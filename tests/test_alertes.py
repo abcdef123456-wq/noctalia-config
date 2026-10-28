@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -175,6 +176,79 @@ class Alertes(unittest.TestCase):
         self.lancer("verifier")
         self.assertTrue(Path(str(client) + ".charge").exists(), "une alerte part : chargé")
         self.assertEqual(len(self.textes()), 1)
+
+    def regler_agents(self, agents="oui", alertes="oui"):
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nALERTES_TELEGRAM=%s\nALERTES_AGENTS=%s\n" % (alertes, agents))
+
+    def test_agent_t_attend_opt_in_sans_texte_de_conversation(self):
+        """nc-claude pousse « un agent t'attend » : agent + nom du dossier seulement, jamais de texte ; non par défaut."""
+        self.lancer("agent", "Claude Code", "mon-projet", "s1")
+        self.assertEqual(self.textes(), [], "ALERTES_AGENTS absent : non")
+        self.regler_agents(agents="non")
+        self.lancer("agent", "Claude Code", "mon-projet", "s1")
+        self.assertEqual(self.textes(), [])
+        self.regler_agents(alertes="non")
+        self.lancer("agent", "Claude Code", "mon-projet", "s1")
+        self.assertEqual(self.textes(), [], "sans « Alertes Telegram » non plus")
+        self.assertFalse((self.home / "state/nc/alertes-agents.json").exists())
+        self.regler_agents()
+        self.lancer("agent", "Claude Code", "mon-projet", "s1")
+        self.assertEqual(self.textes(), ["💬 Claude Code t'attend dans « mon-projet »."])
+        chemin, cle, corps = Gateway.recus[0]
+        self.assertEqual((chemin, cle, corps["op"], corps["confirmed"]), ("/api/nc/manage", CLE, "notify", True))
+        self.assertEqual(list(corps["params"]), ["text"])
+        self.lancer("agent", "Codex", "mon-projet", "s2", langue="en")
+        self.assertEqual(self.textes()[-1], "💬 Codex is waiting for you in “mon-projet”.")
+
+    def test_agent_une_alerte_par_session_toutes_les_5_minutes(self):
+        self.regler_agents()
+        self.lancer("agent", "Codex", "site", "sess-1")
+        self.lancer("agent", "Codex", "site", "sess-1")
+        self.assertEqual(len(self.textes()), 1, "même session : pas de seconde alerte")
+        self.lancer("agent", "Codex", "site", "sess-2")
+        self.assertEqual(len(self.textes()), 2, "une autre session part")
+        f = self.home / "state/nc/alertes-agents.json"
+        self.assertEqual(stat.S_IMODE(f.stat().st_mode), 0o600)
+        d = json.loads(f.read_text())
+        self.assertEqual(len(d), 2)
+        self.assertNotIn("sess-1", f.read_text(), "l'identifiant de session n'est gardé que haché")
+        # 4 min 50 plus tard : toujours rien ; 5 min 10 : une nouvelle alerte
+        for cle in d:
+            d[cle] -= 290
+        f.write_text(json.dumps(d))
+        self.lancer("agent", "Codex", "site", "sess-1")
+        self.assertEqual(len(self.textes()), 2)
+        for cle in d:
+            d[cle] -= 20
+        f.write_text(json.dumps(d))
+        self.lancer("agent", "Codex", "site", "sess-1")
+        self.assertEqual(len(self.textes()), 3)
+        # le très ancien est oublié
+        f.write_text(json.dumps({"x": 1, "y": "z"}))
+        self.lancer("agent", "Codex", "site", "sess-3")
+        d = json.loads(f.read_text())
+        self.assertEqual(len(d), 1, "les entrées anciennes ou illisibles sont oubliées, la nouvelle est notée")
+        self.assertNotIn("x", d)
+
+    def test_agent_noms_nettoyes_et_dossier_sans_chemin(self):
+        self.regler_agents()
+        self.lancer("agent", "Claude\x1b[31m Code\u202e", "/home/user/projets/" + "d" * 80, "s1")
+        t = self.textes()[0]
+        self.assertTrue(t.startswith("💬 Claude[31m Code t'attend dans « " + "d" * 39 + "… »"), t)
+        self.assertNotIn("/home", t)
+        self.assertNotIn("\x1b", t)
+        self.assertNotIn("\u202e", t)
+
+    def test_agent_ia_mode_non_et_arguments_manquants(self):
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nALERTES_TELEGRAM=oui\nALERTES_AGENTS=oui\nIA_MODE=non\n")
+        self.lancer("agent", "Codex", "site", "s1")
+        self.assertEqual(self.textes(), [])
+        self.regler_agents()
+        r = subprocess.run([str(self.home / "bin/nc-alertes"), "agent", "Codex"], capture_output=True, text=True, timeout=20,
+                           env=dict(HOME=str(self.home), XDG_STATE_HOME=str(self.home / "state"), NC_LANGUE="fr",
+                                    PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin"))
+        self.assertEqual(self.textes(), [])
+        self.assertIn("agent AGENT DOSSIER SESSION", r.stderr)
 
     def test_envoyer_coupe_le_dit_sur_stderr(self):
         self.regler("non", "20")

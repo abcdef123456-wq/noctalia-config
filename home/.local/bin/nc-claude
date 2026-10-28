@@ -336,6 +336,25 @@ def oublier_question(s):
         s.pop("question", None)
 
 
+def alerte_telegram(s, avant):
+    """L'agent vient de passer à « t'attend » : une alerte Telegram si tu l'as voulue (ALERTES_AGENTS et ALERTES_TELEGRAM, non par
+    défaut). Poussée par ce hook, rien ne tourne en boucle : nc-alertes agent (en arrière-plan, le hook rend la main tout de
+    suite) limite à une alerte par session toutes les 5 minutes. Seulement l'agent et le NOM du dossier : jamais de texte de
+    la conversation. Déjà en attente avant (autorisation puis question…) : rien de plus."""
+    try:
+        if avant in ATTEND or reglage("ALERTES_AGENTS", "non") != "oui" or reglage("ALERTES_TELEGRAM", "non") != "oui":
+            return
+        alertes = os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-alertes")
+        if not os.access(alertes, os.X_OK):
+            return
+        agent = s.get("agent") or "claude"
+        subprocess.Popen([alertes, "agent", "Claude Code" if agent == "claude" else NOMS.get(agent, agent), dossier_court(s),
+                          str(s.get("id") or "?")], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass                                   # une alerte manquée ne gêne jamais l'agent
+
+
 def ajouter_etape(s, icone, texte):
     s["icone"], s["etape"] = icone, texte
     l = s.setdefault("etapes", [])
@@ -393,6 +412,7 @@ def demande(ev, genre, ia="claude"):
             if ia != "claude":
                 s["etat"] = "terminal"
             return
+        alerte_telegram(s, s.get("etat"))
         s["etat"] = "demande"
         if genre == "question":
             q = e["questions"][0]
@@ -469,6 +489,7 @@ def hook():
             d["sessions"].pop(ev.get("session_id") or "?", None)
             return
         s = session(d, ev)
+        avant = s.get("etat")
         if nom == "SessionStart":
             s["etat"] = "pret"
         elif nom == "UserPromptSubmit":
@@ -496,6 +517,7 @@ def hook():
                 s["etat"] = "attente"
                 # Sa dernière réponse en entier (souvent une question posée en clair), sinon le message de Claude
                 poser_question(s, T("À toi de répondre", "Your turn to answer"), s.get("reponse") or message)
+                alerte_telegram(s, avant)
                 if not notif_ouverte(d, s["id"]):
                     notifier(s, T("Claude t'attend", "Claude is waiting for you"),
                              s["projet"] + T(" : à toi de répondre", ": your turn to answer"), voir=True)
@@ -503,11 +525,13 @@ def hook():
                 s["etat"] = "terminal"         # Claude attend une réponse dans le terminal
                 titre = T("Claude demande ton accord", "Claude needs your approval")
                 poser_question(s, titre, message)
+                alerte_telegram(s, avant)
                 notifier(s, titre, s["projet"] + T(" : ", ": ") + court(message, 120), voir=True)
             elif t in ("agent_needs_input", "elicitation_dialog"):
                 s["etat"] = "terminal"         # une question dans le terminal : la pilule la garde en vue
                 titre = T("Claude t'attend", "Claude is waiting for you")
                 poser_question(s, titre, message)
+                alerte_telegram(s, avant)
                 notifier(s, titre, s["projet"] + T(" : ", ": ") + court(message, 120), voir=True)
         elif nom == "Stop":
             s["etat"] = "fini"
@@ -784,6 +808,7 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
             return
         s = d["sessions"].setdefault(sid, {"id": sid, "etat": "pret", "etapes": [], "ajouts": 0, "retraits": 0,
                                            "debut": time.time()})
+        avant = s.get("etat")
         s["agent"] = agent
         if cwd:
             s["cwd"] = cwd.replace(HOME, "~")
@@ -812,6 +837,7 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
         elif quoi == "attente":
             s["etat"] = "terminal"
             poser_question(s, T("T'attend dans le terminal", "Waiting in the terminal"), message)
+            alerte_telegram(s, avant)
             # Sans notification à elle (OpenCode…), notre « Voir » la remplace ; les autres ont déjà la leur (doublon)
             if notre_voir:
                 notifier(s, T(f"{NOMS.get(agent, agent)} t'attend", f"{NOMS.get(agent, agent)} is waiting for you"),

@@ -6,17 +6,23 @@
   nc-alertes maj N          fin de la mise à jour du système (lancé par nc-paquets) : N mises à jour restantes
   nc-alertes maj N echec C  la mise à jour du système a échoué (code de sortie C) : ❌, N restantes
   nc-alertes envoyer TEXTE  un message libre
+  nc-alertes agent AGENT DOSSIER SESSION   un agent de code t'attend (lancé par les hooks de nc-claude, ALERTES_AGENTS=oui) :
+                            « AGENT t'attend dans DOSSIER », jamais de texte de la conversation, au plus un message par
+                            session toutes les 5 minutes (~/.local/state/nc/alertes-agents.json)
 
 Rien n'est envoyé sans ALERTES_TELEGRAM=oui (nc-reglages → Agents IA) ni sans connexion configurée (nc-assistant
 configurer) ; le message part aux chats Telegram qui ont déjà écrit au bot. État : ~/.local/state/nc/alertes.json.
 Les erreurs vont sur stderr ; le code de sortie reste 0 (minuterie).
 """
+import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 import types
 
 DOC_EN = """nc-alertes: machine alerts to Telegram, through the JARVIS bot (notify op of the gateway's /api/nc/manage).
@@ -26,6 +32,9 @@ DOC_EN = """nc-alertes: machine alerts to Telegram, through the JARVIS bot (noti
   nc-alertes maj N          end of the system update (run by nc-packages): N updates left
   nc-alertes maj N echec C  the system update failed (exit code C): ❌, N left
   nc-alertes envoyer TEXT   a free message
+  nc-alertes agent AGENT FOLDER SESSION   a coding agent is waiting for you (run by nc-claude's hooks, ALERTES_AGENTS=oui):
+                            “AGENT is waiting for you in FOLDER”, never any conversation text, at most one message per
+                            session every 5 minutes (~/.local/state/nc/alertes-agents.json)
 
 Nothing is sent without ALERTES_TELEGRAM=oui (nc-settings → AI agents) or without a configured connection (nc-assistant
 configurer); the message goes to the Telegram chats that already wrote to the bot. State: ~/.local/state/nc/alertes.json.
@@ -166,6 +175,56 @@ def envoyer(texte, urgent=False):
     return True
 
 
+AGENTS_INTERVALLE = 300         # secondes entre deux alertes de la même session
+
+
+def propre(texte, n):
+    """Un nom rendu sûr : caractères imprimables seulement, espaces ramenés à un seul, n signes au plus."""
+    texte = " ".join("".join(c for c in str(texte) if c.isprintable() or c.isspace()).split())
+    return texte if len(texte) <= n else texte[:n - 1] + "…"
+
+
+def agent_a_le_droit(session, maintenant=None):
+    """Vrai (et noté) si cette session n'a pas déjà été signalée il y a moins de 5 minutes. Verrou pour les hooks simultanés ;
+    l'identifiant de session n'est gardé que haché."""
+    maintenant = time.time() if maintenant is None else maintenant
+    fichier = ETAT.with_name("alertes-agents.json")
+    try:
+        fichier.parent.mkdir(parents=True, exist_ok=True)
+        with open(fichier.with_name("alertes-agents.lock"), "a") as verrou:
+            fcntl.flock(verrou, fcntl.LOCK_EX)
+            try:
+                d = json.loads(fichier.read_text(encoding="utf-8"))
+                d = d if isinstance(d, dict) else {}
+            except (OSError, ValueError):
+                d = {}
+            cle = hashlib.sha256(str(session).encode("utf-8", "replace")).hexdigest()[:16]
+            derniere = d.get(cle)
+            if isinstance(derniere, (int, float)) and 0 <= maintenant - derniere < AGENTS_INTERVALLE:
+                return False
+            d = {k: v for k, v in d.items() if isinstance(v, (int, float)) and 0 <= maintenant - v < 3600}
+            d[cle] = maintenant
+            tmp = fichier.with_name(fichier.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            os.replace(tmp, fichier)
+            return True
+    except OSError as exc:
+        print("nc-alertes : " + str(exc), file=sys.stderr)
+        return False
+
+
+def alerte_agent(agent, dossier, session):
+    """Un agent de code t'attend : « AGENT t'attend dans DOSSIER ». Seulement ces deux noms, jamais de texte de la conversation
+    (un message poussé sans demande reste le plus pauvre possible). Une alerte par session toutes les 5 minutes au plus."""
+    if not agent_a_le_droit(session):
+        return False
+    agent = propre(agent, 30) or "agent"
+    dossier = propre(str(dossier).rstrip("/").rsplit("/", 1)[-1], 40) or "?"
+    return envoyer(T(f"💬 {agent} t'attend dans « {dossier} ».", f"💬 {agent} is waiting for you in “{dossier}”."), urgent=True)
+
+
 def verifier():
     etat = lire_etat()
     seuil = reglages().get("BATTERIE_ALERTE", "20")
@@ -220,6 +279,9 @@ def main():
             envoyer(texte)
         elif action == "envoyer" and len(sys.argv) > 2 and sys.argv[2].strip():
             envoyer(" ".join(sys.argv[2:]))
+        elif action == "agent" and len(sys.argv) >= 5:
+            if reglages().get("ALERTES_AGENTS", "non") == "oui":
+                alerte_agent(sys.argv[2], sys.argv[3], sys.argv[4])
         elif action == "version":
             # Une nouvelle version de noctalia-config (nc-maj verifier) : dès qu'elle est publiée, par Telegram.
             # Code 2 si elle n'est pas partie (JARVIS injoignable…) : nc-maj réessaie au passage suivant.
@@ -230,7 +292,7 @@ def main():
                       f"🆕 New version of noctalia-config: {resume}\nOn the PC: the “Update” notification, or nc-update.")
             return 0 if envoyer(texte) else 2
         else:
-            print("nc-alertes verifier | maj N [echec CODE] | version RÉSUMÉ | envoyer TEXTE", file=sys.stderr)
+            print("nc-alertes verifier | maj N [echec CODE] | version RÉSUMÉ | envoyer TEXTE | agent AGENT DOSSIER SESSION", file=sys.stderr)
             return 1
     except Exception as exc:     # jamais d'échec d'unité pour une alerte manquée
         print("nc-alertes : " + str(exc)[:300], file=sys.stderr)

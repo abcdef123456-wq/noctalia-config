@@ -912,7 +912,8 @@ déjà écrit au bot) : la batterie passée sous le seuil de l’île (`BATTERIE
 rechargeant), un service utilisateur `nc-*`, `noctalia`, `assistant-*` ou `hypridle` en échec (une fois par échec), et la
 fin d’une mise à jour du système lancée depuis l’île (`nc-paquets` appelle `nc-alertes maj N`). `nc-alertes envoyer
 TEXTE` envoie un message libre. Rien n’est envoyé sans le réglage ni sans connexion configurée ; état dans
-`~/.local/state/nc/alertes.json`.
+`~/.local/state/nc/alertes.json`. `nc-alertes agent AGENT DOSSIER SESSION` (lancé par les hooks de `nc-claude`, réglage
+`ALERTES_AGENTS`) prévient qu’un agent de code t’attend : voir « Suivre et répondre aux agents de code depuis Telegram ».
 
 ## Suivre et répondre aux agents de code depuis Telegram
 

@@ -642,5 +642,85 @@ class NcClaudeEtatJson(unittest.TestCase):
         self.assertIn("mon-projet  [fini]", self.lancer().stdout)
 
 
+class AlerteParLesHooks(unittest.TestCase):
+    """Les vrais hooks de nc-claude (HOME, XDG_RUNTIME_DIR et PATH isolés, faux nc-alertes qui note ses arguments) : l'alerte
+    part au passage à « t'attend », une fois par attente, avec l'agent et le nom du dossier seulement ; rien sans les réglages."""
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-hk-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        self.bin = self.home / "bin"
+        self.bin.mkdir()
+        (self.home / ".config/nc").mkdir(parents=True)
+        (self.home / "run").mkdir(mode=0o700)
+        import shutil
+        shutil.copy2(NC_CLAUDE, self.bin / "nc-claude")
+        (self.bin / "nc-alertes").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(self.home) + '/alertes"\n')
+        (self.bin / "nc-alertes").chmod(0o755)
+        (self.bin / "hyprctl").write_text("#!/bin/sh\necho '[]'\n")
+        (self.bin / "hyprctl").chmod(0o755)
+        (self.bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
+        (self.bin / "systemctl").chmod(0o755)
+        self.env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), PATH=str(self.bin), NC_LANGUE="fr",
+                        TMPDIR=str(self.home))
+        self.regler("oui", "oui")
+
+    def regler(self, agents, alertes):
+        (self.home / ".config/nc/reglages.conf").write_text("ALERTES_AGENTS=%s\nALERTES_TELEGRAM=%s\n" % (agents, alertes))
+
+    def hook(self, *args, **evenement):
+        r = subprocess.run([sys.executable, str(self.bin / "nc-claude"), *args], env=self.env, input=json.dumps(evenement),
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def alertes(self, attendre=1):
+        import time
+        f = self.home / "alertes"
+        fin = time.monotonic() + attendre
+        while time.monotonic() < fin and not f.exists():
+            time.sleep(0.05)
+        time.sleep(0.2)
+        return f.read_text().splitlines() if f.exists() else []
+
+    def claude(self, nom, **kw):
+        self.hook("hook", hook_event_name=nom, session_id="s1", cwd=str(self.home / "mon-projet"), **kw)
+
+    def test_claude_attend_une_fois_puis_de_nouveau_apres_un_tour(self):
+        self.claude("UserPromptSubmit")
+        self.claude("Notification", notification_type="idle_prompt", message="texte SECRET de la conversation")
+        self.assertEqual(self.alertes(), ["agent Claude Code mon-projet s1"])
+        self.claude("Notification", notification_type="idle_prompt", message="encore")
+        self.assertEqual(self.alertes(0), ["agent Claude Code mon-projet s1"], "déjà en attente : pas de seconde alerte")
+        self.assertNotIn("SECRET", (self.home / "alertes").read_text())
+        self.claude("UserPromptSubmit")
+        self.claude("Notification", notification_type="permission_prompt", message="Autoriser rm ?")
+        self.assertEqual(len(self.alertes()), 2, "un nouveau passage à « t'attend » : nc-alertes limite à une par 5 minutes")
+        self.assertNotIn("rm", (self.home / "alertes").read_text())
+
+    def test_autres_agents_par_suivre(self):
+        self.hook("ia", "codex", "permission", session_id="c1", cwd=str(self.home / "site"))
+        self.assertEqual(self.alertes(), ["agent Codex site codex-c1"])
+
+    def test_rien_sans_les_deux_reglages(self):
+        for agents, alertes in (("non", "oui"), ("oui", "non"), ("non", "non")):
+            self.regler(agents, alertes)
+            self.claude("Notification", notification_type="idle_prompt", message="x")
+            self.assertEqual(self.alertes(0.3), [], (agents, alertes))
+        (self.home / ".config/nc/reglages.conf").write_text("")
+        self.claude("Notification", notification_type="idle_prompt", message="x")
+        self.assertEqual(self.alertes(0.3), [], "non par défaut")
+
+    def test_sans_nc_alertes_le_hook_ne_gene_pas(self):
+        (self.bin / "nc-alertes").unlink()
+        self.claude("Notification", notification_type="idle_prompt", message="x")
+        self.assertEqual(self.alertes(0.3), [])
+        d = json.loads((self.home / "run/nc-claude/etat.json").read_text())
+        self.assertEqual(d["sessions"]["s1"]["etat"], "attente")
+
+    def test_dossier_personnel_nomme_tilde(self):
+        self.hook("hook", hook_event_name="Notification", notification_type="idle_prompt", session_id="s2", cwd=str(self.home), message="x")
+        self.assertEqual(self.alertes(), ["agent Claude Code ~ s2"], "jamais le nom du compte")
+
+
 if __name__ == "__main__":
     unittest.main()

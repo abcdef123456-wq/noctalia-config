@@ -1504,6 +1504,12 @@ REGLAGES = [
         "Activé après coup, il prévient à partir de la version suivante.",
         "As soon as a new noctalia-config version is published (checked every hour), with what's new. Turned on later, "
         "it notifies from the next version on.")),
+    R("ALERTES_AGENTS", "Agents IA (coucou)", L("Alerte Telegram : un agent de code t'attend", "Telegram alert: a coding agent is waiting for you"),
+      "ouinon", "non",
+      L("Quand un agent de code (Claude Code, Codex…) passe à « t'attend » : un message avec l'agent et le nom du dossier, jamais "
+        "de texte de la conversation, au plus un par session toutes les 5 minutes. Demande aussi « Alertes Telegram ».",
+        "When a coding agent (Claude Code, Codex…) starts waiting for you: a message with the agent and the folder name, never "
+        "any conversation text, at most one per session every 5 minutes. Also needs “Telegram alerts”.")),
     R("TELEGRAM_AGENTS", "Agents IA (coucou)", L("Agents de code depuis Telegram (/agents, /repondre)", "Coding agents from Telegram (/agents, /reply)"),
       "ouinon", "non",
       L("Suivre tes agents de code depuis le bot JARVIS (liste, état) et leur répondre : chaque réponse demande le code de ton appli "
