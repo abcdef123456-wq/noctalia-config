@@ -1,6 +1,6 @@
 """install.sh, étapes sensibles : --restore déplace sans rien supprimer, sources épinglées par commit et vérifiées,
 empreinte de la clé du dépôt Noctalia (Debian) vérifiée avant toute installation, dépôts tiers (COPR, zypper) annoncés.
-Morceaux d'install.sh extraits et lancés avec de faux outils (git, gpg, dpkg-deb, sudo) ; faux HOME ; rien de réel."""
+Morceaux d'install.sh extraits et lancés avec de faux outils (git, gpg, sudo) ; faux HOME ; rien de réel."""
 import os
 from pathlib import Path
 import re
@@ -163,12 +163,11 @@ class EmpreinteDebian(Base):
     FONCTIONS = entre("NOCT_DEB_EMPREINTE=", "# Fedora (COPR) et openSUSE")
     BONNE = "C2A7E07FB3D746BDF2A245CD683B67D7BC99A9B7"
 
-    def lance(self, sortie_gpg):
-        faux(self.bin, "dpkg-deb", 'mkdir -p "$3" && : > "$3/cle.gpg"')
+    def lance(self, sortie_gpg, contenu=b"\x99\x02\x0d"):
         faux(self.bin, "gpg", 'printf "%s" "$FAUX_GPG"')
-        deb = self.r / "keyring.deb"
-        deb.write_text("faux")
-        return self.bash(PREAMBULE + self.FONCTIONS + f'verifier_empreinte_cle "{deb}" "$NOCT_DEB_EMPREINTE"', FAUX_GPG=sortie_gpg)
+        cle = self.r / "cle.gpg"
+        cle.write_bytes(contenu)
+        return self.bash(PREAMBULE + self.FONCTIONS + f'verifier_empreinte_cle "{cle}" "$NOCT_DEB_EMPREINTE"', FAUX_GPG=sortie_gpg)
 
     @staticmethod
     def cles(*fprs):
@@ -200,14 +199,52 @@ class EmpreinteDebian(Base):
         self.assertEqual(r.returncode, 1)
         self.assertIn("aucune", r.stdout)
 
+    def test_cle_en_texte_refusee(self):
+        # apt ne lit un .gpg qu'en binaire : une clé « -----BEGIN PGP » est refusée, même avec la bonne empreinte
+        r = self.lance(self.cles(self.BONNE), b"-----BEGIN PGP PUBLIC KEY BLOCK-----\n")
+        self.assertEqual(r.returncode, 1)
+
+    def bloc(self):
+        return SOURCE[SOURCE.index("empreinte attendue de la clé"):SOURCE.index("have noctalia || die")]
+
     def test_la_cle_est_verifiee_avant_toute_installation(self):
-        bloc = SOURCE[SOURCE.index("empreinte attendue de la clé"):SOURCE.index("have noctalia || die")]
-        self.assertLess(bloc.index("verifier_empreinte_cle"), bloc.index("sudo dpkg -i"))
+        bloc = self.bloc()
         self.assertLess(bloc.index("verifier_empreinte_cle"), bloc.index("sudo install -Dm0644"))
-        # en cas d'écart : die, avant dpkg -i
-        self.assertLess(bloc.index("die "), bloc.index("sudo dpkg -i"))
-        self.assertNotIn("sudo wget", bloc)                  # le fichier de source n'est plus écrit sans contrôle
+        self.assertLess(bloc.index("die "), bloc.index("sudo install -Dm0644"))
+        # le fichier vérifié est celui qui est installé (pas un second téléchargement)
+        self.assertIn('verifier_empreinte_cle "$kd/cle.gpg"', bloc)
+        self.assertIn('sudo install -Dm0644 "$kd/cle.gpg" "$NOCT_DEB_CLE"', bloc)
+        self.assertEqual(bloc.count("wget "), 1)
         self.assertRegex(SOURCE, r"(?m)^NOCT_DEB_EMPREINTE=[0-9A-F]{40}$")
+
+    def test_aucun_paquet_de_cle_installe(self):
+        # un .deb avec la bonne clé peut porter un postinst lancé en root par dpkg -i : il n'est ni téléchargé ni installé
+        self.assertNotRegex(SOURCE, r"(?m)^[^#\n]*dpkg\s+(-i|--install)\b")
+        self.assertNotIn("keyring.deb\"", SOURCE)
+        self.assertNotIn("-O \"$kd/keyring.deb\"", SOURCE)
+        self.assertNotIn("dpkg-deb -x", SOURCE)
+
+    def test_fichier_de_source_ecrit_ici_jamais_telecharge(self):
+        bloc = self.bloc()
+        self.assertNotRegex(bloc, r"wget[^\n]*\.sources")
+        self.assertNotIn("sudo wget", bloc)
+        self.assertIn('source_noctalia "$suites" > "$kd/$src"', bloc)
+
+    def test_fichier_de_source_strict(self):
+        fn = entre("NOCT_DEB_EMPREINTE=", "# Fedora (COPR) et openSUSE")
+        r = self.bash(PREAMBULE + fn + 'source_noctalia "trixie/ trixie-backports/"')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        champs = dict(l.split(": ", 1) for l in r.stdout.strip().split("\n"))
+        self.assertEqual(champs, {"Types": "deb", "URIs": "https://pkg.noctalia.dev/deb/", "Suites": "trixie/ trixie-backports/",
+                                  "Architectures": "amd64", "Signed-By": "/usr/share/keyrings/nickh-archive-keyring.gpg"})
+        self.assertNotIn("Trusted", r.stdout)
+        self.assertNotIn("\n\n", r.stdout.strip())          # un seul paragraphe
+
+    def test_suites_par_version(self):
+        bloc = SOURCE[SOURCE.index('trixie) src=noctalia-trixie.sources'):SOURCE.index("[ -n \"$src\" ] || die")]
+        self.assertIn('suites="trixie/ trixie-backports/"', bloc)
+        self.assertIn('suites="resolute/ resolute-backports/"', bloc)
+        self.assertIn('suites="unstable/"', bloc)
 
 
 class DepotsTiers(Base):
