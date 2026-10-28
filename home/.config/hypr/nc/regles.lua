@@ -133,4 +133,9 @@ hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-d
 hl.layer_rule({ name = "nc-fiche-verre", match = { namespace = "^nc-fiche$" }, blur = true, ignore_alpha = 0.2 })
 -- Espace de code de l'île (Super + X) : la même carte de verre, floutée seulement sous la carte
 hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blur = true, ignore_alpha = 0.2 })
+-- Lanceur qui sort de la pilule (nc-reglages → Île, ILE_LANCEUR_FONDU=oui) : l'île anime elle-même Super + X depuis la
+-- pilule ; pas d'animation de Hyprland en plus sur ce calque. Réglage non : rien ici (Super + X garde le fondu de Hyprland).
+if nc.reglage("ILE_LANCEUR_FONDU", "non") == "oui" then
+    hl.layer_rule({ name = "nc-code-sans-anim", match = { namespace = "^nc-code$" }, no_anim = true })
+end
 hl.layer_rule({ name = "nc-vpn-verre", match = { namespace = "^nc-vpn$" }, blur = true, ignore_alpha = 0.2 })

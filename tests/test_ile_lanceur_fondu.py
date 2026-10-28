@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -131,6 +132,35 @@ class LanceurFondu(unittest.TestCase):
         self.assertNotRegex((qml / "LanceurFondu.qml").read_text(), r"repeat:\s*true")
         # la décision dépend d'abord du réglage : sans lui, rien d'autre n'est lu
         self.assertRegex((qml / "LanceurFondu.qml").read_text(), r'ILE_LANCEUR_FONDU", "non"\) !== "oui"')
+
+
+class RegleHyprland(unittest.TestCase):
+    """La règle de calque no_anim sur nc-code suit le réglage : absente si non (Super + X garde le fondu de Hyprland),
+    présente si oui ; et changer le réglage recharge Hyprland (groupe « hypr » de nc-reglages)."""
+    REGLES = Path(__file__).resolve().parents[1] / "home/.config/hypr/nc/regles.lua"
+
+    def regles(self, valeur):
+        harnais = r'''
+hl = setmetatable({ layer_rule = function(r) if r.no_anim then print(r.name .. "\t" .. r.match.namespace) end end },
+                  { __index = function() return function() end end })
+nc = setmetatable({ reglage = function(c, d) if c == "ILE_LANCEUR_FONDU" then return VALEUR end return d end },
+                  { __index = function() return function() return "" end end })
+dofile(FICHIER)
+'''.replace("FICHIER", json.dumps(str(self.REGLES))).replace("VALEUR", json.dumps(valeur))
+        r = subprocess.run(["lua", "-"], input=harnais, text=True, capture_output=True, timeout=10, env=dict(PATH="/usr/bin:/bin"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return dict(l.split("\t", 1) for l in r.stdout.splitlines())
+
+    @unittest.skipUnless(shutil.which("lua"), "lua absent")
+    def test_regle_suit_le_reglage(self):
+        self.assertNotIn("nc-code-sans-anim", self.regles("non"))
+        self.assertEqual(self.regles("oui").get("nc-code-sans-anim"), "^nc-code$")
+
+    def test_reglage_recharge_hyprland(self):
+        src = (Path(__file__).resolve().parents[1] / "home/.local/bin/nc-reglages").read_text()
+        bloc = src[src.index('R("ILE_LANCEUR_FONDU"'):]
+        bloc = bloc[:bloc.index("\n    R(")]
+        self.assertIn('groupe="hypr"', bloc)
 
 
 if __name__ == "__main__":
