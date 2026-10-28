@@ -578,6 +578,11 @@ REGLAGES = [
         "passages de la documentation, instantanément et sans IA (nc-aide-config). L'IA reste proposée en dernier.",
         "“? your question” or a question (“how to change the wallpaper”): settings, shortcuts, commands and documentation "
         "passages, instantly and without AI (nc-aide-config). The AI is still offered last.")),
+    R("SPOTLIGHT_EMOJI", "Île", L("Emoji dans le Spotlight (« : coeur »)", "Emoji in Spotlight (“: heart”)"), "ouinon", "oui",
+      L("« : » puis un mot (« :coeur », « :rire », « :heart ») propose des emoji, en français comme en anglais ; Entrée "
+        "copie l'emoji. Les derniers choisis (24) passent en premier, sauf pendant un partage d'écran. Hors ligne, sans IA.",
+        "“:” then a word (“:heart”, “:laugh”, “:coeur”) offers emoji, in English or French; Enter copies the emoji. The "
+        "last 24 chosen come first, except during screen sharing. Offline, no AI.")),
     R("SPOTLIGHT_MOTEUR", "Île", L("Moteur de recherche du Spotlight (« g … »)", "Spotlight search engine (“g …”)"), "choix", "google",
       "", [("google", "Google"), ("duckduckgo", "DuckDuckGo"), ("qwant", "Qwant"), ("startpage", "Startpage"), ("brave", "Brave Search"), ("ecosia", "Ecosia")]),
     R("SPOTLIGHT_CALCULS", "Île", L("Calculs et conversions dans le Spotlight", "Calculations and conversions in Spotlight"), "ouinon", "oui",
@@ -1581,7 +1586,7 @@ MATERIEL = {
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
     # nuit, Pomodoro, ville de la météo, images en Économie) : vérifiés en comparant avec les clés lues par nc-ile
-    **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE",
+    **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE", "SPOTLIGHT_EMOJI",
                           "SPOTLIGHT_MOTEUR", "SPOTLIGHT_CALCULS", "SPOTLIGHT_FENETRES", "VUE_BUREAUX", "VUE_RECUL", "VUE_VOISINS",
                           "VUE_DUREE", "GOOGLE_INTEGRATION", "GOOGLE_CALENDRIER", "NPD_NUIT", "NPD_DEBUT", "NPD_FIN",
                           "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE")},

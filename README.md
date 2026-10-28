@@ -153,6 +153,13 @@ Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recet
 préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
 installer dans le Spotlight »).
 
+**Emoji dans le Spotlight** : `:` puis un mot (`:coeur`, `:rire`, `:heart`) propose des emoji, en français comme en
+anglais, sans accents ni casse ; Entrée copie l'emoji (`wl-copy`) et referme. Les 24 derniers choisis passent en
+premier (`~/.local/state/nc/emoji-recents`, cachés pendant un partage d'écran). Tout est hors ligne : la liste
+(`~/.local/share/nc/emoji/emoji.tsv`, 1 914 emoji d'Unicode 17.0 avec les mots-clés de CLDR 48.2, sans les variantes de
+couleur de peau, licence Unicode à côté) n'est lue qu'à la première frappe de `:`, et refaite avec
+`outils/emoji-generer.py`. Réglage « Emoji dans le Spotlight ».
+
 **Super + X** ouvre l'espace de code, façon Raycast : une carte de verre centrée avec tes dépôts git récents (recherche
 floue, le plus récent en haut), et à droite l'aperçu du projet choisi (branche, propre ou modifié, derniers commits,
 début du README) ; Entrée ouvre Neovim et l'agent de l'IA dans kitty (`nc-code`), Tab choisit l'agent, Alt + Entrée

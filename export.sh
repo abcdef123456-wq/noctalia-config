@@ -74,6 +74,7 @@ HOME_FILES=(
   .config/quickshell/nc-ile
   .local/share/nc/firefox
   .local/share/nc/finger.png
+  .local/share/nc/emoji
   .local/share/nc/logos
   .local/bin/nc-apps
   .local/bin/nc-boot-wallpaper
