@@ -17,7 +17,7 @@ Item {
     Rectangle { id: pastille; x: 16; anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: ligne.teinte }
     Texte {
         id: nom
-        anchors.left: pastille.right; anchors.leftMargin: 12; anchors.right: date.left; anchors.rightMargin: 8
+        anchors.left: pastille.right; anchors.leftMargin: 12; anchors.right: date.left; anchors.rightMargin: 16     // la date garde sa place : un long nom est coupé avant elle
         y: 9; height: 18
         text: ligne.projet && ligne.projet.nom ? ligne.projet.nom : ""
         font.pixelSize: 14; font.weight: Font.DemiBold

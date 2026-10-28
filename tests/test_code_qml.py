@@ -22,6 +22,7 @@ with (H / "appels").open("a") as f: f.write(json.dumps(sys.argv[1:], ensure_asci
 a = sys.argv[1:]
 if a[:1] == ["--liste-json"]: print((H / "projets.json").read_text())
 elif a[:1] == ["--agents-json"]: print((H / "agents.json").read_text())
+elif a[:1] == ["--github-json"]: print((H / "github.json").read_text() if (H / "github.json").exists() else json.dumps(dict(connecte=False, erreur=False, depots=[])))
 elif a[:1] == ["--apercu-json"]:
     p = json.loads((H / "apercus.json").read_text()).get(a[1])
     print(json.dumps(p) if p else "{}")
@@ -65,10 +66,10 @@ def projets(home):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class EspaceDeCode(unittest.TestCase):
-    def executer(self, scenario, agents=None, attendus=None, fondu=False):
+    def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None, github=None, partage=0):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -81,22 +82,31 @@ class EspaceDeCode(unittest.TestCase):
                 self.assertIn(l, source); source = source.replace(l, "")
             source = source.replace('code.screen ? code.screen.name : ""', '"DP-1"')   # hors écran, la fenêtre n'a pas de nom d'écran
             source = source.replace("code.screen ? code.screen.width : 1600", "1600").replace("code.screen ? code.screen.height : 1000", "1000")
+            if carte:
+                self.assertIn("Math.min(980, Math.round(largeurEcran * 0.64))", source)
+                source = source.replace("Math.min(980, Math.round(largeurEcran * 0.64))", str(carte))
             (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: %s;'
                                             ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return %s}}'
                                             % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
             (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
+            if partage:
+                (q / "Partage.qml").write_text(FAUX_PARTAGE.replace("property int sessions: 0", "property int sessions: %d" % partage))
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
             ps = projets(root)
+            if projets_plus:
+                ps = ps + projets_plus(root)
             (root / "projets.json").write_text(json.dumps(ps))
+            if github is not None:
+                (root / "github.json").write_text(json.dumps(github).replace("@HOME@", str(root)))
             (root / "agents.json").write_text(json.dumps(agents if agents is not None else
                                                          dict(coupee=False, defaut="claude", agents=[dict(prog="claude", nom="Claude Code"), dict(prog="codex", nom="Codex")])))
             (root / "apercus.json").write_text(json.dumps({
-                ps[0]["chemin"]: dict(chemin=ps[0]["chemin"], nom="alpha", branche="main", etat="propre", readme="Alpha\nUn outil.", github=ps[0]["github"],
+                ps[0]["chemin"]: dict(chemin=ps[0]["chemin"], nom="alpha", branche="main", etat="propre", readme=readme or "Alpha\nUn outil.", github=ps[0]["github"],
                                       commits=[dict(message="Dernier <b>brut</b>", quand=1700000300, date="hier"), dict(message="Premier", quand=1700000100, date="il y a 3 j")]),
                 ps[1]["chemin"]: dict(chemin=ps[1]["chemin"], nom="neovim-conf", branche="essai", etat="modifie", readme="", github="", commits=[])}))
             (q / "shell.qml").write_text('''import QtQuick
@@ -162,7 +172,9 @@ ShellRoot {
   if (etape === 3) { verifier(fen.visibles.length === 3 && fen.sel === 0, "recherche vidée")
                      touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Up)
                      verifier(fen.sel === 1, "flèches : " + fen.sel)
-                     touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.sel === 0, "pas sous zéro")
+                     touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.sel === -1, "Haut depuis le premier projet : la ligne Nouveau")
+                     touche(Qt.Key_Up); verifier(fen.sel === -1, "pas au-dessus de Nouveau")
+                     touche(Qt.Key_Down); verifier(fen.sel === 0, "Bas revient au premier projet")
                      etape++; return }
   if (etape === 4) { if (!fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
                      var a = trouver(fen.contentItem, "nc-code-apercu")
@@ -230,27 +242,191 @@ ShellRoot {
     def test_nouveau_projet_ctrl_n(self):
         appels, ps = self.executer('''
   if (etape === 1) { verifier(trouver(fen.contentItem, "nc-code-nouveau") !== null, "première ligne : nouveau projet")
-                     touche(Qt.Key_N, Qt.ControlModifier); verifier(fen.mode === "nouveau" && trouver(fen.contentItem, "nc-code-saisie").visible, "mode nouveau")
+                     touche(Qt.Key_N, Qt.ControlModifier); verifier(fen.mode === "choix" && trouver(fen.contentItem, "nc-code-choix").visible, "Ctrl N : le petit choix")
+                     touche(Qt.Key_Return); verifier(fen.mode === "nouveau" && trouver(fen.contentItem, "nc-code-saisie").visible, "« Projet vide » : mode nouveau")
                      taper("-piege"); touche(Qt.Key_Return); verifier(!racine.fermee, "un nom qui commence par - est refusé ici")
                      touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
-                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
                      taper("essai"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
                                    attendus=lambda a: ["--nouveau", "essai"] in a)
         self.assertIn(["--nouveau", "essai"], appels)
         self.assertNotIn(["--nouveau", "-piege"], appels)
 
+    def test_ligne_nouveau_au_clavier_haut_entree_choix_a_deux_lignes(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { verifier(fen.sel === 0, "départ : le premier projet")
+                     var ligne = trouver(fen.contentItem, "nc-code-nouveau")
+                     verifier(!ligne.choisie, "Nouveau n'est pas choisie au départ")
+                     touche(Qt.Key_Up); verifier(fen.sel === -1 && fen.projet === null, "Haut : la ligne Nouveau")
+                     verifier(ligne.choisie, "mise en évidence comme une ligne choisie")
+                     verifier(!trouver(fen.contentItem, "nc-code-apercu").visible && trouver(fen.contentItem, "nc-code-nouveau-aide").visible, "à droite : ce qu'Entrée va faire")
+                     touche(Qt.Key_PageUp); verifier(fen.sel === -1, "page haut ne bouge pas")
+                     touche(Qt.Key_Down); verifier(fen.sel === 0, "Bas revient au premier projet")
+                     touche(Qt.Key_Up); touche(Qt.Key_Return)
+                     verifier(!racine.fermee && fen.mode === "choix", "Entrée sur Nouveau : le choix à deux lignes")
+                     var vide = trouver(fen.contentItem, "nc-code-choix-vide"), gh = trouver(fen.contentItem, "nc-code-choix-github")
+                     verifier(vide.visible && gh.visible && fen.selChoix === 0 && vide.actif && !gh.actif, "« Projet vide » d'abord")
+                     touche(Qt.Key_Down); verifier(fen.selChoix === 1 && gh.actif, "Bas : Depuis GitHub")
+                     touche(Qt.Key_Down); verifier(fen.selChoix === 1, "pas plus bas")
+                     touche(Qt.Key_Up); touche(Qt.Key_Escape); verifier(fen.mode === "" && fen.sel === -1 && !racine.fermee, "Échap ferme le choix, pas le panneau")
+                     touche(Qt.Key_Return); touche(Qt.Key_Down); touche(Qt.Key_Return); verifier(fen.mode === "github", "Depuis GitHub")
+                     touche(Qt.Key_Escape); touche(Qt.Key_Return); touche(Qt.Key_Return); taper("demo"); touche(Qt.Key_Return)
+                     verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--nouveau", "demo"] in a)
+        self.assertIn(["--nouveau", "demo"], appels)
+        self.assertFalse([a for a in appels if a and a[0] == ps[0]["chemin"]], "Entrée sur Nouveau n'ouvre aucun projet")
+
+    def test_clic_sur_nouveau_et_sur_les_lignes_du_choix(self):
+        appels, ps = self.executer('''
+  function cliquer(item) { clavier.mouseClick(item, item.width / 2, item.height / 2) }
+  if (etape === 1) { var zone = trouver(fen.contentItem, "nc-code-nouveau-zone")
+                     verifier(zone !== null && zone.visible, "zone de clic de la ligne Nouveau")
+                     // la zone est bien celle qui reçoit un clic en son centre (ni la liste, ni le surligneur, ni le champ devant elle)
+                     var p = zone.mapToItem(fen.contentItem, zone.width / 2, zone.height / 2)
+                     var devant = fen.contentItem.childAt(p.x, p.y)
+                     verifier(devant !== null, "un élément à cet endroit")
+                     cliquer(zone); verifier(fen.mode === "choix", "clic : le choix à deux lignes (mode " + fen.mode + ")")
+                     verifier(!racine.fermee, "un clic sur Nouveau ne ferme pas")
+                     cliquer(trouver(fen.contentItem, "nc-code-choix-github")); verifier(fen.mode === "github", "clic sur Depuis GitHub")
+                     touche(Qt.Key_Escape); fen.sel = 2
+                     cliquer(zone); verifier(fen.mode === "choix", "clic aussi quand un autre projet était choisi")
+                     cliquer(trouver(fen.contentItem, "nc-code-choix-vide")); verifier(fen.mode === "nouveau", "clic sur Projet vide")
+                     touche(Qt.Key_Escape); etape++; return }
+  if (etape === 2) { // un clic sur un projet de la liste l'ouvre toujours
+                     var l = trouver(fen.contentItem, "nc-code-liste")
+                     var it = l.itemAtIndex(1); verifier(it !== null, "deuxième ligne")
+                     clavier.mouseClick(it, it.width / 2, it.height / 2)
+                     verifier(racine.fermee, "clic sur un projet : ouvert"); Qt.quit() }''', attendus=lambda a: any(x and x[0].endswith("/neovim-conf") for x in a))
+        self.assertIn([ps[1]["chemin"]], appels, "le clic sur la deuxième ligne ouvre ce projet")
+
     def test_cloner_ctrl_l(self):
         appels, ps = self.executer('''
-  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "cloner", "mode cloner")
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "github", "mode GitHub")
                      taper("moi/depot"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
                                    attendus=lambda a: ["--cloner", "moi/depot"] in a)
         self.assertIn(["--cloner", "moi/depot"], appels)
+
+    # ── Depuis GitHub ──
+    def depots_gh(self):
+        return dict(connecte=True, erreur=False, depots=[
+            dict(nom="exemple/projet-test", depot="projet-test", description="Mon <b>outil</b> brut", maj="2026-10-01T10:00:00Z", prive=False,
+                 la=True, chemin="@HOME@/dev/alpha", pris=False),
+            dict(nom="exemple/secret", depot="secret", description="", maj="", prive=True, la=False, chemin="", pris=False),
+            dict(nom="exemple/libre", depot="libre", description="Un dépôt libre", maj="", prive=False, la=False, chemin="", pris=False),
+            dict(nom="exemple/occupe", depot="occupe", description="", maj="", prive=False, la=False, chemin="", pris=True)])
+
+    def executer_gh(self, scenario, attendus=None, partage=0, connecte=True):
+        """Comme executer, avec la réponse du faux nc-code --github-json : les dépôts ci-dessus (le « déjà là » pointe vers alpha)."""
+        gh = self.depots_gh() if connecte else dict(connecte=False, erreur=False, depots=[])
+        return self.executer(scenario, attendus=attendus, github=gh, partage=partage)
+
+    def test_github_ctrl_l_liste_filtre_cadenas_et_etiquettes(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "github" && trouver(fen.contentItem, "nc-code-github-panneau").visible, "mode GitHub")
+                     verifier(!trouver(fen.contentItem, "nc-code-saisie").visible && !trouver(fen.contentItem, "nc-code-apercu").visible, "ni saisie du nom ni aperçu")
+                     etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     var l = trouver(fen.contentItem, "nc-code-depots"); verifier(l.visible && l.count === 4, "quatre dépôts : " + l.count)
+                     var cad = [], eti = []; (function tout(e) { if (e.objectName === "nc-code-depot-cadenas" && e.visible) cad.push(e)
+                                                               if (e.objectName === "nc-code-depot-etiquette" && e.visible) eti.push(e); (e.children || []).forEach(tout) })(l)
+                     verifier(cad.length === 1, "un seul cadenas (le dépôt privé) : " + cad.length)
+                     verifier(eti.length === 2, "deux étiquettes (déjà là, dossier pris) : " + eti.length)
+                     var plat = []; (function tout(e) { if (e.text !== undefined && e.text) plat.push(e.text); (e.children || []).forEach(tout) })(l)
+                     verifier(plat.indexOf("Mon <b>outil</b> brut") >= 0, "description en texte brut : " + plat)
+                     verifier(plat.indexOf("déjà là") >= 0 && plat.indexOf("dossier pris") >= 0, "libellés")
+                     taper("lib"); etape++; return }
+  if (etape === 3) { verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].nom === "exemple/libre", "filtre : " + fen.depotsFiltres.map(d => d.nom))
+                     champ().text = ""; taper("secret"); verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].prive, "filtre sur le nom")
+                     champ().text = ""; taper("oUtil"); verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].nom === "exemple/projet-test", "filtre sur la description, sans casse")
+                     champ().text = ""; taper("zzz"); verifier(fen.depotsFiltres.length === 0, "rien ne correspond")
+                     touche(Qt.Key_Return); verifier(!racine.fermee, "rien à lancer")
+                     champ().text = ""; touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down)
+                     verifier(fen.selDepot === 3, "les flèches s'arrêtent au dernier : " + fen.selDepot)
+                     touche(Qt.Key_Up); touche(Qt.Key_Up); touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.selDepot === 0, "…et au premier")
+                     touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
+                     Qt.quit() }''')
+        self.assertEqual([a for a in appels if a[:1] == ["--github-json"]], [["--github-json"]], "lu une seule fois, à l'ouverture du mode")
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"]], "rien n'est cloné par le filtrage")
+
+    def test_github_entree_ouvre_le_depot_deja_la_et_clone_les_autres(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     verifier(fen.depotsFiltres[0].la === true && fen.selDepot === 0, "le premier est « déjà là »")
+                     touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: any(x and x[0].endswith("/alpha") for x in a))
+        self.assertIn([ps[0]["chemin"]], appels, "un dépôt déjà là s'ouvre comme un projet")
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"]], "…et ne se clone pas")
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("libre"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--cloner", "exemple/libre"] in a)
+        self.assertIn(["--cloner", "exemple/libre"], appels, "un autre dépôt : nc-code --cloner propriétaire/dépôt")
+        self.assertFalse([a for a in appels if a and a[0].endswith("/alpha")], "aucun projet ouvert")
+
+    def test_github_dossier_pris_adresse_collee_et_clic(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("occupe"); touche(Qt.Key_Return); verifier(!racine.fermee, "dossier pris : ni clone ni ouverture")
+                     champ().text = ""; taper("https://github.com/exemple/ailleurs")
+                     verifier(fen.depotsFiltres.length === 0, "une adresse https n'est pas un filtre")
+                     champ().text = ""; taper("-piege"); touche(Qt.Key_Return); verifier(!racine.fermee, "jamais une option")
+                     champ().text = ""; taper("exemple/inconnu"); touche(Qt.Key_Return); verifier(racine.fermee, "propriétaire/dépôt hors liste : cloné tel quel"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/inconnu"] in a)
+        self.assertIn(["--cloner", "exemple/inconnu"], appels)
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"] and a[1] in ("exemple/occupe", "-piege")], "dossier pris et option : rien")
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("https://github.com/exemple/ailleurs.git"); touche(Qt.Key_Return); verifier(racine.fermee, "adresse https : clonée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "https://github.com/exemple/ailleurs.git"] in a)
+        self.assertIn(["--cloner", "https://github.com/exemple/ailleurs.git"], appels)
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     var l = trouver(fen.contentItem, "nc-code-depots"); var it = l.itemAtIndex(2); if (!it) return
+                     clavier.mouseClick(it, it.width / 2, it.height / 2); verifier(racine.fermee, "clic sur « libre » : cloné"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/libre"] in a)
+        self.assertIn(["--cloner", "exemple/libre"], appels, "le clic sur un dépôt le clone")
+
+    def test_github_sans_gh_connecte_mode_adresse_et_phrase(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "non") return
+                     var n = trouver(fen.contentItem, "nc-code-github-note")
+                     verifier(n.text === "Connecte gh (gh auth login) pour voir tes dépôts.", "phrase : " + n.text)
+                     verifier(!trouver(fen.contentItem, "nc-code-depots").visible && trouver(fen.contentItem, "nc-code-github-adresse").visible, "seul le mode adresse")
+                     taper("moi/depot"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "moi/depot"] in a, connecte=False)
+        self.assertIn(["--cloner", "moi/depot"], appels)
+
+    def test_github_liste_masquee_pendant_un_partage_d_ecran(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.enPartage, "partage en cours"); etape++; return }
+  if (etape === 2) { verifier(!fen.depotsVisibles && fen.depotsFiltres.length === 0 && !trouver(fen.contentItem, "nc-code-depots").visible, "la liste est masquée")
+                     verifier(fen.depots.length === 0 && fen.ghEtat === "", "les dépôts ne sont même pas lus")
+                     verifier(trouver(fen.contentItem, "nc-code-github-note").text.indexOf("masquée") > 0, "dit pourquoi")
+                     verifier(trouver(fen.contentItem, "nc-code-github-adresse").visible, "le champ « colle l'adresse » reste")
+                     taper("exemple/projet-test"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/projet-test"] in a, partage=1)
+        self.assertIn(["--cloner", "exemple/projet-test"], appels, "l'adresse collée se clone malgré tout")
+        self.assertFalse([a for a in appels if a[:1] == ["--github-json"]], "gh n'est même pas lancé pendant un partage")
+
+    def test_github_jamais_lu_avant_d_ouvrir_ce_mode(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { taper("alp"); touche(Qt.Key_Down); champ().text = ""
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Down); touche(Qt.Key_Escape)
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); touche(Qt.Key_Escape)
+                     verifier(fen.ghEtat === "" && fen.mode === "", "gh pas lu : " + fen.ghEtat); etape++; return }
+  if (etape === 2) { etape++; return }
+  if (etape === 3) { Qt.quit() }''')
+        self.assertFalse([a for a in appels if a[:1] == ["--github-json"]], "pas de gh au démarrage ni en parcourant le panneau")
 
     def test_fichiers_libelles_et_chargeur(self):
         shell = (QML / "shell.qml").read_text()
         self.assertIn("function code(): void", shell, "qs -c nc-ile ipc call ile code")
         self.assertRegex(shell, r"LazyLoader \{\s*id: chargeurCode\s*active: racine\.codeOuvert", "le panneau n'existe que lorsqu'il est ouvert")
-        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction"):
+        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom + " : jamais de component inline")
         code = (QML / "Code.qml").read_text()
@@ -297,12 +473,70 @@ ShellRoot {
 
     def test_aide_de_premiere_ouverture(self):
         self.executer('''
-  if (etape === 1) { var a = trouver(fen.contentItem, "nc-code-aide"); verifier(a !== null && a.visible === true, "aide visible pour un débutant")
+  if (etape === 1) { if (!fen.debutant) return                                  // agents-json peut répondre après la liste
+                     var a = trouver(fen.contentItem, "nc-code-aide"); verifier(a !== null && a.visible === true, "aide visible pour un débutant")
                      taper("x"); etape++; return }
   if (etape === 2) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible || fen.mode === "", "aide discrète"); Qt.quit() }''',
                       agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
         self.executer('''
   if (etape === 1) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible, "pas d'aide quand un projet a déjà été ouvert"); Qt.quit() }''')
+
+    # ── mise en page : rien ne se chevauche, quelle que soit la largeur du panneau ──
+    SCENARIO_PIED = '''
+  if (etape === 1) { if (!fen.projet) return; etape++; return }                  // le temps que la sélection et GitHub se posent
+  if (etape === 2) {
+    var pied = trouver(fen.contentItem, "nc-code-aides"), act = trouver(fen.contentItem, "nc-code-actions")
+    var px = pied.mapToItem(fen.contentItem, 0, 0).x, ax = act.mapToItem(fen.contentItem, 0, 0).x
+    console.log("PIED carte=" + fen.largeurCarte + " aides=" + px + "+" + pied.width + " actions=" + ax + "+" + act.width)
+    verifier(px + pied.width <= ax, "la rangée d'aides s'arrête avant les actions")
+    var noms = ["ouvrir", "tab", "nvim", "force", "echap"], vus = []
+    noms.forEach(n => { var a = trouver(fen.contentItem, "nc-code-aide-" + n); vus.push(a.visible)
+        if (a.visible) verifier(a.x + a.width <= pied.width, "l'aide " + n + " tient entière dans sa rangée : " + (a.x + a.width) + " > " + pied.width) })
+    verifier(vus[0] && vus[4], "« ouvrir » et « fermer » restent toujours")
+    verifier(!vus[3] || vus[2], "« ouvrir quand même » ne reste pas seul sans « Alt ↵ »")
+    verifier(!vus[2] || vus[1], "« Alt ↵ » ne reste pas sans « Tab »")
+    var pieds = trouver(fen.contentItem, "nc-code-fichiers")
+    var cx = (1600 - fen.largeurCarte) / 2; verifier(ax >= cx && ax + act.width <= cx + fen.largeurCarte, "les actions restent dans la carte")
+    console.log("PIED visibles=" + vus + " compactes=" + pieds.compact)
+    ATTENDU
+    Qt.quit() }'''
+
+    def test_pied_large_toutes_les_aides(self):
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(vus.every(v => v), "assez large : toutes les aides"); verifier(!pieds.compact, "actions complètes")'), carte=1300)
+
+    def test_pied_etroit_aides_masquees_dans_l_ordre_puis_actions_en_icone(self):
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(!vus[3], "étroit : « ouvrir quand même » partie d\'abord")'), carte=900)
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(pieds.compact, "les actions passent en icône quand les aides ne tiennent plus avec elles")'), carte=760)
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(pieds.compact && pieds.width < 40, "très étroit : les actions passent en icône seule")'), carte=560)
+
+    def test_noms_longs_date_reservee_aide_bornee_et_readme_clippe(self):
+        long = "un-nom-de-projet-vraiment-tres-long-pour-voir-la-coupure-" * 2
+        plus = lambda root: [dict(nom=long, chemin=str(root / "dev" / "long"), court="~/dev/long", branche="main", quand=1700000100,
+                                  date="il y a 10 j", message="", langage="Go", couleur="cyan", github="")]
+        lignes = "\n".join("Ligne %d du fichier de présentation, assez longue pour passer à la ligne dans la carte de l'aperçu" % i for i in range(60))
+        self.executer('''
+  if (etape === 1) { var l = trouver(fen.contentItem, "nc-code-liste"); l.positionViewAtEnd(); etape++; return }
+  if (etape === 2) { var l = trouver(fen.contentItem, "nc-code-liste"); var it = null
+                     for (var i = 0; i < l.contentItem.children.length; i++) { var c = l.contentItem.children[i]; if (c.projet && c.projet.nom && c.projet.nom.indexOf("un-nom-de-projet") === 0) it = c }
+                     if (!it) return
+                     var nom = null, date = null
+                     ;(function tout(e) { var t = e.text !== undefined ? e.text : null
+                       if (t && t.indexOf("un-nom-de-projet") === 0) nom = e
+                       if (t === "il y a 10 j") date = e; (e.children || []).forEach(tout) })(it)
+                     verifier(nom !== null && date !== null, "nom et date trouvés")
+                     verifier(nom.truncated, "le long nom est coupé (elide)")
+                     verifier(nom.x + nom.width + 12 <= date.x, "la date garde sa place : " + (nom.x + nom.width) + " vs " + date.x)
+                     etape++; return }
+  if (etape === 3) { if (!fen.debutant || !fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
+                     var a = trouver(fen.contentItem, "nc-code-apercu"), r = trouver(a, "nc-code-readme")
+                     verifier(r.visible && r.y + r.height <= a.height - 8, "le README finit avant le bas de l'aperçu avec une marge : " + (r.y + r.height) + " / " + a.height)
+                     var t = r.children[0]
+                     verifier(t.truncated, "texte long : fini par « … »")
+                     verifier(t.y + t.contentHeight <= r.height, "aucune ligne coupée en bas : " + (t.y + t.contentHeight) + " > " + r.height)
+                     var aide = trouver(fen.contentItem, "nc-code-aide"), li = trouver(fen.contentItem, "nc-code-liste")
+                     verifier(aide.x + aide.width <= li.x + li.width, "l'aide « Premier projet » reste dans la colonne de gauche : " + (aide.x + aide.width) + " > " + (li.x + li.width))
+                     verifier(aide.truncated, "…et elle est coupée (elide) plutôt que de déborder")
+                     Qt.quit() }''', projets_plus=plus, readme=lignes, carte=700, agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
 
 
 def ps_chemin(appels):

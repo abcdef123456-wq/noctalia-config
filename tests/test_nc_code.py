@@ -573,6 +573,66 @@ class NcCode(unittest.TestCase):
             self.assertEqual(m.depots_gh(), [("moi", "mien")])             # les URL d'ailleurs ou piégées sont écartées
         self.assertIn("gh repo list --json name,url --limit 50", self.appels())
 
+    GH_LISTE = [
+        {"name": "mien", "nameWithOwner": "moi/mien", "description": "Mon <b>outil</b>\u202e\x07", "updatedAt": "2026-10-01T10:00:00Z", "isPrivate": False},
+        {"name": "secret", "nameWithOwner": "moi/secret", "description": None, "updatedAt": "pas une date", "isPrivate": True},
+        {"name": "libre", "nameWithOwner": "moi/libre", "description": "Un dépôt", "updatedAt": "2026-09-01T10:00:00Z", "isPrivate": False},
+        {"name": "occupe", "nameWithOwner": "moi/occupe", "description": "", "updatedAt": "2026-08-01T10:00:00Z", "isPrivate": False},
+        {"name": "trouve", "nameWithOwner": "moi/trouve", "description": "", "updatedAt": "2026-07-01T10:00:00Z", "isPrivate": False},
+        {"name": "mauvais", "nameWithOwner": "moi/autre", "description": "", "updatedAt": "", "isPrivate": False},
+        {"name": "x", "nameWithOwner": "evil host/x", "description": "", "isPrivate": False},
+        {"name": "y", "nameWithOwner": "../y", "description": "", "isPrivate": False},
+        {"name": "-z", "nameWithOwner": "moi/-z", "description": "", "isPrivate": False},
+        {"name": "..", "nameWithOwner": "moi/..", "description": "", "isPrivate": False},
+        "pas un objet", {"name": 3, "nameWithOwner": 4}]
+
+    def faux_gh_liste(self, connecte=True, liste=None, code_liste=0):
+        self.programme("gh", f'echo "gh $*" >> "{self.home}/appels"\n'
+                             'case "$1 $2" in\n'
+                             f'  "auth status") exit {0 if connecte else 1};;\n'
+                             f'  "repo list") cat <<\'FIN\'\n{json.dumps(liste if liste is not None else self.GH_LISTE)}\nFIN\n'
+                             f'    exit {code_liste};;\nesac')
+
+    def test_github_json_depots_valides_deja_la_pris_prive(self):
+        self.faux_gh_liste()
+        connu = self.depot("dev/mien")
+        (connu / ".git/config").write_text('[remote "origin"]\n\turl = git@github.com:Moi/Mien.git\n')
+        self.programme("zoxide", f'printf "%s\\n" "{connu}"')
+        trouve = self.depot("balayage-seul/trouve")                    # seulement trouvé par le balayage : jamais « déjà là »
+        (trouve / ".git/config").write_text('[remote "origin"]\n\turl = https://github.com/moi/trouve.git\n')
+        self.depot("Projets/occupe")                                   # le dossier du clone existe, sans origine : « pris »
+        r = self.lancer("--github-json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual((d["connecte"], d["erreur"]), (True, False))
+        par = {x["nom"]: x for x in d["depots"]}
+        self.assertEqual(sorted(par), ["moi/libre", "moi/mien", "moi/occupe", "moi/secret", "moi/trouve"], "les noms piégés sont écartés")
+        self.assertEqual(sorted(par["moi/mien"]), sorted(["nom", "depot", "description", "maj", "prive", "la", "chemin", "pris"]), "seuls ces champs sortent")
+        self.assertEqual((par["moi/mien"]["la"], par["moi/mien"]["chemin"], par["moi/mien"]["pris"]), (True, str(connu), False))
+        self.assertEqual(par["moi/mien"]["description"], "Mon <b>outil</b>", "texte brut, sans contrôle ni inversion de sens")
+        self.assertEqual(par["moi/mien"]["maj"], "2026-10-01T10:00:00Z")
+        self.assertEqual((par["moi/secret"]["prive"], par["moi/secret"]["maj"], par["moi/secret"]["description"]), (True, "", ""))
+        self.assertEqual((par["moi/libre"]["la"], par["moi/libre"]["pris"]), (False, False))
+        self.assertEqual((par["moi/occupe"]["la"], par["moi/occupe"]["pris"]), (False, True))
+        self.assertEqual((par["moi/trouve"]["la"], par["moi/trouve"]["pris"]), (False, False), "un dépôt vu seulement par le balayage n'est pas ouvert à sa place")
+        self.assertEqual(self.appels(), ["gh auth status", "gh repo list --json name,nameWithOwner,description,updatedAt,isPrivate -L 100"])
+
+    def test_github_json_sans_gh_connecte_ne_liste_rien(self):
+        self.faux_gh_liste(connecte=False)
+        r = self.lancer("--github-json")
+        self.assertEqual(json.loads(r.stdout), dict(connecte=False, erreur=False, depots=[]))
+        self.assertEqual(self.appels(), ["gh auth status"], "pas de gh repo list sans connexion")
+
+    def test_github_json_sans_gh_installe_et_liste_en_echec(self):
+        m = self.module_nc_code()
+        reel = shutil.which
+        with self.env_faux(), unittest.mock.patch("shutil.which", lambda n, *a, **k: None if n == "gh" else reel(n, *a, **k)):
+            self.assertEqual(m.github_json(), dict(connecte=False, erreur=False, depots=[]))
+        self.assertEqual(self.appels(), [], "gh absent : rien n'est lancé")
+        self.faux_gh_liste(code_liste=1)
+        d = json.loads(self.lancer("--github-json").stdout)
+        self.assertEqual((d["connecte"], d["erreur"], d["depots"]), (True, True, []))
+
     def test_cloner_dossier_existant_rien_n_est_lance(self):
         self.faux_clone(gh=True)
         d = self.home / "Projets/depot"
