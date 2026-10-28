@@ -11,3 +11,9 @@ done
 _nc_p="${_nc_p#:}"; _nc_p="${_nc_p%:}"
 export PATH="$HOME/.local/bin${_nc_p:+:$_nc_p}"
 unset _nc_p
+
+# Tes variables à toi : ~/.config/uwsm/env.d/perso (créé par install.sh, jamais remplacé ni par l'installation ni par
+# les mises à jour). Mets-y tes « export NOM=valeur » au lieu de modifier ce fichier.
+if [ -r "$HOME/.config/uwsm/env.d/perso" ]; then
+  . "$HOME/.config/uwsm/env.d/perso"
+fi

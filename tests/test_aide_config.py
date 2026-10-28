@@ -38,6 +38,9 @@ class Index(unittest.TestCase):
         (self.home / ".config/nc").mkdir(parents=True)
         (self.home / ".config/nc/depot").write_text(str(REPO) + "\n")
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n")
+        # L'île Quickshell est là : les réglages que seule elle lit (Spotlight, Ne pas déranger la nuit…) sont proposés
+        (self.home / ".config/quickshell/nc-ile").mkdir(parents=True)
+        (self.home / ".config/quickshell/nc-ile/shell.qml").write_text("")
         self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
                         XDG_CACHE_HOME=str(self.home / ".cache"), NC_LANGUE="fr", PATH="/usr/bin:/bin")
         self.env.pop("WAYLAND_DISPLAY", None)

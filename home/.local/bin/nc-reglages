@@ -54,8 +54,11 @@ import unicodedata
 
 try:
     import tomllib
-except ImportError:          # Python < 3.11
-    tomllib = None
+except ImportError:          # Python < 3.11 : le paquet tomli (même interface), sinon un repli simple (voir fin_barre)
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
@@ -137,6 +140,25 @@ def charger(nom, fichier):
     mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(nom, chargeur))
     chargeur.exec_module(mod)
     return mod
+
+
+@contextlib.contextmanager
+def ouvrir_atomique(chemin):
+    """Écriture d'un seul coup : un fichier temporaire dans le même dossier, puis renommage (os.replace). Le fichier
+    n'est jamais lu à moitié écrit (Noctalia, kitty et hypridle le relisent dès qu'il change) ; sur erreur, l'ancien
+    reste en place et le temporaire est retiré."""
+    dossier = os.path.dirname(os.path.abspath(chemin))
+    fd, tmp = tempfile.mkstemp(prefix=".nc-", suffix=".tmp", dir=dossier)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yield f
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, stat.S_IMODE(os.stat(chemin).st_mode) if os.path.exists(chemin) else 0o644)
+        os.replace(tmp, chemin)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
 
 
 def sortie(cmd):
@@ -1478,6 +1500,19 @@ MATERIEL = {
                           "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
+    # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
+    # nuit, Pomodoro, ville de la météo, images en Économie) : vérifiés en comparant avec les clés lues par nc-ile
+    **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE",
+                          "SPOTLIGHT_MOTEUR", "SPOTLIGHT_CALCULS", "SPOTLIGHT_FENETRES", "VUE_BUREAUX", "VUE_RECUL", "VUE_VOISINS",
+                          "VUE_DUREE", "GOOGLE_INTEGRATION", "GOOGLE_CALENDRIER", "NPD_NUIT", "NPD_DEBUT", "NPD_FIN",
+                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES")},
+    # Réglages d'un logiciel : cachés si ce logiciel n'est pas là (Firefox, kitty, Neovim)
+    **{c: "firefox" for c in ("FIREFOX_STYLE", "FIREFOX_COULEURS", "FIREFOX_ONGLETS_VERTICAUX", "FIREFOX_SESSION", "FIREFOX_DEFILEMENT_DOUX")},
+    **{c: "kitty" for c in ("TERMINAL_OPACITE", "TERMINAL_TAILLE", "TERMINAL_POLICE", "TERMINAL_CURSEUR", "TERMINAL_TRAINEE",
+                            "TERMINAL_MARGE", "TERMINAL_LOGO", "TERMINAL_LOGO_STYLE", "TERMINAL_ACCUEIL", "TERMINAL_OUTILS",
+                            "TERMINAL_LS_ICONES", "TERMINAL_HISTORIQUE", "TERMINAL_CLOCHE", "TERMINAL_CLIGNOTE",
+                            "TERMINAL_COPIE_SELECTION", "TERMINAL_LIGATURES")},
+    **{c: "nvim" for c in ("NVIM_THEME", "NVIM_NUMEROS", "NVIM_RETOUR_LIGNE", "NVIM_TRANSPARENT")},
     "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 
@@ -1524,6 +1559,13 @@ def materiel():
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode
             "mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*"),
+            # Firefox (paquet, Flatpak, Snap ou profil déjà là), kitty (le terminal des réglages TERMINAL_*), Neovim
+            # (celui du système ou celui qu'install.sh met dans ~/.local/bin)
+            "firefox": bool(shutil.which("firefox") or shutil.which("firefox-esr") or any(
+                os.path.isdir(os.path.expanduser(d)) for d in ("~/.mozilla/firefox", "~/.config/mozilla/firefox",
+                                                              "~/.var/app/org.mozilla.firefox", "~/snap/firefox"))),
+            "kitty": bool(shutil.which("kitty") or os.path.isfile(os.path.join(BIN, "kitty"))),
+            "nvim": bool(shutil.which("nvim") or os.path.isfile(os.path.join(BIN, "nvim"))),
             "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak")),
             "btrfs": sortie(["findmnt", "-no", "FSTYPE", "/"]).strip() == "btrfs"}
 
@@ -2114,7 +2156,7 @@ def appliquer_bt_musique(vals):
         return
     try:
         os.makedirs(os.path.dirname(conf), exist_ok=True)
-        with open(conf, "w", encoding="utf-8") as f:
+        with ouvrir_atomique(conf) as f:
             f.write("# noctalia-config (nc-reglages) : pas de bascule automatique du casque Bluetooth en mode appel\n"
                     "wireplumber.settings = {\n  bluetooth.autoswitch-to-headset-profile = false\n}\n")
     except OSError:
@@ -2138,11 +2180,11 @@ def appliquer_veille(vals):
     except OSError:
         return
     os.makedirs(os.path.dirname(VEILLE_OUT), exist_ok=True)
-    with open(VEILLE_OUT, "w", encoding="utf-8") as f:
+    with ouvrir_atomique(VEILLE_OUT) as f:
         f.write(texte_veille(vals, src))
     hi = sortie(["sh", "-c", "command -v hypridle"]).strip() or "/usr/bin/hypridle"
     os.makedirs(os.path.dirname(VEILLE_UNITE), exist_ok=True)
-    with open(VEILLE_UNITE, "w", encoding="utf-8") as f:
+    with ouvrir_atomique(VEILLE_UNITE) as f:
         f.write(f"# nc-reglages : la veille avec tes délais\n[Service]\nExecStart=\nExecStart={hi} -c %h/.config/nc/hypridle.conf\n")
     relancer_hypridle()
 
@@ -2177,11 +2219,26 @@ def appliquer_terminal(vals):
         return
     if texte:
         os.makedirs(os.path.dirname(KITTY_OUT), exist_ok=True)      # ~/.config/kitty peut manquer
-        with open(KITTY_OUT, "w", encoding="utf-8") as f:
+        with ouvrir_atomique(KITTY_OUT) as f:
             f.write(texte)
     elif os.path.exists(KITTY_OUT):
         os.remove(KITTY_OUT)
     subprocess.run(["pkill", "-USR1", "-x", "kitty"], capture_output=True)      # kitty relit sa config
+
+
+def fin_barre(chemin):
+    """La liste « end » de [bar.default] dans config.toml. Avec tomllib (Python 3.11+) ou tomli : lecture complète ;
+    sans (Python < 3.11 sans tomli) : repli qui lit seulement cette liste de textes entre guillemets (KeyError si absente)."""
+    if tomllib:
+        with open(chemin, "rb") as f:
+            return tomllib.load(f)["bar"]["default"]["end"]
+    with open(chemin, encoding="utf-8") as f:
+        texte = f.read()
+    sec = re.search(r'^\[bar\.default\][ \t]*\n(.*?)(?=^\[|\Z)', texte, re.M | re.S)
+    m = sec and re.search(r'^end\s*=\s*\[(.*?)\]\s*(?:#.*)?$', sec.group(1), re.M | re.S)
+    if not m:
+        raise KeyError("end")
+    return re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
 
 
 def toml_val(v):
@@ -2238,11 +2295,10 @@ def appliquer_noctalia(vals):
             mettre(table, "transition_duration", nombre(vals, cle + "_DUREE", True))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", nombre(vals, "BARRE_OPACITE") / 100)
-    if "BARRE_SYSTEME" in vals and tomllib:
+    if "BARRE_SYSTEME" in vals:
         # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système
         try:
-            with open(os.path.join(NOCTALIA_DIR, "config.toml"), "rb") as f:
-                fin = tomllib.load(f)["bar"]["default"]["end"]
+            fin = fin_barre(os.path.join(NOCTALIA_DIR, "config.toml"))
             if not oui("BARRE_SYSTEME"):
                 fin = [w for w in fin if w != "group:sys"]
             mettre("bar.default", "end", fin)
@@ -2276,7 +2332,7 @@ def appliquer_noctalia(vals):
     if texte != ancien:
         if texte:
             os.makedirs(NOCTALIA_DIR, exist_ok=True)
-            with open(NOCTALIA_OUT, "w", encoding="utf-8") as f:
+            with ouvrir_atomique(NOCTALIA_OUT) as f:
                 f.write(texte)
         elif os.path.exists(NOCTALIA_OUT):
             os.remove(NOCTALIA_OUT)
@@ -2317,7 +2373,7 @@ def appliquer_style(vals):
     ancien = open(STYLE_FICHIER, encoding="utf-8").read() if os.path.exists(STYLE_FICHIER) else ""
     if texte != ancien:
         os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)
-        with open(STYLE_FICHIER, "w", encoding="utf-8") as f:
+        with ouvrir_atomique(STYLE_FICHIER) as f:
             f.write(texte)
     # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…) ; celle d'avant le premier
     # style est gardée pour la remettre
@@ -2328,7 +2384,7 @@ def appliquer_style(vals):
         pass                                       # Noctalia ne tourne pas : palette changée au prochain passage
     elif cible:
         if actuelle not in des_styles:
-            with open(STYLE_AVANT, "w", encoding="utf-8") as f:
+            with ouvrir_atomique(STYLE_AVANT) as f:
                 f.write(actuelle + "\n")
         if actuelle != " ".join(cible):
             subprocess.run(["noctalia", "msg", "color-scheme-set"] + cible, capture_output=True)

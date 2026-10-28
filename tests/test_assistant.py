@@ -678,7 +678,8 @@ assert(launched[4] == "a 'quote' and $(false)")
 
     def test_copy_pass_preserves_secret_and_installs_client_on_all_families(self):
         script = (REPO / "install.sh").read_text()
-        copie = script[script.index('copied=0; same=0; hypr_changed=0'):script.index('ok "$(t "$copied fichier(s)')]
+        copie = script[script.index('copied=0; same=0; hypr_changed=0'):script.index('relancer_noctalia   # la copie est finie')]
+        esc_sed = script[script.index('esc_sed() {'):script.index('\n', script.index('esc_sed() {'))]
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             depot = root / "repo/home"
@@ -708,7 +709,7 @@ assert(launched[4] == "a 'quote' and $(false)")
                     conf.chmod(0o600)
                     bk = root / (famille + "-backup")
                     bk.mkdir()
-                    prelude = 'tmp="$HOME/tmp"\nbackup() { return 42; }\n'
+                    prelude = 'tmp="$HOME/tmp"\nbackup() { return 42; }\n' + esc_sed + '\n'
                     env = dict(os.environ, HOME=str(home), REPO=str(root / "repo"), BK=str(bk), FAMILY=famille)
                     for cle in ("MON", "KBL", "KBV", "KBO", "BROWSER", "LCX", "LCY1", "LCY2", "LCY3", "LCY4", "LCY5", "LCY6",
                                 "DISTRO_LOGO", "POLKIT", "QT_STYLE", "ICON_THEME", "ILE_CENTRE", "NOTIF_NOCTALIA",
