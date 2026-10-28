@@ -10,6 +10,9 @@
 // --github-json, seulement si gh est connecté, lue à l'ouverture de ce mode), filtrée par le champ ; Entrée ouvre un dépôt
 // « déjà là » ou clone les autres (nc-code --cloner propriétaire/dépôt, fenêtre kitty avec la progression). Sans gh connecté,
 // ou pendant un partage d'écran : le champ « colle l'adresse » seulement.
+// Réglages : le bouton ⚙ du pied (ou Ctrl + ,) ouvre la page « Réglages du code » (CodeReglages.qml) dans le panneau : agent par défaut,
+// dossier des projets (champ ou sélecteur zenity), modèle d'un projet vide, part de Neovim, lazygit ; tout par « nc-reglages set ».
+// Échap revient à la liste. Dans « Projet vide », le modèle (vide, python, c, web) se choisit en pastilles (Tab aussi).
 // Tout vient de nc-code (--liste-json, --agents-json, --apercu-json : les fichiers de .git lus directement, bornés,
 // jamais git : un dépôt trouvé sur le disque pourrait lui faire exécuter des commandes). Rien ne tourne fermé : la fenêtre n'existe
 // qu'ouverte (shell.qml, LazyLoader) ; l'aperçu part 120 ms après le dernier déplacement, jamais un processus par pas.
@@ -35,6 +38,7 @@ PanelWindow {
     WlrLayershell.namespace: "nc-code"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     color: "transparent"
+    visible: !reglagesPage.selecteur                // le sélecteur de dossier de zenity se montre devant : la fenêtre se cache un instant
 
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
     readonly property real largeurEcran: code.screen ? code.screen.width : 1600
@@ -54,6 +58,8 @@ PanelWindow {
     property int sel: 0                             // -1 = la ligne « + Nouveau projet » (Haut depuis le premier projet)
     property string mode: ""                        // "" = chercher un projet ; "choix" : Nouveau (projet vide ou GitHub) ; "nouveau" : taper le nom ; "github" : tes dépôts GitHub (ou coller l'adresse)
     property int selChoix: 0                        // la ligne du petit choix de « Nouveau »
+    property bool reglages: false                   // la page « Réglages du code » (⚙ du pied, Ctrl + ,) à la place de la liste
+    property string modeleNouveau: "vide"           // le modèle du projet vide en cours de création (pastilles ; départ : CODE_MODELE)
     property bool choixAgent: false                 // Tab : la liste des agents à droite, à la place de l'aperçu
     property int selAgent: 0
     property var apercu: null                       // nc-code --apercu-json du dernier projet lu
@@ -189,10 +195,18 @@ PanelWindow {
     function quitter() { if (!fondu.fermer()) code.fermer() }
     // Ctrl + N (nouveau projet) et Ctrl + L (cloner depuis GitHub) : le champ sert à taper le nom ou l'adresse
     function demarrerMode(m) {
-        mode = m; choixAgent = false; selChoix = 0; selDepot = 0; champ.text = ""; filtre = ""
+        mode = m; choixAgent = false; selChoix = 0; selDepot = 0; champ.text = ""; filtre = ""; reglages = false
+        modeleNouveau = ["vide", "python", "c", "web"].indexOf(Reglages.val("CODE_MODELE", "vide")) >= 0 ? Reglages.val("CODE_MODELE", "vide") : "vide"
         if (m === "github") lireDepots()                                    // seulement ici : jamais au démarrage de l'île ni du panneau
     }
     function finirMode() { mode = ""; champ.text = "" }
+    function ouvrirReglages() { mode = ""; choixAgent = false; champ.text = ""; filtre = ""; reglages = true; champ.forceActiveFocus() }
+    function fermerReglages() { reglages = false; champ.forceActiveFocus() }
+    // Nouveau projet vide : Tab (ou Haut / Bas) passe d'un modèle au suivant
+    function modeleSuivant(d) {
+        var l = ["vide", "python", "c", "web"], n = l.indexOf(modeleNouveau)
+        modeleNouveau = l[(Math.max(0, n) + d + l.length) % l.length]
+    }
     // Un choix du petit menu « Nouveau » (clavier ou clic) : 0 = projet vide (taper le nom), 1 = depuis GitHub
     function choisirNouveau(i) { demarrerMode(i === 1 ? "github" : "nouveau"); champ.forceActiveFocus() }
 
@@ -264,7 +278,7 @@ PanelWindow {
         if (t.indexOf("-") === 0) return                                   // jamais une option pour nc-code
         if (mode === "nouveau") {
             if (t === "") return
-            Quickshell.execDetached([bin + "nc-code", "--nouveau", t])      // en argv ; nc-code filtre le nom et refuse un nom pris
+            Quickshell.execDetached([bin + "nc-code", "--nouveau", t, "--modele", modeleNouveau])      // en argv ; nc-code filtre le nom et refuse un nom pris
         } else if (mode === "github") {
             var l = depotsFiltres
             // une adresse complète (https://github.com/…, git@…, ou propriétaire/dépôt qui n'est pas dans la liste) se clone telle quelle
@@ -305,6 +319,19 @@ PanelWindow {
             else if (mode !== "") return
             else if (choixAgent) selAgent = Math.max(0, Math.min(n - 1, selAgent + d))
             else sel = Math.max(page && sel > 0 ? 0 : -1, Math.min(n - 1, sel + d))
+        }
+        if (ctrl && e.key === Qt.Key_Comma) { if (reglages) fermerReglages(); else ouvrirReglages(); return true }
+        if (reglages) {                                                      // la page des réglages tient le clavier
+            if (e.key === Qt.Key_Escape) fermerReglages()
+            else if (e.key === Qt.Key_Up) reglagesPage.bouger(-1)
+            else if (e.key === Qt.Key_Down) reglagesPage.bouger(1)
+            else if (e.key === Qt.Key_Left) reglagesPage.changer(-1)
+            else if (e.key === Qt.Key_Right) reglagesPage.changer(1)
+            else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) reglagesPage.activer()
+            return true
+        }
+        if (mode === "nouveau" && (e.key === Qt.Key_Tab || e.key === Qt.Key_Backtab || e.key === Qt.Key_Up || e.key === Qt.Key_Down)) {
+            modeleSuivant(e.key === Qt.Key_Backtab || e.key === Qt.Key_Up ? -1 : 1); return true
         }
         if (e.key === Qt.Key_Escape) { if (mode !== "") finirMode(); else if (choixAgent) choixAgent = false; else quitter(); return true }
         if (ctrl && e.key === Qt.Key_N) { demarrerMode("choix"); return true }
@@ -402,7 +429,8 @@ PanelWindow {
                 Texte {
                     visible: champ.text === ""
                     anchors.verticalCenter: parent.verticalCenter
-                    text: code.mode === "choix" ? Reglages.t("Nouveau : choisis avec les flèches…", "New: pick with the arrows…")
+                    text: code.reglages ? Reglages.t("Réglages du code", "Code settings")
+                      : code.mode === "choix" ? Reglages.t("Nouveau : choisis avec les flèches…", "New: pick with the arrows…")
                       : code.mode === "nouveau" ? Reglages.t("Nom du nouveau projet…", "New project name…")
                       : code.mode === "github" ? (code.depotsVisibles ? Reglages.t("Filtrer mes dépôts, ou coller une adresse…", "Filter my repos, or paste an address…")
                                                                       : Reglages.t("Adresse GitHub (ou propriétaire/dépôt)…", "GitHub address (or owner/repo)…"))
@@ -424,6 +452,18 @@ PanelWindow {
         Item {
             id: corps
             y: barre.height + 1; width: parent.width; height: parent.height - y - pied.height
+            CodeReglages {
+                id: reglagesPage
+                objectName: "nc-code-reglages"
+                anchors.fill: parent
+                visible: code.reglages
+                agents: code.agents
+                onRendreFocus: champ.forceActiveFocus()
+            }
+            Item {
+            id: vueListe
+            anchors.fill: parent
+            visible: !code.reglages
             // Première ligne : un nouveau projet (Ctrl + N), à cliquer ou au clavier
             Rectangle {
                 id: nouveauLigne
@@ -525,8 +565,14 @@ PanelWindow {
                 spacing: 6
                 Texte { width: parent.width; font.pixelSize: 17; font.weight: Font.Bold; height: 30; text: Reglages.t("Nouveau projet", "New project") }
                 Texte { width: parent.width; secondaire: true; font.pixelSize: 12; wrapMode: Text.Wrap
-                        text: Reglages.t("Tape un nom (lettres, chiffres, - et _) puis Entrée : le dossier est créé avec un dépôt git et un README, puis ouvert. Un nom déjà pris est refusé. Modèles (vide, python, c, web) : nc-code --nouveau NOM --modele python.",
-                                         "Type a name (letters, digits, - and _) then Enter: the folder is created with a repository and a README, then opened. A name already taken is refused. Templates: nc-code --nouveau NAME --modele python.") }
+                        text: Reglages.t("Tape un nom (lettres, chiffres, - et _) puis Entrée : le dossier est créé avec un dépôt git et un README, puis ouvert. Un nom déjà pris est refusé. Tab change de modèle.",
+                                         "Type a name (letters, digits, - and _) then Enter: the folder is created with a repository and a README, then opened. A name already taken is refused. Tab changes the template.") }
+                Texte { width: parent.width; height: 22; secondaire: true; font.pixelSize: 12; text: Reglages.t("Modèle", "Template") }
+                CodeModeles {
+                    objectName: "nc-code-modeles"
+                    modele: code.modeleNouveau
+                    onChoisir: v => { code.modeleNouveau = v; champ.forceActiveFocus() }
+                }
             }
             // Depuis GitHub (Ctrl + L) : la liste de tes dépôts (si gh est connecté), filtrée par le champ ; sinon l'adresse à coller
             Item {
@@ -597,6 +643,7 @@ PanelWindow {
                     }
                 }
             }
+            }
         }
 
         // ── Le pied : l'aide des touches à gauche, les actions rapides à droite ──
@@ -608,7 +655,7 @@ PanelWindow {
             // utiles disparaissent une à une (« ouvrir quand même », puis « Alt ↵ », puis « Tab »), jamais coupées au milieu.
             // « ↵ ouvrir » et « Échap fermer » restent toujours. Si même ça ne tient pas, les actions de droite passent en icône seule.
             readonly property real largeurActionsPleine: {
-                var l = [actFichiers, actCopier, actCloner, actGitHub], t = 0, n = 0
+                var l = [actFichiers, actCopier, actCloner, actGitHub], t = 34 + 6, n = 0      // + le bouton ⚙ (icône seule)
                 for (var i = 0; i < l.length; i++) if (l[i].visible) { t += l[i].largeurPleine; n++ }
                 return t + Math.max(0, n - 1) * 6
             }
@@ -623,11 +670,11 @@ PanelWindow {
                 id: aides
                 objectName: "nc-code-aides"
                 x: 20; width: pied.placeAides; height: parent.height; spacing: 14; clip: true
-                CodeAide { id: aOuvrir; objectName: "nc-code-aide-ouvrir"; anchors.verticalCenter: parent.verticalCenter; touche: "↵"; libelle: Reglages.t("ouvrir", "open") }
+                CodeAide { id: aOuvrir; objectName: "nc-code-aide-ouvrir"; anchors.verticalCenter: parent.verticalCenter; touche: "↵"; libelle: code.reglages ? Reglages.t("changer", "change") : Reglages.t("ouvrir", "open") }
                 CodeAide { id: aTab; objectName: "nc-code-aide-tab"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideTab; touche: "Tab"; libelle: Reglages.t("agent", "agent") }
                 CodeAide { id: aNvim; objectName: "nc-code-aide-nvim"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideNvim; touche: "Alt ↵"; libelle: "Neovim" }
                 CodeAide { id: aForce; objectName: "nc-code-aide-force"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideForce; touche: "Ctrl ↵"; libelle: Reglages.t("ouvrir quand même", "open anyway") }
-                CodeAide { id: aEchap; objectName: "nc-code-aide-echap"; anchors.verticalCenter: parent.verticalCenter; touche: Reglages.t("Échap", "Esc"); libelle: Reglages.t("fermer", "close") }
+                CodeAide { id: aEchap; objectName: "nc-code-aide-echap"; anchors.verticalCenter: parent.verticalCenter; touche: Reglages.t("Échap", "Esc"); libelle: code.reglages ? Reglages.t("retour", "back") : Reglages.t("fermer", "close") }
             }
             Row {
                 id: actions
@@ -637,6 +684,7 @@ PanelWindow {
                 CodeAction { id: actCopier; objectName: "nc-code-copier"; compact: pied.actionsCompactes; glyphe: "content_copy"; libelle: Reglages.t("Copier le chemin", "Copy path"); touche: "Ctrl ⇧ C"; onClic: code.copierChemin() }
                 CodeAction { id: actCloner; objectName: "nc-code-cloner"; compact: pied.actionsCompactes; glyphe: "download"; libelle: Reglages.t("Cloner", "Clone"); touche: "Ctrl L"; onClic: { code.demarrerMode("github"); champ.forceActiveFocus() } }
                 CodeAction { id: actGitHub; objectName: "nc-code-github"; compact: pied.actionsCompactes; visible: code.github !== ""; glyphe: "open_in_new"; libelle: "GitHub"; touche: "Ctrl G"; onClic: code.ouvrirGitHub() }
+                CodeAction { id: actReglages; objectName: "nc-code-reglages-bouton"; compact: true; glyphe: "settings"; libelle: Reglages.t("Réglages du code", "Code settings"); touche: "Ctrl ,"; onClic: { if (code.reglages) code.fermerReglages(); else code.ouvrirReglages() } }
             }
         }
         }

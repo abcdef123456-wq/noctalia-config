@@ -60,8 +60,24 @@ class Base(unittest.TestCase):
 
 
 class Periode(Base):
+    def periode(self):
+        self.enterContext(patch.dict(os.environ, self.env))         # jamais le vrai ~/.config
+        return runpy.run_path(str(SCRIPT))["periode"]
+
+    def test_heures_reglables_nc_reglages(self):
+        """FONDS_JOUR_DE et FONDS_NUIT_DE (nc-reglages → Fonds d'écran) décalent la bascule ; absurdes : 7 h et 19 h."""
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_JOUR_DE="9", FONDS_NUIT_DE="22")
+        p = self.periode()
+        self.assertEqual(p(D(2026, 10, 28, 8, 0)), ("nuit", D(2026, 10, 28, 9, 0)))
+        self.assertEqual(p(D(2026, 10, 28, 12, 0)), ("jour", D(2026, 10, 28, 22, 0)))
+        self.assertEqual(p(D(2026, 10, 28, 22, 0)), ("nuit", D(2026, 10, 29, 9, 0)))
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_JOUR_DE="20", FONDS_NUIT_DE="6")      # le jour après la nuit : par défaut
+        self.assertEqual(self.periode()(D(2026, 10, 28, 12, 0)), ("jour", D(2026, 10, 28, 19, 0)))
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_JOUR_DE="abc")
+        self.assertEqual(self.periode()(D(2026, 10, 28, 12, 0)), ("jour", D(2026, 10, 28, 19, 0)))
+
     def test_periodes_et_echeances(self):
-        p = runpy.run_path(str(SCRIPT))["periode"]
+        p = self.periode()
         self.assertEqual(p(D(2026, 10, 28, 3, 0)), ("nuit", D(2026, 10, 28, 7, 0)))
         self.assertEqual(p(D(2026, 10, 28, 6, 59)), ("nuit", D(2026, 10, 28, 7, 0)))
         self.assertEqual(p(D(2026, 10, 28, 7, 0)), ("jour", D(2026, 10, 28, 19, 0)))

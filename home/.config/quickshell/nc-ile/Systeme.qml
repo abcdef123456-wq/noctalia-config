@@ -295,6 +295,7 @@ Item {
             Repeater {
                 model: [
                     { icone: "keyboard", titre: Reglages.t("Changer la disposition du clavier", "Switch Keyboard Layout"), sous: Etat.sys.clavier_disposition || "", cmd: [Etat.bin + "nc-touches", "disposition"], ferme: false },
+                    { icone: "tune", titre: Reglages.t("Réglages du bureau", "Desktop Settings"), cmd: [Etat.bin + "nc-reglages", "fenetre"], ferme: true },
                     { icone: "settings", titre: Reglages.t("Réglages de la barre", "Bar Settings"), cmd: ["noctalia", "msg", "settings-open"], ferme: true },
                     { icone: "lock", titre: Reglages.t("Verrouiller", "Lock"), cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
                     { icone: "power_settings_new", titre: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), cmd: ["noctalia", "msg", "panel-toggle", "session"], ferme: true }

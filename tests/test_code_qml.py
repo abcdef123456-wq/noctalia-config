@@ -29,6 +29,21 @@ elif a[:1] == ["--apercu-json"]:
 '''
 
 
+FAUX_NC_REGLAGES = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ["HOME"]) / "appels").open("a") as f: f.write(json.dumps(["nc-reglages"] + sys.argv[1:], ensure_ascii=False) + "\n")
+'''
+
+# Le sélecteur de dossier : note ses arguments et « choisit » un dossier fictif
+FAUX_ZENITY = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+H = Path(os.environ["HOME"])
+with (H / "appels").open("a") as f: f.write(json.dumps(["zenity"] + sys.argv[1:], ensure_ascii=False) + "\n")
+print("/home/user/mes-projets")
+'''
+
 FAUX_NC_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -69,7 +84,7 @@ class EspaceDeCode(unittest.TestCase):
     def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None, github=None, partage=0):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "CodeReglages.qml", "CodeReglageLigne.qml", "CodeModeles.qml", "PastilleChoix.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -85,7 +100,7 @@ class EspaceDeCode(unittest.TestCase):
             if carte:
                 self.assertIn("Math.min(980, Math.round(largeurEcran * 0.64))", source)
                 source = source.replace("Math.min(980, Math.round(largeurEcran * 0.64))", str(carte))
-            (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
+            (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000\n'))
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: %s;'
                                             ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return %s}}'
                                             % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
@@ -93,9 +108,11 @@ class EspaceDeCode(unittest.TestCase):
             if partage:
                 (q / "Partage.qml").write_text(FAUX_PARTAGE.replace("property int sessions: 0", "property int sessions: %d" % partage))
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot", "Texte", "Ico")))
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeReglages", "CodeReglageLigne", "CodeModeles", "PastilleChoix", "CodeDepot", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
+            (b / "nc-reglages").write_text(FAUX_NC_REGLAGES); (b / "nc-reglages").chmod(0o755)
+            (b / "zenity").write_text(FAUX_ZENITY); (b / "zenity").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
             ps = projets(root)
             if projets_plus:
@@ -136,7 +153,7 @@ ShellRoot {
  Timer { interval: 12000; running: true; onTriggered: { console.error("ECHEC délai"); Qt.exit(3) } }
 }
 '''.replace("SCENARIO", scenario.replace("@HOME@", d)).replace("FONDU", "true" if fondu else "false"))
-            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+            env = dict(os.environ, HOME=d, PATH=str(root / ".local/bin") + ":" + os.environ.get("PATH", ""), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
                        XDG_CACHE_HOME=str(root / "cache"), XDG_CONFIG_HOME=str(root / "config"), XDG_STATE_HOME=str(root / "state"),
                        XDG_DATA_HOME=str(root / "data"), TMPDIR=str(root))
             env.pop("WAYLAND_DISPLAY", None)
@@ -248,8 +265,8 @@ ShellRoot {
                      touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
                      touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
                      taper("essai"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
-                                   attendus=lambda a: ["--nouveau", "essai"] in a)
-        self.assertIn(["--nouveau", "essai"], appels)
+                                   attendus=lambda a: ["--nouveau", "essai", "--modele", "vide"] in a)
+        self.assertIn(["--nouveau", "essai", "--modele", "vide"], appels)
         self.assertNotIn(["--nouveau", "-piege"], appels)
 
     def test_ligne_nouveau_au_clavier_haut_entree_choix_a_deux_lignes(self):
@@ -271,8 +288,8 @@ ShellRoot {
                      touche(Qt.Key_Up); touche(Qt.Key_Escape); verifier(fen.mode === "" && fen.sel === -1 && !racine.fermee, "Échap ferme le choix, pas le panneau")
                      touche(Qt.Key_Return); touche(Qt.Key_Down); touche(Qt.Key_Return); verifier(fen.mode === "github", "Depuis GitHub")
                      touche(Qt.Key_Escape); touche(Qt.Key_Return); touche(Qt.Key_Return); taper("demo"); touche(Qt.Key_Return)
-                     verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--nouveau", "demo"] in a)
-        self.assertIn(["--nouveau", "demo"], appels)
+                     verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--nouveau", "demo", "--modele", "vide"] in a)
+        self.assertIn(["--nouveau", "demo", "--modele", "vide"], appels)
         self.assertFalse([a for a in appels if a and a[0] == ps[0]["chemin"]], "Entrée sur Nouveau n'ouvre aucun projet")
 
     def test_clic_sur_nouveau_et_sur_les_lignes_du_choix(self):
@@ -297,6 +314,77 @@ ShellRoot {
                      clavier.mouseClick(it, it.width / 2, it.height / 2)
                      verifier(racine.fermee, "clic sur un projet : ouvert"); Qt.quit() }''', attendus=lambda a: any(x and x[0].endswith("/neovim-conf") for x in a))
         self.assertIn([ps[1]["chemin"]], appels, "le clic sur la deuxième ligne ouvre ce projet")
+
+    def test_reglages_du_code_page_pastilles_et_clavier(self):
+        """⚙ du pied et Ctrl + , ouvrent la page DANS le panneau ; chaque contrôle appelle nc-reglages set CLE valeur ; Échap revient."""
+        appels, ps = self.executer('''
+  function cliquer(item) { verifier(item !== null, "contrôle introuvable"); clavier.mouseClick(item, item.width / 2, item.height / 2) }
+  function page() { return trouver(fen.contentItem, "nc-code-reglages") }
+  if (etape === 1) { if (fen.agents.length < 2) return
+                     var b = trouver(fen.contentItem, "nc-code-reglages-bouton")
+                     verifier(b !== null && b.visible, "bouton ⚙ dans le pied")
+                     verifier(!fen.reglages && !page().visible, "page fermée au départ")
+                     cliquer(b); verifier(fen.reglages && page().visible, "⚙ ouvre la page")
+                     verifier(!trouver(fen.contentItem, "nc-code-liste").visible, "la liste cède la place")
+                     verifier(!racine.fermee, "ouvrir la page ne ferme pas le panneau")
+                     touche(Qt.Key_Escape); verifier(!fen.reglages && !racine.fermee && trouver(fen.contentItem, "nc-code-liste").visible, "Échap revient à la liste")
+                     touche(Qt.Key_Comma, Qt.ControlModifier); verifier(fen.reglages, "Ctrl + , ouvre")
+                     touche(Qt.Key_Comma, Qt.ControlModifier); verifier(!fen.reglages, "Ctrl + , referme")
+                     touche(Qt.Key_Comma, Qt.ControlModifier); verifier(fen.reglages, "Ctrl + , rouvre")
+                     verifier(trouver(fen.contentItem, "nc-code-reglage-agent-claude") !== null && trouver(fen.contentItem, "nc-code-reglage-agent-codex") !== null, "une pastille par agent")
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-agent-codex"))
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-agent-aucun"))
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-agent-auto"))
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-modele-python"))
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-part-70"))
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-lazygit-non"))
+                     etape++; return }
+  if (etape === 2) { if (page().occupe) return
+                     // clavier : Bas / Haut choisissent la ligne, Gauche / Droite changent, Entrée bascule lazygit
+                     page().sel = 0; touche(Qt.Key_Right)
+                     touche(Qt.Key_Down); touche(Qt.Key_Down); verifier(page().sel === 2, "Bas choisit la ligne : " + page().sel)
+                     touche(Qt.Key_Left)
+                     page().sel = 4; touche(Qt.Key_Return)
+                     verifier(fen.reglages && !racine.fermee, "les touches de la page ne ferment rien et ne tapent pas dans la recherche")
+                     etape++; return }
+  if (etape === 3) { if (page().occupe) return
+                     // dossier : le champ puis le sélecteur de zenity
+                     var champD = trouver(fen.contentItem, "nc-code-reglage-dossier-champ")
+                     champD.text = "~/mes-codes"; champD.accepted()
+                     cliquer(trouver(fen.contentItem, "nc-code-reglage-dossier-choisir"))
+                     verifier(!fen.visible, "la fenêtre se cache pendant le sélecteur")
+                     etape++; return }
+  if (etape === 4) { if (page().occupe) return
+                     verifier(fen.visible && fen.reglages, "la fenêtre revient après le sélecteur")
+                     touche(Qt.Key_Escape); verifier(!fen.reglages, "Échap revient"); Qt.quit() }''',
+                                   attendus=lambda a: ["nc-reglages", "set", "CODE_DOSSIER", "/home/user/mes-projets"] in a)
+        regl = [a[1:] for a in appels if a[:1] == ["nc-reglages"]]
+        self.assertEqual(regl, [
+            ["set", "CODE_AGENT", "codex"], ["set", "CODE_AGENT", "aucun"], ["set", "CODE_AGENT", "auto"],
+            ["set", "CODE_MODELE", "python"], ["set", "CODE_NVIM_PART", "70"], ["set", "CODE_LAZYGIT", "non"],
+            ["set", "CODE_AGENT", "claude"], ["set", "CODE_MODELE", "web"], ["set", "CODE_LAZYGIT", "non"],
+            ["set", "CODE_DOSSIER", "~/mes-codes"], ["set", "CODE_DOSSIER", "/home/user/mes-projets"]], regl)
+        zen = [a for a in appels if a[:1] == ["zenity"]]
+        self.assertEqual(len(zen), 1, appels)
+        self.assertEqual(zen[0][1:3], ["--file-selection", "--directory"], "sélecteur de dossier, en argv")
+        self.assertTrue(zen[0][-1].endswith("/Projets/"), zen[0])
+        self.assertFalse([a for a in appels if a[:1] == ["--nouveau"]], "aucun projet créé")
+
+    def test_nouveau_projet_vide_choix_du_modele_en_pastilles(self):
+        appels, ps = self.executer('''
+  function cliquer(item) { verifier(item !== null, "contrôle introuvable"); clavier.mouseClick(item, item.width / 2, item.height / 2) }
+  if (etape === 1) { touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return)
+                     verifier(fen.mode === "nouveau" && fen.modeleNouveau === "vide", "départ : le modèle par défaut")
+                     var m = trouver(fen.contentItem, "nc-code-modeles"); verifier(m.visible, "pastilles dans Projet vide")
+                     verifier(trouver(m, "nc-code-modele-vide") !== null && trouver(m, "nc-code-modele-python") !== null
+                              && trouver(m, "nc-code-modele-c") !== null && trouver(m, "nc-code-modele-web") !== null, "quatre modèles")
+                     cliquer(trouver(m, "nc-code-modele-python")); verifier(fen.modeleNouveau === "python", "clic : python")
+                     touche(Qt.Key_Tab); verifier(fen.modeleNouveau === "c", "Tab : le suivant")
+                     touche(Qt.Key_Backtab); touche(Qt.Key_Backtab); verifier(fen.modeleNouveau === "vide", "Maj + Tab : le précédent")
+                     cliquer(trouver(m, "nc-code-modele-web"))
+                     taper("site"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--nouveau", "site", "--modele", "web"] in a)
+        self.assertIn(["--nouveau", "site", "--modele", "web"], appels)
 
     def test_cloner_ctrl_l(self):
         appels, ps = self.executer('''
@@ -426,7 +514,7 @@ ShellRoot {
         shell = (QML / "shell.qml").read_text()
         self.assertIn("function code(): void", shell, "qs -c nc-ile ipc call ile code")
         self.assertRegex(shell, r"LazyLoader \{\s*id: chargeurCode\s*active: racine\.codeOuvert", "le panneau n'existe que lorsqu'il est ouvert")
-        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot"):
+        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot", "CodeReglages", "CodeReglageLigne", "CodeModeles", "PastilleChoix", "BoutonReglages"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom + " : jamais de component inline")
         code = (QML / "Code.qml").read_text()
