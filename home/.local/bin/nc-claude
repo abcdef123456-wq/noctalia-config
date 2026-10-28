@@ -1529,6 +1529,13 @@ def cmdline_est_agent(cmdline, agent):
     return False
 
 
+def _sortie_sans_entree():
+    """Message fixe (sans texte de l'utilisateur, relayé tel quel par JARVIS) et code 4."""
+    print(T("texte collé sans Entrée : une autorisation vient de s'ouvrir, réponds sur le PC",
+            "text pasted without Enter: a permission just opened, answer on the PC"), file=sys.stderr)
+    return SORTIE_AUTORISATION
+
+
 def agent_au_premier_plan(sock, shell, agent):
     """Vrai si le premier plan du terminal de ce shell (kitty @ ls, argv exact) est bien cet agent."""
     try:
@@ -1579,7 +1586,7 @@ def ecrire(sid, texte, distant=False):
             print(T("nc-claude : l'agent ne tourne plus dans ce terminal.", "nc-agents: the agent is no longer running in this terminal."),
                   file=sys.stderr)
             sys.exit(SORTIE_AGENT_ABSENT)
-        envoyer_kitty(sock, s["shell"], texte)
+        envoyer_kitty(sock, s["shell"], texte, sid if distant else None)
     with Etat() as d:
         x = d["sessions"].get(sid)
         if x:
@@ -1587,12 +1594,25 @@ def ecrire(sid, texte, distant=False):
             ajouter_etape(x, "chat", T("Toi : ", "You: ") + court(texte, 50))
 
 
-def envoyer_kitty(sock, shell, texte):
+def autorisation_ouverte(sid):
+    """Vrai si la session a disparu ou demande une autorisation (état demande ou terminal) dans le fichier d'état, relu à l'instant."""
+    try:
+        s = json.load(open(ETAT, encoding="utf-8"))["sessions"][sid]
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+    return not isinstance(s, dict) or s.get("etat") in ("demande", "terminal")
+
+
+def envoyer_kitty(sock, shell, texte, sid_distant=None):
+    """Colle le texte puis envoie Entrée. sid_distant (JARVIS seulement) : l'état de la session est relu JUSTE avant l'Entrée ; si une
+    autorisation vient de s'ouvrir pendant la pause, l'Entrée validerait l'option surlignée : elle n'est pas envoyée (sortie 4)."""
     base = ["kitty", "@", "--to", "unix:" + sock, "send-text", "--match", f"pid:{shell}"]
     r = subprocess.run(base + ["--bracketed-paste", "auto", "--stdin"], input=texte, text=True, capture_output=True, timeout=5)
     if r.returncode:
         sys.exit(T("nc-claude : ", "nc-agents: ") + (r.stderr.strip() or T("kitty n'a pas accepté le texte", "kitty did not accept the text")))
     time.sleep(0.2)                            # Entrée à part : sinon prise pour un retour à la ligne du texte collé
+    if sid_distant is not None and autorisation_ouverte(sid_distant):
+        sys.exit(_sortie_sans_entree())
     subprocess.run(base + ["--stdin"], input="\r", text=True, capture_output=True, timeout=5)
 
 

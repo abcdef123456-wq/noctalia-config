@@ -553,11 +553,11 @@ class AutorisationEtTerminal(Base):
         self.assertEqual(self.m._attente[(7, 42)]["etat_brut"], "attente")
 
     def test_code_de_sortie_de_nc_claude_expliques(self):
-        for sortie, mot in ((3, "ne tourne plus dans ce terminal"), (4, "une autorisation attend")):
+        for sortie, mot in ((3, "ne tourne plus dans ce terminal"), (4, "vient de s'ouvrir")):
             self.ecrire_code = sortie
             self.demander()
             r = self.un("/code " + {3: "111111", 4: "222222"}[sortie], t=1030)
-            self.assertTrue(r.startswith("❌ Rien n'est envoyé"), r)
+            self.assertTrue(r.startswith("❌ Rien n'est envoyé" if sortie == 3 else "❌ Une autorisation"), r)
             self.assertIn(mot, r)
         self.assertEqual([a for a in self.appels if a[0][0] == "notify-send"], [])
 
@@ -805,7 +805,8 @@ class EcrireDistant(unittest.TestCase):
         (self.home / "run" / ("kitty-%d" % self.terminal)).write_text("")
         (self.bin / "kitty").write_text(
             '#!/bin/sh\nH="' + str(self.home) + '"\necho "kitty $*" >> "$H/kitty.log"\n'
-            'case "$*" in *" ls "*) cat "$H/ls.json";; *send-text*) cat >> "$H/kitty.log"; echo >> "$H/kitty.log";; esac\n')
+            'case "$*" in *" ls "*) cat "$H/ls.json";; *send-text*) cat >> "$H/kitty.log"; echo >> "$H/kitty.log"\n'
+            'case "$*" in *bracketed-paste*) if [ -f "$H/etat-apres.json" ]; then cp "$H/etat-apres.json" "$H/run/nc-claude/etat.json"; fi;; esac;; esac\n')
         (self.bin / "opencode").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(self.home) + '/opencode.log"\n')
         for f in ("kitty", "opencode"):
             (self.bin / f).chmod(0o755)
@@ -893,6 +894,51 @@ class EcrireDistant(unittest.TestCase):
         self.session(agent="codex", etat="travail", sid="codex-1")
         self.premier_plan(["codex"])
         self.assertEqual(self.lancer("--distant", "codex-1", "x").returncode, 0, "codex signale ses autorisations")
+
+    def entrees(self):
+        return self.journal().count("send-text --match pid:%d --stdin" % self.shell)
+
+    def test_autorisation_ouverte_pendant_la_pause_pas_d_entree(self):
+        for apres in ("demande", "terminal", None):
+            (self.home / "kitty.log").unlink(missing_ok=True)
+            self.session(etat="travail")
+            self.premier_plan(["claude"])
+            if apres:
+                self.session(etat=apres)
+                (self.home / "etat-apres.json").write_text((self.home / "run/nc-claude/etat.json").read_text())
+                self.session(etat="travail")
+            else:
+                (self.home / "etat-apres.json").write_text(json.dumps({"sessions": {}, "demandes": {}}))     # session disparue
+            r = self.lancer("--distant", "s1", "bonjour")
+            self.assertEqual(r.returncode, 4, (apres, r.stderr))
+            self.assertEqual(r.stderr.strip(), "texte collé sans Entrée : une autorisation vient de s'ouvrir, réponds sur le PC")
+            self.assertIn("bracketed-paste", self.journal(), "le texte est collé")
+            self.assertEqual(self.entrees(), 0, "l'Entrée ne part JAMAIS")
+        (self.home / "etat-apres.json").unlink()
+
+    def test_message_en_anglais(self):
+        self.session(etat="travail")
+        self.premier_plan(["claude"])
+        (self.home / "etat-apres.json").write_text(json.dumps({"sessions": {}, "demandes": {}}))
+        self.env["NC_LANGUE"] = "en"
+        r = self.lancer("--distant", "s1", "x")
+        self.assertEqual((r.returncode, r.stderr.strip()), (4, "text pasted without Enter: a permission just opened, answer on the PC"))
+
+    def test_sans_changement_l_entree_part(self):
+        self.session(etat="travail")
+        self.premier_plan(["claude"])
+        r = self.lancer("--distant", "s1", "bonjour")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.entrees(), 1)
+
+    def test_ile_sans_distant_entree_meme_si_autorisation(self):
+        """L'île ne change pas : l'Entrée part sans relire l'état."""
+        self.session(etat="travail")
+        self.session(etat="demande")
+        (self.home / "etat-apres.json").write_text((self.home / "run/nc-claude/etat.json").read_text())
+        r = self.lancer("s1", "bonjour")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.entrees(), 1)
 
     def test_sans_distant_comme_avant_l_ile_ne_change_pas(self):
         self.session(etat="terminal")

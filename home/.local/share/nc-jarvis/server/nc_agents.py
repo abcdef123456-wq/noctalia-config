@@ -452,7 +452,7 @@ async def cmd_code(brut, chat_id, user_id, prive, maintenant):
     if sortie == 3:
         return "❌ Rien n'est envoyé : l'agent ne tourne plus dans ce terminal."
     if sortie == 4:
-        return "❌ Rien n'est envoyé : une autorisation attend, réponds sur le PC."
+        return "❌ Une autorisation attend ou vient de s'ouvrir : réponds sur le PC (le texte a pu être collé sans Entrée, rien n'est validé)."
     return "❌ Échec de l'envoi à %s (%s) : son terminal n'accepte plus l'écriture ?" % (s["agent"], s["dossier"])
 
 
