@@ -949,6 +949,14 @@ modifié ne lance rien ; un ordre reçu pendant que le PC était éteint n'est p
   « demande ton accord » (autorisation d'une commande ou question dans le terminal) ne reçoit AUCUNE réponse à distance : pendant
   cette demande, n'importe quel texte suivi d'Entrée valide le choix surligné (souvent « Oui »). Elle dit « une autorisation attend :
   réponds sur le PC ».
+  Seuls les agents dont les hooks ont un événement dédié aux autorisations le signalent (Claude Code : `PermissionRequest` et
+  `Notification` `permission_prompt`/`elicitation_dialog` ; Codex : `PermissionRequest` ; Gemini CLI : `Notification`
+  `ToolPermission` ; Qwen Code : `PermissionRequest` ; Copilot : `notification` `permission_prompt`/`elicitation_dialog` ;
+  OpenCode : `permission.asked`, `question.asked`, `form.created`). Pour les autres (Antigravity, Cursor, Kiro, Amp), l'état
+  « travaille » peut cacher une autorisation qui attend : la ligne dit « réponse à distance impossible : <agent> ne signale pas
+  s'il attend une autorisation » et `/repondre` n'est permis que quand l'agent est « fini » ou « prêt ». Les sources sont en
+  commentaire dans `nc-claude` (`SIGNALENT_AUTORISATION`). Une seconde confirmation ne remplacerait pas cette règle : elle ne protège
+  pas d'un Entrée qui valide une autorisation.
   Une session dont le terminal n'est pas pris en charge dit « réponse impossible à distance (terminal non pris en charge) ».
   **Par défaut aucun contenu de conversation.** Avec `TELEGRAM_AGENTS_TEXTE=oui` : le dernier message de l'agent, si
   `nc-claude` l'a, passé par un filtre de secrets (jetons `sk-…`, `ghp_…`/`gho_…`, `xox…`, `AKIA…`, clés PEM, `password=`,

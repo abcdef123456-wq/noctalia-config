@@ -47,6 +47,8 @@ ETATS = {"attente": "t'attend", "demande": "demande ton accord", "terminal": "de
          "fini": "fini", "pret": "prêt"}
 # Pendant une demande d'autorisation, N'IMPORTE QUEL texte suivi d'Entrée valide le choix surligné (souvent « Oui ») : jamais d'écriture
 AUTORISATION_EN_ATTENTE = ("demande", "terminal")
+# Agents dont les hooks ne disent pas s'ils attendent une autorisation : l'état « travail » peut cacher une autorisation qui attend
+REPLI_ETATS_SUREMENT_LIBRES = ("fini", "pret")
 AUTORISATION_REFUSEE = "une autorisation attend : réponds sur le PC (un texte suivi d'Entrée la validerait)"
 IDENTIFIANT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}")
 NUMERO = re.compile(r"[0-9]{1,3}")
@@ -198,6 +200,17 @@ def _nom_agent(valeur):
     return NOMS.get(valeur) or (propre(valeur, 20) if re.fullmatch(r"[a-z][a-z0-9_-]{0,19}", valeur) else "agent")
 
 
+def refus_etat(s):
+    """Pourquoi JARVIS n'écrit pas à cette session dans son état actuel (texte), ou None. Une autorisation (demande, terminal) :
+    jamais. Un agent qui ne signale pas ses autorisations (repli) : seulement quand il est fini ou prêt, l'état « travail » ou
+    « attente » pouvant cacher une autorisation qui attend."""
+    if s["etat_brut"] in AUTORISATION_EN_ATTENTE:
+        return AUTORISATION_REFUSEE
+    if not s["signale"] and s["etat_brut"] not in REPLI_ETATS_SUREMENT_LIBRES:
+        return "réponse à distance impossible : %s ne signale pas s'il attend une autorisation" % s["agent"]
+    return None
+
+
 def valider(brut, avec_texte):
     """La sortie JSON de `nc-claude etat --json` (contrat 1) → liste de sessions reconstruites champ par champ, ou None."""
     try:
@@ -216,7 +229,7 @@ def valider(brut, avec_texte):
         brut = x.get("etat") if isinstance(x.get("etat"), str) and x.get("etat") in ETATS else "?"
         s = {"id": x["id"], "agent": agent, "dossier": nom_dossier(x.get("dossier")), "etat_brut": brut,
              "etat": ETATS.get(brut, "état inconnu"),
-             "ecrire": x.get("ecrire") is True}
+             "ecrire": x.get("ecrire") is True, "signale": x.get("signale_autorisation") is True}
         if avec_texte and x.get("message"):
             s["message"] = extrait(x["message"])
         sessions.append(s)
@@ -343,8 +356,8 @@ async def cmd_agents(brut, chat_id, user_id, prive, maintenant):
         lignes.append("%d. %s · %s · %s" % (numeros[s["id"]], s["agent"], s["dossier"], s["etat"]))
         if not s["ecrire"]:
             lignes.append("   ↳ " + IMPOSSIBLE)
-        elif s["etat_brut"] in AUTORISATION_EN_ATTENTE:
-            lignes.append("   ↳ " + AUTORISATION_REFUSEE)
+        elif refus_etat(s):
+            lignes.append("   ↳ " + refus_etat(s))
         if s.get("message"):
             lignes.append("   « " + s["message"] + " »")
     lignes.append("Répondre : /repondre N texte (puis /code avec les 6 chiffres de ton appli). Liste valable 10 minutes.")
@@ -386,8 +399,8 @@ async def cmd_repondre(brut, chat_id, user_id, prive, maintenant):
     if s is None or not s["ecrire"]:
         _listes.pop(cle, None)
         return "❌ Cette session n'est plus là (ou n'accepte plus l'écriture) : tape /agents."
-    if s["etat_brut"] in AUTORISATION_EN_ATTENTE:
-        return "❌ Agent %d : %s." % (numero, AUTORISATION_REFUSEE)
+    if refus_etat(s):
+        return "❌ Agent %d : %s." % (numero, refus_etat(s))
     if cle in _attente:                          # une autre demande est arrivée pendant les vérifications ci-dessus
         _attente.pop(cle, None)
         return "⛔ Deux demandes en même temps : tout est annulé, refais /repondre (une seule à la fois)."
@@ -423,7 +436,7 @@ async def cmd_code(brut, chat_id, user_id, prive, maintenant):
     s = next((x for x in sessions or () if x["id"] == demande["id"]), None)
     if s is None or not s["ecrire"]:
         return "❌ Cette session n'est plus là (ou n'accepte plus l'écriture) : rien n'est envoyé."
-    if s["etat_brut"] != demande["etat_brut"] or s["etat_brut"] in AUTORISATION_EN_ATTENTE:
+    if s["etat_brut"] != demande["etat_brut"] or refus_etat(s):
         return "❌ L'état de l'agent a changé (%s) ou une autorisation attend : rien n'est envoyé, réponds sur le PC ou refais /repondre." % s["etat"]
     # L'argv exact : l'identifiant vient de nc-claude (validé), le texte est UN argument (vérifié : une ligne, sans contrôle) ;
     # --distant : nc-claude refuse si l'agent n'est plus au premier plan de son terminal ou si une autorisation attend

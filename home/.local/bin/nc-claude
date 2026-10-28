@@ -1459,7 +1459,7 @@ def montrer_json(avec_texte=False):
         if not isinstance(s, dict) or not isinstance(sid, str):
             continue
         x = {"id": sid, "agent": s.get("agent") or "claude", "dossier": dossier_court(s), "etat": str(s.get("etat") or "pret"),
-             "ecrire": s.get("ecrire") is True}
+             "ecrire": s.get("ecrire") is True, "signale_autorisation": (s.get("agent") or "claude") in SIGNALENT_AUTORISATION}
         if avec_texte and x["etat"] != "travail":
             m = s.get("reponse") or s.get("message")
             if isinstance(m, str) and m.strip():
@@ -1490,6 +1490,26 @@ PROCESSUS_AGENT = {"claude": ("claude", "claude-code"), "codex": ("codex",), "ge
                    "opencode": ("opencode",), "antigravity": ("agy", "antigravity"), "cursor": ("cursor-agent",),
                    "copilot": ("copilot",), "qwen": ("qwen", "qwen-code"), "kiro": ("kiro", "kiro-cli"), "amp": ("amp",)}
 INTERPRETES = ("node", "nodejs", "bun", "deno", "python", "python3")
+# Quels agents SIGNALENT une autorisation (ou une question à choix) par un événement de hook DÉDIÉ, vérifié dans leur doc officielle
+# (jamais de lecture de l'écran ni d'heuristique sur le texte). Pendant ces moments, un texte + Entrée validerait le choix surligné :
+# l'état passe à « demande » (Claude) ou « terminal » (les autres, via suivre) et JARVIS n'écrit pas. Pour les autres agents (repli),
+# on ne sait pas quand ils attendent une autorisation (l'état reste « travail » pendant qu'elle attend) : JARVIS n'écrit que
+# lorsqu'ils sont « fini » ou « prêt ».
+#   claude   PermissionRequest ; Notification permission_prompt / elicitation_dialog (idle_prompt = simple saisie, « attente »)
+#            https://code.claude.com/docs/en/hooks
+#   codex    PermissionRequest : « runs when Codex is about to ask for approval » (aucun événement d'attente de saisie : au prompt,
+#            Stop → « fini ») https://developers.openai.com/codex/hooks (redirige vers https://learn.chatgpt.com/docs/hooks)
+#   gemini   Notification, notification_type « ToolPermission » (seule valeur) https://geminicli.com/docs/hooks/ et
+#            docs/hooks/reference.md du dépôt google-gemini/gemini-cli
+#   qwen     PermissionRequest « when permission dialog is shown » ; Notification permission_prompt / idle_prompt
+#            https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/
+#   copilot  notification, notification_type permission_prompt / elicitation_dialog ; hook permissionRequest
+#            https://docs.github.com/en/copilot/reference/hooks-configuration
+#   opencode événements de plugin permission.asked (https://opencode.ai/docs/plugins/) et question.asked / form.created (extension
+#            ci-dessous) ; session.idle = « fini »
+# REPLI (aucun événement d'autorisation dans leurs hooks) : antigravity (comment hook_agy : « ni de demande d'autorisation »), cursor,
+# kiro, amp (hooks installés ici : prompt, outil, stop, fin seulement).
+SIGNALENT_AUTORISATION = ("claude", "codex", "gemini", "qwen", "copilot", "opencode")
 SORTIE_AGENT_ABSENT = 3                    # nc-claude ecrire --distant : l'agent ne tourne plus dans ce terminal
 SORTIE_AUTORISATION = 4                    # … ou une autorisation attend (n'importe quel texte + Entrée la validerait)
 
@@ -1536,6 +1556,10 @@ def ecrire(sid, texte, distant=False):
         sys.exit(T("nc-claude : session inconnue.", "nc-agents: unknown session."))
     if distant and s.get("etat") in ("demande", "terminal"):
         print(T("nc-claude : une autorisation attend, réponds sur le PC.", "nc-agents: a permission is waiting, answer on the PC."), file=sys.stderr)
+        sys.exit(SORTIE_AUTORISATION)
+    if distant and (s.get("agent") or "claude") not in SIGNALENT_AUTORISATION and s.get("etat") not in ("fini", "pret"):
+        print(T("nc-claude : cet agent ne signale pas s'il attend une autorisation.", "nc-agents: this agent does not report whether it waits for a permission."),
+              file=sys.stderr)
         sys.exit(SORTIE_AUTORISATION)
     sock = socket_kitty(s.get("terminal"))
     if texte and s.get("agent") == "opencode" and not (sock and s.get("shell")) and shutil.which("opencode"):

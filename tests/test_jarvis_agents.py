@@ -35,8 +35,12 @@ def module():
     return m
 
 
-def session(sid, agent, dossier, etat, ecrire=True, message=None):
-    x = {"id": sid, "agent": agent, "dossier": dossier, "etat": etat, "ecrire": ecrire}
+SIGNALENT = ("claude", "codex", "gemini", "qwen", "copilot", "opencode")      # SIGNALENT_AUTORISATION de nc-claude
+
+
+def session(sid, agent, dossier, etat, ecrire=True, message=None, signale=None):
+    x = {"id": sid, "agent": agent, "dossier": dossier, "etat": etat, "ecrire": ecrire,
+         "signale_autorisation": agent in SIGNALENT if signale is None else signale}
     if message is not None:
         x["message"] = message
     return x
@@ -558,6 +562,70 @@ class AutorisationEtTerminal(Base):
         self.assertEqual([a for a in self.appels if a[0][0] == "notify-send"], [])
 
 
+class AgentsQuiSignalentOuNon(Base):
+    """Les agents dont les hooks signalent les autorisations sont permis en « attente » ; les autres (repli) ne reçoivent rien
+    tant qu'ils ne sont pas finis, car « travail » peut cacher une autorisation qui attend."""
+    PHRASE = "réponse à distance impossible : %s ne signale pas s'il attend une autorisation"
+
+    def un_agent(self, agent, etat, signale=None, sid="x-1"):
+        self.sessions = [session(sid, agent, "dossier", etat, signale=signale)]
+        self.m._attente.clear()
+        self.m._listes.clear()
+        self.un("/agents", t=1000)
+        return self.un("/repondre 1 bonjour", t=1001)
+
+    def test_codex_en_attente_est_permis_s_il_distingue(self):
+        self.assertIn("Confirme avec /code", self.un_agent("codex", "attente"))
+        self.assertIn("Confirme avec /code", self.un_agent("codex", "travail"))
+        self.assertIn("Confirme avec /code", self.un_agent("codex", "fini"))
+        for agent in SIGNALENT:
+            self.assertIn("Confirme avec /code", self.un_agent(agent, "attente"), agent)
+
+    def test_demande_et_terminal_toujours_refuses_meme_si_l_agent_distingue(self):
+        for agent in SIGNALENT:
+            for etat in ("demande", "terminal"):
+                r = self.un_agent(agent, etat)
+                self.assertIn("une autorisation attend : réponds sur le PC", r, (agent, etat))
+
+    def test_repli_refuse_avec_la_phrase(self):
+        for agent, nom in (("antigravity", "Antigravity"), ("kiro", "Kiro"), ("amp", "Amp")):
+            for etat in ("attente", "travail"):
+                r = self.un_agent(agent, etat)
+                self.assertEqual(r, "❌ Agent 1 : " + self.PHRASE % nom + ".", (agent, etat))
+            for etat in ("terminal", "demande"):
+                self.assertIn("autorisation attend", self.un_agent(agent, etat), (agent, etat))
+        self.assertEqual(self.commandes_ecrire(), [])
+
+    def test_repli_permis_seulement_fini_ou_pret(self):
+        for etat in ("fini", "pret"):
+            self.assertIn("Confirme avec /code", self.un_agent("kiro", etat), etat)
+
+    def test_agent_sans_le_champ_est_en_repli(self):
+        self.sessions = [{"id": "c-1", "agent": "codex", "dossier": "d", "etat": "travail", "ecrire": True}]
+        self.m._listes.clear()
+        self.un("/agents", t=1000)
+        self.assertIn("ne signale pas s'il attend une autorisation", self.un("/repondre 1 salut", t=1001))
+        self.sessions = [session("c-1", "codex", "d", "travail", signale="oui")]
+        self.m._listes.clear()
+        self.un("/agents", t=1000)
+        self.assertIn("ne signale pas", self.un("/repondre 1 salut", t=1001), "exactement vrai")
+
+    def test_la_ligne_de_agents_le_dit(self):
+        self.sessions = [session("k-1", "kiro", "site", "travail"), session("c-1", "codex", "api", "travail"),
+                         session("a-1", "antigravity", "x", "fini")]
+        r = self.un("/agents")
+        self.assertIn("1. Kiro · site · travaille\n   ↳ " + self.PHRASE % "Kiro", r)
+        self.assertNotIn("↳", r.split("2. Codex")[1].split("3.")[0])
+        self.assertNotIn("Antigravity ne signale", r, "fini : permis")
+
+    def test_le_code_refuse_si_l_agent_repli_est_repasse_en_travail(self):
+        self.assertIn("Confirme avec /code", self.un_agent("kiro", "fini"))
+        self.sessions = [session("x-1", "kiro", "dossier", "travail")]
+        r = self.un("/code " + CODE_BON, t=1030)
+        self.assertIn("L'état de l'agent a changé", r)
+        self.assertEqual(self.commandes_ecrire(), [])
+
+
 class Garde(Base):
     def test_prive_avant_indisponible(self):
         self.regler()                                    # réglage à non : un groupe ne l'apprend pas
@@ -801,9 +869,10 @@ class EcrireDistant(unittest.TestCase):
         for agent, cmdline in (("codex", ["codex"]), ("gemini", ["node", "/x/bin/gemini"]), ("antigravity", ["agy", "chat"]),
                                ("opencode", ["opencode"]), ("qwen", ["qwen"]), ("kiro", ["kiro-cli"]), ("amp", ["amp"]),
                                ("cursor", ["cursor-agent"]), ("copilot", ["copilot"])):
-            self.session(agent=agent, sid=agent + "-1")
+            self.session(agent=agent, sid=agent + "-1", etat="fini")
             self.premier_plan(cmdline)
             self.assertEqual(self.lancer("--distant", agent + "-1", "x").returncode, 0, agent)
+            self.session(agent=agent, sid=agent + "-1", etat="fini")
             self.premier_plan(["claude"])            # l'agent d'un autre : non
             self.assertEqual(self.lancer("--distant", agent + "-1", "x").returncode, 3, agent)
 
@@ -816,6 +885,15 @@ class EcrireDistant(unittest.TestCase):
             self.assertEqual(r.returncode, 4, etat)
             self.assertEqual(self.journal(), "", "même pas interrogé")
 
+    def test_agent_en_repli_refuse_sauf_fini(self):
+        self.premier_plan(["kiro-cli"])
+        for etat, code in (("travail", 4), ("attente", 4), ("terminal", 4), ("fini", 0), ("pret", 0)):
+            self.session(agent="kiro", etat=etat, sid="kiro-1")
+            self.assertEqual(self.lancer("--distant", "kiro-1", "x").returncode, code, etat)
+        self.session(agent="codex", etat="travail", sid="codex-1")
+        self.premier_plan(["codex"])
+        self.assertEqual(self.lancer("--distant", "codex-1", "x").returncode, 0, "codex signale ses autorisations")
+
     def test_sans_distant_comme_avant_l_ile_ne_change_pas(self):
         self.session(etat="terminal")
         self.premier_plan(["vim"])
@@ -825,16 +903,26 @@ class EcrireDistant(unittest.TestCase):
         self.assertNotIn(" ls ", j)
         self.assertIn("depuis l'île", j)
 
-    def test_opencode_double_tiret_avant_le_texte(self):
+    def test_opencode_jamais_de_double_tiret_et_tiret_refuse(self):
+        """yargs : un texte placé après « -- » peut ne pas remplir le positionnel message. Le tiret en tête est refusé à la place."""
         (self.home / "run/nc-claude/etat.json").write_text(json.dumps({"sessions": {"opencode-ses_9": {
             "id": "opencode-ses_9", "agent": "opencode", "etat": "fini", "cwd": str(self.home), "maj": time.time(), "terminal": 0, "shell": 0}}, "demandes": {}}))
-        for args in (("--distant", "opencode-ses_9", "-rf", "x"), ("opencode-ses_9", "-rf", "x")):
+        for args in (("--distant", "opencode-ses_9", "salut", "x"), ("opencode-ses_9", "salut", "x")):
             (self.home / "opencode.log").unlink(missing_ok=True)
             self.assertEqual(self.lancer(*args).returncode, 0)
             fin = time.monotonic() + 3
             while time.monotonic() < fin and not (self.home / "opencode.log").exists():
                 time.sleep(0.05)
-            self.assertEqual((self.home / "opencode.log").read_text().strip(), "run --session ses_9 -- -rf x")
+            argv = (self.home / "opencode.log").read_text().strip()
+            self.assertEqual(argv, "run --session ses_9 salut x")
+            self.assertNotIn(" -- ", " " + argv + " ", "jamais « -- » dans l'argv d'opencode")
+        (self.home / "opencode.log").unlink()
+        for args in (("--distant", "opencode-ses_9", "-rf", "x"), ("opencode-ses_9", "--auto"), ("opencode-ses_9", " -f")):
+            r = self.lancer(*args)
+            self.assertNotEqual(r.returncode, 0, args)
+            self.assertIn("commence ton message par un mot", r.stderr)
+        time.sleep(0.3)
+        self.assertFalse((self.home / "opencode.log").exists(), "rien n'est lancé")
 
     def test_sans_xdg_runtime_dir_refus(self):
         src = NC_CLAUDE.read_text()
@@ -964,9 +1052,9 @@ class NcClaudeEtatJson(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         d = json.loads(r.stdout)
         self.assertEqual(d, {"contrat": 1, "sessions": [
-            {"id": "a", "agent": "claude", "dossier": "mon-projet", "etat": "attente", "ecrire": True},
-            {"id": "codex-b", "agent": "codex", "dossier": "~", "etat": "travail", "ecrire": False},
-            {"id": "c", "agent": "claude", "dossier": "?", "etat": "fini", "ecrire": False}]})
+            {"id": "a", "agent": "claude", "dossier": "mon-projet", "etat": "attente", "ecrire": True, "signale_autorisation": True},
+            {"id": "codex-b", "agent": "codex", "dossier": "~", "etat": "travail", "ecrire": False, "signale_autorisation": True},
+            {"id": "c", "agent": "claude", "dossier": "?", "etat": "fini", "ecrire": False, "signale_autorisation": True}]})
         for interdit in ("secret", "/home", h, "rm -rf", "Edit"):
             self.assertNotIn(interdit, r.stdout)
 
@@ -977,6 +1065,17 @@ class NcClaudeEtatJson(unittest.TestCase):
         d = json.loads(self.lancer("--json", "--texte").stdout)
         self.assertEqual([s.get("message") for s in d["sessions"]], ["Dernier mot", None, "msg codex"])
         self.assertNotIn("message", json.loads(self.lancer("--json").stdout)["sessions"][0])
+
+    def test_signale_autorisation_par_agent(self):
+        self.etat({"a": {"id": "a", "cwd_reel": "/x/p", "etat": "fini", "ecrire": True}})
+        sess = {}
+        for agent in ("codex", "gemini", "qwen", "copilot", "opencode", "antigravity", "cursor", "kiro", "amp"):
+            sess[agent + "-1"] = {"id": agent + "-1", "agent": agent, "cwd_reel": "/x/p", "etat": "fini", "ecrire": True}
+        sess["a"] = {"id": "a", "cwd_reel": "/x/p", "etat": "fini", "ecrire": True}
+        self.etat(sess)
+        d = {x["agent"]: x["signale_autorisation"] for x in json.loads(self.lancer("--json").stdout)["sessions"]}
+        self.assertEqual({k for k, v in d.items() if v}, {"claude", "codex", "gemini", "qwen", "copilot", "opencode"})
+        self.assertEqual({k for k, v in d.items() if not v}, {"antigravity", "cursor", "kiro", "amp"})
 
     def test_sans_etat_liste_vide(self):
         (self.run / "nc-claude/etat.json").unlink(missing_ok=True)
