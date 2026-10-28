@@ -5,6 +5,10 @@
                                bascule (7 h et 19 h) ; écran éteint ou session verrouillée : rien (l'île relance dès le réveil)
   nc-fond-jour-nuit force      réapplique même si la période n'a pas changé (réglage tout juste activé)
   nc-fond-jour-nuit arreter    retire le minuteur (réglage coupé)
+  nc-fond-jour-nuit creer-dossiers
+                               crée les sous-dossiers « jour » et « nuit » de FONDS_DOSSIER (qui doit déjà exister) et l'ouvre
+                               dans le gestionnaire de fichiers (xdg-open) ; rien d'autre
+  nc-fond-jour-nuit -h | --help | aide    cet usage (code 0) ; tout autre argument : usage sur la sortie d'erreur, code 2, rien n'est fait
   nc-fond-jour-nuit imposer jour|nuit|aucun
                                (Modes Concentration) garde le fond du jour ou de la nuit quelle que soit l'heure, jusqu'à « aucun »
                                qui rend la main à l'heure réelle ; réglage coupé : « jour » et « nuit » sont refusés (code 1)
@@ -152,8 +156,41 @@ def appliquer(fond):
                           timeout=15).returncode == 0
 
 
+def creer_dossiers():
+    """mkdir -p de « jour » et « nuit » dans FONDS_DOSSIER, puis xdg-open sur ce dossier. Refus (code 1) : dossier vide, absent
+    ou qui n'est pas un dossier. Rien d'autre n'est créé ni lancé."""
+    brut = reglages().get("FONDS_DOSSIER") or "~/Pictures/Wallpapers"
+    base = os.path.expanduser(brut.strip())
+    if not brut.strip() or not os.path.isabs(base) or not os.path.isdir(base):
+        print("nc-fond-jour-nuit : « %s » n'est pas un dossier existant (FONDS_DOSSIER dans nc-reglages → Fonds d'écran)." % brut[:200],
+              file=sys.stderr)
+        return 1
+    for sous in ("jour", "nuit"):
+        try:
+            os.makedirs(os.path.join(base, sous), exist_ok=True)
+        except OSError as e:
+            print("nc-fond-jour-nuit : impossible de créer %s : %s" % (sous, e.strerror), file=sys.stderr)
+            return 1
+    if shutil.which("xdg-open"):
+        try:
+            subprocess.Popen(["xdg-open", base], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError:
+            pass
+    print(base)
+    return 0
+
+
 def main(argv, maintenant=None):
+    if argv and argv[0] in ("-h", "--help", "aide"):
+        print(__doc__.strip())
+        return 0
+    if argv and (argv[0] not in ("force", "arreter", "imposer", "creer-dossiers") or (argv[0] != "imposer" and len(argv) > 1)):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
     arg = argv[0] if argv else ""
+    if arg == "creer-dossiers":
+        return creer_dossiers()
     marque = lire_marque()
     ancienne = marque[1] if len(marque) > 1 else ""
     if arg == "arreter":

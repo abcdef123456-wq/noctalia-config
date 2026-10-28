@@ -59,6 +59,68 @@ class Base(unittest.TestCase):
         return self.journal.read_text().splitlines() if self.journal.exists() else []
 
 
+class LigneDeCommande(Base):
+    """Argument inconnu ou --help : usage, rien n'est fait (ni noctalia, ni systemd-run, ni systemctl) ; creer-dossiers."""
+
+    def cli(self, *args):
+        import subprocess
+        import sys
+        (self.r / "bin/xdg-open").write_text('#!/bin/sh\necho "xdg-open $*" >> "%s"\n' % self.journal)
+        (self.r / "bin/xdg-open").chmod(0o755)
+        return subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env, capture_output=True, text=True, timeout=30,
+                              stdin=subprocess.DEVNULL)
+
+    def test_aide_code_0_et_rien_n_est_fait(self):
+        for a in ("-h", "--help", "aide"):
+            r = self.cli(a)
+            self.assertEqual(r.returncode, 0, a)
+            self.assertIn("nc-fond-jour-nuit", r.stdout)
+        self.assertEqual(self.appels(), [])
+        self.assertFalse((self.home / ".local/state/nc").exists())
+
+    def test_argument_inconnu_usage_sur_stderr_code_2_rien_n_est_fait(self):
+        for args in (("--aid",), ("forcer",), ("-x",), ("jour",), ("arreter", "x"), ("force", "x"), ("--help-moi",)):
+            r = self.cli(*args)
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("nc-fond-jour-nuit", r.stderr)
+            self.assertEqual(r.stdout, "")
+        self.assertEqual(self.appels(), [], "ni noctalia, ni systemd-run, ni systemctl")
+        self.assertFalse((self.home / ".local/state/nc").exists(), "aucune marque écrite")
+
+    def test_creer_dossiers_mkdir_et_xdg_open_seulement(self):
+        import shutil
+        shutil.rmtree(self.home / "Pictures/Wallpapers")
+        (self.home / "Pictures/Wallpapers").mkdir()
+        r = self.cli("creer-dossiers")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        base = self.home / "Pictures/Wallpapers"
+        self.assertTrue((base / "jour").is_dir() and (base / "nuit").is_dir())
+        import time
+        for _ in range(50):
+            if self.appels():
+                break
+            time.sleep(0.1)
+        self.assertEqual(self.appels(), ["xdg-open " + str(base)])
+        r = self.cli("creer-dossiers")                      # déjà là : sans erreur
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_creer_dossiers_dossier_regle_avec_tilde_et_refus(self):
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_DOSSIER="~/Fonds")
+        r = self.cli("creer-dossiers")                      # n'existe pas : refusé, rien créé
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.home / "Fonds").exists())
+        (self.home / "Fonds").mkdir()
+        self.assertEqual(self.cli("creer-dossiers").returncode, 0)
+        self.assertTrue((self.home / "Fonds/jour").is_dir() and (self.home / "Fonds/nuit").is_dir())
+        (self.home / "fichier").write_text("x")
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_DOSSIER="~/fichier")        # pas un dossier
+        self.assertEqual(self.cli("creer-dossiers").returncode, 1)
+        self.reglages(FONDS_JOUR_NUIT="oui", FONDS_DOSSIER="relatif/chemin")    # ni absolu ni ~
+        self.assertEqual(self.cli("creer-dossiers").returncode, 1)
+        self.assertFalse((self.home / "fichier/jour").exists())
+        self.assertFalse(any(x.startswith(("noctalia", "systemd-run", "systemctl")) for x in self.appels()))
+
+
 class Periode(Base):
     def periode(self):
         self.enterContext(patch.dict(os.environ, self.env))         # jamais le vrai ~/.config
