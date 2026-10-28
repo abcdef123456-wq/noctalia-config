@@ -235,6 +235,8 @@ Item {
                     }
                 }
             }
+            // Profils d'énergie poussés (nc-energie) : proposés par l'IA ou par des règles, aperçu, Appliquer, Revenir
+            EnergieProfils { width: sa.width; affichee: sa.affichee }
             Texte {
                 visible: Chaleur.seuil > 0 && Chaleur.fichierCpu !== ""
                 width: sa.width; wrapMode: Text.WordWrap; secondaire: true; font.pixelSize: 11; leftPadding: 8

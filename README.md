@@ -302,6 +302,33 @@ turbo, carte PCIe, mode de la plateforme) : les mêmes sur Arch, Fedora 44+, Deb
 sur un PC fixe, le service de la distribution est utilisé. La limite de charge à 80 % est proposée si la batterie la gère
 (Lenovo, ASUS, Dell, ThinkPad… ; pas encore les Acer sous Linux).
 
+### Profils d'énergie poussés (`nc-energie`)
+
+Des profils plus poussés que Économie / Équilibré / Performance, faits pour **ton** PC : `nc-energie fiche` en dresse la fiche
+anonyme (marque du processeur, cœurs, pilote, EPP, boost, cartes graphiques et mode MUX, santé de la batterie, écran, service
+de profils, **capacités détectées** ; jamais de numéro de série, de nom, d'adresse MAC ni de nom de machine). Puis
+`nc-energie proposer` en tire 2 ou 3 profils (« Cours / bureautique », « Jeu », « Film sur batterie »…), par l'IA (`nc-ia`) ou,
+sans IA (`IA_MODE=non`, IA indisponible), par des règles calculées d'après la fiche. L'IA ne produit qu'un JSON
+`{nom, description, reglages}` : jamais une commande, un chemin ni du code. Chaque profil passe par une **liste blanche**
+(`nc-energie-liste`, un seul endroit, valeurs énumérées) : clé inconnue, valeur hors liste, capacité absente sur ce PC, option de
+rendu d'Hyprland, ventilateurs, undervolt, ryzenadj, TDP brut, écriture libre dans `/sys` → le profil entier est refusé, avec la
+raison.
+
+- `nc-energie apercu NOM` : ce qui changerait, avant → après, en français simple. `nc-energie appliquer NOM` : après confirmation,
+  tout ou rien (si une étape échoue, tout est remis comme avant). `nc-energie revenir` : l'état d'avant
+  (`~/.local/state/nc/energie-avant.json`). `nc-energie liste` : les profils gardés (`~/.config/nc/profils-energie.json`).
+- Niveau 1, sans root : profil du service d'énergie, luminosité, réglages de `nc-reglages` (`ECO_*`, `EFFETS`, `HALO_BATTERIE`,
+  `FOND_ANIME`, `ILE_*`, flou, ombres et animations des fenêtres). L'écran **garde sa fréquence maximale**, sauf un profil marqué
+  « film sur batterie » (60 Hz), appliqué seulement après une confirmation qui le dit en clair.
+- Niveau 2, matériel : par l'assistant `/usr/local/bin/nc-energie-root` (processeur : EPP, boost, fréquence maximale en paliers
+  100 / 80 / 60 % ; profil de la plateforme ; NVIDIA : gestion d'énergie et limite de puissance, seulement carte allumée ; Wi-Fi ;
+  veille USB hors clavier et souris ; audio ; rétroéclairage du clavier) et `nc-limite-charge`. L'assistant n'accepte que des
+  sous-commandes et des valeurs d'une liste fixe, construit lui-même les chemins de `/sys`, et sa règle sudo est faite de
+  commandes exactes. `install.sh` ne le pose qu'avec ton accord (étape sensible : « non » par défaut sans terminal). Rien n'est
+  réappliqué tout seul au démarrage.
+- Dans l'île : une carte « Profils d'énergie poussés » dans la page Santé (aperçu, Appliquer, Revenir ; le bouton de l'IA est
+  caché si `IA_MODE=non`). Détails : `docs/profils-energie.md`.
+
 ### PC hybride (carte intégrée + NVIDIA)
 
 - Quelle carte sert ? Réglage « Carte NVIDIA pour les applis » (`nc-reglages` → Énergie). En auto, la NVIDIA sert sur
@@ -465,7 +492,7 @@ Fedora/Nobara et les configurations à plusieurs écrans.
 ## Contenu
 
 - `home/` : la config (Hyprland en Lua dans `.config/hypr/`, Noctalia v5, plugins, kitty, zsh, Neovim, Firefox, Qt/KDE, scripts `nc-*`) ;
-- `system/` : profils d'énergie TLP, thème GRUB « nc », écran de connexion SDDM (étapes optionnelles) ;
+- `system/` : profils d'énergie TLP, assistants root facultatifs (`nc-limite-charge`, `nc-energie-root`), thème GRUB « nc », écran de connexion SDDM (étapes optionnelles) ;
 - `install.sh`, `export.sh`, `RACCOURCIS.md`.
 
 Les plugins `nc/launcher`, `nc/carousel` et `nc/keys` (recherche, fonds d'écran, raccourcis) sont écrits pour ce dépôt.
