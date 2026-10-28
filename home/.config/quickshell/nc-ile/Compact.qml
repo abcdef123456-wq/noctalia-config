@@ -69,6 +69,17 @@ Item {
         // Un tunnel VPN monté (VpnEtat.qml, nc-vpn) : un bouclier devant l'heure, jamais de nom
         Ico { objectName: "nc-vpn-pill"; anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 15; color: Couleurs.vert
               visible: VpnEtat.indicateur; Accessible.role: Accessible.StaticText; Accessible.name: "VPN" }
+        // Un mode Concentration actif (Modes.qml) : son icône et son nom court ; le nom est caché pendant un partage d'écran
+        Row {
+            objectName: "nc-mode-pill"
+            anchors.verticalCenter: parent.verticalCenter; spacing: 4
+            visible: Modes.pastille
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Modes.actifIcone; taille: 15; color: Couleurs.accentClair }
+            Texte { anchors.verticalCenter: parent.verticalCenter; visible: Modes.nomVisible !== ""; text: Modes.nomVisible; secondaire: true
+                    font.pixelSize: 12; width: Math.min(implicitWidth, 90) }
+            Accessible.role: Accessible.StaticText
+            Accessible.name: Reglages.t("Mode Concentration actif", "Focus mode on")
+        }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
                 visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages

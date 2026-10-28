@@ -537,6 +537,14 @@ REGLAGES = [
         "les mises à jour du système et la batterie. Rien pendant un partage d'écran ni en mode jeu.",
         "When you come back after a long absence (4 h or more) or the first time of the day: “Good morning” with the weather, events, "
         "system updates and battery. Nothing during screen sharing or Game Mode.")),
+    R("ILE_CONCENTRATION", "Île", L("Modes Concentration dans l'île", "Focus modes in the island"), "ouinon", "oui",
+      L("Des modes que tu crées toi-même (Travail, Nuit, Jeu…) : chacun règle d'un coup Ne pas déranger, un profil d'énergie, le fond "
+        "du jour ou de la nuit et l'IA des notifications, puis remet ce qu'il avait changé. Appui long sur Ne pas déranger dans le "
+        "centre de contrôle. Aucun mode n'existe tant que tu n'en crées pas ; rien ne s'applique sans ton clic. Pastille dans la pilule "
+        "quand un mode est actif (sans son nom pendant un partage d'écran).",
+        "Modes you create yourself (Work, Night, Gaming…): each sets Do Not Disturb, a power profile, the day or night wallpaper and the "
+        "notification AI in one go, then puts back what it changed. Long-press Do Not Disturb in the control center. No mode exists until "
+        "you create one; nothing applies without your click. A badge in the pill while a mode is on (without its name during screen sharing).")),
     R("POMODORO_CONCENTRATION", "Île", L("Pomodoro : Ne pas déranger pendant le travail", "Pomodoro: Do Not Disturb while working"),
       "ouinon", "oui",
       L("Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4.",
@@ -1558,7 +1566,7 @@ MATERIEL = {
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie", "BAT_RAPPEL_80": "batterie", "BAT_RAPPEL_SEUIL": "batterie",
     "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
-    "ILE_RESUME_REVEIL": "ile",
+    "ILE_RESUME_REVEIL": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},

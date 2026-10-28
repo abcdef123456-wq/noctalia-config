@@ -5,6 +5,9 @@
                                bascule (7 h et 19 h) ; écran éteint ou session verrouillée : rien (l'île relance dès le réveil)
   nc-fond-jour-nuit force      réapplique même si la période n'a pas changé (réglage tout juste activé)
   nc-fond-jour-nuit arreter    retire le minuteur (réglage coupé)
+  nc-fond-jour-nuit imposer jour|nuit|aucun
+                               (Modes Concentration) garde le fond du jour ou de la nuit quelle que soit l'heure, jusqu'à « aucun »
+                               qui rend la main à l'heure réelle ; réglage coupé : « jour » et « nuit » sont refusés (code 1)
 Les fonds sont les images des sous-dossiers « jour » et « nuit » de FONDS_DOSSIER (un par jour, à tour de rôle s'il y en a
 plusieurs). Le fond est changé comme partout dans le dépôt : « noctalia msg wallpaper-set » (le hook de Noctalia recalcule
 alors les couleurs). Le minuteur est une minuterie systemd de session posée pour une seule échéance : aucun processus ne
@@ -67,6 +70,35 @@ def choisir(dossier, nom, maintenant):
     return os.path.join(d, images[maintenant.toordinal() % len(images)]) if images else None
 
 
+def fichier_imposition():
+    return os.path.join(etat_dir(), "fond-impose")
+
+
+def lire_imposition():
+    """'jour', 'nuit' ou '' (fichier absent, abîmé ou trop gros : rien d'imposé)."""
+    try:
+        with open(fichier_imposition(), encoding="utf-8") as f:
+            v = f.read(16).strip()
+    except OSError:
+        return ""
+    return v if v in ("jour", "nuit") else ""
+
+
+def ecrire_imposition(valeur):
+    f = fichier_imposition()
+    if not valeur:
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+        return
+    os.makedirs(etat_dir(), exist_ok=True)
+    tmp = f + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as g:
+        g.write(valeur + "\n")
+    os.replace(tmp, f)
+
+
 def lire_marque():
     try:
         with open(os.path.join(etat_dir(), "fond-jour-nuit"), encoding="utf-8") as f:
@@ -120,13 +152,25 @@ def main(argv, maintenant=None):
         except OSError:
             pass
         return 0
+    if arg == "imposer":
+        voulu = argv[1] if len(argv) == 2 else ""
+        if voulu not in ("jour", "nuit", "aucun"):
+            print("usage : nc-fond-jour-nuit imposer jour|nuit|aucun", file=sys.stderr)
+            return 2
+        if voulu != "aucun" and reglages().get("FONDS_JOUR_NUIT", "non") != "oui":
+            return 1
+        ecrire_imposition("" if voulu == "aucun" else voulu)
+        arg = "force"
     v = reglages()
     if v.get("FONDS_JOUR_NUIT", "non") != "oui" or not ecran_vu():
         return 0
     maintenant = maintenant or datetime.datetime.now()
     nom, prochaine = periode(maintenant)
+    impose = lire_imposition()
     cle = nom + ":" + maintenant.date().isoformat() if nom == "jour" or maintenant.hour >= NUIT_DE else \
         nom + ":" + (maintenant.date() - datetime.timedelta(days=1)).isoformat()
+    if impose:
+        nom, cle = impose, "impose:" + impose
     if arg == "force" or (marque[:1] or [""])[0] != cle:
         fond = choisir(v.get("FONDS_DOSSIER") or "~/Pictures/Wallpapers", nom, maintenant)
         if fond and appliquer(fond):

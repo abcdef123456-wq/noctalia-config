@@ -325,6 +325,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             taille: 36; icone: lc.modelData.icone; actif: lc.actif
                             couleur: lc.modelData.cle === "dnd" ? centre.indigo : centre.bleu
+                            onAppuiLong: if (lc.modelData.cle === "dnd" && Modes.reglage) Modes.ouvrirPage()
                             onClic: lc.modelData.cle === "dnd" ? Notifs.basculerConcentration() : Etat.inverser(lc.modelData.cle, ["noctalia", "msg", lc.modelData.cle + "-toggle"])
                         }
                         Column {
@@ -336,6 +337,7 @@ Item {
                             id: zl
                             anchors.fill: parent; anchors.leftMargin: 40
                             hoverEnabled: true
+                            onPressAndHold: if (lc.modelData.cle === "dnd" && Modes.reglage) Modes.ouvrirPage()
                             onClicked: lc.modelData.page !== "" ? Etat.aller(lc.modelData.page) : rl.clic()
                         }
                     }

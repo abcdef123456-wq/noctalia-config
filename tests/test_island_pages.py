@@ -40,6 +40,7 @@ class NavigationPages(unittest.TestCase):
             # Activités Appel et Terminal (Appel.qml, Terminal.qml) : lues par Etat.activites, ici sans appel ni commande
             for name in ("Appel", "Terminal"):
                 (root / (name + ".qml")).write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false}')
+            (root / "Modes.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool pagePossible: false; property bool pastille: false; property bool reglage: false; property string actifIcone: ""; property string nomVisible: "" }')
             (root / "Resume.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool ouvert: false; property bool soir: false; property string salut: ""; property string court: ""; property var contenu: ({}) }')
             # Le bloc de navigation de production, avec les entrées matérielles simulées.
             source = (QML / "Etat.qml").read_text()
@@ -68,7 +69,7 @@ QtObject {
  function lirePage() {}
 '''
             (root / "Etat.qml").write_text(stub + (bloc if etat_reel else "") + "\n}")
-            (root / "qmldir").write_text("\n".join(("" if n == "NavigationIle" else "singleton ") + n + " 1.0 " + n + ".qml" for n in ("NavigationIle", "Reglages", "Agents", "Couleurs", "Etat", "Appel", "Terminal", "Resume")))
+            (root / "qmldir").write_text("\n".join(("" if n == "NavigationIle" else "singleton ") + n + " 1.0 " + n + ".qml" for n in ("NavigationIle", "Reglages", "Agents", "Couleurs", "Etat", "Appel", "Terminal", "Resume", "Modes")))
             shell = '''import QtQuick
 import QtQuick.Window
 import QtTest
