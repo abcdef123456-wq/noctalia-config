@@ -284,7 +284,7 @@ Item {
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 190)
-            text: telechargement.t ? telechargement.t.nom : ""
+            text: telechargement.t ? (Partage.silence ? Etat.sansNom : telechargement.t.nom) : ""
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.features: { "tnum": 1 }
@@ -296,8 +296,8 @@ Item {
         id: telechargementFini
         montre: c.mode === "telechargement-fini"
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "download_done"; taille: 17; color: Couleurs.vert }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Téléchargé", "Downloaded"); font.weight: Font.DemiBold }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.telechargeFini; secondaire: true; width: Math.min(implicitWidth, 200) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.telechargeFini; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 200) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("téléchargé", "downloaded"); secondaire: true }
     }
     Fondu {
         id: video

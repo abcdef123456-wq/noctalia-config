@@ -54,7 +54,7 @@ class Source(unittest.TestCase):
 
     def test_releve_des_telechargements_suspendu(self):
         # find du dossier Téléchargements : suspendu écran éteint ou verrouillé, relevé dès le réveil
-        self.assertRegex(self.etat, r'running: etat\.ecranVu && Reglages\.val\("ILE_TELECHARGEMENTS", "oui"\) !== "non"; '
+        self.assertRegex(self.etat, r'running: etat\.ecranVu && Reglages\.val\("ILE_TELECHARGEMENTS", "oui"\) !== "non" && \(etat\.telechargements\.length > 0 \|\| !etat\.surveillance\); '
                                     r'triggeredOnStart: true; onTriggered: if \(!lecteurTel\.running\)')
 
     def test_pas_de_composant_neuf(self):

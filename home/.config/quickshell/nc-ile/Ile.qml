@@ -339,9 +339,10 @@ PanelWindow {
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
                                // « Terminée » / « Échec » d'une commande longue : retour à son terminal
+                               : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false))))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
