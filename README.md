@@ -283,6 +283,21 @@ l'île Quickshell.
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
   client commercial.
+  **Fournisseurs** (`nc-vpn fournisseurs-json`, pour la fenêtre VPN ; contrat dans `docs/vpn-contrat.md`) : NordVPN (CLI officielle
+  `nordvpn`), Proton VPN (application officielle `protonvpn-app`) et Mullvad (`mullvad`), chacun dans l'un de trois états : **absent**
+  (commande introuvable, silencieux), **sans compte** (installé, pas de compte connecté) ou **prêt** (compte connecté) ; les pays ne
+  sont proposés qu'à l'état prêt. `nc-vpn fournisseur nord|proton|mullvad connecter FR | deconnecter | login` (code pays en deux
+  lettres MAJUSCULES, vérifié avant tout appel). Nord : l'état vient de `nordvpn account` (seul « connecté ou non » est gardé,
+  jamais l'e-mail ni un jeton), les pays de `nordvpn countries`, `connect` reçoit le nom exact de la CLI ; `login` lance `nordvpn
+  login` et n'ouvre l'adresse qu'il donne (avec `xdg-open`) si elle est en https sur nordaccount.com ou nordvpn.com. Le premier
+  lancement de `nordvpn` pose une question (statistiques anonymes) : ouvre un terminal et lance `nordvpn` une fois ; sans le groupe
+  `nordvpn` dans ta session, ajoute ton compte au groupe puis rouvre la session (aucune élévation de notre part). Proton n'a pas de CLI
+  officielle : le compte de l'application n'est jamais lu, « prêt » veut dire qu'une connexion NetworkManager « ProtonVPN … » existe
+  (l'appli ne la crée que pendant la connexion), et choisir un pays, se déconnecter ou se connecter ouvre l'appli officielle (jamais
+  pilotée ni fermée par nous). Mullvad : « compte connecté » vient de l'avertissement de `mullvad status` (jamais `mullvad account get`,
+  qui affiche le numéro), les pays de `mullvad relay list` (sinon la liste ISO intégrée), `login` ouvre l'appli ou dit de lancer
+  `mullvad account login` dans un terminal. Le nom d'un client installé ne fait jamais office de fournisseur connecté : la pilule ne
+  montre qu'un tunnel réellement monté.
   **Kill switch** (facultatif, coupé par défaut : `VPN_KILLSWITCH` à oui dans `nc-reglages` → Île). Quand un tunnel est monté, il
   bloque toute sortie de l'ordinateur hors du tunnel, pour qu'une coupure du tunnel ne laisse rien fuir. L'interrupteur « Bloquer
   tout hors du VPN » est dans la section « Protections » du panneau (confirmation avant d'activer, rien pendant un partage

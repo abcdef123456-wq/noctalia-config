@@ -12,6 +12,11 @@
                               (un seul nmcli ; fournisseur et pays déduits du nom de la connexion et de l'interface, sans réseau)
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn fournisseurs-json    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+                              "message", "pays" (seulement à l'état pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+  nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC : deux lettres MAJUSCULES (FR). Nord : la CLI nordvpn ;
+                              Mullvad : mullvad ; Proton (pas de CLI officielle) : ouvre l'appli officielle, sans la piloter ni la fermer.
+                              Le login lance le parcours officiel (navigateur, appli) : jamais de mot de passe, de numéro de compte ni de jeton chez nous
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
                               assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
@@ -81,6 +86,11 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
                               (one nmcli; provider and country guessed from the connection and interface names, no network)
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn fournisseurs-json    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+                              "message", "pays" (only when pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+  nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC: two UPPERCASE letters (FR). Nord: the nordvpn CLI;
+                              Mullvad: mullvad; Proton (no official CLI): opens the official app, never driving or closing it.
+                              Login starts the official flow (browser, app): never a password, account number or token on our side
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
                               (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
