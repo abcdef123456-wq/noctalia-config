@@ -1,9 +1,16 @@
-// Panneau VPN (Super + Alt + V) : les tunnels VPN et WireGuard que NetworkManager connaît, pilotés depuis l'île. Une carte de
-// verre centrée : en haut les tunnels montés (tous, plusieurs à la fois), chacun avec « Déconnecter », et « Tout déconnecter » ;
-// dessous les autres connexions (un clic connecte) ; en bas « Importer… » (un .ovpn ou un .conf, par le sélecteur de zenity).
+// Fenêtre VPN « Réseau privé » (Super + Alt + V, ou un clic sur l'indicateur VPN de la pilule : la MÊME fenêtre). Une carte de verre
+// centrée, de haut en bas :
+//   1. l'en-tête (VpnEntete.qml) : titre, sous-titre, « Fermer », ⚙ vers les réglages VPN ;
+//   2. la carte principale (VpnCarte.qml) : état, un tunnel par ligne avec « Déconnecter », IP publique (si demandée), durée, débits,
+//      et « Tout déconnecter » ;
+//   3. la ligne « Protections » (VpnBarre.qml) : pastille Kill switch (clic : le détail VpnProtections.qml) et « Importer un profil » ;
+//   4. les filtres et la recherche (VpnFiltres.qml) ;
+//   5. la liste (VpnListe.qml) : pays de Mullvad, profils de NetworkManager, ou la carte d'état d'un fournisseur pas prêt ;
+//   6. le pied (VpnPied.qml).
 // Tout vient de nc-vpn par VpnEtat.qml (mise à jour sur événements de NetworkManager, jamais en boucle). Rien n'existe fermé :
-// la fenêtre n'est créée qu'ouverte (shell.qml, LazyLoader). Échap ferme. Noms de connexions en texte brut (Texte.qml) ; pendant
-// un partage d'écran (Partage.qml) les noms, interfaces et IP sont remplacés par « Tunnel N ».
+// la fenêtre n'est créée qu'ouverte (shell.qml, LazyLoader) ; les débits (VpnDebit.qml) ne sont relevés que fenêtre ouverte et
+// écran allumé. Échap ferme. Noms en texte brut (Texte.qml) ; pendant un partage d'écran (Partage.qml) les noms, pays, serveurs,
+// interfaces et IP sont masqués ou remplacés par « Tunnel N ».
 // Verre : flou de Hyprland derrière (règle de calque nc-vpn, regles.lua), fond de la palette à 62 % (92 % sans flou).
 import QtQuick
 import Quickshell
@@ -24,18 +31,12 @@ PanelWindow {
     readonly property real largeurEcran: vpn.screen ? vpn.screen.width : 1600
     readonly property real hauteurEcran: vpn.screen ? vpn.screen.height : 1000
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
-    readonly property int rayon: 22
-    readonly property int largeurCarte: Math.min(460, Math.round(largeurEcran * 0.9))
-    readonly property var autres: VpnEtat.connexions.filter(c => !c.active)
+    readonly property int rayon: 26
+    readonly property int largeurCarte: Math.min(880, Math.round(largeurEcran * 0.92))
     property bool entree: false
+    property bool ksDetail: false                 // le détail du kill switch (VpnProtections.qml) est déplié
 
     function quitter() { vpn.fermer() }
-    function nomDe(c, i) { return VpnEtat.masque ? Reglages.t("Tunnel ", "Tunnel ") + (i + 1) : c.nom }
-    function typeDe(c) { return c.type === "wireguard" ? "WireGuard" : "VPN" }
-    function detailDe(c) {
-        if (VpnEtat.masque) return typeDe(c)
-        return typeDe(c) + (c.active && c.interface ? " · " + c.interface : "")
-    }
     function importer() { VpnEtat.choisirFichier(); quitter() }
     Component.onCompleted: { entree = true; VpnEtat.panneauOuvert = true }
     Component.onDestruction: VpnEtat.panneauOuvert = false
@@ -46,9 +47,10 @@ PanelWindow {
         id: carte
         x: Math.round((vpn.largeurEcran - width) / 2); y: Math.round((vpn.hauteurEcran - height) * 0.35)
         width: vpn.largeurCarte
-        height: Math.min(Math.round(vpn.hauteurEcran * 0.85), contenu.implicitHeight + 36)
+        height: Math.min(Math.round(vpn.hauteurEcran * 0.94), contenu.implicitHeight + 48)
         scale: vpn.entree ? 1 : 0.94
         Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.001 } }
+        Keys.onEscapePressed: vpn.quitter()                                // Échap, d'où que vienne le focus (champ de recherche compris)
         Rectangle {
             anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
             visible: Couleurs.aContour
@@ -64,7 +66,7 @@ PanelWindow {
             anchors.fill: parent; radius: vpn.rayon
             color: Qt.alpha(Couleurs.fond, vpn.verre ? 0.62 : 0.92)
             Rectangle {
-                x: 28; width: parent.width - 56; height: 1; y: 1
+                x: 32; width: parent.width - 64; height: 1; y: 1
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
                     GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0) }
@@ -75,29 +77,24 @@ PanelWindow {
         }
         MouseArea { anchors.fill: parent }                                 // un clic dans la carte ne ferme pas
 
-        // Échap ferme ; le focus clavier reste sur cet élément
-        Item {
-            id: clavier
-            objectName: "nc-vpn-clavier"
-            anchors.fill: parent
-            focus: true
-            Keys.onEscapePressed: vpn.quitter()
+        // Le focus clavier de départ (quand le champ de recherche ne l'a pas)
+        Item { id: clavier; objectName: "nc-vpn-clavier"; anchors.fill: parent; focus: true }
+
+        // Les débits : relevés une fois par seconde, fenêtre ouverte ET écran allumé seulement
+        VpnDebit {
+            id: debit
+            objectName: "nc-vpn-debit"
+            actif: VpnEtat.panneauOuvert && Etat.ecranVu
+            interfaces: VpnEtat.tunnels.map(t => t.interface).filter(x => x !== "")
         }
 
         Column {
             id: contenu
             objectName: "nc-vpn-contenu"
-            x: 18; y: 18; width: parent.width - 36
-            spacing: 10
+            x: 26; y: 24; width: parent.width - 52
+            spacing: 14
 
-            // ── Titre ──
-            Row {
-                spacing: 10; height: 28
-                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 22; color: VpnEtat.actif ? Couleurs.vert : Couleurs.accent }
-                Texte { anchors.verticalCenter: parent.verticalCenter; text: "VPN"; font.pixelSize: 18; font.weight: Font.Bold }
-                Texte { objectName: "nc-vpn-resume"; anchors.verticalCenter: parent.verticalCenter; visible: VpnEtat.indicateur
-                        text: VpnEtat.libelle; secondaire: true; font.pixelSize: 12 }
-            }
+            VpnEntete { width: parent.width; onFermer: vpn.quitter() }
 
             // ── NetworkManager absent ──
             Texte {
@@ -105,86 +102,49 @@ PanelWindow {
                 visible: VpnEtat.lu && !VpnEtat.disponible
                 width: parent.width; wrapMode: Text.Wrap; secondaire: true
                 text: Reglages.t("NetworkManager ne répond pas : les VPN ne peuvent pas être pilotés d'ici.",
-                                 "NetworkManager isn't responding: VPNs can't be controlled from here.")
+                                 "NetworkManager is not responding: VPNs can't be controlled from here.")
             }
 
-            // ── Les tunnels montés ──
-            Column {
-                objectName: "nc-vpn-actifs"
-                visible: VpnEtat.disponible
-                width: parent.width; spacing: 6
-                Texte {
-                    width: parent.width; secondaire: true; font.pixelSize: 12
-                    text: VpnEtat.actives.length === 0 ? Reglages.t("Aucun tunnel connecté", "No tunnel connected")
-                          : (VpnEtat.actives.length > 1 ? Reglages.t("Connectés", "Connected") : Reglages.t("Connecté", "Connected"))
-                }
-                Repeater {
-                    model: VpnEtat.actives
-                    VpnLigne {
-                        objectName: "nc-vpn-actif"
-                        width: parent.width
-                        nom: vpn.nomDe(modelData, index)
-                        detail: vpn.detailDe(modelData)
-                        monte: true
-                        occupe: VpnEtat.cible === modelData.uuid || VpnEtat.cible === "tout"
-                        onClic: VpnEtat.deconnecter(modelData.uuid)
-                    }
-                }
-                // IP publique : seulement si tu l'as demandée dans les réglages ; masquée en partage
-                Texte {
-                    objectName: "nc-vpn-ip"
-                    visible: VpnEtat.ip !== "" && !VpnEtat.masque
-                    width: parent.width; secondaire: true; font.pixelSize: 12
-                    text: Reglages.t("IP publique : ", "Public IP: ") + VpnEtat.ip
-                }
-                Rectangle {
-                    objectName: "nc-vpn-tout"
-                    visible: VpnEtat.actives.length > 0
-                    width: parent.width; height: 34; radius: 17
-                    color: zoneTout.containsMouse ? Qt.alpha(Couleurs.rouge, 0.3) : Qt.alpha(Couleurs.gris3, 0.55)
-                    opacity: VpnEtat.cible !== "" ? 0.6 : 1
-                    Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
-                    Texte { anchors.centerIn: parent; text: Reglages.t("Tout déconnecter", "Disconnect all"); font.pixelSize: 13; font.weight: Font.DemiBold }
-                    MouseArea { id: zoneTout; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: VpnEtat.toutDeconnecter() }
-                }
-            }
-
-            // ── Les autres connexions : un clic connecte ──
-            Column {
-                objectName: "nc-vpn-autres"
-                visible: VpnEtat.disponible && vpn.autres.length > 0
-                width: parent.width; spacing: 6
-                Texte { width: parent.width; secondaire: true; font.pixelSize: 12; text: Reglages.t("Autres connexions", "Other connections") }
-                Repeater {
-                    model: vpn.autres
-                    VpnLigne {
-                        objectName: "nc-vpn-autre"
-                        width: parent.width
-                        nom: vpn.nomDe(modelData, VpnEtat.actives.length + index)
-                        detail: vpn.detailDe(modelData)
-                        occupe: VpnEtat.cible === modelData.uuid
-                        onClic: VpnEtat.connecter(modelData.uuid)
-                    }
-                }
-            }
-            Texte {
-                objectName: "nc-vpn-vide"
-                visible: VpnEtat.disponible && VpnEtat.connexions.length === 0
-                width: parent.width; wrapMode: Text.Wrap; secondaire: true
-                text: Reglages.t("Aucune connexion VPN ou WireGuard. Importe un fichier .ovpn ou .conf.",
-                                 "No VPN or WireGuard connection. Import an .ovpn or .conf file.")
-            }
-
-            // ── Application Mullvad (hors NetworkManager) : seulement si la commande `mullvad` existe ──
-            VpnMullvad {
-                objectName: "nc-vpn-mullvad"
+            VpnCarte {
+                objectName: "nc-vpn-carte"
                 width: parent.width
+                debitBas: debit.bas; debitHaut: debit.haut; debitMesure: debit.mesure
             }
 
-            // ── Protections : le kill switch (VpnProtections.qml), absent pendant un partage d'écran ──
-            VpnProtections {
-                objectName: "nc-vpn-protections"
+            VpnBarre {
+                objectName: "nc-vpn-barre"
                 width: parent.width
+                detail: vpn.ksDetail
+                onBasculerDetail: vpn.ksDetail = !vpn.ksDetail
+                onImporter: vpn.importer()
+            }
+            // Le détail du kill switch : limites toujours visibles, confirmation avant d'activer
+            Rectangle {
+                visible: vpn.ksDetail && VpnEtat.disponible && !VpnEtat.masque
+                width: parent.width; height: protections.height + 28; radius: 18
+                color: Qt.alpha(Couleurs.carte, 0.5)
+                border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.08)
+                VpnProtections {
+                    id: protections
+                    objectName: "nc-vpn-protections"
+                    x: 18; y: 14; width: parent.width - 36
+                    ouvert: vpn.ksDetail
+                }
+            }
+
+            VpnFiltres {
+                id: filtres
+                objectName: "nc-vpn-filtres-zone"
+                width: parent.width
+                visible: VpnEtat.lu
+            }
+            VpnListe {
+                objectName: "nc-vpn-liste-zone"
+                width: parent.width
+                visible: VpnEtat.lu
+                filtre: filtres.filtre
+                recherche: filtres.recherche
+                maxHauteur: Math.max(170, Math.min(340, Math.round(vpn.hauteurEcran * 0.3)))
             }
 
             // ── Le dernier message de nc-vpn (texte brut) ──
@@ -195,35 +155,8 @@ PanelWindow {
                 text: VpnEtat.erreur
             }
 
-            // ── Pied : importer, Échap ──
-            Item {
-                width: parent.width; height: 32
-                visible: VpnEtat.disponible
-                Rectangle {
-                    id: boutonImport
-                    objectName: "nc-vpn-importer"
-                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    width: importLibelle.implicitWidth + 40; height: 30; radius: 15
-                    color: zoneImport.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
-                    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
-                    Row {
-                        anchors.centerIn: parent; spacing: 7
-                        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "upload_file"; taille: 16; color: zoneImport.containsMouse ? Couleurs.accent : Couleurs.texteSec }
-                        Texte { id: importLibelle; anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Importer…", "Import…"); font.pixelSize: 12 }
-                    }
-                    MouseArea { id: zoneImport; anchors.fill: parent; hoverEnabled: true; onClicked: vpn.importer() }
-                }
-                BoutonReglages {
-                    objectName: "nc-vpn-reglages"
-                    anchors.left: boutonImport.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                    section: "Île"
-                    onOuvert: vpn.fermer()
-                }
-                Texte {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    text: Reglages.t("Échap pour fermer", "Esc to close"); secondaire: true; font.pixelSize: 11
-                }
-            }
+            VpnPied { width: parent.width }
         }
+        Component.onCompleted: filtres.donnerFocus()
     }
 }

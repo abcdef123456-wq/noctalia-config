@@ -39,7 +39,7 @@ class Source(unittest.TestCase):
         demandee = sections_connues()
         attendu = {"Vpn.qml": "nc-vpn-reglages", "ClesIA.qml": "nc-cles-reglages", "Jarvis.qml": "nc-jarvis-reglages"}
         for nom, objet in attendu.items():
-            src = (QML / nom).read_text()
+            src = (QML / ("VpnEntete.qml" if nom == "Vpn.qml" else nom)).read_text()      # le ⚙ du VPN est dans son en-tête
             m = re.search(r'BoutonReglages \{[^}]*objectName: "%s"[^}]*section: "([^"]+)"|BoutonReglages \{[^}]*section: "([^"]+)"[^}]*objectName: "%s"' % (objet, objet), src)
             self.assertTrue(m, nom + " : un BoutonReglages avec sa section")
             self.assertTrue(demandee(m.group(1) or m.group(2)), nom + " : section inconnue de nc-reglages")

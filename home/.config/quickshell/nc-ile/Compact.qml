@@ -72,14 +72,14 @@ Item {
     Fondu {
         id: repos
         montre: c.mode === "repos"
-        // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : bouclier et « Fournisseur · 🇫🇷 FR » (+1 si plusieurs) ;
+        // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : notre bouclier à cadenas (shield_lock, pas l'icône de tray d'un client) et « Fournisseur · 🇫🇷 FR » (+1 si plusieurs) ;
         // pendant un partage d'écran : « VPN » seul. Un clic ouvre le panneau VPN complet.
         Row {
             id: pastilleVpn
             objectName: "nc-vpn-pill"
             anchors.verticalCenter: parent.verticalCenter; spacing: 4
             visible: VpnEtat.indicateur
-            Ico { anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 15; color: Couleurs.vert }
+            Ico { objectName: "nc-vpn-pill-glyphe"; anchors.verticalCenter: parent.verticalCenter; nom: "shield_lock"; taille: 15; color: Couleurs.vert }
             Texte { objectName: "nc-vpn-pill-texte"; anchors.verticalCenter: parent.verticalCenter; text: VpnEtat.libelle; secondaire: true
                     font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 150) }
             Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle

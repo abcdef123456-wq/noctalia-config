@@ -15,9 +15,17 @@ class EtatVpn(BaseVpn):
         self.assertEqual([c["uuid"] for c in d["connexions"]], [U1, U2, U3])       # le Wi-Fi n'en est pas
         self.assertEqual({c["uuid"] for c in d["actives"]}, {U2, U3})              # plusieurs tunnels à la fois
         par = {c["uuid"]: c for c in d["connexions"]}
-        self.assertEqual(par[U2], dict(uuid=U2, nom="Maison: 192.0.2.1", type="wireguard", active=True, interface="wg-maison"))
+        self.assertEqual(par[U2], dict(uuid=U2, nom="Maison: 192.0.2.1", type="wireguard", active=True, interface="wg-maison", fournisseur="", pays=""))
         self.assertEqual(par[U3]["nom"], "Bureau\\ 2001:db8::1")                   # « : » et antislash échappés par nmcli -t
-        self.assertEqual(par[U1], dict(uuid=U1, nom="Labo", type="vpn", active=False, interface=""))
+        self.assertEqual(par[U1], dict(uuid=U1, nom="Labo", type="vpn", active=False, interface="", fournisseur="", pays=""))
+
+    def test_etat_json_fournisseur_pays_et_duree(self):
+        import time
+        (self.r / "horodatages.json").write_text(json.dumps({U2: int(time.time()) - 90, U3: "pas-un-nombre", U1: 5}))
+        par = {c["uuid"]: c for c in json.loads(self.vpn("etat-json").stdout)["connexions"]}
+        self.assertTrue(80 <= time.time() - par[U2]["depuis"] <= 200)
+        self.assertNotIn("depuis", par[U3], "valeur illisible : absente")
+        self.assertNotIn("depuis", par[U1], "pas montée : pas de durée")
 
     def test_nmcli_en_arguments_et_champs_explicites(self):
         self.vpn("etat-json")

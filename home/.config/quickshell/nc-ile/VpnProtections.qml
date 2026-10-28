@@ -1,4 +1,4 @@
-// Section « Protections » du panneau VPN (Vpn.qml) : le kill switch, « Bloquer tout hors du VPN ». Réglage VPN_KILLSWITCH (non par
+// Détail du kill switch de la fenêtre VPN (Vpn.qml), déplié par un clic sur la pastille « Kill switch » (VpnBarre.qml) : le kill switch, « Bloquer tout hors du VPN ». Réglage VPN_KILLSWITCH (non par
 // défaut) ; tout passe par nc-vpn killswitch (VpnEtat.qml), qui appelle l'assistant root facultatif de l'installation. Les limites
 // sont montrées en permanence, donc AVANT l'activation, et une confirmation explicite précède chaque activation. Désactiver
 // reste possible en un clic, réglage coupé ou non. Rien du tout pendant un partage d'écran (VpnEtat.masque).
@@ -6,7 +6,8 @@ import QtQuick
 
 Column {
     id: p
-    visible: VpnEtat.disponible && !VpnEtat.masque
+    property bool ouvert: true                    // déplié par la pastille de VpnBarre.qml
+    visible: ouvert && VpnEtat.disponible && !VpnEtat.masque
     spacing: 6
     property bool confirmation: false
     readonly property bool pasInstalle: VpnEtat.ksLu && !VpnEtat.ksInstalle           // assistant ou règle sudo absents : ni Couper ni Activer
@@ -19,7 +20,7 @@ Column {
     onVisibleChanged: if (!visible) confirmation = false
     onActifChanged: confirmation = false
 
-    Texte { width: parent.width; secondaire: true; font.pixelSize: 12; text: Reglages.t("Protections", "Protections") }
+    Texte { width: parent.width; font.pixelSize: 13; font.weight: Font.DemiBold; text: Reglages.t("Kill switch", "Kill switch") }
     Rectangle {
         objectName: "nc-vpn-ks-bascule"
         visible: !p.pasInstalle
