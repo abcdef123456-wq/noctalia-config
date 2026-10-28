@@ -118,6 +118,9 @@ touche(SUPER .. " + SHIFT + code:25", cmd(barre .. "sessions"),    trad("Bureaux
 touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
 touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), trad("Applis et barre|Réglages du bureau (fenêtre, avec recherche)", "Desktop settings (window, with search)"))
+-- Panneau VPN de l'île (tunnels VPN et WireGuard de NetworkManager, nc-vpn) ; sans l'île, la liste en notification
+touche(SUPER .. " + ALT + code:55", cmd([[sh -c 'qs -c nc-ile ipc call ile vpn >/dev/null 2>&1 || exec notify-send -a VPN VPN "$(~/.local/bin/nc-vpn liste)"']]),
+    trad("Applis et barre|VPN : connecter ou déconnecter un tunnel (île)", "VPN: connect or disconnect a tunnel (island)"))
 -- La fiche éditable de l'île Quickshell ; sans elle (île de secours, Quickshell absent), celle de Noctalia
 touche(SUPER .. " + code:61", cmd([[sh -c 'qs -c nc-ile ipc call ile fiche >/dev/null 2>&1 || exec ~/.local/bin/nc-shell-msg keys']]),
     trad("Applis et barre|Afficher cette fiche (Modifier : changer, ajouter)", "Show this cheat sheet (Edit: change, add)"))

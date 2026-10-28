@@ -499,6 +499,19 @@ REGLAGES = [
         "(seul le nom part vers Open-Meteo ; ville introuvable : message dans l'île).",
         "Automatic: position estimated by ipwho.is from your IP, weather by Open-Meteo. Otherwise, a city name "
         "(only the name goes to Open-Meteo; unknown city: a message in the island).")),
+    R("VPN_INDICATEUR", "Île", L("VPN : bouclier dans la pilule", "VPN: shield in the pill"), "ouinon", "oui",
+      L("Un petit bouclier devant l'heure quand un tunnel VPN ou WireGuard de NetworkManager est monté (Super + Alt + V pour le panneau VPN). "
+        "Mis à jour sur les événements de NetworkManager, jamais en boucle ; rien du tout sans NetworkManager.",
+        "A small shield before the time while a NetworkManager VPN or WireGuard tunnel is up (Super + Alt + V for the VPN panel). "
+        "Updated on NetworkManager events, never polled; nothing at all without NetworkManager.")),
+    R("VPN_IP_PUBLIQUE", "Île", L("VPN : montrer mon IP publique", "VPN: show my public IP"), "ouinon", "non",
+      L("Le panneau VPN demande ton adresse IP publique au service ci-dessous (https seulement), à son ouverture et quand un tunnel change ; "
+        "jamais en boucle, jamais pendant un partage d'écran. Désactivé par défaut : ce service voit ton IP.",
+        "The VPN panel asks the service below (https only) for your public IP, when it opens and when a tunnel changes; never polled, "
+        "never while your screen is shared. Off by default: that service sees your IP.")),
+    R("VPN_IP_SERVICE", "Île", L("VPN : service d'IP publique", "VPN: public IP service"), "texte", "",
+      L("Adresse https://… d'un service qui répond ton IP en texte simple. Vide : aucune demande.",
+        "https://… address of a service that answers your IP as plain text. Empty: no request.")),
     R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
       L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
         "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),
@@ -1505,7 +1518,7 @@ MATERIEL = {
     **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE",
                           "SPOTLIGHT_MOTEUR", "SPOTLIGHT_CALCULS", "SPOTLIGHT_FENETRES", "VUE_BUREAUX", "VUE_RECUL", "VUE_VOISINS",
                           "VUE_DUREE", "GOOGLE_INTEGRATION", "GOOGLE_CALENDRIER", "NPD_NUIT", "NPD_DEBUT", "NPD_FIN",
-                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES")},
+                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE")},
     # Réglages d'un logiciel : cachés si ce logiciel n'est pas là (Firefox, kitty, Neovim)
     **{c: "firefox" for c in ("FIREFOX_STYLE", "FIREFOX_COULEURS", "FIREFOX_ONGLETS_VERTICAUX", "FIREFOX_SESSION", "FIREFOX_DEFILEMENT_DOUX")},
     **{c: "kitty" for c in ("TERMINAL_OPACITE", "TERMINAL_TAILLE", "TERMINAL_POLICE", "TERMINAL_CURSEUR", "TERMINAL_TRAINEE",

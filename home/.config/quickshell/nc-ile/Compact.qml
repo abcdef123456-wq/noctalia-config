@@ -65,6 +65,9 @@ Item {
     Fondu {
         id: repos
         montre: c.mode === "repos"
+        // Un tunnel VPN monté (VpnEtat.qml, nc-vpn) : un bouclier devant l'heure, jamais de nom
+        Ico { objectName: "nc-vpn-pill"; anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 15; color: Couleurs.vert
+              visible: VpnEtat.indicateur; Accessible.role: Accessible.StaticText; Accessible.name: "VPN" }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
                 visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages

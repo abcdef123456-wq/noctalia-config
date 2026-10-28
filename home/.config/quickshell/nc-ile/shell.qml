@@ -11,6 +11,7 @@
 //   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
+//   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
 import Quickshell
@@ -118,6 +119,16 @@ ShellRoot {
             onFermer: racine.codeOuvert = false
         }
     }
+    // Panneau VPN (Super + Alt + V, nc-vpn) : les tunnels VPN et WireGuard de NetworkManager ; créé à l'ouverture seulement
+    property bool vpnOuvert: false
+    LazyLoader {
+        id: chargeurVpn
+        active: racine.vpnOuvert
+        Vpn {
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: racine.vpnOuvert = false
+        }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -146,6 +157,12 @@ ShellRoot {
             Etat.fermer()
             if (!racine.codeOuvert) Hyprland.refreshMonitors()
             racine.codeOuvert = !racine.codeOuvert
+        }
+        // Panneau VPN (Super + Alt + V, nc-vpn) : ouvre ; déjà ouvert, le referme
+        function vpn(): void {
+            Etat.fermer()
+            if (!racine.vpnOuvert) Hyprland.refreshMonitors()
+            racine.vpnOuvert = !racine.vpnOuvert
         }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
