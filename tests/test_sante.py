@@ -231,11 +231,19 @@ class Source(unittest.TestCase):
         self.assertIn("blockLoading: true", ch)                 # lecture directe du fichier du noyau, aucun processus
         sa = (QML / "Sante.qml").read_text()
         self.assertIn("running: sa.affichee && Etat.ecranVu", sa)
-        self.assertNotIn("Animation.Infinite", sa + (QML / "JaugeSante.qml").read_text())
+        courbe = (QML / "Courbe.qml").read_text()
+        self.assertNotIn("Animation.Infinite", sa + (QML / "JaugeSante.qml").read_text() + courbe)
+        # Historique et conseil : alimentés par le relevé existant (aucun Timer ni Process de plus), rien écrit sur le disque
+        self.assertNotIn("Timer", courbe)
+        self.assertNotIn("Process", courbe)
+        self.assertEqual(sa.count("Timer {"), 2)            # attente + relevé, comme avant
+        self.assertEqual(sa.count("Process {"), 1)
+        for interdit in ("FileView", "writeText", "localStorage", "Settings"):
+            self.assertNotIn(interdit, sa + courbe)
 
     def test_pas_de_composant_neuf(self):
         import re
-        for nom in ("Etat.qml", "Compact.qml", "Ile.qml", "Sante.qml", "Chaleur.qml", "JaugeSante.qml"):
+        for nom in ("Etat.qml", "Compact.qml", "Ile.qml", "Sante.qml", "Chaleur.qml", "JaugeSante.qml", "Courbe.qml"):
             self.assertEqual(len(re.findall(r"(?m)^\s*component ", (QML / nom).read_text())), 1 if nom == "Compact.qml" else 0, nom)
 
     def test_page_apres_systeme_seulement_avec_capteurs(self):
@@ -472,13 +480,13 @@ class Page(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-sante-page-") as d:
             root = Path(d)
             bouchons(root, d)
-            for nom in ("Sante", "JaugeSante", "Texte", "Ico", "Module", "Defilement", "Couleurs"):
+            for nom in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs"):
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Chaleur.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool alerte: false; property bool lenovo: true; '
                                               'property int seuil: 95; property string fichierCpu: "x"; readonly property bool performancePossible: Etat.performanceDisponible\n'
                                               '  function titre() { return "Processeur à 98 °C" } function situation() { return "s" } function causes() { return "c" } function gestes() { return "g" } }')
             (root / "qmldir").write_text("\n".join(("singleton " if n in ("Couleurs", "Reglages", "Etat", "Chaleur", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                   for n in ("Sante", "JaugeSante", "Texte", "Ico", "Module", "Defilement", "Couleurs", "Reglages", "Etat", "Chaleur", "Partage")))
+                                                   for n in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs", "Reglages", "Etat", "Chaleur", "Partage")))
             faux(root / "bin", "nc-ile-etat", f'echo "nc-ile-etat $*" >> "{root}/appels"\nprintf \'{sante}\'\n')
             (root / "shell.qml").write_text(ENTETE_QML + "import Quickshell.Services.UPower\n" + textwrap.dedent('''\
                 ShellRoot {
@@ -524,6 +532,53 @@ else if (etape === 2) { if (attendre(500)) return; verifier(!page.affichee, "pag
 ''')
         self.assertGreaterEqual(n, 1)
         self.assertLessEqual(n, 2)        # toutes les 2 s, et plus rien page cachée
+
+    def test_courbe_conseil_textes(self):
+        self.executer('cpu=8\\n', '''
+if (etape === 0) { if (attendre(700)) return
+  function rel(deg, charge, top) { return { temps: [{ id: "cpu", deg: deg, max: 0 }], fans: [], cpu: String(charge), top: top } }
+  page.lecturesConseil = 3
+  // La courbe ne garde jamais plus de maxPoints points ; la plus ancienne part la première
+  for (var i = 0; i < 350; i++) page.noter(rel(40 + (i % 10), 10, undefined))
+  verifier(page.histoTemp.length === 300 && page.histoCharge.length === 300, "historique non borné : " + page.histoTemp.length)
+  verifier(page.histoTemp[299] === 49 && page.histoTemp[0] === 40 + (50 % 10), "ordre de l'historique")
+  verifier(trouver(page, "courbeTemp").visible && trouver(page, "courbeTemp").nombre === 300, "courbe de température")
+  verifier(trouver(page, "courbeTemp").teinte === Couleurs.vert, "teinte courbe fraîche")
+  // Pas de conseil sans chauffe, ni pour un pic, ni quand la charge est forte ou que personne ne pèse
+  page.noter(rel(60, 20, "Discord\\t75")); page.noter(rel(60, 20, "Discord\\t75")); page.noter(rel(60, 20, "Discord\\t75"))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil sans chauffe")
+  page.noter(rel(90, 40, "Discord\\t30")); page.noter(rel(90, 40, "Discord\\t30")); page.noter(rel(60, 40, "Discord\\t30"))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil pour un pic")
+  for (i = 0; i < 4; i++) page.noter(rel(92, 90, "Discord\\t75"))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil sous forte charge")
+  for (i = 0; i < 4; i++) page.noter(rel(92, 40, undefined))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil sans programme gourmand")
+  // Un autre programme à chaque relevé : la série repart de zéro
+  page.noter(rel(92, 40, "a\\t30")); page.noter(rel(92, 40, "b\\t30")); page.noter(rel(92, 40, "a\\t30"))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil pour des programmes qui changent")
+  // Le bon cas : chaud, charge modérée, un programme en prend une grosse part, plusieurs relevés de suite
+  page.noter(rel(90, 50, "Discord\\t30")); page.noter(rel(90, 50, "Discord\\t30"))
+  verifier(!trouver(page, "conseilChauffe").visible, "conseil trop tôt")
+  page.noter(rel(90, 50, "Discord\\t30"))
+  var c = trouver(page, "conseilChauffe")
+  verifier(c.visible, "conseil absent")
+  verifier(page.conseil() === "Discord prend 30 % du processeur : redémarre-le, ou coupe son accélération matérielle.", "texte Discord : " + page.conseil())
+  verifier(trouver(page, "courbeTemp").teinte === Couleurs.rouge, "courbe rouge à 90 °C : " + trouver(page, "courbeTemp").teinte)
+  // Nom caché pendant un partage d'écran
+  Partage.silence = true; verifier(!c.visible, "conseil visible pendant un partage d'écran"); Partage.silence = false
+  verifier(c.visible, "conseil absent après le partage")
+  // Textes selon le programme
+  page.chaudNom = "firefox"; verifier(page.conseil().indexOf("onglets") > 0, "navigateur : " + page.conseil())
+  page.chaudNom = "Isolated Web Co"; verifier(page.conseil().indexOf("onglets") > 0, "navigateur (contenu web)")
+  page.chaudNom = "electron"; verifier(page.conseil().indexOf("accélération matérielle") > 0, "electron : " + page.conseil())
+  page.chaudNom = "make"; verifier(page.conseil() === "make prend 30 % : ferme-le s'il ne sert pas.", "générique : " + page.conseil())
+  // Page fermée : historique et conseil vidés
+  page.visible = false; marque = Date.now(); etape++ }
+else if (etape === 1) { if (attendre(500)) return
+  verifier(page.histoTemp.length === 0 && page.histoCharge.length === 0 && page.chaudLectures === 0, "historique gardé page cachée")
+  verifier(!trouver(page, "blocCourbes").visible, "courbes visibles page cachée")
+  Qt.quit() }
+''')
 
     def test_sans_capteur(self):
         self.executer('cpu=8\\n', '''
