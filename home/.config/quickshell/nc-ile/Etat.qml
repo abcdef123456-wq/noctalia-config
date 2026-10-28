@@ -508,24 +508,19 @@ Singleton {
         .map(n => ({ mac: n.name.split(".")[1].replace(/_/g, ":"), nom: n.description || n.nickname || Reglages.t("Casque", "Headphones") }))
     property var btConnus: []
     property string casqueNom: ""
-    property string casqueBatterie: ""
+    // Niveau donné par UPower (CasqueBatterie.qml) : vide tant que le casque ne le donne pas (ou si le réglage est coupé)
+    readonly property string casqueBatterie: { var n = casqueNom === "" ? 0 : CasqueBatterie.niveauPour(casqueNom); return n > 0 ? String(n) : "" }
     onAdressesBtChanged: {
         var avant = btConnus, macs = []
         for (let i = 0; i < adressesBt.length; i++) {
             let a = adressesBt[i]
             macs.push(a.mac)
             if (avant.indexOf(a.mac) < 0 && macs.indexOf(a.mac) === macs.length - 1 && pret) {
-                casqueNom = a.nom; casqueBatterie = ""
-                lireBatterieBt.command = ["sh", "-c", "sleep 1.5; bluetoothctl info " + a.mac + " | sed -n 's/.*Battery Percentage:.*(\\([0-9]*\\)).*/\\1/p' | head -1"]
-                lireBatterieBt.running = true
-                activite("casque", 4500)
+                casqueNom = a.nom
+                activite("casque", 3000)
             }
         }
         btConnus = macs
-    }
-    Process {
-        id: lireBatterieBt
-        stdout: StdioCollector { onStreamFinished: etat.casqueBatterie = text.trim() }
     }
 
     // ── Batterie faible : alerte à 20 % puis à 10 % (sur batterie), avec un bouton « Mode Économie » ──

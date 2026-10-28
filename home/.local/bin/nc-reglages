@@ -451,6 +451,25 @@ REGLAGES = [
         "While your screen is shared (Discord, Meet, Teams…), notifications don't pop up as banners, urgent ones included: "
         "they stay in the Notifications page. The pill shows \"Sharing\". When it ends, a notification says how many arrived. "
         "Your Focus setting is not touched. No: nothing changes.")),
+    R("NPD_AUTO", "Notifications", L("Ne pas déranger en jeu et en projection", "Do not disturb while gaming and projecting"), "ouinon", "oui",
+      L("Pendant le mode jeu, ou quand l'écran du PC est dupliqué ou éteint au profit d'un projecteur ou d'un second écran, les "
+        "notifications n'apparaissent pas en bannière, même les urgentes : elles restent dans la page Notifications. À la fin, une "
+        "seule notification dit combien sont arrivées. Ton réglage Concentration n'est pas touché. Non : rien ne change.",
+        "While Game Mode is on, or when the PC screen is mirrored or switched off in favour of a projector or a second screen, "
+        "notifications don't pop up as banners, urgent ones included: they stay in the Notifications page. When it ends, a single "
+        "notification says how many arrived. Your Focus setting is not touched. No: nothing changes.")),
+    R("ILE_CASQUE_BATTERIE", "Île", L("Batterie des casques Bluetooth", "Bluetooth headset battery"), "ouinon", "oui",
+      L("À la connexion d'un casque ou d'écouteurs qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau "
+        "pendant 3 s ; la page Son l'affiche à côté du casque. Rien si le casque ne donne pas son niveau.",
+        "When headphones or earbuds that report their battery connect (AirPods…), the pill shows the name and level for 3 s; "
+        "the Sound page shows it next to the device. Nothing if the device does not report its level.")),
+    R("ILE_PRESSE_ACTIONS", "Île", L("Actions rapides du presse-papiers", "Clipboard quick actions"), "ouinon", "oui",
+      L("Un texte copié qui est une couleur (pastille et conversions), un lien (Ouvrir), un chemin (Ouvrir le dossier) ou un "
+        "calcul (résultat avec qalc, sans réseau) reçoit sa ligne d'action dans la page Presse-papiers. Rien n'est lancé sans ton clic, "
+        "sauf l'aperçu du calcul. Caché pendant un partage d'écran.",
+        "A copied text that is a colour (swatch and conversions), a link (Open), a path (Open folder) or a calculation (result "
+        "with qalc, offline) gets an action line in the Clipboard page. Nothing runs without your click, except the calculation "
+        "preview. Hidden while your screen is shared.")),
     R("ILE_METEO", "Île", L("Météo à côté de l'heure", "Weather next to the time"), "ouinon", "oui",
       L("Et une page Météo dans l'île (Open-Meteo, sans compte).", "And a Weather page in the island (Open-Meteo, no account).")),
     R("METEO_VILLE", "Île", L("Ville de la météo", "Weather city"), "texte", "auto",
@@ -1453,10 +1472,10 @@ MATERIEL = {
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "VERROU_MUSIQUE": "verrou",
-    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",

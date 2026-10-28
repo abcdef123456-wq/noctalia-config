@@ -29,6 +29,12 @@ Item {
         if (b.indexOf("alsa") >= 0 && (b.indexOf("analog") >= 0 || b.indexOf("pci") >= 0)) return entree ? Reglages.t("Micro intégré", "Built-in Microphone") : Reglages.t("Haut-parleurs", "Speakers")
         return d
     }
+    // « · 80 % » après le nom d'un casque Bluetooth qui donne sa batterie (CasqueBatterie.qml, UPower) ; rien sinon
+    function niveauCasque(n) {
+        if ((n.name || "").indexOf("bluez") < 0) return ""
+        var v = CasqueBatterie.niveauPour(n.description || n.nickname || "")
+        return v > 0 ? " · " + v + Reglages.t(" %", "%") : ""
+    }
     function iconeSortie(n) {
         var t = nomAppareil(n, false)
         if (t.indexOf("HDMI") >= 0) return "tv"
@@ -142,7 +148,7 @@ Item {
                         required property var modelData
                         required property int index
                         icone: son.iconeSortie(modelData)
-                        titre: son.nomAppareil(modelData, false)
+                        titre: son.nomAppareil(modelData, false) + son.niveauCasque(modelData)
                         coche: modelData === Pipewire.defaultAudioSink
                         dernier: index === son.sorties.length - 1
                         onClic: Pipewire.preferredDefaultAudioSink = modelData

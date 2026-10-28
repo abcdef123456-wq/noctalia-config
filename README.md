@@ -208,6 +208,9 @@ l'île Quickshell.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Batterie des casques Bluetooth** (`nc-reglages` → Île, réglage `ILE_CASQUE_BATTERIE`) : à la connexion d'écouteurs ou
+  d'un casque qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau pendant 3 s, puis la page Son
+  l'affiche à côté du casque. Le niveau vient d'UPower (aucun processus, aucun sondage) ; rien si le casque ne le donne pas.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
   la page Appel coupe ou réactive le micro (sur la source qu'utilise l'appli, sinon la source par défaut) et rappelle
