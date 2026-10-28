@@ -255,7 +255,8 @@ l'île Quickshell.
   l'île : tous les tunnels montés (plusieurs à la fois) avec un bouton « Déconnecter » chacun, « Tout déconnecter », un clic sur
   une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
   qui ferait exécuter quelque chose (`up`, `down`, `route-up`, `script-security` au-dessus de 1, `plugin`, `PostUp`…), un lien,
-  un fichier de plus de 64 Kio et des certificats donnés par un chemin relatif (mets-les dans le fichier) ; un bloc
+  un fichier de plus de 64 Kio ; les certificats donnés par un chemin relatif (`ca`, `cert`, `key`, `tls-auth`…) sont lus depuis le
+  dossier du `.ovpn` et mis dans une copie (PEM texte seulement) ; un bloc
   `<auth-user-pass>` (identifiant puis mot de passe) est accepté : le mot de passe va dans le trousseau de la session
   (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian et openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
   jamais dans un fichier, et l'import est refusé s'il manque ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier

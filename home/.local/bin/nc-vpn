@@ -11,8 +11,9 @@
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
 Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
 Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
-un fichier trop gros (64 Kio) et des certificats donnés par un chemin relatif (mets-les dans le fichier : blocs <ca>, <cert>,
-<key>). Un bloc <auth-user-pass> (identifiant puis mot de passe) est accepté : l'identifiant va dans la connexion, le mot de
+un fichier trop gros (64 Kio). Les certificats donnés par un chemin relatif (ca, cert, key, tls-auth, tls-crypt…) sont lus depuis
+le dossier du .ovpn et mis dans une copie temporaire (PEM texte seulement, 64 Kio au plus en tout) ; l'original n'est jamais
+modifié. Un bloc <auth-user-pass> (identifiant puis mot de passe) est accepté : l'identifiant va dans la connexion, le mot de
 passe dans le trousseau de la session (secret-tool, paquet libsecret ; il faut un trousseau ouvert : gnome-keyring, KeePassXC,
 KWallet…), jamais dans un fichier ; sans trousseau l'import est refusé. Les secrets restent chez NetworkManager ou dans le
 trousseau : jamais dans nos fichiers, jamais dans les journaux ni dans la sortie.
@@ -20,6 +21,7 @@ trousseau : jamais dans nos fichiers, jamais dans les journaux ni dans la sortie
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -70,7 +72,8 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
 Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
 Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
-is too big (64 KiB) and certificates given by a relative path (put them in the file: <ca>, <cert>, <key> blocks). An
+is too big (64 KiB). Certificates given by a relative path (ca, cert, key, tls-auth, tls-crypt…) are read from the .ovpn's
+folder and put into a temporary copy (text PEM only, 64 KiB at most in all); the original is never modified. An
 <auth-user-pass> block (username then password) is accepted: the username goes into the connection, the password into the
 session keyring (secret-tool, libsecret package; an unlocked keyring is needed: gnome-keyring, KeePassXC, KWallet…), never
 into a file; without a keyring the import is refused. Secrets stay with NetworkManager or in the keyring: never in our files,
@@ -373,6 +376,130 @@ def extraire_auth(texte):
     return "\n".join(sortie) + "\n", fin[0], fin[1]
 
 
+# Certificats donnés par un chemin relatif : lus depuis le dossier du .ovpn, mis EN LIGNE (<ca>…</ca>) dans la copie
+DIRECTION = ("tls-auth", "secret")     # ces deux directives peuvent porter un sens (0 ou 1) : il devient « key-direction N »
+
+
+def chemin_relatif_sur(dossier, arg):
+    """Le chemin absolu de `arg` (relatif) depuis `dossier`, ou Echec. Chaque dossier traversé doit être lisible et
+    traversable par l'utilisateur, « .. » compris : pas de détour par un dossier qu'il ne pourrait pas ouvrir."""
+    cur = dossier
+    parties = [x for x in arg.split("/") if x not in ("", ".")]
+    for i, part in enumerate(parties):
+        if not os.access(cur, os.R_OK | os.X_OK):
+            raise Echec(T(f"Le chemin « {arg} » passe par un dossier que tu ne peux pas ouvrir.", f"The path \"{arg}\" goes through a folder you cannot open."))
+        if part == "..":
+            cur = os.path.dirname(cur)
+        else:
+            cur = os.path.join(cur, part)
+            if i < len(parties) - 1 and stat.S_ISLNK(os.lstat(cur).st_mode if os.path.lexists(cur) else 0):
+                raise Echec(T(f"Le chemin « {arg} » passe par un lien symbolique : refusé.", f"The path \"{arg}\" goes through a symbolic link: refused."))
+    return cur
+
+
+def lire_pem(mot, chemin):
+    """Le texte PEM d'un certificat ou d'une clé (blocs -----BEGIN … -----END seulement), 64 Kio au plus."""
+    try:
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        raise Echec(T(f"Le fichier « {mot} » est introuvable ou illisible.", f"The \"{mot}\" file is not found or unreadable."))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Echec(T(f"« {mot} » n'est pas un fichier ordinaire.", f"\"{mot}\" is not a regular file."))
+        donnees = b""
+        while len(donnees) <= MAX_OCTETS:
+            bloc = os.read(fd, MAX_OCTETS + 1 - len(donnees))
+            if not bloc:
+                break
+            donnees += bloc
+    except OSError:
+        raise Echec(T(f"Le fichier « {mot} » est illisible.", f"The \"{mot}\" file is unreadable."))
+    finally:
+        os.close(fd)
+    if len(donnees) > MAX_OCTETS:
+        raise Echec(T(f"Le fichier « {mot} » est trop gros (64 Kio au plus).", f"The \"{mot}\" file is too big (64 KiB at most)."))
+    pas_pem = Echec(T(f"Le fichier « {mot} » n'est pas un PEM texte (-----BEGIN … -----END) : un pkcs12 ou un fichier binaire ne peut pas être mis dans le fichier. Convertis-le en PEM.",
+                      f"The \"{mot}\" file is not a text PEM (-----BEGIN … -----END): a pkcs12 or binary file cannot be put into the file. Convert it to PEM."))
+    try:
+        texte = donnees.decode("utf-8")
+    except UnicodeDecodeError:
+        raise pas_pem
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", texte):
+        raise pas_pem
+    sortie, dedans = [], False
+    for brute in texte.splitlines():
+        ligne = brute.strip()
+        if re.fullmatch(r"-----BEGIN [A-Za-z0-9 ]+-----", ligne):
+            if dedans:
+                raise pas_pem
+            dedans = True
+        if dedans:
+            if ligne.startswith("<"):                 # ne jamais laisser le fichier fermer notre bloc et ajouter des directives
+                raise pas_pem
+            sortie.append(ligne)
+        if re.fullmatch(r"-----END [A-Za-z0-9 ]+-----", ligne):
+            if not dedans:
+                raise pas_pem
+            dedans = False
+    if dedans or not sortie:
+        raise pas_pem
+    return "\n".join(sortie) + "\n"
+
+
+def mettre_en_ligne(texte, dossier):
+    """Remplace chaque certificat donné par un chemin relatif (ca, cert, key, tls-auth, tls-crypt…) par un bloc <ca>…</ca>
+    contenant le PEM du fichier, lu depuis `dossier`. Les chemins complets et « [inline] » sont laissés tels quels."""
+    sortie, ferme = [], None
+    for brute in texte.splitlines():
+        ligne = brute.strip()
+        if ferme is not None:                          # à l'intérieur d'un bloc <…> : recopié tel quel (verifier le relira)
+            sortie.append(brute)
+            if re.fullmatch(r"<\s*/\s*" + ferme + r"\s*>", ligne, re.I):
+                ferme = None
+            continue
+        ouvre = re.fullmatch(r"<\s*([A-Za-z0-9_-]+)\s*>", ligne)
+        if ouvre:
+            ferme = re.escape(ouvre.group(1))
+            sortie.append(brute)
+            continue
+        m = re.match(r"-{0,2}([A-Za-z][A-Za-z0-9_-]*)(?=$|[\s=])\s*(.*)$", ligne.replace('"', "").replace("'", "")) if ligne and ligne[0] not in "#;" else None
+        if not m or m.group(1).lower() not in OVPN_FICHIERS:
+            sortie.append(brute)
+            continue
+        mot = m.group(1).lower()
+        try:
+            jetons = shlex.split(ligne, comments=False)
+        except ValueError:
+            sortie.append(brute)                        # guillemets mal fermés : verifier tranchera
+            continue
+        if jetons and jetons[0].lstrip("-").lower() != mot or len(jetons) < 2:
+            sortie.append(brute)
+            continue
+        arg = jetons[1]
+        if arg == "[inline]" or arg.startswith("/"):
+            sortie.append(brute)
+            continue
+        if mot == "pkcs12":
+            raise Echec(T("Le certificat « pkcs12 » donné par un chemin relatif est un fichier binaire : il ne peut pas être mis dans le fichier. Convertis-le en PEM (blocs <ca>, <cert>, <key>) ou donne un chemin complet.",
+                          "The \"pkcs12\" certificate given by a relative path is a binary file: it cannot be put into the file. Convert it to PEM (<ca>, <cert>, <key> blocks) or give a full path."))
+        extra = jetons[2:]
+        if mot in DIRECTION and len(extra) == 1 and extra[0] in ("0", "1"):
+            sens = extra[0]
+        elif extra:
+            raise Echec(T(f"La directive « {mot} » a des arguments en plus du fichier : donne-lui seulement le fichier, ou mets le certificat dans le fichier.",
+                          f"The \"{mot}\" directive has extra arguments after the file: give it the file only, or put the certificate into the file."))
+        else:
+            sens = None
+        chemin = chemin_relatif_sur(dossier, arg)
+        fichier_lisible(mot, chemin)
+        sortie.append(f"<{mot}>")
+        sortie.extend(lire_pem(mot, chemin).splitlines())
+        sortie.append(f"</{mot}>")
+        if sens is not None:
+            sortie.append("key-direction " + sens)
+    return "\n".join(sortie) + "\n"
+
+
 def trousseau_dispo():
     return shutil.which("secret-tool") is not None
 
@@ -415,7 +542,12 @@ def importer(chemin):
     ident = mdp = None
     if ext == ".ovpn":
         texte, ident, mdp = extraire_auth(texte)          # le mot de passe quitte le texte ici : la copie n'en a plus
+        # certificats relatifs lus depuis le dossier du .ovpn et mis en ligne ; le résultat complet repasse par verifier()
+        texte = mettre_en_ligne(texte, os.path.dirname(os.path.realpath(chemin)))
         donnees = texte.encode("utf-8")
+        if len(donnees) > MAX_OCTETS:
+            raise Echec(T("Une fois les certificats mis dans le fichier, il dépasse 64 Kio : import refusé.",
+                          "Once the certificates are put into the file, it exceeds 64 KiB: import refused."))
     typ = verifier(texte)
     if ext == ".ovpn" and typ == "wireguard":
         raise Echec(T("Un fichier .ovpn ne peut pas contenir une section WireGuard.", "An .ovpn file cannot contain a WireGuard section."))

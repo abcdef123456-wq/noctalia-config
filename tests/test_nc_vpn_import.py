@@ -180,10 +180,11 @@ class Import(BaseVpn):
         # le bloc en ligne est pris en charge (tests/test_nc_vpn_auth.py) ; la directive seule passe comme avant
         self.assertEqual(self.importer(self.ecrire("seule.ovpn", "client\nauth-user-pass\nremote 192.0.2.10 1194\n")).returncode, 0)
 
-    def test_certificat_en_chemin_relatif_refuse_chemin_complet_accepte(self):
+    def test_certificat_en_chemin_relatif_absent_refuse_chemin_complet_accepte(self):
+        # relatif : lu depuis le dossier du .ovpn (voir test_nc_vpn_certs.py) ; ici le fichier n'existe pas
         r = self.importer(self.ecrire("rel.ovpn", "client\nca ca.crt\nremote 192.0.2.10 1194\n"))
         self.assertEqual(r.returncode, 1)
-        self.assertIn("chemin relatif", r.stderr)
+        self.assertIn("refusé", r.stderr)
         # chemin complet d'un fichier que l'utilisateur peut lire : accepté
         ca = self.ecrire("ca.crt", "certificat")
         r = self.importer(self.ecrire("abs.ovpn", f"client\nca {ca}\nremote 192.0.2.10 1194\n"))
