@@ -1060,7 +1060,7 @@ class LigneMisesAJour(unittest.TestCase):
             # Un XDG_CACHE_HOME qui n'est pas ~/.cache : la page doit lire là où nc-paquets écrit
             (root / "cache-xdg/nc").mkdir(parents=True)
             (root / "cache-xdg/nc/paquets").write_text("3\navahi\nbaloo\nzsh\n")
-            for nom in ("Systeme.qml", "Ligne.qml", "Module.qml", "Texte.qml", "Ico.qml", "Defilement.qml", "Couleurs.qml", "ModeGraphique.qml"):
+            for nom in ("Systeme.qml", "Ligne.qml", "Module.qml", "Texte.qml", "Ico.qml", "Defilement.qml", "Couleurs.qml", "ModeGraphique.qml", "ExpliquerMaj.qml", "DemandeIA.qml", "IaPrete.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; function t(fr,en){return en} function val(k,d){return d}}')
             (root / "Etat.qml").write_text(textwrap.dedent('''\
@@ -1089,7 +1089,7 @@ class LigneMisesAJour(unittest.TestCase):
             (root / "bin/nc-paquets").chmod(0o755)
             (root / "qmldir").write_text("\n".join(
                 ("singleton " if n in ("Couleurs", "Reglages", "Etat", "ModeGraphique") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Systeme", "Ligne", "Module", "Texte", "Ico", "Defilement", "Couleurs", "Reglages", "Etat", "ModeGraphique")))
+                for n in ("Systeme", "Ligne", "Module", "Texte", "Ico", "Defilement", "Couleurs", "Reglages", "Etat", "ModeGraphique", "ExpliquerMaj", "DemandeIA", "IaPrete")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window

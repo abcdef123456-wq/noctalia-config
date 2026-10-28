@@ -6,6 +6,10 @@
         --flux                         morceau par morceau : une ligne JSON {"t": …} chacun ({"ia": …} avant)
         --usage question|texte|commande|image|commit   (question par défaut)
         --ia ID                        cette IA-là (sinon : le réglage) ; --image FICHIER : une image jointe
+        --local                        l'IA de ce PC (Ollama) si elle répond, sinon le choix habituel (texte sensible)
+        --sans-outils                  seulement une IA sans outils : Ollama, une API, ou Claude Code, Codex, Gemini CLI,
+                                       OpenCode, Qwen Code, Oh My Pi lancés dans le bac sans outils ; JARVIS jamais (texte
+                                       venu de n'importe qui : notification, liste de paquets). Se combine avec --local
   nc-ia texte ACTION [--presse|--selection|--stdin] [--copier] [--flux]
                                        sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
                                        reformuler, expliquer, repondre, ou une consigne libre entre guillemets
@@ -135,6 +139,10 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
         --flux                         piece by piece: one JSON line {"t": …} each ({"ia": …} first)
         --usage question|texte|commande|image|commit   (question by default)
         --ia ID                        that AI (otherwise: the setting); --image FILE: an attached image
+        --local                        the AI on this PC (Ollama) if it answers, otherwise the usual choice (sensitive text)
+        --sans-outils                  only an AI without tools: Ollama, an API, or Claude Code, Codex, Gemini CLI,
+                                       OpenCode, Qwen Code, Oh My Pi run in the sandbox without tools; never JARVIS (text
+                                       from anyone: notification, package list). Combines with --local
   nc-ai text ACTION [--presse|--selection] [--copier] [--flux]
                                        on the selected (else copied) text: resumer (summarize), traduire (translate),
                                        corriger (fix), reformuler (rephrase), expliquer (explain), repondre (reply),
@@ -471,6 +479,43 @@ def candidats(usage="question", force=""):
     # plus chaque question, et revient d'elle-même en tête ensuite
     e = echecs()
     return sorted(liste, key=lambda i: i in e)
+
+
+# Les CLI vérifiées une à une : appeler() les lance sans outils pour une question (voir sans_outils_ok). Une CLI ajoutée plus
+# tard n'y est PAS d'office : il faut vérifier comment elle est lancée, puis l'ajouter ici (tests/test_ia.py le rappelle).
+SANS_OUTILS_CLI = ("claude", "codex", "gemini-cli", "opencode", "qwen", "omp")
+
+
+def sans_outils_ok(ident):
+    """Une IA sans outils par nature ou lancée sans outils : Ollama, les API, et les CLI telles que appeler() les lance pour
+    une question (claude --tools "", codex -s read-only sans web, omp --no-tools, opencode nc-question, gemini et qwen en
+    mode default avec outils exclus, tous dans le bac, sans tête). JARVIS (agy avec MCP, web, shell) : jamais."""
+    f = FOURNISSEURS.get(ident)
+    return bool(f) and (f["genre"] in ("api", "local") or (f["genre"] == "cli" and ident in SANS_OUTILS_CLI))
+
+
+def candidats_sans_outils(usage="question", force=""):
+    """Comme candidats(), mais seulement des IA sans outils. Le choix manuel (IA_CHOIX) ou une IA forcée qui n'en est pas
+    une est laissé de côté : on prend la suivante de l'ordre automatique qui convient."""
+    if coupee():
+        return []
+    if force:
+        force = ANCIENS.get(force, force)
+        if force not in FOURNISSEURS:
+            raise ErreurIA(T(f"IA inconnue : {force}", f"Unknown AI: {force}"))
+        return [force] if sans_outils_ok(force) and disponible(force) else []
+    if mode() == "manuel":
+        c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
+        if c in FOURNISSEURS and sans_outils_ok(c) and disponible(c):
+            return [c]
+    ordre = ORDRES.get(reglage("IA_PREFERENCE", "rapide"), ORDRES["rapide"])
+    e = echecs()
+    return sorted([i for i in ordre if sans_outils_ok(i) and disponible(i)], key=lambda i: i in e)
+
+
+def message_sans_outils():
+    return T("Choisis une IA sans outils dans les réglages (Ollama, une API, ou Claude/Codex…) : JARVIS n'est pas permis pour ce texte.",
+             "Choose an AI without tools in the settings (Ollama, an API, or Claude/Codex…): JARVIS is not allowed for this text.")
 
 
 ECHECS = RUN / "echecs.json"
@@ -2799,16 +2844,16 @@ class FiltreOutils:
 
 
 def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=(),
-             echeance=None):
+             echeance=None, sans_outils=False):
     """Écrit la réponse (texte brut, ou lignes JSON en flux) ; renvoie (réponse, ia) ; ErreurIA si aucune n'a pu.
     exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre). echeance : la fin de tout le
     relais (horloge monotone), comme en arrière-plan (nc-ia diagnostic --json --delai)."""
     ecrire = sortie or (lambda m: (sys.stdout.write(m), sys.stdout.flush()))
     if coupee():
         raise ErreurIA(message_coupee())
-    liste = [i for i in candidats(usage, force) if i not in exclure]
+    liste = [i for i in (candidats_sans_outils(usage, force) if sans_outils else candidats(usage, force)) if i not in exclure]
     if not liste:
-        raise ErreurIA(message_aucune(usage))
+        raise ErreurIA(message_sans_outils() if sans_outils else message_aucune(usage))
     RELAIS.clear()
     global ECHEANCE
     # En arrière-plan, le relais a DELAI_FOND en tout (une seule IA : son propre délai suffit)
@@ -5227,9 +5272,11 @@ def main(a):
         if c in ("demander", "commande"):
             flux = "--flux" in a
             usage, force, image, reste = ("commande" if c == "commande" else "question"), "", None, []
+            local = "--local" in a
+            sans_outils = "--sans-outils" in a
             i = 0
             while i < len(a):
-                if a[i] == "--flux":
+                if a[i] in ("--flux", "--local", "--sans-outils"):
                     pass
                 elif a[i] in ("--usage", "--ia", "--image") and i + 1 < len(a):
                     usage, force, image = (a[i + 1], force, image) if a[i] == "--usage" else \
@@ -5249,6 +5296,8 @@ def main(a):
                 return 2
             if image:
                 usage = "image"
+            if local and not force and not image and not coupee() and disponible("ollama"):
+                force = "ollama"                 # --local : l'IA de ce PC si elle répond (le texte ne sort pas), sinon le choix habituel
             if c == "commande" and not flux:
                 tampon = []
                 rep, _ = demander(q, usage, force, image, sortie=tampon.append)
@@ -5257,7 +5306,7 @@ def main(a):
                 l = [x for x in rep.splitlines() if x.strip()]
                 print(re.sub(r"^\$\s*", "", l[0]) if l else "")
                 return 0
-            demander(q, usage, force, image, flux=flux)
+            demander(q, usage, force, image, flux=flux, sans_outils=sans_outils)
             return 0
         if c == "commit":
             dossier = a[a.index("--dossier") + 1] if "--dossier" in a and a.index("--dossier") + 1 < len(a) else "."

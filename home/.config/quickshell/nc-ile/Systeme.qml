@@ -258,6 +258,13 @@ Item {
                 }
                 Connections { target: sy; function onVisibleChanged() { if (sy.visible) { paquets.reload(); paquetsErreur.reload(); paquetsDetail.reload() } } }
             }
+            // « Expliquer » les mises à jour par l'IA (réglage IA_MAJ) : seulement s'il y en a et que l'IA peut répondre, au clic
+            ExpliquerMaj {
+                objectName: "nc-paquets-expliquer"
+                width: sy.width
+                n: maj.n
+                affichee: sy.visible
+            }
             // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
             Ligne {
                 readonly property var niv: (Etat.sys.clavier || "").split("/").map(x => parseInt(x) || 0)

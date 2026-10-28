@@ -1283,6 +1283,28 @@ REGLAGES = [
         "notification. Demande une IA qui lit les images.",
         "Super + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
         "Needs an AI that reads images.")),
+    R("NOTIFS_IA", "Intelligence artificielle", L("IA sur les notifications de l'île", "AI on the island's notifications"), "ouinon", "non",
+      L("Page Notifications de l'île : « Résumer » et « Réponses suggérées » (copiées dans le presse-papiers, jamais envoyées à "
+        "l'application). Seulement quand tu cliques, jamais pendant un partage d'écran. Le texte de la notification part à l'IA "
+        "choisie : l'IA de ce PC (Ollama) est préférée si elle répond, sinon le choix de nc-ia (IA_PREFERENCE) ; elle n'a aucun outil.",
+        "Island Notifications page: “Summarize” and “Suggested replies” (copied to the clipboard, never sent to the app). Only "
+        "when you click, never during screen sharing. The notification text goes to the chosen AI: the AI on this PC (Ollama) is "
+        "preferred if it answers, otherwise nc-ia's choice (IA_PREFERENCE); it has no tools.")),
+    R("IA_CHALEUR", "Intelligence artificielle", L("« Pourquoi ça chauffe ? » (page Santé)", "“Why is it hot?” (Health page)"), "ouinon", "oui",
+      L("Quand le processeur est chaud, un bouton de la page Santé de l'île demande à l'IA d'expliquer en trois phrases et de "
+        "conseiller. Seulement au clic : un court relevé (température, ventilateurs, profil d'énergie, secteur ou batterie, les 5 "
+        "programmes les plus gourmands par leur nom, jamais leurs arguments) part à l'IA choisie. Sans IA, le bouton n'existe pas.",
+        "When the processor is hot, a button on the island's Health page asks the AI to explain in three sentences and advise. Only "
+        "on click: a short report (temperature, fans, power profile, mains or battery, the 5 busiest programs by name, never their "
+        "arguments) goes to the chosen AI. Without AI, the button does not exist.")),
+    R("IA_MAJ", "Intelligence artificielle", L("Mises à jour expliquées (page Système)", "Updates explained (System page)"), "ouinon", "oui",
+      L("Quand des mises à jour du système attendent, un bouton « Expliquer » de la page Système demande à l'IA ce qui change "
+        "d'important, s'il faut redémarrer et s'il y a un risque connu (elle dit « je ne sais pas » plutôt que d'inventer). "
+        "Seulement au clic : la liste des paquets (noms et versions, rien d'autre) part à l'IA choisie. Sans IA, le bouton "
+        "n'existe pas.",
+        "When system updates are waiting, an “Explain” button on the System page asks the AI what matters, whether a restart is "
+        "needed and whether there is a known risk (it says “I don't know” rather than inventing). Only on click: the package list "
+        "(names and versions, nothing else) goes to the chosen AI. Without AI, the button does not exist.")),
     # Ranger les fenêtres (Super + Maj + O, Super + Ctrl + O) : le raccourci est la demande, fait tout de suite
     R("DISPOSITIONS_PROPOSER", "Intelligence artificielle", L("Proposer de reprendre tes dispositions", "Offer to restore your layouts"),
       "ouinon", "oui",
@@ -1539,7 +1561,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la

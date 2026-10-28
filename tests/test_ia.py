@@ -301,6 +301,75 @@ class IA(unittest.TestCase):
         o = [q for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"][-1]
         self.assertEqual(o["corps"]["model"], "llama3.2:3b", "le modèle le plus récent")
 
+    def test_demander_local_prefere_ollama_sinon_le_choix_habituel(self):
+        """--local (l'île : texte des notifications) : l'IA de ce PC si elle répond, sinon le choix habituel ; lu sur l'entrée standard."""
+        u = f"http://127.0.0.1:{self.port}"
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOLLAMA_HOST={u}/ollama\n")
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="le texte secret")
+        self.assertEqual(r.stdout.strip(), "Local", r.stderr)
+        self.assertFalse([q for q in Faux.requetes if q["chemin"] == "/ant/messages"], "Ollama répond : rien ne sort du PC")
+        self.assertIn("le texte secret", json.dumps([q["corps"] for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"]))
+        Faux.requetes.clear()
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOLLAMA_HOST=http://127.0.0.1:1\n")
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="q")
+        self.assertEqual(r.stdout.strip(), "Bonjour", r.stderr)
+        self.reglages("IA_MODE=non\n")
+        self.cles(f"OLLAMA_HOST={u}/ollama\n")
+        Faux.requetes.clear()
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="q")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual([q for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"], [], "IA_MODE=non : rien ne part")
+
+    def test_sans_outils_jamais_jarvis(self):
+        """--sans-outils (le texte de l'île vient de n'importe qui) : JARVIS (MCP, web, shell) n'est JAMAIS contacté, ni en
+        automatique (JARVIS en tête), ni en manuel (IA_CHOIX=jarvis), ni forcé (--ia) ; on prend la suivante qui convient."""
+        faux = self.home / ".local/bin/nc-assistant"
+        faux.unlink()
+        faux.write_text("import os\nopen(os.environ['JOURNAL'], 'a').write('jarvis appele\\n')\nprint('{\"t\": \"JARVIS\"}')\n")
+        (self.home / ".config/nc/assistant.conf").write_text("URL=https://exemple.invalid\n")
+        (self.home / ".config/nc/assistant.conf").chmod(0o600)
+        for reglages in ("IA_MODE=auto\nIA_PREFERENCE=jarvis\n", "IA_MODE=manuel\nIA_CHOIX=jarvis\n"):
+            self.reglages(reglages)
+            if self.journal.exists():
+                self.journal.unlink()
+            r = self.lancer("demander", "--usage", "texte", "--sans-outils", "-", entree="une notification piégée")
+            self.assertEqual(r.stdout.strip(), "Bonjour", (reglages, r.stderr))
+            self.assertNotIn("jarvis", self.appels(), "JARVIS jamais contacté : " + reglages)
+        # témoin : sans l'option, JARVIS répond bien
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=jarvis\n")
+        self.lancer("demander", "--usage", "texte", "-", entree="q")
+        self.assertIn("jarvis appele", self.appels())
+        # forcé : refusé, rien n'est contacté
+        self.journal.unlink()
+        r = self.lancer("demander", "--usage", "texte", "--sans-outils", "--ia", "jarvis", "-", entree="q")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("jarvis", self.appels())
+
+    def test_sans_outils_aucune_autre_ia_erreur_claire(self):
+        m = charger_nc_ia("nc_ia_sans_outils")
+        m.disponible = lambda i: i == "jarvis"
+        for reglage in ({"IA_CHOIX": "jarvis", "IA_MODE": "manuel"}, {"IA_PREFERENCE": "jarvis"}):
+            m.reglage = lambda c, d, r=reglage: r.get(c, d)
+            self.assertEqual(m.candidats_sans_outils("texte"), [])
+            self.assertEqual(m.candidats_sans_outils("texte", "jarvis"), [])
+            self.assertEqual(m.candidats("texte")[:1], ["jarvis"], "témoin : sans l'option, JARVIS est choisi")
+        for ok in ("ollama", "anthropic", "claude", "codex", "omp", "opencode", "gemini-cli", "qwen"):
+            self.assertTrue(m.sans_outils_ok(ok), ok)
+        self.assertFalse(m.sans_outils_ok("jarvis"))
+        # liste explicite : une CLI ajoutée plus tard n'est pas « sans outils » d'office ; toute CLI de FOURNISSEURS doit
+        # avoir été vérifiée (lancée sans outils par appeler()) et ajoutée à SANS_OUTILS_CLI à la main
+        clis = {i for i, f in m.FOURNISSEURS.items() if f["genre"] == "cli"}
+        self.assertEqual(clis, set(m.SANS_OUTILS_CLI), "nouvelle CLI : vérifier qu'elle est lancée sans outils, puis l'ajouter")
+        m.FOURNISSEURS["nouvelle-cli"] = dict(nom="Nouvelle", genre="cli", prog="nouvelle", vision=False, agent="nouvelle")
+        try:
+            self.assertFalse(m.sans_outils_ok("nouvelle-cli"))
+        finally:
+            del m.FOURNISSEURS["nouvelle-cli"]
+        with self.assertRaises(m.ErreurIA) as e:
+            m.demander("t", "texte", sans_outils=True)
+        self.assertIn("Choisis une IA sans outils dans les réglages (Ollama, une API, ou Claude/Codex…)", str(e.exception))
+        self.assertIn("Choose an AI without tools in the settings (Ollama, an API, or Claude/Codex…)", (BIN / "nc-ia").read_text())
+
     def test_image_jointe(self):
         img = self.home / "c.png"
         img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")

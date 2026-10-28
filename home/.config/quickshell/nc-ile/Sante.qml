@@ -208,6 +208,18 @@ Item {
                     Texte { id: texteConseil; width: parent.width - 28; wrapMode: Text.WordWrap; elide: Text.ElideNone; font.pixelSize: 12; text: sa.conseilVisible ? sa.conseil() : "" }
                 }
             }
+            // « Pourquoi ça chauffe ? » (IA du bureau, réglage IA_CHALEUR) : seulement quand la chaleur est haute et que l'IA peut
+            // répondre ; sans IA le bouton n'existe pas et le conseil local ci-dessus reste
+            PourquoiChaleur {
+                objectName: "pourquoiChaleur"
+                width: sa.width
+                actif: !Partage.silence && (Chaleur.alerte || sa.conseilVisible || (sa.cpuTemp !== undefined && sa.cpuTemp.deg >= sa.seuilConseil))
+                deg: sa.cpuTemp ? sa.cpuTemp.deg : 0
+                charge: sa.aCharge ? (parseInt(sa.m.cpu) || 0) : -1
+                fans: sa.fans
+                profil: { var x = sa.profils.filter(q => q.p === Etat.profil)[0]; return x ? x.nom : "" }
+                surBatterie: UPower.onBattery
+            }
             // Dix dernières minutes : température et charge du processeur (courbes lisses, couleur selon le seuil)
             Module {
                 objectName: "blocCourbes"
