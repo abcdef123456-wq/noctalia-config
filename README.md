@@ -195,6 +195,10 @@ l'île Quickshell.
   ou plus (compilation, copie, mise à jour…) s'affiche dans la pilule avec sa durée, puis « Terminée » ou « Échec (code) »
   avec un clic pour revenir au terminal. `~/.config/nc/terminal.zsh` (chargé par `~/.zshrc`) écrit un petit fichier dans
   le dossier privé de la session avec les commandes internes de zsh, que l'île surveille : aucun processus, aucun sondage.
+  Vie privée : seul le **nom du programme** est noté (`make`, `rsync`…), jamais ses arguments ; une ligne qui commence par
+  une espace, et les programmes interactifs (éditeurs, ssh, pagers, consoles…) ne sont pas notés ; pendant un partage
+  d'écran, la pilule dit « Commande » sans le nom. Le retour au terminal passe par le pid du terminal qui a lancé zsh :
+  sous tmux ou dans une instance unique de kitty, ce peut être une autre fenêtre, ou aucune.
 - **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
   effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
   l'écriture de la liste, sans minuteur.

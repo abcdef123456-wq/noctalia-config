@@ -21,11 +21,13 @@ Singleton {
 
     readonly property bool reglage: Reglages.val("ILE_APPEL", "oui") !== "non"
     property int delai: 2500               // ms d'enregistrement continu avant de parler d'appel (pas un clic de dictée)
-    // Les flux qui enregistrent, sans les outils de dictée (parec, pw-record, arecord : une dictée n'est pas un appel)
-    // ni la mesure de niveau de l'île elle-même (flux « monitor » de Quickshell)
+    // Les flux qui enregistrent, sans les outils de dictée (parec, pw-record, arecord : une dictée n'est pas un appel),
+    // ni les traitements du son toujours branchés sur le micro (EasyEffects, rnnoise, PulseEffects, JamesDSP, Carla,
+    // boucles et flux passifs : un « appel » sans fin), ni OBS (il capte pour enregistrer, pas pour parler), ni la mesure
+    // de niveau de l'île elle-même (flux de Quickshell, « stream.monitor »)
     readonly property var flux: reglage ? Etat.fluxMicro.filter(n => !/^(parec|pw-record|pw-cat|arecord)$/i.test(n.name || "")
-                                                                   && !/quickshell|peak/i.test((n.name || "") + " " + (n.description || ""))
-                                                                   && !(n.properties && n.properties["stream.monitor"] === "true")) : []
+                                                                   && !/quickshell|peak|easyeffects|easy effects|pulseeffects|rnnoise|noise|jamesdsp|carla|loopback|\bobs\b/i.test((n.name || "") + " " + (n.description || ""))
+                                                                   && !(n.properties && (n.properties["stream.monitor"] === "true" || n.properties["node.passive"] === "true"))) : []
     readonly property var noeud: flux.length ? flux[0] : null
     readonly property bool presence: noeud !== null
     readonly property string appli: noeud ? Etat.nomJoli(noeud.description || noeud.name || "") : ""

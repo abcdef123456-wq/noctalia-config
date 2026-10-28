@@ -381,7 +381,7 @@ Item {
         montre: c.mode === "terminal"
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "terminal"; taille: 17; color: Couleurs.accentClair }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Terminal.commande; font.family: "monospace"; width: Math.min(implicitWidth, 170) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Terminal.commandeAffichee; font.family: "monospace"; width: Math.min(implicitWidth, 170) }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Terminal.dureeTexte; font.weight: Font.DemiBold; color: Couleurs.accentClair; font.features: { "tnum": 1 } }
     }
     Fondu {
@@ -395,7 +395,7 @@ Item {
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.family: "monospace"; width: Math.min(implicitWidth, 170)
-            text: Terminal.fini ? Terminal.fini.commande : ""
+            text: Terminal.finiAffichee
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.features: { "tnum": 1 }; text: Terminal.fini ? Etat.duree(Terminal.fini.duree) : "" }
     }

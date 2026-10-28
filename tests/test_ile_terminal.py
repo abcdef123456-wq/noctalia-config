@@ -62,6 +62,32 @@ class Source(unittest.TestCase):
         self.assertIn("(( duree >= 10 ))", self.zsh)
         self.assertIn("[[ -r ~/.config/nc/terminal.zsh ]] && source ~/.config/nc/terminal.zsh", (REPO / "home/.zshrc").read_text())
 
+    def test_zsh_vie_privee_et_ecriture_atomique(self):
+        # Seul le nom du programme ; espace en tête ignorée ; interactifs exclus ; >| (noclobber) puis zf_mv (atomique, pas de
+        # lien suivi) ; un shell n'efface que sa propre ligne
+        self.assertIn("[[ $1 == [[:space:]]* ]] && return 0", self.zsh)
+        self.assertIn('print -rl -- "$@" >| "$f.$$" && zf_mv -f -- "$f.$$" "$f"', self.zsh)
+        self.assertIn("zmodload -F zsh/files b:zf_rm b:zf_mv", self.zsh)
+        for prog in ("vim", "nvim", "ssh", "htop", "btop", "less", "man", "mysql", "psql", "tmux", "lazygit", "claude", "codex", "python", "python3"):
+            self.assertRegex(self.zsh, r"_nc_terminal_interactifs=\([^)]*\b%s\b" % re.escape(prog))
+        for prog in ("sudo", "env", "nohup", "time", "noglob"):
+            self.assertRegex(self.zsh, r"_nc_terminal_prefixes=\([^)]*\b%s\b" % prog)
+        self.assertIn("_nc_terminal_mien && zf_rm", self.zsh)
+        self.assertNotIn("[1,200]", self.zsh)      # plus jamais la ligne entière
+
+    def test_masque_pendant_le_partage_et_sans_dossier_de_session(self):
+        # Partage d'écran (Partage.silence, comme Presse.qml) : « Commande » à la place du nom, pilule et page
+        self.assertIn("readonly property bool masque: Partage.silence", self.terminal)
+        self.assertIn("readonly property string commandeAffichee: masque ? generique : commande", self.terminal)
+        self.assertIn('readonly property string finiAffichee: fini === null ? "" : (masque ? generique : fini.commande)', self.terminal)
+        self.assertIn("text: Terminal.commandeAffichee", self.compact)
+        self.assertIn("text: Terminal.finiAffichee", self.compact)
+        self.assertNotRegex(re.sub(r"//.*", "", self.compact), r"Terminal\.commande\b|Terminal\.fini\.commande")
+        self.assertIn("text: Terminal.commandeAffichee", self.page)
+        self.assertNotRegex(self.page, r"Terminal\.commande\b")
+        # Sans XDG_RUNTIME_DIR (repli /tmp lisible par tous) : rien
+        self.assertIn('&& (Quickshell.env("XDG_RUNTIME_DIR") || "") !== ""', self.terminal)
+
     def test_etat_et_pilule(self):
         self.assertIn('if (Terminal.enCours) a.push("terminal")', (QML / "Etat.qml").read_text())
         self.assertIn('(Terminal.enCours ? "terminal" : "repos")', self.compact)
@@ -105,12 +131,12 @@ class Crochets(unittest.TestCase):
             r = subprocess.run(["zsh", "-f", "-c", prelude + script], env=env, text=True, capture_output=True, timeout=20)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(r.stderr, "")
-            fichiers = {f.name: f.read_text() for f in (root / "run").iterdir()}
+            fichiers = {f.name: f.read_text() for f in (root / "run").iterdir() if f.is_file()}
             return r.stdout, fichiers
 
-    def test_commande_longue_puis_fin(self):
+    def test_commande_longue_puis_fin_le_programme_seulement(self):
         out, fichiers = self.zsh('''
-            _nc_terminal_preexec "make -j8" "make -j8" "make -j8"
+            _nc_terminal_preexec 'FOO=1 sudo env -u BAR /usr/bin/make -j8 CFLAGS="-O2 -DSECRET=abc"' "" ""
             print -r -- "pendant: $(<$XDG_RUNTIME_DIR/nc-terminal)" | tr "\\n" "|"
             print
             _nc_terminal_debut=$(( EPOCHSECONDS - 12 ))
@@ -118,30 +144,95 @@ class Crochets(unittest.TestCase):
             [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print "fichier encore là"
             print -r -- "fini: $(<$XDG_RUNTIME_DIR/nc-terminal-fini)" | tr "\\n" "|"
         ''')
-        self.assertRegex(out, r"pendant: \d+\|\d+\|\d+\|make -j8\|")
+        self.assertRegex(out, r"pendant: \d+\|\d+\|\d+\|make\|")
         self.assertNotIn("fichier encore là", out)
-        self.assertRegex(out, r"fini: 3\|1[2-9]\|\d+\|\d+\|make -j8\|")
-        self.assertNotIn("nc-terminal", [n for n in fichiers if n == "nc-terminal"])
+        self.assertRegex(out, r"fini: 3\|1[2-9]\|\d+\|\d+\|make\|")
+        self.assertEqual(list(fichiers), ["nc-terminal-fini"])
+        self.assertNotIn("SECRET", out + "".join(fichiers.values()))
+
+    def test_un_secret_n_est_jamais_ecrit(self):
+        # Arguments jamais notés (jeton, mot de passe) ; mysql et sshpass sont interactifs : rien du tout
+        out, fichiers = self.zsh('''
+            _nc_terminal_preexec 'curl -H "Authorization: Bearer S3cretToken" https://example.test/api' "" ""
+            print -r -- "$(<$XDG_RUNTIME_DIR/nc-terminal)" | sed -n 4p
+            _nc_terminal_debut=$(( EPOCHSECONDS - 20 )); true; _nc_terminal_precmd
+            _nc_terminal_preexec 'mysql -uroot -pSecretPass base' "" ""
+            [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print "mysql noté"
+            true; _nc_terminal_precmd
+            _nc_terminal_preexec 'sshpass -p SecretPass ssh hote' "" ""
+            [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print "sshpass noté : $(<$XDG_RUNTIME_DIR/nc-terminal)"
+            true; _nc_terminal_precmd
+        ''')
+        self.assertEqual(out.splitlines()[0], "curl")
+        self.assertNotIn("mysql noté", out)
+        self.assertNotIn("S3cret", out + "".join(fichiers.values()))
+        self.assertNotIn("SecretPass", out + "".join(fichiers.values()))
+        self.assertNotIn("nc-terminal", fichiers)
+
+    def test_espace_en_tete_et_interactifs_ignores(self):
+        out, fichiers = self.zsh('''
+            for c in " make -j8" "vim fichier" "ssh hote" "sudo -i" "htop" "python" "nvim ." "less journal" "claude"; do
+                _nc_terminal_preexec "$c" "" ""
+                [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print -r -- "noté : $c"
+                [[ -n $_nc_terminal_cmd ]] && print -r -- "retenu : $c"
+                _nc_terminal_debut=$(( EPOCHSECONDS - 20 )); true; _nc_terminal_precmd
+            done
+            print "fin"
+        ''')
+        self.assertNotIn("noté", out)
+        self.assertNotIn("retenu", out)
+        self.assertIn("fin", out)
+        self.assertEqual(fichiers, {})
 
     def test_commande_courte_sans_fini(self):
         out, fichiers = self.zsh('''
-            _nc_terminal_preexec "ls" "ls" "ls"
+            _nc_terminal_preexec "ls -la" "" ""
             true; _nc_terminal_precmd
             (( $+functions[_nc_terminal_preexec] )) && print "crochets posés"
         ''')
         self.assertIn("crochets posés", out)
         self.assertEqual(fichiers, {})
 
-    def test_commande_sur_plusieurs_lignes_et_longue(self):
+    def test_noclobber_et_lien_symbolique(self):
+        # set -o noclobber : « > » refuserait d'écraser ; le fichier est réécrit par un temporaire puis zf_mv, et un lien
+        # symbolique posé à sa place est remplacé, sa cible jamais touchée
         out, fichiers = self.zsh('''
-            _nc_terminal_preexec $'for i in 1 2\\ndo echo $i\\ndone' "" ""
+            set -o noclobber
+            _nc_terminal_preexec "make" "" "" && print "premier ok"
+            _nc_terminal_preexec "cargo build" "" "" && print "second ok"
             print -r -- "$(<$XDG_RUNTIME_DIR/nc-terminal)" | sed -n 4p
-            _nc_terminal_preexec "${(l:400::x:)}" "" ""
-            print -r -- "$(<$XDG_RUNTIME_DIR/nc-terminal)" | sed -n 4p | wc -c
+            true; _nc_terminal_precmd
+            print -r -- "cible intacte" > $XDG_RUNTIME_DIR/cible
+            ln -s $XDG_RUNTIME_DIR/cible $XDG_RUNTIME_DIR/nc-terminal
+            _nc_terminal_preexec "rsync -a a b" "" ""
+            [[ -L $XDG_RUNTIME_DIR/nc-terminal ]] && print "toujours un lien"
+            print -r -- "$(<$XDG_RUNTIME_DIR/cible)"
+            true; _nc_terminal_precmd
         ''')
-        lignes = out.splitlines()
-        self.assertEqual(lignes[0], "for i in 1 2 do echo $i done")
-        self.assertEqual(int(lignes[1]), 201)        # 200 caractères et la fin de ligne
+        self.assertIn("premier ok", out)
+        self.assertIn("second ok", out)
+        self.assertIn("cargo", out.splitlines())
+        self.assertNotIn("toujours un lien", out)
+        self.assertIn("cible intacte", out)
+        self.assertEqual(fichiers.get("cible"), "cible intacte\n")
+        self.assertNotIn("nc-terminal", fichiers)
+
+    def test_deux_shells_chacun_sa_ligne(self):
+        # Le fichier d'un autre shell (ligne 3 = autre pid) n'est jamais effacé par ce shell ; le sien l'est
+        out, fichiers = self.zsh('''
+            print -rl -- 4242 $EPOCHSECONDS 999999 make > $XDG_RUNTIME_DIR/nc-terminal
+            _nc_terminal_cmd=cargo; _nc_terminal_debut=$EPOCHSECONDS
+            true; _nc_terminal_precmd
+            [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print "fichier de l'autre gardé"
+            _nc_terminal_cmd=cargo; _nc_terminal_zshexit
+            [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] && print "gardé aussi à la sortie"
+            _nc_terminal_preexec "cargo build" "" ""
+            true; _nc_terminal_precmd
+            [[ -e $XDG_RUNTIME_DIR/nc-terminal ]] || print "le mien effacé"
+        ''')
+        self.assertIn("fichier de l'autre gardé", out)
+        self.assertIn("gardé aussi à la sortie", out)
+        self.assertIn("le mien effacé", out)
 
     def test_rien_hors_session_graphique_ni_reglage_non(self):
         for reglage, graphique in (("non", True), (None, False)):
@@ -227,7 +318,8 @@ class Banc(unittest.TestCase):
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Etat.qml").write_text(STUB_ETAT % (root / "run"))
             (root / "Reglages.qml").write_text(STUB_REGLAGES)
-            singletons = ("Terminal", "Etat", "Reglages", "Couleurs")
+            (root / "Partage.qml").write_text("pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }")
+            singletons = ("Terminal", "Etat", "Reglages", "Couleurs", "Partage")
             (root / "qmldir").write_text("\n".join(("singleton " if n in singletons else "") + n + " 1.0 " + n + ".qml"
                                                    for n in singletons + ("PageTerminal", "Texte", "Ico", "Module")))
             (root / "shell.qml").write_text(ENTETE % (root / "run", os.getpid()) + textwrap.indent(textwrap.dedent(scenario), " " * 8) + PIED)
@@ -296,6 +388,22 @@ class Banc(unittest.TestCase):
             }
         ''')
         self.assertNotIn("hyprctl", journal)
+
+    def test_masque_pendant_le_partage(self):
+        self.executer('''
+            if (etape === 0) { Terminal.delai = 200; ecrire("nc-terminal", "4242\\n" + (Math.floor(Date.now() / 1000) - 60) + "\\n" + moi + "\\nmake\\n"); ecrire("nc-terminal-fini", "0\\n30\\n" + Math.floor(Date.now() / 1000) + "\\n4242\\nrsync\\n"); etape++ }
+            else if (etape === 1) {
+                if (!Terminal.enCours || !Terminal.fini) { verifier(++attente < 20, "jamais lu"); return }
+                verifier(Terminal.commandeAffichee === "make" && Terminal.finiAffichee === "rsync", "hors partage : " + Terminal.commandeAffichee + " " + Terminal.finiAffichee)
+                Partage.silence = true; etape++
+            } else if (etape === 2) {
+                verifier(Terminal.masque && Terminal.commandeAffichee === "Commande" && Terminal.finiAffichee === "Commande", "pendant le partage : " + Terminal.commandeAffichee + " " + Terminal.finiAffichee)
+                Partage.silence = false; etape++
+            } else if (etape === 3) {
+                verifier(Terminal.commandeAffichee === "make", "nom pas revenu après le partage")
+                Qt.quit()
+            }
+        ''')
 
     def test_reglage_non(self):
         self.executer('''

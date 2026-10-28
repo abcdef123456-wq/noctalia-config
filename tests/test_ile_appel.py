@@ -61,6 +61,8 @@ class Source(unittest.TestCase):
         self.assertIn("PwNodeLinkTracker { id: liens; node: Appel.noeud }", self.source)
         self.assertIn("return Pipewire.defaultAudioSource", self.source)
         self.assertIn("PwObjectTracker { objects: s.source ? [s.source] : [] }", self.source)
+        # Un flux relié au moniteur d'une sortie (OBS, partage avec le son) : la sortie n'est jamais « le micro »
+        self.assertIn("if (g[i].source && !g[i].source.isStream && !g[i].source.isSink) return g[i].source", self.source)
         self.assertIn("function basculerMicro() { if (lien.item && lien.item.lie) lien.item.basculer(); else Etat.basculerMicro() }", self.appel)
         self.assertIn('(source.name || "").indexOf("bluez_input.") === 0', self.source)
 
@@ -75,7 +77,10 @@ class Source(unittest.TestCase):
 
     def test_etat_et_pilule(self):
         self.assertIn('if (Appel.enCours) a.push("appel")', self.etat)
-        self.assertIn("|quickshell/i.test", self.etat)       # la mesure de niveau de l'île n'est pas « une appli qui utilise le micro »
+        # Etat.fluxMicro (point orange, « X utilise le micro ») n'écarte pas tout « quickshell » : Appel.qml écarte lui-même sa mesure
+        self.assertNotIn("quickshell", re.sub(r"//.*", "", self.etat))
+        self.assertIn("/quickshell|peak|", self.appel)
+        self.assertIn('n.properties["node.passive"] === "true"', self.appel)
         self.assertIn(': Appel.enCours ? "appel"', self.compact)
         for mode in ('appel: appel', '"appel-muet": appelMuet', '"appel-fini": appelFini'):
             self.assertIn(mode, self.compact)
@@ -284,29 +289,33 @@ class Banc(unittest.TestCase):
             }
         ''')
 
-    def test_reglage_non_dictee_et_flux_de_quickshell_ignores(self):
+    def test_reglage_non_dictee_traitements_et_flux_de_quickshell_ignores(self):
         self.executer('''
+            function ignore(f, message) {        // un flux qui ne doit jamais faire un appel (6 tours de 80 ms, plus que le délai)
+                if (attente === 0) Etat.fluxMicro = f
+                if (++attente < 6) return false
+                verifier(!Appel.enCours && !Appel.presence, message)
+                attente = 0; etape++
+                return true
+            }
             if (etape === 0) { Appel.delai = 100; Reglages.valeurs = { ILE_APPEL: "non" }; Etat.fluxMicro = flux("Firefox"); attente = 0; etape++ }
             else if (etape === 1) {
                 if (++attente < 6) return
                 verifier(!Appel.enCours && Appel.flux.length === 0 && Appel.appli === "", "ILE_APPEL=non : appel détecté")
-                Reglages.valeurs = {}; Etat.fluxMicro = flux("parec"); attente = 0; etape++
-            } else if (etape === 2) {
-                if (++attente < 6) return
-                verifier(!Appel.enCours && !Appel.presence, "la dictée (parec) prise pour un appel")
-                Etat.fluxMicro = flux("quickshell"); attente = 0; etape++
-            } else if (etape === 3) {
-                if (++attente < 6) return
-                verifier(!Appel.enCours && !Appel.presence, "la mesure de niveau de l'île prise pour un appel")
-                Etat.fluxMicro = [{ name: "Chromium", description: "Chromium input", type: 0, properties: { "stream.monitor": "true" } }]; attente = 0; etape++
-            } else if (etape === 4) {
-                if (++attente < 6) return
-                verifier(!Appel.presence, "un flux « stream.monitor » pris pour un appel")
-                Etat.fluxMicro = flux("Firefox"); attente = 0; etape++
-            } else if (etape === 5) {
+                Reglages.valeurs = {}; attente = 0; etape++
+            }
+            else if (etape === 2) ignore(flux("parec"), "la dictée (parec) prise pour un appel")
+            else if (etape === 3) ignore(flux("quickshell"), "la mesure de niveau de l'île prise pour un appel")
+            else if (etape === 4) ignore([{ name: "Chromium", description: "Chromium input", type: 0, properties: { "stream.monitor": "true" } }], "un flux « stream.monitor » pris pour un appel")
+            else if (etape === 5) ignore([{ name: "Chromium", description: "Chromium input", type: 0, properties: { "node.passive": "true" } }], "un flux passif (boucle) pris pour un appel")
+            else if (etape === 6) ignore(flux("easyeffects_soe"), "EasyEffects pris pour un appel")
+            else if (etape === 7) ignore([{ name: "rnnoise_source", description: "RNNoise", type: 0 }], "rnnoise pris pour un appel")
+            else if (etape === 8) ignore([{ name: "OBS", description: "OBS Studio", type: 0 }], "OBS pris pour un appel")
+            else if (etape === 9) { Etat.fluxMicro = flux("Firefox"); attente = 0; etape++ }
+            else if (etape === 10) {
                 if (!Appel.enCours) { verifier(++attente < 12, "jamais en cours"); return }
                 Reglages.valeurs = { ILE_APPEL: "non" }; etape++
-            } else if (etape === 6) {
+            } else if (etape === 11) {
                 verifier(!Appel.enCours, "réglage coupé en plein appel : l'activité reste")
                 verifier(Etat.reactions.indexOf("appel-fini") < 0, "« Appel terminé » alors que le réglage est coupé")
                 Qt.quit()

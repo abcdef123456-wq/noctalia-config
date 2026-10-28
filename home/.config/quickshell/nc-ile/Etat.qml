@@ -444,9 +444,10 @@ Singleton {
     // Micro : flux PipeWire qui enregistre (pas les captures du son des haut-parleurs : cava, halo, indicateurs).
     // Seulement le type, le nom et la description des flux, lisibles sans s'y attacher : s'attacher (PwObjectTracker) à
     // tous les flux des applis faisait planter Quickshell quand plusieurs disparaissaient d'un coup (quitter Discord en
-    // déconnectant le casque). La mesure du niveau du micro pendant un appel (NiveauMicro.qml) est un flux de Quickshell : écarté.
+    // déconnectant le casque). (La mesure du niveau du micro pendant un appel, NiveauMicro.qml, est un flux « peak » /
+    // « stream.monitor » de Quickshell : Appel.qml l'écarte de ses flux, pas d'ici.)
     readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.type === PwNodeType.AudioInStream
-        && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile|monitor|quickshell/i.test((n.name || "") + " " + (n.description || "")))
+        && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile|monitor/i.test((n.name || "") + " " + (n.description || "")))
     readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].description || fluxMicro[0].name || Reglages.t("Une appli", "An app")) : ""
     // Caméra : allumée si la webcam est sortie de veille (simple fichier à lire) ; le nom de l'appli n'est cherché
     // qu'à ce moment-là (parcourir les fichiers ouverts de tous les programmes coûte cher : pas toutes les 3 s)

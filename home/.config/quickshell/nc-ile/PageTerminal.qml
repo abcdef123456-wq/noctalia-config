@@ -24,7 +24,7 @@ Item {
             Column {
                 anchors.verticalCenter: parent.verticalCenter; spacing: 3
                 width: parent.width - 56 - 16
-                Texte { width: parent.width; text: Terminal.commande; font.pixelSize: 17; font.weight: Font.DemiBold; font.family: "monospace"; maximumLineCount: 2; wrapMode: Text.WrapAnywhere }
+                Texte { width: parent.width; text: Terminal.commandeAffichee; font.pixelSize: 17; font.weight: Font.DemiBold; font.family: "monospace"; maximumLineCount: 2; wrapMode: Text.WrapAnywhere }
                 Row {
                     spacing: 6
                     Texte { text: Reglages.t("En cours depuis", "Running for"); secondaire: true; font.pixelSize: 14 }

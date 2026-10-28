@@ -826,18 +826,18 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
 fi
 # Ton ~/.zshrc (copié d'une version plus ancienne) charge ia.zsh mais pas outils.zsh : une seule ligne de plus, juste après
 if [ -f "$HOME/.zshrc" ] && grep -qE 'source.*\.config/nc/ia\.zsh' "$HOME/.zshrc" && ! grep -qF '.config/nc/outils.zsh' "$HOME/.zshrc"; then
-  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour les outils modernes du terminal (fzf, zoxide, eza, bat…) ?" "Add one line to your ~/.zshrc for the modern terminal tools (fzf, zoxide, eza, bat…)?")" o; then
+  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour les outils modernes du terminal (fzf, zoxide, eza, bat…) ?" "Add one line to your ~/.zshrc for the modern terminal tools (fzf, zoxide, eza, bat…)?")" n; then
     backup .zshrc
-    sed -i '/source.*\.config\/nc\/ia\.zsh/{a\
+    sed -i --follow-symlinks '/source.*\.config\/nc\/ia\.zsh/{a\
 [[ -r ~/.config/nc/outils.zsh ]] \&\& source ~/.config/nc/outils.zsh
 :b;n;bb}' "$HOME/.zshrc"
   fi
 fi
 # De même pour terminal.zsh (commandes longues montrées dans l'île), juste après outils.zsh
 if [ -f "$HOME/.zshrc" ] && grep -qF '.config/nc/outils.zsh' "$HOME/.zshrc" && ! grep -qF '.config/nc/terminal.zsh' "$HOME/.zshrc"; then
-  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour montrer les commandes longues du terminal dans l'île ?" "Add one line to your ~/.zshrc to show long terminal commands in the island?")" o; then
+  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour montrer les commandes longues du terminal dans l'île ?" "Add one line to your ~/.zshrc to show long terminal commands in the island?")" n; then
     backup .zshrc
-    sed -i '/source.*\.config\/nc\/outils\.zsh/{a\
+    sed -i --follow-symlinks '/source.*\.config\/nc\/outils\.zsh/{a\
 [[ -r ~/.config/nc/terminal.zsh ]] \&\& source ~/.config/nc/terminal.zsh
 :b;n;bb}' "$HOME/.zshrc"
   fi

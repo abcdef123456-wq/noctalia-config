@@ -1,16 +1,22 @@
 pragma Singleton
 // Commande longue dans le terminal (activité en direct) : une commande zsh qui dure plus de 10 s (compilation, copie,
-// mise à jour…) s'affiche dans la pilule (son nom et sa durée) et dans la page Terminal ; à la fin, « Terminée » ou
-// « Échec » avec sa durée, et un clic ramène au terminal.
+// mise à jour…) s'affiche dans la pilule (le nom du programme et sa durée) et dans la page Terminal ; à la fin,
+// « Terminée » ou « Échec » avec sa durée, et un clic ramène au terminal.
 // Source : ~/.config/nc/terminal.zsh (chargé par ~/.zshrc) écrit deux fichiers dans le dossier privé de la session,
 // avec les commandes internes de zsh seulement (aucun processus lancé) :
-//   XDG_RUNTIME_DIR/nc-terminal        pendant une commande : pid du terminal, début (s), pid du shell, commande
-//   XDG_RUNTIME_DIR/nc-terminal-fini   après une commande de 10 s ou plus : code, durée (s), fin (s), pid du terminal, commande
-// L'île les surveille (FileView, comme nc-video et nc-mode-jeu) : aucun sondage. Le shell disparu en pleine commande
-// (terminal fermé) : le fichier est vérifié (kill -0 du shell, un seul processus) seulement sur un événement, à la
-// relecture, au réveil de l'écran et à l'ouverture de la page ; jamais en boucle.
-// La commande s'affiche en texte brut (Texte.qml) et ne part jamais dans une commande : seul le pid (un entier) sert à
-// retrouver la fenêtre du terminal (hl.dsp.focus de Hyprland).
+//   XDG_RUNTIME_DIR/nc-terminal        pendant une commande : pid du terminal, début (s), pid du shell, programme
+//   XDG_RUNTIME_DIR/nc-terminal-fini   après une commande de 10 s ou plus : code, durée (s), fin (s), pid du terminal, programme
+// Vie privée : terminal.zsh n'écrit que le NOM du programme (make, cargo, rsync…), jamais ses arguments ; ici il
+// s'affiche en texte brut (Texte.qml) et ne part jamais dans une commande : seul le pid (un entier vérifié) sert à
+// retrouver la fenêtre du terminal (hl.dsp.focus de Hyprland). Pendant un partage d'écran (Partage.silence, comme les
+// aperçus du presse-papiers), le nom est remplacé par « Commande ». Sans XDG_RUNTIME_DIR (repli /tmp, lisible par
+// tous) : rien.
+// L'île surveille les fichiers (FileView, comme nc-video et nc-mode-jeu) : aucun sondage. Le shell disparu en pleine
+// commande (terminal fermé) : le fichier est vérifié (kill -0 du shell, un seul processus) seulement sur un événement,
+// à la relecture, au réveil de l'écran et à l'ouverture de la page ; jamais en boucle.
+// Le pid du terminal est le parent du shell ($PPID) : juste quand le terminal lance zsh lui-même (kitty, foot,
+// alacritty…) ; sous tmux, ou dans une instance unique de kitty à plusieurs fenêtres, la fenêtre ramenée peut être
+// une autre, ou aucune (hyprctl ne trouve rien : rien ne se passe).
 // Réglage ILE_TERMINAL (nc-reglages → Île) : non = rien de tout ça.
 import QtQuick
 import Quickshell
@@ -19,9 +25,14 @@ import Quickshell.Io
 Singleton {
     id: t
 
-    readonly property bool reglage: Reglages.val("ILE_TERMINAL", "oui") !== "non"
+    readonly property bool reglage: Reglages.val("ILE_TERMINAL", "oui") !== "non" && (Quickshell.env("XDG_RUNTIME_DIR") || "") !== ""
+    // Partage d'écran en cours : le nom du programme ne s'affiche pas devant tout le monde
+    readonly property bool masque: Partage.silence
+    readonly property string generique: Reglages.t("Commande", "Command")
     property int delai: 10000               // ms avant de parler de commande longue (même seuil que terminal.zsh)
-    property string commande: ""            // la commande en cours (fichier présent)
+    property string commande: ""            // le programme en cours (fichier présent)
+    readonly property string commandeAffichee: masque ? generique : commande
+    readonly property string finiAffichee: fini === null ? "" : (masque ? generique : fini.commande)
     property int pid: 0                     // pid du terminal (fenêtre à ramener)
     property int pidShell: 0
     property real debut: 0                  // s
