@@ -1526,8 +1526,8 @@ def proton_fournisseur():
     actives = [c for c in (proton_connexions() or []) if c["active"]]
     actif = pays_de(re.sub(r"^\s*proton\s*vpn\s*", "", actives[0]["nom"], flags=re.I)) if actives else ""
     return fiche("proton", "Proton VPN", "pilote_appli",
-                 T("Proton VPN se pilote dans son application : ouvre-la pour te connecter et choisir un pays.",
-                   "Proton VPN is driven from its own app: open it to sign in and pick a country."),
+                 T("Ouvre-la pour te connecter et choisir un pays ; l'île montre ensuite le tunnel, sans piloter l'application.",
+                   "Open it to sign in and pick a country; the island then shows the tunnel, without driving the app."),
                  pays_actif=actif, connecte=bool(actives), peut_login=True, pilotage="appli")
 
 
