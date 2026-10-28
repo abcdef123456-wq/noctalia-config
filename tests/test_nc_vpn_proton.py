@@ -1,4 +1,4 @@
-"""nc-vpn : le fournisseur Proton (pas de CLI officielle : l'application `protonvpn-app`, remplacée ici par un faux qui note ses
+"""nc-vpn : le fournisseur Proton (SANS la CLI `protonvpn` : repli sur l'application `protonvpn-app`, remplacée ici par un faux qui note ses
 arguments). Absent ; installé sans connexion Proton ; connexion « ProtonVPN … » détectée (prêt, sans liste de pays) ; choisir un
 pays, se déconnecter, se connecter ouvrent seulement l'application ; aucune fermeture, aucun pkill. PATH = faux-bin seul."""
 import json
