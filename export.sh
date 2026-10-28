@@ -90,6 +90,7 @@ HOME_FILES=(
   .local/bin/nc-micro-bluetooth
   .local/bin/nc-code
   .local/bin/nc-vpn
+  .local/bin/nc-assistant-install
   .local/bin/nc-assistant
   .local/bin/nc-noeud
   .local/bin/nc-bac

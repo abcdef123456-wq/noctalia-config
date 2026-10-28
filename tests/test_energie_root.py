@@ -290,7 +290,7 @@ class Sudoers(Base):
 
     def test_pas_d_installation_sans_accord(self):
         # La question est « sensible » avec NON par défaut : sans terminal, install.sh ne pose rien (sauf --oui)
-        bloc = INSTALL.split("Profils d'énergie poussés (nc-energie)", 1)[1].split("Bouton d'arrêt", 1)[0]
+        bloc = INSTALL.split("etape_energie_root() {", 1)[1].split("\n}\n", 1)[0]
         self.assertRegex(bloc, r'ask "[^\n]*" n sensible')
         self.assertNotIn("systemctl enable", bloc)
         self.assertNotIn(".service", bloc, "rien n'est réappliqué tout seul au démarrage")

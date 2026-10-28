@@ -336,6 +336,10 @@ pname() {
   esac
 }
 
+# Profils d'énergie poussés (nc-energie, proposés par l'IA ou par des règles) : un petit assistant root qui ne règle que
+# des valeurs d'une liste fixe (processeur, boost, Wi-Fi, USB, audio, clavier, NVIDIA…), avec une règle sudo à commandes
+# exactes (une ligne par sous-commande et valeur, écrite par l'assistant lui-même, vérifiée par visudo). Étape
+# sensible, réponse par défaut non : sans terminal elle est refusée (--oui n'accepte pas une question dont la réponse par défaut est non). Rien n'est réappliqué tout seul au démarrage.
 # Profils d'énergie poussés : assistant root (étape appelée par l'installation complète ET par --seulement energie)
 etape_energie_root() {
   local regle_e=/etc/sudoers.d/nc-energie

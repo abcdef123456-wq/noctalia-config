@@ -370,8 +370,8 @@ class DesactiverEtat(Base):
 class InstallEtDoc(unittest.TestCase):
     def test_install_question_a_part_non_par_defaut_et_nftables_seulement_si_oui(self):
         inst = (REPO / "install.sh").read_text()
-        i = inst.index("Kill switch VPN (nc-vpn killswitch")
-        bloc = inst[i:inst.index("# Bouton d'arrêt", i)]
+        i = inst.index("etape_killswitch_root() {")
+        bloc = inst[i:inst.index("\n}\n", i)]
         self.assertRegex(bloc, r'ask "\$\(t "Installer l\'assistant du kill switch VPN \?"[^\n]*\)" n sensible')   # non par défaut
         self.assertEqual(bloc.count("ask "), 1)
         # le paquet n'est tiré qu'après le oui, par le gestionnaire commun aux quatre distributions
@@ -389,14 +389,15 @@ class InstallEtDoc(unittest.TestCase):
 
     def test_commentaire_oui_corrige_et_firewalld_annonce_avant_la_question(self):
         inst = (REPO / "install.sh").read_text()
-        self.assertNotIn("(--oui pour l'accepter)", inst[inst.index("# Profils d'énergie poussés"):inst.index("# Bouton d'arrêt")])
+        e = inst.index("etape_energie_root() {")
+        fonction_e = inst[e:inst.index("\n}\n", e)]
+        self.assertNotIn("(--oui pour l'accepter)", inst[inst.index("# Profils d'énergie poussés"):e])
         self.assertIn("--oui n'accepte pas", inst)
-        i = inst.index("Kill switch VPN (nc-vpn killswitch")
-        bloc = inst[i:inst.index("# Bouton d'arrêt", i)]
+        i = inst.index("etape_killswitch_root() {")
+        bloc = inst[i:inst.index("\n}\n", i)]
         self.assertLess(bloc.index("firewalld est actif par défaut sur Fedora et openSUSE"), bloc.index('ask "'))
         self.assertIn("&& dossiers_root_surs; then", bloc)
-        e = inst.index("# Profils d'énergie poussés")
-        self.assertIn("n sensible && dossiers_root_surs; then", inst[e:i])
+        self.assertIn("n sensible && dossiers_root_surs; then", fonction_e)
 
     def lancer_garde(self, faux_stat):
         d = Path(tempfile.mkdtemp(prefix="ncvr-"))
