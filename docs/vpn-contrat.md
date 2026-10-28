@@ -169,6 +169,9 @@ Les messages d'erreur passent par un filtre (URL, e-mail, longues suites de chif
     deux caractères = code) ; nous donnons toujours le code ISO MAJUSCULE, validé avant tout appel. Sur le palier gratuit, choisir un pays est refusé par
     la CLI (« not available on the free plan ») : message prévu, jamais la sortie brute. Un compte payant dont la requête n'aboutit pas peut recevoir un
     code 0 sans « Connected to » : c'est traité comme un refus. `disconnect` écrit `Disconnected.`.
+  - **Déconnexion** : `Disconnected.` avec un code de sortie NON nul n'est un succès que si NetworkManager confirme ensuite (`nmcli` en argv, 3 lectures
+    à une seconde d'écart) qu'AUCUNE connexion « ProtonVPN … » n'est active ni en montée ; NetworkManager muet, absent ou en erreur, ou un tunnel encore là :
+    échec (« Proton VPN a refusé la demande »). Un code non nul sans ce message reste un échec. Code 0 : succès comme avant.
   - Aucune question interactive en dehors de `signin` (mot de passe `getpass`, code `click.prompt`, clé de sécurité) : stdin est fermé et chaque lecture a
     un délai. `signin` demande un NOM D'UTILISATEUR en argument obligatoire : la fenêtre `kitty` le lit dans le terminal.
   - Conflit avec l'application graphique (`proton/vpn/cli/__init__.py`, `_vpn_gui_running`) : si le nom `proton.vpn.app.gtk` est sur le bus de session, la

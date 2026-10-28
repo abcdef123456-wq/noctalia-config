@@ -1887,8 +1887,25 @@ def proton_ouvrir(message):
     print(message)
 
 
-def proton_cli_agir(args, delai, succes):
+def proton_aucun_tunnel_nm():
+    """Vrai SEULEMENT si NetworkManager répond et ne montre aucune connexion Proton active ou en montée (lecture bornée par nmcli ;
+    3 essais, une seconde entre deux, le temps que la déconnexion soit prise en compte). NetworkManager muet, absent ou en erreur :
+    faux (on ne confirme jamais sur une absence de réponse)."""
+    for essai in range(3):
+        actives = proton_connexions()
+        if actives is None:
+            return False
+        if not [c for c in actives if c["active"]] and not proton_en_montee():
+            return True
+        if essai < 2:
+            time.sleep(1)
+    return False
+
+
+def proton_cli_agir(args, delai, succes, confirme_par_nm=False):
     """Lance `protonvpn ARGS` et ne rend la main que si le code est 0 et que la sortie contient `succes` (motif en début de ligne).
+    Exception (confirme_par_nm, la déconnexion) : le message de succès avec un code NON nul n'est un succès que si NetworkManager
+    confirme ensuite qu'aucun tunnel Proton n'est actif (proton_aucun_tunnel_nm) ; sinon c'est un refus.
     Sinon un message prévu à l'avance : la sortie brute n'est JAMAIS reprise (elle peut porter une IP, un nom de compte)."""
     code, t = proton_cli(args, delai)
     if code == 124:
@@ -1897,7 +1914,7 @@ def proton_cli_agir(args, delai, succes):
         raise Echec(proton_msg_probleme("lancement"))
     if PROTON_APPLI_OUVERTE.search(t):
         raise Echec(proton_msg_appli_ouverte())
-    if code == 0 and re.search(succes, t, re.M):
+    if re.search(succes, t, re.M) and (code == 0 or (confirme_par_nm and proton_aucun_tunnel_nm())):
         return
     if PROTON_SANS_COMPTE.search(t):
         raise Echec(T("Aucun compte Proton VPN n'est connecté : utilise « Se connecter au compte ».",
@@ -1926,7 +1943,7 @@ def proton_connecter(cc):
 
 def proton_deconnecter():
     if proton_cli_exe():
-        proton_cli_agir(["disconnect"], 30, r"^Disconnected\.")
+        proton_cli_agir(["disconnect"], 30, r"^Disconnected\.", confirme_par_nm=True)
         return print(T("Proton VPN : déconnecté.", "Proton VPN: disconnected."))
     proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, déconnecte-toi dedans (nous ne la fermons ni ne la pilotons jamais).",
                     "Proton VPN: the official app is opening, disconnect there (we never close or drive it)."))
