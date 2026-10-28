@@ -347,6 +347,7 @@ class IA(unittest.TestCase):
 
     def test_sans_outils_aucune_autre_ia_erreur_claire(self):
         m = charger_nc_ia("nc_ia_sans_outils")
+        m.EN = False                         # messages en français, quelle que soit la langue du système (CI en anglais)
         m.disponible = lambda i: i == "jarvis"
         for reglage in ({"IA_CHOIX": "jarvis", "IA_MODE": "manuel"}, {"IA_PREFERENCE": "jarvis"}):
             m.reglage = lambda c, d, r=reglage: r.get(c, d)
