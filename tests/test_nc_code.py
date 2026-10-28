@@ -574,7 +574,7 @@ class NcCode(unittest.TestCase):
         self.assertIn("gh repo list --json name,url --limit 50", self.appels())
 
     GH_LISTE = [
-        {"name": "mien", "nameWithOwner": "moi/mien", "description": "Mon <b>outil</b>‮\x07", "updatedAt": "2026-10-01T10:00:00Z", "isPrivate": False},
+        {"name": "mien", "nameWithOwner": "moi/mien", "description": "Mon <b>outil</b>\u202e\x07", "updatedAt": "2026-10-01T10:00:00Z", "isPrivate": False},
         {"name": "secret", "nameWithOwner": "moi/secret", "description": None, "updatedAt": "pas une date", "isPrivate": True},
         {"name": "libre", "nameWithOwner": "moi/libre", "description": "Un dépôt", "updatedAt": "2026-09-01T10:00:00Z", "isPrivate": False},
         {"name": "occupe", "nameWithOwner": "moi/occupe", "description": "", "updatedAt": "2026-08-01T10:00:00Z", "isPrivate": False},
