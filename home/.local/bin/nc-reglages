@@ -624,6 +624,14 @@ REGLAGES = [
         "silence until things are back to normal. A short spike doesn't count. Island Health page: temperatures, fans, power "
         "profile. No sensor: nothing."),
       mini=0, maxi=110, pas=5, unite="°C", zero=_JAMAIS),
+    # Avec l'alerte de surchauffe : le ⚙ de la page Santé ouvre la section « Île », qui porte ainsi les deux réglages de la chaleur
+    R("IA_CHALEUR", "Île", L("« Pourquoi ça chauffe ? » (page Santé)", "“Why is it hot?” (Health page)"), "ouinon", "oui",
+      L("Quand le processeur est chaud, un bouton de la page Santé de l'île demande à l'IA d'expliquer en trois phrases et de "
+        "conseiller. Seulement au clic : un court relevé (température, ventilateurs, profil d'énergie, secteur ou batterie, les 5 "
+        "programmes les plus gourmands par leur nom, jamais leurs arguments) part à l'IA choisie. Sans IA, le bouton n'existe pas.",
+        "When the processor is hot, a button on the island's Health page asks the AI to explain in three sentences and advise. Only "
+        "on click: a short report (temperature, fans, power profile, mains or battery, the 5 busiest programs by name, never their "
+        "arguments) goes to the chosen AI. Without AI, the button does not exist.")),
     # Notifications
     R("PANNES", "Notifications", L("Signaler les services en panne", "Report failed services"), "choix", "nc",
       L("Un service qui s'arrête en échec (l'île, Noctalia, le son…) : une notification avec Redémarrer et, si l'IA est "
@@ -1350,13 +1358,6 @@ REGLAGES = [
         "Island Notifications page: “Summarize” and “Suggested replies” (copied to the clipboard, never sent to the app). Only "
         "when you click, never during screen sharing. The notification text goes to the chosen AI: the AI on this PC (Ollama) is "
         "preferred if it answers, otherwise nc-ia's choice (IA_PREFERENCE); it has no tools.")),
-    R("IA_CHALEUR", "Intelligence artificielle", L("« Pourquoi ça chauffe ? » (page Santé)", "“Why is it hot?” (Health page)"), "ouinon", "oui",
-      L("Quand le processeur est chaud, un bouton de la page Santé de l'île demande à l'IA d'expliquer en trois phrases et de "
-        "conseiller. Seulement au clic : un court relevé (température, ventilateurs, profil d'énergie, secteur ou batterie, les 5 "
-        "programmes les plus gourmands par leur nom, jamais leurs arguments) part à l'IA choisie. Sans IA, le bouton n'existe pas.",
-        "When the processor is hot, a button on the island's Health page asks the AI to explain in three sentences and advise. Only "
-        "on click: a short report (temperature, fans, power profile, mains or battery, the 5 busiest programs by name, never their "
-        "arguments) goes to the chosen AI. Without AI, the button does not exist.")),
     R("IA_MAJ", "Intelligence artificielle", L("Mises à jour expliquées (page Système)", "Updates explained (System page)"), "ouinon", "oui",
       L("Quand des mises à jour du système attendent, un bouton « Expliquer » de la page Système demande à l'IA ce qui change "
         "d'important, s'il faut redémarrer et s'il y a un risque connu (elle dit « je ne sais pas » plutôt que d'inventer). "
@@ -3821,6 +3822,18 @@ def catalogue(vals):
     for a in actions:
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)
+    # Fonds d'écran : juste après le dossier des fonds, « Créer les dossiers jour et nuit » (mkdir -p de « jour » et « nuit » dans ce
+    # dossier, qui doit exister, puis ouverture dans le gestionnaire de fichiers ; rien d'autre). Le message s'affiche en bas.
+    k = next((k for k, x in enumerate(res) if x["cle"] == "FONDS_DOSSIER"), None)
+    if k is not None:
+        res.insert(k + 1, dict(cle="action:fonds-jour-nuit-dossiers", section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"),
+                               nom=T("Créer les dossiers jour et nuit", "Create the day and night folders"), genre="action", defaut="",
+                               aide=T("Crée les sous-dossiers « jour » et « nuit » dans le dossier des fonds d'écran (il doit exister), "
+                                      "puis l'ouvre : mets-y tes images pour « Un fond pour le jour, un pour la nuit ».",
+                                      "Creates the “jour” and “nuit” sub-folders inside the wallpaper folder (it must exist), then opens "
+                                      "it: put your pictures there for “One wallpaper for day, one for night”."),
+                               choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="", affiche=T("Créer…", "Create…"),
+                               modifie=False, groupe="", commande=["nc-fond-jour-nuit", "creer-dossiers"], relire=True))
     # Sessions enregistrées : à la fin de Fenêtres. Le bouton demande confirmation sur sa ligne (« confirmer » : la
     # question, « bouton » : le mot du bouton qui confirme), puis la fenêtre relit le catalogue (« relire »)
     fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Fenêtres"), default=len(res))

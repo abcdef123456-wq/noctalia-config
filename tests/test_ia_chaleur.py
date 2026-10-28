@@ -70,8 +70,10 @@ class Source(unittest.TestCase):
                     else:
                         os.environ[k] = v
         r = next(x for x in nc.REGLAGES if x.cle == "IA_CHALEUR")
-        self.assertEqual((r.section, r.defaut, r.genre), ("Intelligence artificielle", "oui", "ouinon"))
+        self.assertEqual((r.section, r.defaut, r.genre), ("Île", "oui", "ouinon"))
         self.assertEqual(nc.MATERIEL.get("IA_CHALEUR"), "ile")
+        # le ⚙ de la page Santé ouvre la section « Île » : elle porte CHALEUR_ALERTE ET IA_CHALEUR
+        self.assertEqual(next(x for x in nc.REGLAGES if x.cle == "CHALEUR_ALERTE").section, r.section)
         self.assertIn('Reglages.val("IA_CHALEUR", "oui") !== "non"', self.pc)
 
     def test_bouton_seulement_avec_ia_et_chaleur_haute(self):

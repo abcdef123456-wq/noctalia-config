@@ -121,6 +121,26 @@ class LigneDeCommande(Base):
         self.assertFalse(any(x.startswith(("noctalia", "systemd-run", "systemctl")) for x in self.appels()))
 
 
+class BoutonReglages(unittest.TestCase):
+    def test_ligne_creer_les_dossiers_apres_fonds_dossier_dans_le_catalogue(self):
+        import json
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory(prefix="nc-fjn-") as h:
+            env = dict(os.environ, HOME=h, XDG_CONFIG_HOME=h + "/.config", XDG_STATE_HOME=h + "/.state", XDG_CACHE_HOME=h + "/.cache", NC_LANGUE="fr")
+            r = subprocess.run([sys.executable, str(REPO / "home/.local/bin/nc-reglages"), "catalogue"], capture_output=True, text=True,
+                               timeout=60, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cat = json.loads(r.stdout)
+        cles = [x["cle"] for x in cat]
+        i = cles.index("FONDS_DOSSIER")
+        self.assertEqual(cles[i + 1], "action:fonds-jour-nuit-dossiers")
+        ligne = cat[i + 1]
+        self.assertEqual((ligne["genre"], ligne["commande"], ligne["section"]), ("action", ["nc-fond-jour-nuit", "creer-dossiers"], "Fonds d'écran"))
+        self.assertIn("Créer les dossiers jour et nuit", ligne["nom"])
+        self.assertTrue(ligne.get("relire"))
+
+
 class Periode(Base):
     def periode(self):
         self.enterContext(patch.dict(os.environ, self.env))         # jamais le vrai ~/.config

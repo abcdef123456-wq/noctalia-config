@@ -51,6 +51,18 @@ class Source(unittest.TestCase):
             self.assertTrue(demandee(s), "ReglagesIle : section inconnue : " + s)
         self.assertIn('"nc-reglages", "fenetre"', (QML / "Systeme.qml").read_text())
 
+    def test_page_sante_ouvre_la_section_des_deux_reglages_de_chaleur(self):
+        """Le ⚙ de la page Santé ouvre la section qui contient CHALEUR_ALERTE ET IA_CHALEUR."""
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, HOME=d), warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)
+            m = runpy.run_path(str(REPO / "home/.local/bin/nc-reglages"))
+        sec = {r.cle: r.section for r in m["REGLAGES"]}
+        src = (QML / "ReglagesIle.qml").read_text()
+        page = re.search(r"sante:\s*\"([^\"]+)\"", src)
+        self.assertTrue(page, "la page Santé a sa section")
+        self.assertEqual(page.group(1), sec["CHALEUR_ALERTE"])
+        self.assertEqual(page.group(1), sec["IA_CHALEUR"])
+
     def test_bouton_en_argv_sans_shell_ni_composant_inline(self):
         src = (QML / "BoutonReglages.qml").read_text()
         self.assertIn('"/.local/bin/nc-reglages", "fenetre"]', src)
