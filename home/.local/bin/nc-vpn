@@ -13,10 +13,10 @@
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    les pays de Mullvad (`mullvad relay list`) en JSON : {"pays": [{"cc", "nom"}]}
-  nc-vpn fournisseurs-json    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
+  nc-vpn fournisseurs-json [--verifier-proton]    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (seulement à l'état pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC : deux lettres MAJUSCULES (FR). Nord : la CLI nordvpn ;
-                              Mullvad : mullvad ; Proton (pas de CLI officielle) : ouvre l'appli officielle, sans la piloter ni la fermer.
+                              Mullvad : mullvad ; Proton : la CLI officielle protonvpn (sinon ouvre l'appli, sans la piloter ni la fermer).
                               Le login lance le parcours officiel (navigateur, appli) : jamais de mot de passe, de numéro de compte ni de jeton chez nous
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
                               assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
@@ -94,10 +94,10 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    Mullvad's countries (`mullvad relay list`) as JSON: {"pays": [{"cc", "nom"}]}
-  nc-vpn fournisseurs-json    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
+  nc-vpn fournisseurs-json [--verifier-proton]    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (only when pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC: two UPPERCASE letters (FR). Nord: the nordvpn CLI;
-                              Mullvad: mullvad; Proton (no official CLI): opens the official app, never driving or closing it.
+                              Mullvad: mullvad; Proton: the official protonvpn CLI (else opens the app, never driving or closing it).
                               Login starts the official flow (browser, app): never a password, account number or token on our side
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
                               (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
@@ -945,7 +945,7 @@ def etat_enrichi():
     depuis = horodatages({c["uuid"] for c in e["actives"]})
     for c in e["connexions"]:
         c["fournisseur"] = fournisseur_de(c["nom"], c["interface"])
-        c["pays"] = pays_de(c["nom"])
+        c["pays"] = (pays_proton_nom(c["nom"]) if c["fournisseur"] == "Proton VPN" else "") or pays_de(c["nom"])
         if c["uuid"] in depuis:
             c["depuis"] = depuis[c["uuid"]]
     return e
@@ -969,7 +969,8 @@ def indicateur():
         return rien
     c = actives[0]
     return {"disponible": True, "actif": True, "fournisseur": fournisseur_de(c["nom"], c["interface"]),
-            "pays": pays_de(c["nom"]), "nom": nom_borne(c["nom"]), "nombre": len(actives), "mullvad": mv}
+            "pays": (pays_proton_nom(c["nom"]) if fournisseur_de(c["nom"], c["interface"]) == "Proton VPN" else "") or pays_de(c["nom"]),
+            "nom": nom_borne(c["nom"]), "nombre": len(actives), "mullvad": mv}
 
 
 # ── Application officielle Mullvad (commande `mullvad`, démon mullvad-daemon ; son tunnel est hors de NetworkManager) ──────
@@ -1328,14 +1329,17 @@ def message_probleme(fid, probleme):
     return T(f"{nom} n'a pas pu être lancé.", f"{nom} could not be run.")
 
 
-def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct"):
-    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret »."""
+def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct",
+          pays_probleme=""):
+    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret » ; « pays_probleme » (« delai » ou vide) dit pourquoi la
+    liste des pays manque alors que le compte est valide."""
     f = {"id": fid, "nom": nom, "etat": etat_, "message": message}
     if etat_ == "pret":
         f["pays"] = pays or []
     f.update({"pays_actif": pays_actif if etat_ in ("pret", "pilote_appli") else "",
               "connecte": bool(connecte) and etat_ in ("pret", "pilote_appli"),
-              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage})
+              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage,
+              "pays_probleme": pays_probleme if etat_ == "pret" else ""})
     return f
 
 
@@ -1496,39 +1500,281 @@ API_FOURNISSEURS = {
 }
 
 
-# ── Proton : l'application officielle `protonvpn-app` (dépôt ProtonVPN/proton-vpn-gtk-app, paquet proton-vpn-gtk-app) ─────
-# Il n'existe PAS de CLI officielle actuelle (l'ancienne protonvpn-cli est abandonnée) : le point d'entrée du paquet est
-# `protonvpn-app`, une application graphique à instance unique dont les seules options sont --start-minimized et --version.
-# Le compte de l'application vit dans son propre stockage (session chiffrée, trousseau) : le lire, c'est toucher des jetons, ce
-# que nous ne faisons pas. Le seul signe public est la connexion NetworkManager que l'appli crée en se connectant : nommée
-# « ProtonVPN <serveur> » (proton-vpn-api-core, backend/networkmanager/core/networkmanager.py) mais créée sans être enregistrée
-# (save_to_disk=False) : elle n'existe que pendant la connexion. Donc : « pret » seulement si une telle connexion existe ;
-# sinon « sans_compte » (compte non détecté : l'appli décide). Choisir un pays, se connecter, se déconnecter, se connecter au
-# compte : on ouvre l'appli officielle (« pilotage »: « appli »), sans simuler son interface ni la fermer.
+# ── Proton : la CLI officielle `protonvpn` (paquet proton-vpn-cli, dépôt ProtonVPN/proton-vpn-cli, module proton.vpn.cli) ───
+# Sources lues (version 1.0.5, lecture seule des fichiers installés, jamais lancée) :
+#   - `connect --country X` : X est un code à 2 lettres (insensible à la casse) ou un nom anglais (commands/server.py, option
+#     --country ; core/controller.py validate_country_input : len == 2 => code) ; nous donnons toujours le code ISO MAJUSCULE.
+#   - `countries` est un GROUPE : la liste est `countries list`, un tableau « Country  Code » (tabulate « simple », nom puis code
+#     en majuscules, commands/location_discovery.py) ; sans compte : « Authentication required… ».
+#   - `info` : « Account: 'NOM' » (« None » sans compte) : NOM est un nom de compte, jamais gardé.
+#   - `status` n'est JAMAIS lancé : il passe par get_vpn_connector (commands/server.py ; core/api.py l.121-139), donc par
+#     initialize_state puis _apply_kill_switch_setting (core/vpnconnector.py l.284-306) : il RÉAPPLIQUE le réglage du kill switch
+#     de Proton, ce qui, pendant un connect lancé ailleurs, peut le désactiver. Le tunnel, son serveur et son pays se lisent dans
+#     NetworkManager : la connexion s'appelle « ProtonVPN NOM_DU_SERVEUR » (backend/networkmanager/core/networkmanager.py l.221,
+#     _get_servername ; protocol/wireguard/wireguard.py l.153, openvpn.py l.249, protun.py l.175) et l'interface est « proton0 »
+#     (VIRTUAL_DEVICE_NAME, wireguard.py l.97, openvpn.py l.201, protun.py l.129).
+#   - `info` et `countries list` n'appellent pas get_vpn_connector eux-mêmes (Controller.create ne fait que get_settings ->
+#     ProtonVPNAPI.load_settings, core/api.py l.218), MAIS load_settings passe par _force_protun_for_free_users ->
+#     _should_force_protun_for_free_users (l.150-180) qui, pour un compte gratuit avec le drapeau PROTUN_ONLY, appelle get_vpn_connector :
+#     le même effet de bord est donc possible. Ces deux commandes ne sont lancées que sur une action EXPLICITE (ouverture de l'onglet
+#     Proton, fin d'un login), jamais sur un événement NetworkManager, au démarrage, par relire() ni par l'indicateur, jamais
+#     pendant qu'un tunnel Proton monte (état NetworkManager « activating »), et toujours sous le verrou des changements.
+#   - `signin USERNAME` : le nom est un ARGUMENT OBLIGATOIRE ; le mot de passe, le TOTP et le code de clé de sécurité sont demandés
+#     par le terminal (getpass, click.prompt) : la saisie reste dans le terminal de Proton.
+#   - la CLI et l'appli GTK ne tournent pas ensemble : si l'appli est sur le bus de session (proton.vpn.app.gtk), la CLI écrit
+#     « Error: Proton VPN desktop app is currently running… » sur la sortie standard et sort avec le code 0 (__init__.py).
+# Les sorties brutes (qui contiennent un nom de compte, une IP…) ne sont jamais affichées, journalisées ni mises en JSON : on
+# n'en tire que des booléens et un code pays. Tout est en argv, stdin fermé, délai borné.
+PROTON_APPLI_OUVERTE = re.compile(r"desktop app is currently running|cannot run simultaneously", re.I)
+PROTON_SANS_COMPTE = re.compile(r"authentication required|sign in with", re.I)
+
+
+def proton_cli_exe():
+    return shutil.which("protonvpn") is not None
+
+
 def proton_exe():
+    """L'application graphique officielle (`protonvpn-app`)."""
     return shutil.which("protonvpn-app") is not None
 
 
 def proton_connexions():
-    """Les connexions NetworkManager de l'appli Proton (nom « ProtonVPN … »), ou None si NetworkManager est indisponible."""
+    """Les connexions NetworkManager de Proton (nom « ProtonVPN … » ou interface proton0), ou None si NetworkManager est indisponible."""
     e = etat()
     if not e["disponible"]:
         return None
-    return [c for c in e["connexions"] if re.match(r"\s*proton\s*vpn(\s|$)", c["nom"], re.I)]
+    return [c for c in e["connexions"] if re.match(r"\s*proton\s*vpn(\s|$)", c["nom"], re.I) or c["interface"] == "proton0"]
+
+
+def pays_proton_nom(nom):
+    """Le code pays d'une connexion « ProtonVPN NOM_DU_SERVEUR » (règle de proton_pays_serveur), sinon vide."""
+    m = re.match(r"\s*proton\s*vpn\s+([A-Za-z0-9#-]{1,30})", nom or "", re.I)
+    return proton_pays_serveur(m.group(1)) if m else ""
+
+
+def proton_en_montee():
+    """Vrai si une connexion « ProtonVPN … » est en train de monter (état NetworkManager « activating »)."""
+    code, out, _ = nmcli(["-t", "-c", "no", "-f", "STATE,NAME", "connection", "show", "--active"])
+    if code != 0:
+        return False
+    for ligne in out.splitlines():
+        etat_, _, nom = ligne.partition(":")
+        if etat_.strip().lower() == "activating" and re.match(r"\s*proton\s*vpn(\s|$)", nom.replace("\\:", ":"), re.I):
+            return True
+    return False
+
+
+def proton_tunnel_nm():
+    """(monté, code pays, en montée) d'après NetworkManager seul : les connexions « ProtonVPN … » ACTIVES et leur nom de serveur."""
+    actives = [c for c in (proton_connexions() or []) if c["active"]]
+    return bool(actives), (pays_proton_nom(actives[0]["nom"]) if actives else ""), proton_en_montee()
+
+
+def verrou_essai():
+    """(pris, fd) : tente le verrou des changements (le même que verrou_changement) sans attendre ; l'appelant ferme fd. Pris faux
+    si un autre changement le tient. Verrou impossible à créer : pris vrai, fd None (comme verrou_changement, rien n'est bloqué)."""
+    base = os.environ.get("XDG_RUNTIME_DIR", "")
+    try:
+        if not base or not os.path.isdir(base) or os.stat(base).st_uid != os.getuid():
+            return True, None
+        fd = os.open(os.path.join(base, "nc-vpn.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError:
+        return True, None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False, None
+    return True, fd
+
+
+def proton_cache_chemin():
+    base = os.environ.get("XDG_RUNTIME_DIR", "")
+    try:
+        if base and os.path.isdir(base) and os.stat(base).st_uid == os.getuid():
+            return os.path.join(base, "nc-vpn-proton.json")
+    except OSError:
+        pass
+    return ""
+
+
+def proton_cache_lire():
+    """Le dernier relevé EXPLICITE (dans le dossier d'exécution de la session, mémoire vive) : seulement {appli_ouverte, compte,
+    pays (codes ISO), probleme}. Aucun nom de compte. Invalide ou absent : None."""
+    chemin = proton_cache_chemin()
+    if not chemin:
+        return None
+    try:
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, encoding="utf-8") as f:
+            d = json.loads(f.read(8192))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or d.get("compte") not in (True, False, None) or not isinstance(d.get("appli_ouverte"), bool) \
+            or d.get("probleme", "") not in ("", "delai", "lancement", "illisible") or not isinstance(d.get("pays"), list) \
+            or d.get("pays_probleme", "") not in ("", "delai"):
+        return None
+    return {"appli_ouverte": d["appli_ouverte"], "compte": d["compte"], "probleme": d.get("probleme", ""),
+            "pays_probleme": d.get("pays_probleme", ""),
+            "pays": [c for c in d["pays"][:300] if isinstance(c, str) and c in ISO_PAYS]}
+
+
+def proton_cache_ecrire(r):
+    chemin = proton_cache_chemin()
+    if not chemin:
+        return
+    tmp = chemin + ".tmp%d" % os.getpid()
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"appli_ouverte": r["appli_ouverte"], "compte": r["compte"], "probleme": r["probleme"], "pays": r["pays"],
+                       "pays_probleme": r["pays_probleme"]}, f)
+        os.replace(tmp, chemin)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def proton_pays_liste(texte):
+    """Les codes ISO du tableau de `countries list` (dernière colonne, majuscules) ; le nom vient du code, jamais de la CLI."""
+    res = []
+    for ligne in texte.splitlines():
+        m = re.fullmatch(r"\S.{0,80}?\s{2,}([A-Z]{2})\s*", ligne)
+        if m and m.group(1) in ISO_PAYS and m.group(1) not in res:
+            res.append(m.group(1))
+    return res
+
+
+def proton_pays_serveur(nom):
+    """Le code pays d'un nom de serveur Proton : « IT#23 » donne IT ; « UK#3 » donne GB. Secure Core : si le 1er segment est CH, IS ou
+    SE (pays d'entrée) et le 2e un pays ISO, c'est le 2e (« CH-US#1 » donne US) ; sinon le 1er (« US-CA#12 » donne US, « US-FREE#5 »
+    aussi). Vide si rien n'est lisible."""
+    mots = nom.upper().split("#")[0].split("-")
+
+    def iso(m):
+        m = "GB" if m == "UK" else m
+        return m if re.fullmatch(r"[A-Z]{2}", m) and m in ISO_PAYS else ""
+    if len(mots) >= 2 and mots[0] in ("CH", "IS", "SE") and iso(mots[1]):
+        return iso(mots[1])
+    return iso(mots[0])
+
+
+def delai_pays_proton():
+    """20 s pour `countries list` ; NC_VPN_PROTON_DELAI_PAYS (1 à 60) ne sert qu'aux tests."""
+    try:
+        return min(60.0, max(1.0, float(os.environ.get("NC_VPN_PROTON_DELAI_PAYS", "20"))))
+    except ValueError:
+        return 20.0
+
+
+def proton_lire_cli():
+    """Relevé EXPLICITE de la CLI, réduit à des booléens et des codes : {"appli_ouverte", "compte" (True/False/None inconnu), "pays"
+    (codes ISO), "probleme"}. `info` d'abord ; la liste des pays seulement avec un compte, et si elle dépasse son délai on s'arrête là.
+    Jamais `status` (voir plus haut). L'appelant tient le verrou et a vérifié qu'aucun tunnel Proton ne monte."""
+    r = {"appli_ouverte": False, "compte": None, "pays": [], "probleme": "", "pays_probleme": ""}
+    code, t = cli_fournisseur("protonvpn", ["info"], 10)
+    if code in (124, 126):
+        r["probleme"] = "delai" if code == 124 else "lancement"
+        return r
+    if PROTON_APPLI_OUVERTE.search(t):
+        r["appli_ouverte"] = True
+        return r
+    m = re.search(r"^\s*Account:\s*'(.*)'\s*$", t, re.M)
+    if code != 0 or not m:
+        r["probleme"] = "illisible"
+        return r
+    r["compte"] = m.group(1).strip() not in ("", "None")
+    del m, t                                    # le nom de compte n'est gardé nulle part
+    if not r["compte"]:
+        return r
+    code, t = cli_fournisseur("protonvpn", ["countries", "list"], delai_pays_proton())
+    if code == 124:                             # délai dépassé : le compte reste valide, la liste manque (dit à l'utilisateur)
+        r["pays_probleme"] = "delai"
+        return r
+    if PROTON_APPLI_OUVERTE.search(t):
+        r["appli_ouverte"] = True
+        return r
+    if PROTON_SANS_COMPTE.search(t):            # la session n'est plus valable : comme sans compte
+        r["compte"] = False
+        return r
+    if code == 0:
+        r["pays"] = proton_pays_liste(t)
+    return r
+
+
+def proton_verifier():
+    """Le relevé explicite (proton_lire_cli) s'il est permis, noté pour les lectures automatiques ; None s'il ne l'est pas : un tunnel
+    Proton monte (NetworkManager « activating »), ou un autre changement tient le verrou. Dans ces cas aucune commande n'est lancée."""
+    if proton_en_montee():
+        return None
+    pris, fd = verrou_essai()
+    if not pris:
+        return None
+    try:
+        r = proton_lire_cli()
+    finally:
+        if fd is not None:
+            os.close(fd)
+    proton_cache_ecrire(r)
+    return r
+
+
+def proton_msg_appli_ouverte():
+    return T("Ferme l'application Proton VPN pour piloter depuis l'île : la CLI et l'application ne tournent pas ensemble.",
+             "Close the Proton VPN app to drive it from the island: the CLI and the app cannot run together.")
+
+
+def proton_msg_probleme(p):
+    if p == "delai":
+        return T("protonvpn ne répond pas à temps. Si c'est la première fois, lance « protonvpn info » dans un terminal.",
+                 "protonvpn did not answer in time. If this is the first time, run \"protonvpn info\" in a terminal.")
+    if p == "lancement":
+        return T("protonvpn n'a pas pu être lancé.", "protonvpn could not be run.")
+    return T("L'état de Proton VPN est illisible : lance « protonvpn info » dans un terminal.",
+             "Proton VPN's state cannot be read: run \"protonvpn info\" in a terminal.")
+
+
+def proton_fiche_appli(probleme=""):
+    """Sans CLI (ou CLI bloquée par l'appli ouverte) : « pilote_appli », Proton se pilote dans son application. Une connexion
+    NetworkManager « ProtonVPN … » ACTIVE rend connecte vrai et donne le pays actif ; son absence ne dit rien du compte."""
+    monte, actif, _ = proton_tunnel_nm()
+    msg = proton_msg_appli_ouverte() if probleme == "appli_ouverte" else T(
+        "Ouvre-la pour te connecter et choisir un pays ; l'île montre ensuite le tunnel, sans piloter l'application.",
+        "Open it to sign in and pick a country; the island then shows the tunnel, without driving the app.")
+    return fiche("proton", "Proton VPN", "pilote_appli", msg, pays_actif=actif, connecte=monte, peut_login=True, probleme=probleme,
+                 pilotage="appli")
+
+
+VERIFIER_PROTON = False        # vrai seulement avec « fournisseurs-json --verifier-proton » (action explicite de la fenêtre)
 
 
 def proton_fournisseur():
-    """« absent » sans l'application ; sinon « pilote_appli » : Proton se pilote dans son application (compte, pays, connexion).
-    Une connexion NetworkManager « ProtonVPN … » ACTIVE rend connecte vrai et donne le pays actif ; son absence ne dit rien du compte."""
-    if not proton_exe():
-        return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."),
-                     pilotage="appli")
-    actives = [c for c in (proton_connexions() or []) if c["active"]]
-    actif = pays_de(re.sub(r"^\s*proton\s*vpn\s*", "", actives[0]["nom"], flags=re.I)) if actives else ""
-    return fiche("proton", "Proton VPN", "pilote_appli",
-                 T("Ouvre-la pour te connecter et choisir un pays ; l'île montre ensuite le tunnel, sans piloter l'application.",
-                   "Open it to sign in and pick a country; the island then shows the tunnel, without driving the app."),
-                 pays_actif=actif, connecte=bool(actives), peut_login=True, pilotage="appli")
+    """CLI présente : absent / sans_compte / pret. Sans l'option explicite, AUCUNE commande protonvpn n'est lancée : l'état du compte
+    et la liste des pays viennent du dernier relevé explicite (proton_cache_lire), le tunnel de NetworkManager. CLI absente mais
+    appli graphique présente : pilote_appli. Ni l'une ni l'autre : absent."""
+    if not proton_cli_exe():
+        if proton_exe():
+            return proton_fiche_appli()
+        return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."), pilotage="appli")
+    c = (proton_verifier() if VERIFIER_PROTON else None) or proton_cache_lire()
+    if c is None:
+        return fiche("proton", "Proton VPN", "sans_compte",
+                     T("Le compte Proton VPN n'est pas encore vérifié : ouvre l'onglet Proton VPN.",
+                       "The Proton VPN account is not checked yet: open the Proton VPN tab."), probleme="non_verifie")
+    if c["appli_ouverte"]:
+        return proton_fiche_appli("appli_ouverte")
+    if c["probleme"]:
+        return fiche("proton", "Proton VPN", "sans_compte", proton_msg_probleme(c["probleme"]), probleme=c["probleme"])
+    if c["compte"] is False:
+        return fiche("proton", "Proton VPN", "sans_compte",
+                     T("Proton VPN est installé, mais aucun compte n'est connecté.", "Proton VPN is installed, but no account is signed in."),
+                     peut_login=True)
+    monte, pays_nm, _ = proton_tunnel_nm()
+    pays = sorted(({"code": x, "nom": nom_pays(x)} for x in c["pays"]), key=lambda x: cle_nom(x["nom"]))
+    return fiche("proton", "Proton VPN", "pret", T("Compte Proton VPN connecté.", "Proton VPN account signed in."), pays=pays,
+                 pays_actif=pays_nm, connecte=monte, pays_probleme=c["pays_probleme"])
 
 
 def proton_ouvrir(message):
@@ -1539,20 +1785,82 @@ def proton_ouvrir(message):
     print(message)
 
 
+def proton_cli_agir(args, delai, succes):
+    """Lance `protonvpn ARGS` et ne rend la main que si le code est 0 et que la sortie contient `succes` (motif en début de ligne).
+    Sinon un message prévu à l'avance : la sortie brute n'est JAMAIS reprise (elle peut porter une IP, un nom de compte)."""
+    code, t = cli_fournisseur("protonvpn", args, delai)
+    if code == 124:
+        raise Echec(proton_msg_probleme("delai"))
+    if code == 126:
+        raise Echec(proton_msg_probleme("lancement"))
+    if PROTON_APPLI_OUVERTE.search(t):
+        raise Echec(proton_msg_appli_ouverte())
+    if code == 0 and re.search(succes, t, re.M):
+        return
+    if PROTON_SANS_COMPTE.search(t):
+        raise Echec(T("Aucun compte Proton VPN n'est connecté : utilise « Se connecter au compte ».",
+                      "No Proton VPN account is signed in: use \"Log in to the account\"."))
+    if re.search(r"free plan", t, re.I):
+        raise Echec(T("Le choix du pays demande un abonnement Proton VPN payant.", "Choosing a country needs a paid Proton VPN plan."))
+    if re.search(r"invalid country|no servers found", t, re.I):
+        raise Echec(T("Proton VPN ne propose pas ce pays.", "Proton VPN does not offer this country."))
+    if re.search(r"2FA Required", t):
+        raise Echec(T("Proton VPN demande une authentification de sécurité supplémentaire : ouvre l'application Proton VPN.",
+                      "Proton VPN asks for an extra security authentication: open the Proton VPN app."))
+    raise Echec(T("Proton VPN a refusé la demande.", "Proton VPN refused the request."))
+
+
 def proton_connecter(cc):
     code_pays_ok(cc)
+    if proton_cli_exe():
+        if killswitch_etat() is True:
+            raise Echec(T("Coupe d'abord le kill switch : il bloquerait Proton VPN.", "Turn the kill switch off first: it would block Proton VPN."),
+                        "killswitch_actif")
+        proton_cli_agir(["connect", "--country", cc], 90, r"^Connected to ")
+        return print(T(f"Proton VPN : connexion demandée ({cc}).", f"Proton VPN: connection requested ({cc})."))
     proton_ouvrir(T(f"Proton VPN : l'application officielle s'ouvre, choisis le pays ({cc}) et connecte-toi dedans.",
                     f"Proton VPN: the official app is opening, pick the country ({cc}) and connect there."))
 
 
 def proton_deconnecter():
+    if proton_cli_exe():
+        proton_cli_agir(["disconnect"], 30, r"^Disconnected\.")
+        return print(T("Proton VPN : déconnecté.", "Proton VPN: disconnected."))
     proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, déconnecte-toi dedans (nous ne la fermons ni ne la pilotons jamais).",
                     "Proton VPN: the official app is opening, disconnect there (we never close or drive it)."))
 
 
+# Dans la fenêtre du terminal : la ligne est lue par le shell du terminal puis donnée à `protonvpn signin` ; le mot de passe, le
+# code TOTP ou la clé de sécurité sont demandés par Proton lui-même. Rien de ce script n'est composé avec une valeur variable
+# (le message et le chemin de la CLI sont des arguments positionnels).
+SCRIPT_SIGNIN = 'printf "%s " "$1"; IFS= read -r u && [ -n "$u" ] && "$2" signin -- "$u"'
+
+
 def proton_login():
-    proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, connecte ton compte dedans.",
-                    "Proton VPN: the official app is opening, sign in to your account there."))
+    """L'appli officielle si elle est installée (ouverte, détachée) ; sinon une fenêtre kitty qui lance `protonvpn signin` : la saisie
+    (nom de compte, mot de passe, TOTP) se fait dans le terminal de Proton, jamais chez nous. On attend la fermeture de la fenêtre
+    (comme nc-assistant-install) : l'île relit l'état ensuite."""
+    if proton_exe():
+        return proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, connecte ton compte dedans.",
+                               "Proton VPN: the official app is opening, sign in to your account there."))
+    exe = shutil.which("protonvpn")
+    if not exe:
+        raise Echec(T("Proton VPN n'est pas installé.", "Proton VPN is not installed."))
+    kitty = shutil.which("kitty")
+    if not kitty:
+        raise Echec(T("kitty est introuvable : dans un terminal, lance « protonvpn signin ton-nom-de-compte ».",
+                      "kitty not found: in a terminal, run \"protonvpn signin your-account-name\"."))
+    invite = T("Nom de compte Proton :", "Proton account name:")
+    try:
+        r = subprocess.run([kitty, "--hold", "--title", "Proton VPN : " + T("connexion au compte", "account sign-in"), "sh", "-c",
+                            SCRIPT_SIGNIN, "sh", invite, exe],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        raise Echec(T("Impossible d'ouvrir kitty : dans un terminal, lance « protonvpn signin ton-nom-de-compte ».",
+                      "Could not open kitty: in a terminal, run \"protonvpn signin your-account-name\"."))
+    if r.returncode != 0:
+        raise Echec(T("La fenêtre de connexion s'est mal terminée.", "The sign-in window ended badly."))
+    print(T("Proton VPN : fenêtre de connexion fermée, l'état est relu.", "Proton VPN: sign-in window closed, the state is read again."))
 
 
 API_FOURNISSEURS["proton"] = {"fiche": proton_fournisseur, "connecter": proton_connecter, "deconnecter": proton_deconnecter,
@@ -1983,6 +2291,7 @@ ALIAS = {"status": "etat-json", "connect": "connecter", "disconnect": "deconnect
 
 
 def main():
+    global VERIFIER_PROTON
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "aide", "help"):
         return print(T(__doc__.strip(), USAGE_EN))
@@ -2020,7 +2329,8 @@ def main():
             print(json.dumps(mullvad_json(), ensure_ascii=False))
         elif cmd == "mullvad" and len(a) >= 2:
             mullvad_agir(a[1:])
-        elif cmd == "fournisseurs-json" and len(a) == 1:
+        elif cmd == "fournisseurs-json" and (len(a) == 1 or a[1:] == ["--verifier-proton"]):
+            VERIFIER_PROTON = len(a) == 2
             print(json.dumps(fournisseurs_json(), ensure_ascii=False))
         elif cmd == "fournisseur" and len(a) >= 3:
             fournisseur_agir(a[1:])

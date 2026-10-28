@@ -48,6 +48,9 @@ elif a[:2] == ["killswitch", "etat-json"]:
     print(open(f).read() if os.path.exists(f) else json.dumps(dict(installe=True, voulu=True, actif=False, refus="", limites=["Limite un", "Limite deux"])))
 elif a[:2] == ["killswitch", "activer"] or a[:2] == ["killswitch", "desactiver"]:
     open(H + "/ks.json", "w").write(json.dumps(dict(installe=True, voulu=True, actif=a[1] == "activer", refus="", limites=["Limite un", "Limite deux"])))
+elif a[:1] == ["fournisseur"]:
+    if json.loads(open(H + "/etat.json").read()).get("lent"):
+        import time; time.sleep(2)            # une action qui dure : pour vérifier ce que relire() fait pendant ce temps
 elif a[:1] == ["fournisseurs-json"]:
     e = json.loads(open(H + "/etat.json").read())
     if "fournisseurs" in e: print(json.dumps(dict(contrat=1, fournisseurs=e["fournisseurs"])))
@@ -588,8 +591,10 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 2) { if (ticks < 2) return
                     var tp = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
                     verifier(tp.indexOf("Pas de compte Proton connecté.") >= 0 && tp.indexOf("bientôt") < 0, "message de nc-vpn : " + tp)
+                    fen.fermer.connect(function () { fermee = true })
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-fournisseur-login")); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 6) return
+                    verifier(fermee, "le clic sur « Se connecter au compte » ferme la fenêtre (elle garde sinon tout le clavier)")
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
                 if (etape === 4) { if (ticks < 2) return
                     var p = tous(fen.contentItem, "nc-vpn-pays")
@@ -622,8 +627,10 @@ class HorsEcran(unittest.TestCase):
                     verifier(lg === null || !lg.visible, "pas de faux bouton de compte")
                     var b = trouver(fen.contentItem, "nc-vpn-fournisseur-ouvrir")
                     verifier(b !== null && b.visible && textes(b).join("").indexOf("Ouvrir Proton VPN") >= 0, "bouton Ouvrir Proton VPN")
+                    fen.fermer.connect(function () { fermee = true })
                     t.mouseClick(b); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 6) return
+                    verifier(fermee, "« Ouvrir Proton VPN » ferme aussi la fenêtre")
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
                 if (etape === 4) { if (ticks < 2) return
                     var tn = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
@@ -635,6 +642,112 @@ class HorsEcran(unittest.TestCase):
         ''', etats={0: etat})
         act = [a for a in appels if a[:1] == ["fournisseur"]]
         self.assertEqual(act, [["fournisseur", "proton", "login"]])
+
+    def test_proton_cli_pret_liste_changer_et_tout_deconnecter_sans_doublon(self):
+        # Proton prêt (CLI officielle) comme Mullvad : Connecté / Changer par pays ; son tunnel NetworkManager n'est pas doublé ;
+        # « Tout déconnecter » ajoute `protonvpn disconnect` (fournisseur proton deconnecter)
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="Compte Proton VPN connecté.",
+                   pays=[dict(code="fr", nom="France"), dict(code="de", nom="Allemagne")], pays_actif="fr", connecte=True, peut_login=False,
+                   probleme="", pilotage="direct")]
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c, fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    verifier(VpnEtat.tunnels.length === 1, "un seul tunnel Proton (pas de doublon) : " + VpnEtat.tunnels.length)
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var p = tous(fen.contentItem, "nc-vpn-pays")
+                    verifier(p.length === 2 && textes(p[0]).indexOf("Connecté") >= 0 && textes(p[1]).indexOf("Changer") >= 0, "pays Proton : " + p.length)
+                    t.mouseClick(p[1]); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return
+                    var ligne = trouver(fen.contentItem, "nc-vpn-actif")
+                    verifier(ligne !== null, "la ligne du tunnel ProtonVPN")
+                    t.mouseClick(trouver(ligne, "nc-vpn-bouton")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 6) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 12) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        act = [a for a in appels if a[:1] in (["fournisseur"], ["tout-deconnecter"], ["deconnecter"])]
+        self.assertEqual(act, [["fournisseur", "proton", "connecter", "DE"], ["fournisseur", "proton", "deconnecter"],
+                               ["fournisseur", "proton", "deconnecter"], ["tout-deconnecter"]],
+                         "Déconnecter (ligne ProtonVPN) puis Tout déconnecter : la CLI Proton d'abord, nmcli ensuite, jamais nmcli seul")
+
+    def test_proton_verification_explicite_une_fois_et_relire_pendant_une_action_ne_lance_rien(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="", pays=[dict(code="fr", nom="France")], pays_actif="", connecte=False,
+                   peut_login=False, probleme="", pilotage="direct"),
+              dict(id="nord", nom="NordVPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False)]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl, lent=True)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 4) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 4 || VpnEtat.externeEnLecture) return
+                    VpnEtat.lancer(["fournisseur", "proton", "deconnecter"], "ext:proton")
+                    VpnEtat.relire()
+                    etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }      // fini AVANT la fin de l'action (2 s)
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(appels.count(["fournisseurs-json", "--verifier-proton"]), 1, "une seule vérification par ouverture")
+        self.assertGreaterEqual(appels.count(["fournisseurs-json"]), 1)
+        i = appels.index(["fournisseur", "proton", "deconnecter"])
+        self.assertNotIn(["fournisseurs-json"], appels[i + 1:], "relire() pendant une action ne lance pas de lecture externe")
+        self.assertEqual([a for a in appels if a[:1] == ["fournisseurs-json"] and a not in (["fournisseurs-json"], ["fournisseurs-json", "--verifier-proton"])], [])
+
+    def test_proton_liste_des_pays_en_delai_message_et_reessayer(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="", pays=[], pays_actif="", connecte=False, peut_login=False, probleme="",
+                   pilotage="direct", pays_probleme="delai")]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 5) return
+                    var tx = textes(trouver(fen.contentItem, "nc-vpn-liste-zone")).join("|")
+                    verifier(tx.indexOf("Liste des pays indisponible (délai dépassé)") >= 0, "message : " + tx)
+                    var b = trouver(fen.contentItem, "nc-vpn-reessayer")
+                    verifier(b !== null && b.visible && textes(b).join("").indexOf("Réessayer") >= 0, "bouton Réessayer")
+                    t.mouseClick(b); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(appels.count(["fournisseurs-json", "--verifier-proton"]), 2, "ouverture de l'onglet puis Réessayer")
+
+    def test_proton_application_ouverte_message_de_nc_vpn_et_tout_deconnecter_sans_ouvrir_l_appli(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", pays_actif="fr", connecte=True, peut_login=True,
+                   message="Ferme l'application Proton VPN pour piloter depuis l'île : la CLI et l'application ne tournent pas ensemble.",
+                   probleme="appli_ouverte", pilotage="appli")]
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c, fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var tp = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
+                    verifier(tp.indexOf("Proton VPN · application ouverte") >= 0 && tp.indexOf("Ferme l'application Proton VPN pour piloter") >= 0, "carte : " + tp)
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual([a for a in appels if a[:1] == ["fournisseur"]], [], "l'application n'est pas ouverte par Tout déconnecter")
+        self.assertIn(["tout-deconnecter"], appels)
 
     def test_carte_principale_tout_deconnecter_dans_le_titre_et_lignes_pleine_largeur(self):
         self.lancer('''

@@ -1,4 +1,4 @@
-"""nc-vpn : le fournisseur Proton (pas de CLI officielle : l'application `protonvpn-app`, remplacée ici par un faux qui note ses
+"""nc-vpn : le fournisseur Proton (SANS la CLI `protonvpn` : repli sur l'application `protonvpn-app`, remplacée ici par un faux qui note ses
 arguments). Absent ; installé sans connexion Proton ; connexion « ProtonVPN … » détectée (prêt, sans liste de pays) ; choisir un
 pays, se déconnecter, se connecter ouvrent seulement l'application ; aucune fermeture, aucun pkill. PATH = faux-bin seul."""
 import json
@@ -16,8 +16,8 @@ class Proton(BaseVpn):
         self.assertEqual(r.returncode, 0, r.stderr)
         return next(f for f in json.loads(r.stdout)["fournisseurs"] if f["id"] == "proton")
 
-    def proton_nm(self, active=True, nom="ProtonVPN FR#12"):
-        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=active, dev="proton0", nom=nom)]))
+    def proton_nm(self, active=True, nom="ProtonVPN FR#12", dev="proton0"):
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=active, dev=dev, nom=nom)]))
 
     def attendre_app(self):
         for _ in range(50):
@@ -64,7 +64,7 @@ class Proton(BaseVpn):
 
     def test_nom_proche_pas_proton(self):
         self.poser("protonvpn-app", {})
-        self.proton_nm(nom="Protonic Labo")
+        self.proton_nm(nom="Protonic Labo", dev="wg9")
         self.assertEqual(self.fiche()["etat"], "pilote_appli")
         self.assertFalse(self.fiche()["connecte"])
 

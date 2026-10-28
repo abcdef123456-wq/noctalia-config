@@ -284,19 +284,24 @@ l'île Quickshell.
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
   client commercial.
   **Fournisseurs** (`nc-vpn fournisseurs-json`, pour la fenêtre VPN ; contrat dans `docs/vpn-contrat.md`) : NordVPN (CLI officielle
-  `nordvpn`), Proton VPN (application officielle `protonvpn-app`) et Mullvad (`mullvad`), chacun dans l'un de trois états : **absent**
+  `nordvpn`), Proton VPN (CLI officielle `protonvpn`, sinon l'application `protonvpn-app`) et Mullvad (`mullvad`), chacun dans l'un de trois états : **absent**
   (commande introuvable, silencieux), **sans compte** (installé, pas de compte connecté) ou **prêt** (compte connecté) ; les pays ne
   sont proposés qu'à l'état prêt. `nc-vpn fournisseur nord|proton|mullvad connecter FR | deconnecter | login` (code pays en deux
   lettres MAJUSCULES, vérifié avant tout appel). Nord : l'état vient de `nordvpn account` (seul « connecté ou non » est gardé,
   jamais l'e-mail ni un jeton), les pays de `nordvpn countries`, `connect` reçoit le nom exact de la CLI ; `login` lance `nordvpn
   login` et n'ouvre l'adresse qu'il donne (avec `xdg-open`) si elle est en https sur nordaccount.com ou nordvpn.com. Le premier
   lancement de `nordvpn` pose une question (statistiques anonymes) : ouvre un terminal et lance `nordvpn` une fois ; sans le groupe
-  `nordvpn` dans ta session, ajoute ton compte au groupe puis rouvre la session (aucune élévation de notre part). Proton n'a pas de CLI
-  officielle : le compte de l'application n'est jamais lu, « prêt » veut dire qu'une connexion NetworkManager « ProtonVPN … » existe
-  (l'appli ne la crée que pendant la connexion), et choisir un pays, se déconnecter ou se connecter ouvre l'appli officielle (jamais
-  pilotée ni fermée par nous). Mullvad : « compte connecté » vient de l'avertissement de `mullvad status` (jamais `mullvad account get`,
-  qui affiche le numéro), les pays de `mullvad relay list` (sinon la liste ISO intégrée), `login` ouvre l'appli ou dit de lancer
-  `mullvad account login` dans un terminal. Le nom d'un client installé ne fait jamais office de fournisseur connecté : la pilule ne
+  `nordvpn` dans ta session, ajoute ton compte au groupe puis rouvre la session (aucune élévation de notre part). Proton : l'état vient de `protonvpn info`
+  (seul « un compte existe » est gardé, jamais son nom), les pays de `protonvpn countries list` (le nom vient du code ISO, pas de la
+  CLI), le tunnel de NetworkManager (connexion « ProtonVPN SERVEUR ») ; la CLI n'est lue que quand tu ouvres l'onglet Proton, jamais en
+  arrière-plan, et jamais `protonvpn status` (il réappliquerait le kill switch de Proton) ; `connecter FR` lance `protonvpn connect --country FR` et `deconnecter` lance `protonvpn
+  disconnect` (refusé si le kill switch est actif). La CLI refuse de tourner avec l'application Proton ouverte : l'île te dit alors de
+  fermer l'application (nous ne la fermons jamais). `login` (le bouton « Se connecter au compte » ferme d'abord la fenêtre VPN, qui sinon avalerait ta saisie) ouvre l'application Proton si
+  elle est installée, sinon une fenêtre kitty où tu tapes ton nom de compte, puis Proton te demande lui-même le mot de passe (jamais chez nous ; une clé de
+  sécurité doit être sous la main, ou connecte-toi par l'application) ; le trousseau de clés peut demander son déverrouillage. Sans la CLI mais avec l'application,
+  Proton reste « piloté dans son application » (bouton « Ouvrir Proton VPN »). Mullvad : « compte connecté » vient d'un
+  `mullvad account get` dont la sortie (qui porte le numéro) est lue en mémoire puis jetée, les pays de `mullvad relay list` (sinon la
+  liste ISO intégrée), `login` ouvre l'appli ou dit de lancer `mullvad account login` dans un terminal. Le nom d'un client installé ne fait jamais office de fournisseur connecté : la pilule ne
   montre qu'un tunnel réellement monté.
   **Kill switch** (facultatif, coupé par défaut : `VPN_KILLSWITCH` à oui dans `nc-reglages` → Île). Quand un tunnel est monté, il
   bloque toute sortie de l'ordinateur hors du tunnel, pour qu'une coupure du tunnel ne laisse rien fuir. L'interrupteur « Bloquer

@@ -72,7 +72,9 @@ Singleton {
                                     pays: typeof c.pays === "string" && /^[A-Z]{2}$/.test(c.pays) ? c.pays : "",
                                     serveur: String(c.nom || ""),
                                     interface: typeof c.interface === "string" && /^[A-Za-z0-9_.-]{1,15}$/.test(c.interface) && c.interface !== ".." ? c.interface : "",
-                                    depuis: typeof c.depuis === "number" ? c.depuis : 0, mullvad: false }))
+                                    depuis: typeof c.depuis === "number" ? c.depuis : 0, mullvad: false,
+                                    // Proton prêt par sa CLI : « Déconnecter » passe par `protonvpn disconnect`, pas par nmcli derrière son dos
+                                    externe: c.fournisseur === "Proton VPN" && externe.proton && externe.proton.etat === "pret" ? "proton" : "" }))
         for (var id of ["nord", "proton"]) {
             var x = externe[id]
             // Proton : sa connexion « ProtonVPN … » est déjà dans les tunnels de NetworkManager ci-dessus (pas de doublon)
@@ -86,8 +88,8 @@ Singleton {
         return l
     }
     // Le modèle des fournisseurs du panneau : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays: [{cc, nom}]}.
-    // « pilote_appli » : Proton, qui se pilote dans son application (pas de pays chez nous ; le bouton l'ouvre).
-    // Proton et Nord : « bientôt » (leurs adaptateurs sont un autre lot) ; CyberGhost seulement si un profil de ce nom existe.
+    // « pilote_appli » : Proton sans sa CLI (ou avec l'application ouverte), qui se pilote dans son application (pas de pays chez nous ; le bouton l'ouvre).
+    // Proton et Nord : « bientôt » tant que nc-vpn ne répond pas ; CyberGhost seulement si un profil de ce nom existe.
     readonly property var fournisseurs: {
         var l = [fiche("proton", "Proton VPN"), fiche("nord", "NordVPN"),
                  { id: "mullvad", fournisseur: "Mullvad", bientot: false, peutLogin: false, message: "",
@@ -101,7 +103,7 @@ Singleton {
         var x = externe[id]
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
         return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
-                 connecte: x.connecte }
+                 connecte: x.connecte, probleme: x.probleme, paysProbleme: x.paysProbleme }
     }
     // « 🇫🇷 » pour « FR » ; vide si le code n'est pas deux lettres majuscules
     function drapeauDe(cc) {
@@ -132,33 +134,49 @@ Singleton {
     }
 
     function lireExterne() { if (panneauOuvert && !lectureExterne.running) lectureExterne.running = true }
+    // Lecture AUTOMATIQUE (événements NetworkManager, relire()) : nc-vpn ne lance alors aucune commande Proton (voir docs/vpn-contrat.md).
     Process {
         id: lectureExterne
         command: [v.bin + "nc-vpn", "fournisseurs-json"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var d = null
-                try { d = JSON.parse(text) } catch (e) { d = null }
-                var res = {}
-                if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
-                    d.fournisseurs.forEach(x => {
-                        if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
-                        var pays = x.etat === "pret" && Array.isArray(x.pays)
-                            ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
-                                    .map(q => ({ cc: q.code.toUpperCase(), nom: q.nom.slice(0, 40) })).slice(0, 150) : []
-                        res[x.id] = { id: x.id, nom: typeof x.nom === "string" && x.nom !== "" ? x.nom.slice(0, 40) : (x.id === "nord" ? "NordVPN" : "Proton VPN"),
-                                      etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
-                                      paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
-                                      connecte: x.connecte === true, peutLogin: x.peut_login === true }
-                    })
-                }
-                v.externe = res
-            }
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+    }
+    // Vérification EXPLICITE du compte Proton (`protonvpn info` et `countries list`) : une seule fois par ouverture de la fenêtre, à
+    // l'ouverture de l'onglet Proton, ou après une connexion au compte (force). Jamais pendant une action, jamais depuis relire().
+    property bool protonVerifie: false
+    readonly property bool externeEnLecture: lectureExterne.running      // lecture automatique en cours (pour les tests)
+    function verifierProton(force) {
+        if (!panneauOuvert || agir.running || verificationProton.running || (protonVerifie && force !== true)) return
+        protonVerifie = true
+        verificationProton.running = true
+    }
+    Process {
+        id: verificationProton
+        command: [v.bin + "nc-vpn", "fournisseurs-json", "--verifier-proton"]
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+    }
+    function ingererExterne(text) {
+        var d = null
+        try { d = JSON.parse(text) } catch (e) { d = null }
+        var res = {}
+        if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
+            d.fournisseurs.forEach(x => {
+                if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
+                var pays = x.etat === "pret" && Array.isArray(x.pays)
+                    ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
+                            .map(q => ({ cc: q.code.toUpperCase(), nom: q.nom.slice(0, 40) })).slice(0, 150) : []
+                res[x.id] = { id: x.id, nom: typeof x.nom === "string" && x.nom !== "" ? x.nom.slice(0, 40) : (x.id === "nord" ? "NordVPN" : "Proton VPN"),
+                              etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
+                              paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
+                              connecte: x.connecte === true, peutLogin: x.peut_login === true,
+                              probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "",
+                              paysProbleme: x.pays_probleme === "delai" ? "delai" : "" }
+            })
         }
+        v.externe = res
     }
 
     function relire() {
-        lireExterne()
+        if (!agir.running) lireExterne()           // une action en cours relira l'état à sa fin (onExited)
         if (panneauOuvert && !lecture.running) lecture.running = true      // tous les tunnels : panneau ouvert seulement
         if (panneauOuvert && mullvadInstalle && !lectureMullvad.running) lectureMullvad.running = true
         if (!resume.running) resume.running = true
@@ -189,7 +207,7 @@ Singleton {
         }
     }
     onVouluChanged: if (voulu) relire()           // premier relevé, et relevé au réveil de l'écran
-    onPanneauOuvertChanged: { if (panneauOuvert) { relire(); lireKs(); lirePays() } else tunnelsLus = false }
+    onPanneauOuvertChanged: { if (panneauOuvert) { relire(); lireKs(); lirePays() } else { tunnelsLus = false; protonVerifie = false } }
     onMullvadInstalleChanged: { lirePays(); if (panneauOuvert && mullvadInstalle && !lectureMullvad.running) lectureMullvad.running = true }
     function lirePays() { if (panneauOuvert && mullvadInstalle && !mullvadPaysLus && !lecturePays.running) lecturePays.running = true }
     Process {
@@ -345,25 +363,20 @@ Singleton {
     }
     function connecter(uuid) { lancer(["connecter", uuid], uuid) }
     function deconnecter(uuid) { lancer(["deconnecter", uuid], uuid) }
-    // Tout couper : les tunnels de NetworkManager, puis l'application Mullvad si elle est montée
+    // Tout couper, dans l'ordre : Proton prêt (sa CLI), les tunnels de NetworkManager, Mullvad, Nord prêt
     function toutDeconnecter() {
         if (agir.running) return
-        if (actives.length === 0) {
-            var file0 = []
-            if (mullvad.connecte) file0.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
-            for (var i0 of ["nord", "proton"])
-                if (externe[i0] && externe[i0].connecte) file0.push({ args: ["fournisseur", i0, "deconnecter"], cible: "ext:" + i0, toujours: true })
-            if (file0.length === 0) return
-            suites = file0.slice(1)
-            lancer(file0[0].args, file0[0].cible)
-            return
-        }
         var file = []
+        // Proton prêt : d'abord sa CLI (`protonvpn disconnect`), puis les tunnels de NetworkManager, puis Mullvad et Nord prêts
+        if (externe.proton && externe.proton.connecte && externe.proton.etat === "pret")
+            file.push({ args: ["fournisseur", "proton", "deconnecter"], cible: "ext:proton", toujours: true })
+        if (actives.length > 0) file.push({ args: ["tout-deconnecter"], cible: "tout", toujours: true })
         if (mullvad.connecte) file.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
-        for (var id of ["nord", "proton"])
-            if (externe[id] && externe[id].connecte) file.push({ args: ["fournisseur", id, "deconnecter"], cible: "ext:" + id, toujours: true })
-        suites = file
-        lancer(["tout-deconnecter"], "tout")
+        if (externe.nord && externe.nord.connecte && externe.nord.etat === "pret")
+            file.push({ args: ["fournisseur", "nord", "deconnecter"], cible: "ext:nord", toujours: true })
+        if (file.length === 0) return
+        suites = file.slice(1)
+        lancer(file[0].args, file[0].cible)
     }
     function killswitchActiver() { if (!masque) lancer(["killswitch", "activer"], "killswitch") }
     function killswitchDesactiver() { if (!masque) lancer(["killswitch", "desactiver"], "killswitch") }
@@ -374,7 +387,25 @@ Singleton {
         if ((id === "nord" || id === "proton") && /^[A-Z]{2}$/.test(cc)) lancer(["fournisseur", id, "connecter", cc], "ext:" + id)
     }
     function fournisseurDeconnecter(id) { if (id === "nord" || id === "proton") lancer(["fournisseur", id, "deconnecter"], "ext:" + id) }
-    function fournisseurLogin(id) { if (id === "nord" || id === "proton") lancer(["fournisseur", id, "login"], "ext:" + id) }
+    // Connexion au compte (Nord, Proton, Mullvad) : un Process à part, pas `agir` (une fenêtre kitty ouverte pendant des minutes ne grise pas les
+    // autres actions VPN). La fenêtre de l'île se ferme avant (Vpn.qml connecterCompte) : le processus vit ici, dans le singleton.
+    property string compteId: ""
+    function fournisseurLogin(id) {
+        if ((id !== "nord" && id !== "proton" && id !== "mullvad") || connexionCompte.running) return
+        compteId = id
+        connexionCompte.command = [bin + "nc-vpn", "fournisseur", id, "login"]
+        connexionCompte.running = true
+    }
+    Process {
+        id: connexionCompte
+        stderr: StdioCollector { id: erreurCompte }
+        onExited: code => {
+            var qui = v.compteId; v.compteId = ""
+            if (code !== 0) v.notifier(erreurCompte.text.trim().split("\n")[0] || Reglages.t("Connexion au compte impossible.", "Couldn't open the account sign-in."))
+            v.relire()
+            if (qui === "proton") v.verifierProton(true)      // le compte vient peut-être de changer : nouvelle vérification explicite
+        }
+    }
     // Un pays de la liste : choisir le pays puis connecter (Connecter, ou Changer si Mullvad est déjà monté)
     function mullvadVers(cc) {
         if (!/^[A-Z]{2}$/.test(cc) || agir.running) return

@@ -41,6 +41,9 @@ elif a[-2:] == ["connection", "show"] and "UUID,TIMESTAMP" in a:
 elif a[-2:] == ["connection", "show"]:
     for c in etat:
         print(":".join([c["uuid"], c["type"], "yes" if c["active"] else "no", c["dev"] if c["active"] else "--", esc(c["nom"])]))
+elif "STATE,NAME" in a:
+    for c in etat:
+        if c["active"]: print(c.get("etat", "activated") + ":" + esc(c["nom"]))
 elif a[-1:] == ["general"]:
     print("running")
 elif a[:3] == ["connection", "up", "uuid"]:
