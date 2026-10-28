@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""nc-fond-jour-nuit : un fond d'écran pour le jour, un pour la nuit (nc-reglages → Fonds d'écran, FONDS_JOUR_NUIT).
+
+  nc-fond-jour-nuit            applique le fond de la période en cours s'il a changé, puis pose UN minuteur jusqu'à la prochaine
+                               bascule (7 h et 19 h) ; écran éteint ou session verrouillée : rien (l'île relance dès le réveil)
+  nc-fond-jour-nuit force      réapplique même si la période n'a pas changé (réglage tout juste activé)
+  nc-fond-jour-nuit arreter    retire le minuteur (réglage coupé)
+Les fonds sont les images des sous-dossiers « jour » et « nuit » de FONDS_DOSSIER (un par jour, à tour de rôle s'il y en a
+plusieurs). Le fond est changé comme partout dans le dépôt : « noctalia msg wallpaper-set » (le hook de Noctalia recalcule
+alors les couleurs). Le minuteur est une minuterie systemd de session posée pour une seule échéance : aucun processus ne
+tourne entre deux bascules, et systemd la déclenche aussi au réveil d'une veille. Lever et coucher du soleil : nc-meteo ne
+les donne pas (et aucun appel réseau n'est ajouté) ; heures fixes."""
+import datetime
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+JOUR_DE, NUIT_DE = 7, 19          # heures de bascule
+IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".avif", ".jxl")
+HOME = os.path.expanduser("~")
+
+
+def etat_dir():
+    d = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "nc")
+    return d
+
+
+def reglages():
+    v = {}
+    try:
+        with open(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "nc", "reglages.conf"),
+                  encoding="utf-8", errors="replace") as f:
+            for l in f:
+                m = re.match(r'\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$', l)
+                if m:
+                    v[m[1]] = m[2].strip('"')
+    except OSError:
+        pass
+    return v
+
+
+def periode(maintenant):
+    """('jour' ou 'nuit', prochaine bascule)."""
+    h = maintenant.replace(minute=0, second=0, microsecond=0)
+    jour7 = h.replace(hour=JOUR_DE)
+    soir = h.replace(hour=NUIT_DE)
+    if maintenant < jour7:
+        return "nuit", jour7
+    if maintenant < soir:
+        return "jour", soir
+    return "nuit", jour7 + datetime.timedelta(days=1)
+
+
+def ecran_vu():
+    run = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return not (os.path.exists(os.path.join(run, "nc-ecran-eteint")) or os.path.exists(os.path.join(run, "nc-verrouille")))
+
+
+def choisir(dossier, nom, maintenant):
+    d = os.path.join(os.path.expanduser(dossier), nom)
+    try:
+        images = sorted(f for f in os.listdir(d) if f.lower().endswith(IMAGES) and os.path.isfile(os.path.join(d, f)))
+    except OSError:
+        return None
+    return os.path.join(d, images[maintenant.toordinal() % len(images)]) if images else None
+
+
+def lire_marque():
+    try:
+        with open(os.path.join(etat_dir(), "fond-jour-nuit"), encoding="utf-8") as f:
+            return f.read().split("\n")
+    except OSError:
+        return []
+
+
+def noter_marque(cle, unite):
+    os.makedirs(etat_dir(), exist_ok=True)
+    tmp = os.path.join(etat_dir(), "fond-jour-nuit.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(cle + "\n" + unite + "\n")
+    os.replace(tmp, os.path.join(etat_dir(), "fond-jour-nuit"))
+
+
+def systemctl(*args):
+    if shutil.which("systemctl"):
+        subprocess.run(["systemctl", "--user", *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+
+
+def poser_minuteur(echeance, ancienne):
+    """Une seule échéance : minuterie transitoire (OnCalendar, heure locale) ; l'ancienne est retirée."""
+    if not shutil.which("systemd-run"):
+        return ""
+    unite = "nc-fond-jn-" + echeance.strftime("%Y%m%d%H%M")
+    if ancienne and ancienne != unite:
+        systemctl("stop", ancienne + ".timer")
+    r = subprocess.run(["systemd-run", "--user", "--quiet", "--collect", "--unit=" + unite, "--timer-property=AccuracySec=1min",
+                        "--on-calendar=" + echeance.strftime("%Y-%m-%d %H:%M:00"), os.path.abspath(sys.argv[0])],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+    return unite if r.returncode == 0 else ancienne
+
+
+def appliquer(fond):
+    if not shutil.which("noctalia"):
+        return False
+    return subprocess.run(["noctalia", "msg", "wallpaper-set", fond], stdin=subprocess.DEVNULL, capture_output=True,
+                          timeout=15).returncode == 0
+
+
+def main(argv, maintenant=None):
+    arg = argv[0] if argv else ""
+    marque = lire_marque()
+    ancienne = marque[1] if len(marque) > 1 else ""
+    if arg == "arreter":
+        if ancienne:
+            systemctl("stop", ancienne + ".timer")
+        try:
+            os.remove(os.path.join(etat_dir(), "fond-jour-nuit"))
+        except OSError:
+            pass
+        return 0
+    v = reglages()
+    if v.get("FONDS_JOUR_NUIT", "non") != "oui" or not ecran_vu():
+        return 0
+    maintenant = maintenant or datetime.datetime.now()
+    nom, prochaine = periode(maintenant)
+    cle = nom + ":" + maintenant.date().isoformat() if nom == "jour" or maintenant.hour >= NUIT_DE else \
+        nom + ":" + (maintenant.date() - datetime.timedelta(days=1)).isoformat()
+    if arg == "force" or (marque[:1] or [""])[0] != cle:
+        fond = choisir(v.get("FONDS_DOSSIER") or "~/Pictures/Wallpapers", nom, maintenant)
+        if fond and appliquer(fond):
+            noter_marque(cle, ancienne)
+            marque = [cle, ancienne]
+    unite = poser_minuteur(prochaine, ancienne)
+    noter_marque((marque[:1] or [""])[0], unite)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

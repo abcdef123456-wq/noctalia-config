@@ -226,6 +226,10 @@ l'île Quickshell.
   commandes sont lancées en argv, et seulement sur ton clic. Le calcul d'aperçu n'accepte que des chiffres et des opérateurs
   (aucun taux de change n'est cherché en ligne), est borné à 2 s et ne se lance qu'à l'affichage de la carte. Tout est caché
   pendant un partage d'écran.
+- **Fond du jour et fond de la nuit** (`nc-reglages` → Fonds d'écran, réglage `FONDS_JOUR_NUIT`, désactivé par défaut) : crée les sous-dossiers
+  `jour` et `nuit` dans le dossier des fonds d'écran ; le fond change à 7 h et à 19 h (`nc-fond-jour-nuit`, par `noctalia msg wallpaper-set`,
+  donc les couleurs suivent). Il passe devant le changement automatique de fond, coupé alors. Un seul minuteur systemd de session est posé
+  jusqu'à la prochaine bascule, rien ne tourne entre deux ; rien écran éteint ou verrouillé, rattrapage au réveil. Aucun appel réseau.
 - **Ne pas déranger automatique** (`nc-reglages` → Notifications, réglage `NPD_AUTO`, activé par défaut) : la même retenue
   que pour le partage d'écran pendant le mode jeu et pendant une projection (écran du PC dupliqué, ou éteint au profit d'un
   projecteur ou d'un second écran avec `nc-ecrans`, Super + O ; étendre le bureau n'en fait pas partie). Les bannières

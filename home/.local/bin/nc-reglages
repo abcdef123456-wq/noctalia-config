@@ -840,6 +840,18 @@ REGLAGES = [
       "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
     R("FONDS_DOSSIER", "Fonds d'écran", L("Dossier des fonds d'écran", "Wallpaper folder"), "dossier", "~/Pictures/Wallpapers",
       groupe="noctalia"),
+    R("FONDS_JOUR_NUIT", "Fonds d'écran", L("Un fond pour le jour, un pour la nuit", "One wallpaper for day, one for night"),
+      "ouinon", "non",
+      L("Crée deux sous-dossiers « jour » et « nuit » dans le dossier des fonds d'écran et mets-y tes images : le fond change "
+        "à 7 h et à 19 h (un fond par jour, à tour de rôle s'il y en a plusieurs). Il passe devant « Changer de fond "
+        "automatiquement », qui est alors coupé. Rien ne tourne entre deux changements : un seul minuteur est posé jusqu'au "
+        "suivant, rien n'est fait écran éteint ou verrouillé (le fond se met à jour dès le réveil). Sous-dossier vide ou "
+        "absent : le fond ne change pas.",
+        "Create two subfolders \"jour\" (day) and \"nuit\" (night) in the wallpaper folder and put your images there: the "
+        "wallpaper changes at 7:00 and 19:00 (one per day, in turn if there are several). It overrides \"Change wallpaper "
+        "automatically\", which is then turned off. Nothing runs between two changes: a single timer is set until the next "
+        "one, nothing is done while the screen is off or locked (the wallpaper updates as soon as you wake it). Empty or "
+        "missing subfolder: the wallpaper doesn't change."), groupe="noctalia"),
     # Énergie
     R("HZ_PERFORMANCE", "Énergie", L("Écran en Performance", "Screen in Performance"), "hz", "max", _FREQ_AIDE, groupe="energie"),
     R("HZ_BALANCED_AC", "Énergie", L("Écran en Équilibré, sur secteur", "Screen in Balanced, plugged in"), "hz", "max",
@@ -1503,7 +1515,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
@@ -2319,6 +2331,9 @@ def appliquer_noctalia(vals):
         mettre("wallpaper.automation", "enabled", oui("FONDS_ROTATION"))
     if "FONDS_INTERVALLE" in vals:
         mettre("wallpaper.automation", "interval_seconds", nombre(vals, "FONDS_INTERVALLE") * 60)
+    if vals.get("FONDS_JOUR_NUIT") == "oui":
+        # Un fond pour le jour et un pour la nuit passe devant le changement automatique de fond
+        mettre("wallpaper.automation", "enabled", False)
     if "FONDS_DOSSIER" in vals:
         mettre("wallpaper", "directory", os.path.expanduser(vals["FONDS_DOSSIER"]))
 

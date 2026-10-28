@@ -125,6 +125,8 @@ ShellRoot {
     }
     // Terminal déroulant sorti : un clic sur le bureau vide à côté le range
     RangeTerminal {}
+    // Fond du jour et fond de la nuit (FONDS_JOUR_NUIT) : lance nc-fond-jour-nuit aux bons moments, rien d'autre
+    FondJourNuit {}
     // Fond d'écran animé (nc-reglages → Fonds d'écran : aurore ou vivant) : créé seulement s'il est choisi
     Variants {
         model: ["aurore", "vivant"].indexOf(Reglages.val("FOND_ANIME", "non")) >= 0 && !Reglages.sobre ? Quickshell.screens : []
