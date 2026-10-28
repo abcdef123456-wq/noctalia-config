@@ -29,10 +29,12 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -184,6 +186,7 @@ def court(texte, n=200):
 
 def connecter(u):
     u = uuid_valide(u)
+    nettoyer_abandonnes()
     c = connue(u)
     if c["active"]:
         return print(T(f"Déjà connecté : {c['nom']}", f"Already connected: {c['nom']}"))
@@ -356,6 +359,43 @@ def dossier_prive():
         raise Echec(T("Impossible de créer un dossier temporaire privé.", "Could not create a private temporary folder."))
     os.chmod(d, 0o700)
     return d
+
+
+# Dossier abandonné : un nc-vpn tué avant son « finally » (SIGKILL, coupure de courant) peut laisser « nc-vpn-*/mdp » (le mot de
+# passe en clair, 0600) dans XDG_RUNTIME_DIR. Le ménage de connecter() et d'importer() efface ceux de plus de SEUIL secondes.
+# Le seuil doit rester LARGEMENT au-dessus du plus long travail légitime : connecter() dure au plus ~190 s (état de NetworkManager
+# 15 s, agent-owned ~20 s, secret-tool 30 s, nmcli up 120 s) et importer() ~60 s. Si l'un de ces délais augmente, on monte ce
+# seuil (tests/test_nc_vpn_menage.py vérifie qu'il reste au moins le double de la somme des délais de connecter).
+SEUIL_DOSSIER_ABANDONNE = 600       # secondes (10 minutes)
+
+
+def nettoyer_abandonnes(seuil=None):
+    """Efface les dossiers DIRECTS de XDG_RUNTIME_DIR nommés « nc-vpn-* » (le préfixe de dossier_prive), qui sont à nous
+    (lstat st_uid), ne sont pas des liens (S_ISDIR sur lstat) et dont le mtime date de plus que le seuil. Un lien, un fichier,
+    le dossier d'un autre préfixe ou d'un autre utilisateur ne sont jamais touchés ; rmtree ne suit aucun lien ; toute erreur est ignorée."""
+    seuil = SEUIL_DOSSIER_ABANDONNE if seuil is None else seuil
+    base = os.environ.get("XDG_RUNTIME_DIR", "")
+    try:
+        if not base or not os.path.isdir(base) or os.stat(base).st_uid != os.getuid():
+            return
+        with os.scandir(base) as it:
+            entrees = [e.name for e in it if e.name.startswith("nc-vpn-")]
+    except OSError:
+        return
+    maintenant = time.time()
+    for nom in entrees:
+        chemin = os.path.join(base, nom)
+        try:
+            st = os.lstat(chemin)
+            if stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and maintenant - st.st_mtime > seuil:
+                shutil.rmtree(chemin, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def arret_propre(num, _cadre):
+    """SIGTERM, SIGINT, SIGHUP : une exception, pour que les « finally » (effacement du dossier du mot de passe) s'exécutent."""
+    raise SystemExit(128 + num)
 
 
 BLOC_AUTH_DEBUT = re.compile(r"<\s*auth-user-pass\s*>", re.I)
@@ -653,6 +693,7 @@ def utilisateur():
 
 
 def importer(chemin):
+    nettoyer_abandonnes()
     nom, donnees = lire_fichier(chemin)
     texte = donnees.decode("utf-8", errors="replace")
     ext = os.path.splitext(nom)[1].lower()
@@ -1250,6 +1291,8 @@ def main():
     if not a or a[0] in ("-h", "--help", "aide", "help"):
         return print(T(__doc__.strip(), USAGE_EN))
     cmd = a[0]
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, arret_propre)
     try:
         if cmd == "etat-json" and len(a) == 1:
             print(json.dumps(etat(), ensure_ascii=False))
