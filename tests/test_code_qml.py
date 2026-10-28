@@ -28,6 +28,29 @@ elif a[:1] == ["--apercu-json"]:
 '''
 
 
+FAUX_NC_CLAUDE = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ["HOME"]) / "appels").open("a") as f: f.write(json.dumps(["nc-claude"] + sys.argv[1:], ensure_ascii=False) + "\n")
+'''
+
+# Agents.qml et Etat.qml réduits à ce que Code.qml lit (les vrais lisent l'état de nc-claude et l'horloge de l'île)
+FAUX_AGENTS = '''pragma Singleton
+import QtQuick
+import Quickshell
+QtObject {
+    property var sessions: []
+    function sessionActive(s) { return s.etat === "travail" || s.etat === "demande" || s.etat === "terminal" }
+    function nom(s) { return s.agent === "codex" ? "Codex" : "Claude" }
+    function couleurDe(s) { return "#d97757" }
+    function allerTerminal(pid, shell) {
+        if (pid > 0) Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-claude", "aller", String(pid), String(shell || 0)])
+    }
+}
+'''
+FAUX_ETAT = "pragma Singleton\nimport QtQuick\nQtObject { property date maintenant: new Date() }\n"
+
+
 def projets(home):
     d = str(home / "dev")
     return [dict(nom="alpha", chemin=d + "/alpha", court="~/dev/alpha", branche="main", quand=1700000300, date="hier", message="Dernier",
@@ -58,10 +81,12 @@ class EspaceDeCode(unittest.TestCase):
             (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: true;'
                                             ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d}}')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
+            (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT)
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat") else "") + n + " 1.0 " + n + ".qml"
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
+            (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
             ps = projets(root)
             (root / "projets.json").write_text(json.dumps(ps))
             (root / "agents.json").write_text(json.dumps(agents if agents is not None else
@@ -93,7 +118,7 @@ ShellRoot {
  } }
  Timer { interval: 12000; running: true; onTriggered: { console.error("ECHEC délai"); Qt.exit(3) } }
 }
-'''.replace("SCENARIO", scenario))
+'''.replace("SCENARIO", scenario.replace("@HOME@", d)))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
                        XDG_CACHE_HOME=str(root / "cache"), XDG_CONFIG_HOME=str(root / "config"), XDG_STATE_HOME=str(root / "state"),
                        XDG_DATA_HOME=str(root / "data"), TMPDIR=str(root))
@@ -214,6 +239,51 @@ ShellRoot {
         self.assertIn('Quickshell.execDetached(["xdg-open", github])', code)
         self.assertNotIn('"sh"', code, "aucune ligne de shell construite avec un chemin")
         self.assertIn('namespace = "^nc-code$"', (REPO / "home/.config/hypr/nc/regles.lua").read_text(), "flou derrière la carte")
+
+    def test_badge_et_entree_ramene_au_terminal_de_l_agent(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { Agents.sessions = [
+        { id: "a", agent: "claude", etat: "travail", cwd_reel: "@HOME@/dev/alpha", cwd: "~/dev/alpha", terminal: 4242, shell: 4243, maj: 1 },
+        { id: "b", agent: "codex", etat: "demande", cwd: "~/dev/neovim-conf", terminal: 0, maj: 1 },
+        { id: "c", agent: "claude", etat: "fini", cwd_reel: "@HOME@/dev/site", terminal: 7, maj: 1 }]
+      etape++; return }
+  if (etape === 2) { var l = []; (function tout(e) { if (e.objectName === "nc-code-badge" && e.visible) l.push(e); (e.children || []).forEach(tout) })(fen.contentItem)
+                     verifier(l.length === 2, "deux badges (alpha, neovim-conf), pas pour un agent fini : " + l.length)
+                     verifier(fen.badgeDe(fen.projets[0]) === "Claude travaille", "badge : " + fen.badgeDe(fen.projets[0]))
+                     verifier(fen.badgeDe(fen.projets[1]) === "Codex t'attend", "badge : " + fen.badgeDe(fen.projets[1]))
+                     verifier(fen.badgeDe(fen.projets[2]) === "", "aucun badge sans agent au travail")
+                     touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: any(x[:1] == ["nc-claude"] for x in a))
+        self.assertIn(["nc-claude", "aller", "4242", "4243"], appels, "Entrée : le terminal de l'agent")
+        self.assertFalse([a for a in appels if a and a[0] == ps[0]["chemin"]], "pas de second espace ouvert")
+
+    def test_ctrl_entree_ouvre_quand_meme_et_sans_terminal_connu(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { Agents.sessions = [
+        { id: "a", agent: "claude", etat: "travail", cwd_reel: "@HOME@/dev/alpha", terminal: 4242, shell: 1, maj: 1 },
+        { id: "b", agent: "claude", etat: "travail", cwd: "~/dev/neovim-conf", terminal: 0, maj: 1 }]
+      etape++; return }
+  if (etape === 2) { touche(Qt.Key_Return, Qt.ControlModifier); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: any(x and x[0].endswith("/alpha") for x in a))
+        self.assertIn([ps[0]["chemin"]], appels, "Ctrl + Entrée ouvre quand même")
+        self.assertFalse([a for a in appels if a[:1] == ["nc-claude"]])
+
+    def test_entree_sans_terminal_connu_ouvre(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { Agents.sessions = [{ id: "a", agent: "claude", etat: "travail", cwd_reel: "@HOME@/dev/alpha", terminal: 0, maj: 1 }]
+      etape++; return }
+  if (etape === 2) { verifier(fen.badgeDe(fen.projets[0]) !== "", "badge malgré tout"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: any(x and x[0].endswith("/alpha") for x in a))
+        self.assertIn([ps[0]["chemin"]], appels, "pas de terminal connu : on ouvre")
+
+    def test_aide_de_premiere_ouverture(self):
+        self.executer('''
+  if (etape === 1) { var a = trouver(fen.contentItem, "nc-code-aide"); verifier(a !== null && a.visible === true, "aide visible pour un débutant")
+                     taper("x"); etape++; return }
+  if (etape === 2) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible || fen.mode === "", "aide discrète"); Qt.quit() }''',
+                      agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
+        self.executer('''
+  if (etape === 1) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible, "pas d'aide quand un projet a déjà été ouvert"); Qt.quit() }''')
 
 
 def ps_chemin(appels):

@@ -307,6 +307,7 @@ def session(d, ev, ia="claude"):
         s["agent"] = ia
     cwd = ev.get("cwd") or s.get("cwd") or ""
     s["cwd"] = cwd.replace(HOME, "~")
+    s["cwd_reel"] = os.path.realpath(cwd) if cwd else s.get("cwd_reel", "")
     s["projet"] = ev.get("session_title") or os.path.basename(cwd.rstrip("/")) or NOMS.get(ia, "Claude")
     s["maj"] = time.time()
     reperer_terminal(s)
@@ -782,6 +783,7 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
         s["agent"] = agent
         if cwd:
             s["cwd"] = cwd.replace(HOME, "~")
+            s["cwd_reel"] = os.path.realpath(cwd)
         s["projet"] = os.path.basename(cwd.rstrip("/")) or s.get("projet") or NOMS.get(agent, agent)
         s["maj"] = time.time()
         if not terminal:

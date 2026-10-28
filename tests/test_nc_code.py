@@ -388,7 +388,20 @@ class NcCode(unittest.TestCase):
         self.assertIn("claude", [x["prog"] for x in d["agents"]])
         self.assertTrue(all(set(x) == {"prog", "nom"} for x in d["agents"]))
         self.reglages("IA_MODE=non\n")
-        self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[]))
+        self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[], debutant=True))
+
+    def test_debutant_jusqu_au_premier_projet_ouvert(self):
+        """--agents-json dit « debutant » tant qu'aucun projet n'a été ouvert (l'aide du panneau de l'île) ; ouvrir en laisse la trace."""
+        self.reglages("IA_MODE=non\n")
+        self.assertTrue(json.loads(self.lancer("--agents-json").stdout)["debutant"])
+        self.programme("kitty", f'cat > "{self.home}/kitty-session"')
+        p = self.depot("dev/alpha")
+        m = self.module_nc_code()
+        with self.env_faux(), unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": str(self.home / ".local/state")}):
+            self.assertEqual(m.ouvrir(str(p), ""), 0)
+        marqueur = self.home / ".local/state/nc/code-deja-ouvert"
+        self.assertTrue(marqueur.exists())
+        self.assertFalse(json.loads(self.lancer("--agents-json").stdout)["debutant"])
 
     def module_nc_code(self):
         import importlib.machinery

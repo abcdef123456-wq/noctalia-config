@@ -158,6 +158,12 @@ début du README) ; Entrée ouvre Neovim et l'agent de l'IA dans kitty (`nc-code
 Neovim seul, Ctrl + E / Ctrl + Maj + C / Ctrl + G : le dossier, le chemin copié, la page GitHub. Rien ne tourne tant que
 le panneau est fermé ; sans l'île, le même sélecteur s'ouvre dans une fenêtre kitty.
 
+Si un agent IA suivi par `nc-claude` travaille déjà dans le dossier d'un projet (chemin réel comparé), sa ligne porte un
+badge (« Claude travaille », « t'attend ») et Entrée te ramène à son terminal au lieu d'ouvrir un second espace ; Ctrl +
+Entrée ouvre quand même. La toute première fois (aucun projet jamais ouvert), le panneau affiche une ligne d'aide en bas
+et Neovim trois phrases d'accueil pour débutant (onglets Code / Git / Terminal, parler à l'agent, changer de panneau),
+une seule fois (marqueurs dans `$XDG_STATE_HOME/nc/`).
+
 La première ligne de la liste, « + Nouveau projet » (Ctrl + N, ou `nc-code --nouveau NOM [--modele vide|python|c|web]`),
 crée `~/Projets/NOM` (dossier réglable : `CODE_DOSSIER` dans nc-reglages) avec `git init`, un README et des fichiers de
 départ, puis l'ouvre ; un nom déjà pris est refusé, rien n'est jamais écrasé. Ctrl + L (ou `nc-code --cloner SOURCE`)

@@ -11,7 +11,7 @@ ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) e
   nc-code --liste          les projets proposés, un par ligne (nom, tabulation, chemin)
   nc-code --liste-json     les mêmes en JSON, le plus récent en tête (nom, chemin, court, branche, quand, date, message,
                            langage, couleur, github), sans lancer git (fichiers de .git lus directement)
-  nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}]}
+  nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}], debutant}
   nc-code --apercu-json DOSSIER   l'aperçu d'un projet en JSON : branche, derniers commits (reflog), début du README
                            en texte brut, URL GitHub (https seulement) — pour le panneau de l'île ; jamais git
   nc-code --nouveau NOM [--modele vide|python|c|web]   crée ~/Projets/NOM (CODE_DOSSIER dans nc-reglages) : git init,
@@ -161,6 +161,22 @@ def projets_voulus(limite=50):
         return []
     res = [l for l in reversed(lignes) if l.startswith("/") and dossier_sur(l) and est_depot(l)]
     return res[:limite]
+
+
+def fichier_deja_ouvert():
+    """Marqueur : un projet a déjà été ouvert par nc-code (sert à l'aide du panneau de l'île pour un débutant)."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state")
+    return os.path.join(base, "nc", "code-deja-ouvert")
+
+
+def noter_deja_ouvert():
+    f = fichier_deja_ouvert()
+    try:
+        os.makedirs(os.path.dirname(f), mode=0o700, exist_ok=True)
+        with open(f, "a", encoding="utf-8"):
+            pass
+    except OSError:
+        pass
 
 
 def retenir_projet(d):
@@ -388,6 +404,7 @@ def ouvrir(dossier, agent="", seul_nvim=False):
         p.stdin.close()
     except OSError:
         pass
+    noter_deja_ouvert()
     return 0
 
 
@@ -888,7 +905,8 @@ def liste_json():
 
 def agents_json():
     e = etat_ia()
-    return dict(coupee=ia_coupee(e), defaut=agent_par_defaut(e), agents=[dict(prog=p, nom=n) for p, n in agents_disponibles(e)])
+    return dict(coupee=ia_coupee(e), defaut=agent_par_defaut(e), agents=[dict(prog=p, nom=n) for p, n in agents_disponibles(e)],
+                debutant=not os.path.exists(fichier_deja_ouvert()))
 
 
 def apercu_json(d):

@@ -61,6 +61,17 @@ class Module(unittest.TestCase):
 
 
 class Claude(Module):
+    def test_session_garde_le_chemin_reel_du_dossier(self):
+        """L'espace de code de l'île compare le chemin réel (cwd_reel) au dossier du projet : un lien symbolique y mène."""
+        vrai = self.root / "vrai"
+        vrai.mkdir()
+        lien = self.root / "lien"
+        lien.symlink_to(vrai)
+        self.hook(hook_event_name="UserPromptSubmit", session_id="R", cwd=str(lien))
+        s = self.session("R")
+        self.assertEqual(s["cwd_reel"], str(vrai.resolve()))
+        self.assertEqual(s["cwd"], "~/lien")
+
     def test_chaque_attente_garde_la_question_entiere_et_porte_voir(self):
         for t, etat in (("permission_prompt", "terminal"), ("elicitation_dialog", "terminal"),
                         ("agent_needs_input", "terminal"), ("idle_prompt", "attente")):
