@@ -176,6 +176,7 @@ HOME_FILES=(
   .config/nc/greeting.zsh
   .config/nc/ia.zsh
   .config/nc/outils.zsh
+  .config/nc/terminal.zsh
   .config/nc/lazygit.yml
   .config/systemd/user/noctalia.service
   .config/systemd/user/nc-theme-sync.path

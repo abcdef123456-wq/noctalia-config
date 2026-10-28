@@ -416,7 +416,8 @@ REGLAGES = [
           ("notifications", "Notifications", "Notifications"), ("son", "Son", "Sound"),
           ("reseau", "Réseau", "Network"), ("bluetooth", "Bluetooth", "Bluetooth"),
           ("systeme", "Système", "System"), ("sante", "Santé", "Health"), ("calendrier", "Calendrier", "Calendar"),
-          ("meteo", "Météo", "Weather"), ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"))],
+          ("meteo", "Météo", "Weather"), ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"),
+          ("appel", "Appel", "Call"), ("terminal", "Terminal", "Terminal"))],
     # Île
     R("ILE_STYLE", "Île", L("Couleurs", "Colors"), "choix", "terminal",
       L("Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
@@ -467,6 +468,16 @@ REGLAGES = [
     R("ILE_TELECHARGEMENTS", "Île", L("Téléchargements du navigateur dans l'île", "Browser downloads in the island"), "ouinon", "oui",
       L("Firefox, Chrome, Brave, Edge, Vivaldi… : le fichier, la taille reçue et la vitesse, puis « Téléchargé ».",
         "Firefox, Chrome, Brave, Edge, Vivaldi…: the file, the size received and the speed, then “Downloaded”.")),
+    R("ILE_APPEL", "Île", L("Appels dans l'île", "Calls in the island"), "ouinon", "oui",
+      L("Une appli enregistre le micro (Discord, navigateur, Zoom, Teams…) : la pilule montre l'appli, sa durée et le niveau du micro ; "
+        "la page Appel coupe ou réactive le micro. Appel commencé micro coupé : l'île le dit. Seul le niveau est mesuré, jamais le son.",
+        "An app is recording the microphone (Discord, browser, Zoom, Teams…): the pill shows the app, the call duration and the mic level; "
+        "the Call page mutes or unmutes the mic. Call started while muted: the island says so. Only the level is measured, never the sound.")),
+    R("ILE_TERMINAL", "Île", L("Commandes longues du terminal dans l'île", "Long terminal commands in the island"), "ouinon", "oui",
+      L("Une commande zsh qui dure 10 s ou plus : son nom et sa durée dans la pilule, puis « Terminée » ou « Échec » (un clic ramène au terminal). "
+        "Pris en compte dans les nouveaux terminaux.",
+        "A zsh command running for 10 s or more: its name and duration in the pill, then “Done” or “Failed” (a click goes back to the terminal). "
+        "Applies to newly opened terminals.")),
     R("POMODORO_CONCENTRATION", "Île", L("Pomodoro : Ne pas déranger pendant le travail", "Pomodoro: Do Not Disturb while working"),
       "ouinon", "oui",
       L("Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4.",
@@ -1445,9 +1456,9 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
-                                               "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres")},
+                                               "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 

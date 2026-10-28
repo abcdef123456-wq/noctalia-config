@@ -81,7 +81,7 @@ PanelWindow {
         jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
-        fenetres: adaptee("fenetres", 160)
+        fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150)
     })
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
     readonly property bool points: Etat.vues.length > 1 && !recherche
@@ -143,10 +143,12 @@ PanelWindow {
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
     Rectangle {
         id: bulle
-        // Minuteur, sinon Claude Code qui travaille (étincelle), pendant la musique
+        // Minuteur, sinon Claude Code qui travaille (étincelle), sinon une commande longue du terminal, pendant la musique
         readonly property bool minuteur: Etat.minuteurFin > 0
-        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && Etat.aMusique
-                                       && (minuteur || Agents.travaille) && Etat.activiteType === ""
+        readonly property bool agent: !minuteur && Agents.travaille
+        readonly property bool terminal: !minuteur && !agent && Terminal.enCours
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && Etat.aMusique && !Appel.enCours
+                                       && (minuteur || Agents.travaille || Terminal.enCours) && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
         color: Couleurs.fond
@@ -165,9 +167,10 @@ PanelWindow {
             }
         }
         Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: Couleurs.orange; visible: bulle.minuteur }
-        Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && !bulle.minuteur; visible: !bulle.minuteur
+        Ico { anchors.centerIn: parent; nom: "terminal"; taille: 14; color: Couleurs.accentClair; visible: bulle.terminal }
+        Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && bulle.agent; visible: bulle.agent
                     agent: Agents.agent(Agents.principale) }
-        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller(bulle.minuteur ? "minuteur" : "claude") } }
+        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller(bulle.minuteur ? "minuteur" : (bulle.terminal ? "terminal" : "claude")) } }
     }
 
     // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
@@ -335,8 +338,10 @@ PanelWindow {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
+                               // « Terminée » / « Échec » d'une commande longue : retour à son terminal
+                               : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
@@ -404,10 +409,13 @@ PanelWindow {
                     active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
-                                        sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
+                                        sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres,
+                                        appel: pAppel, terminal: pTerminal })[pageIle.modelData] || pCentre
                 }
             }
         }
+        Component { id: pAppel; PageAppel {} }
+        Component { id: pTerminal; PageTerminal {} }
         Component { id: pMusique; Musique {} }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }

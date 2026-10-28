@@ -27,11 +27,13 @@ Singleton {
                                                   && maintenant.getTime() - finLecture < 15 * 60000))
     readonly property var activites: {
         var a = []
+        if (Appel.enCours) a.push("appel")                                 // appel en cours (Appel.qml)
         if (aMusique) a.push("musique")
         if (Agents.aPage || Agents.demande !== null) a.push("claude")      // Claude Code (nc-claude)
         if (minuteurFin > 0) a.push("minuteur")
         if (enCharge) a.push("charge")
         if (jeu) a.push("jeu")
+        if (Terminal.enCours) a.push("terminal")                           // commande longue dans le terminal (Terminal.qml)
         return a
     }
     // Page Batterie (Charge.qml) juste après le centre, seulement sur un PC qui a une batterie ; pendant une recharge,
@@ -445,7 +447,8 @@ Singleton {
     // Micro : flux PipeWire qui enregistre (pas les captures du son des haut-parleurs : cava, halo, indicateurs).
     // Seulement le type, le nom et la description des flux, lisibles sans s'y attacher : s'attacher (PwObjectTracker) à
     // tous les flux des applis faisait planter Quickshell quand plusieurs disparaissaient d'un coup (quitter Discord en
-    // déconnectant le casque).
+    // déconnectant le casque). (La mesure du niveau du micro pendant un appel, NiveauMicro.qml, est un flux « peak » /
+    // « stream.monitor » de Quickshell : Appel.qml l'écarte de ses flux, pas d'ici.)
     readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.type === PwNodeType.AudioInStream
         && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile|monitor/i.test((n.name || "") + " " + (n.description || "")))
     readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].description || fluxMicro[0].name || Reglages.t("Une appli", "An app")) : ""
