@@ -370,5 +370,49 @@ class Seulement(Base):
         self.assertEqual(src.count("ask \"$(t \"Installer l'assistant du kill switch VPN ?\""), 1, "la question n'existe qu'une fois")
 
 
+class LigneSudoers(unittest.TestCase):
+    """La ligne sudoers imprimée par un assistant (peut-être modifié localement) n'est posée que de la forme exacte attendue."""
+    def fonction(self):
+        src = INSTALL.read_text()
+        i = src.index("ligne_sudoers_sure() {")
+        return src[i:src.index("\n}\n", i) + 3]
+
+    def sure(self, outil, ligne):
+        r = subprocess.run(["bash", "-c", self.fonction() + '\nligne_sudoers_sure user "$1" "$2"', "_", outil, ligne],
+                           capture_output=True, text=True, timeout=10, env={"PATH": "/usr/bin:/bin"})
+        return r.returncode == 0
+
+    def vraie(self, assistant, interp):
+        r = subprocess.run([interp, str(REPO / "system" / assistant), "sudoers", "user"], capture_output=True, text=True,
+                           timeout=10, env={"PATH": "/usr/bin:/bin"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_vraies_lignes_acceptees(self):
+        self.assertTrue(self.sure("nc-vpn-root", self.vraie("nc-vpn-root", sys.executable)))
+        self.assertTrue(self.sure("nc-energie-root", self.vraie("nc-energie-root", "sh")))
+
+    def test_lignes_piegees_refusees(self):
+        b = "user ALL=(root) NOPASSWD: "
+        for outil, ligne in (("nc-vpn-root", "ALL ALL=(ALL) NOPASSWD: ALL"),
+                             ("nc-vpn-root", "user ALL=(ALL) NOPASSWD: /usr/local/bin/nc-vpn-root etat"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root etat, /bin/sh"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root *"),
+                             ("nc-energie-root", b + "/usr/local/bin/nc-energie-root activer *"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root etat\nALL ALL=(ALL) NOPASSWD: ALL"),
+                             ("nc-vpn-root", "autre ALL=(root) NOPASSWD: /usr/local/bin/nc-vpn-root etat"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root-x etat"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root etat, /usr/local/bin/nc-vpn-root ../x"),
+                             ("nc-vpn-root", b + "/usr/local/bin/nc-vpn-root etat, "),
+                             ("nc-vpn-root", b)):
+            self.assertFalse(self.sure(outil, ligne), ligne)
+
+    def test_verifiee_avant_la_question(self):
+        src = INSTALL.read_text()
+        for var, outil in (("ligne_e", "nc-energie-root"), ("ligne_v", "nc-vpn-root")):
+            i = src.index(f'! ligne_sudoers_sure "$(id -un)" {outil} "${var}"')
+            self.assertLess(i, src.index(f'elif [ -n "${var}" ] && garde_clone_assistant && ask', i))
+
+
 if __name__ == "__main__":
     unittest.main()

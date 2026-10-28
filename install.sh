@@ -82,6 +82,30 @@ dossiers_root_surs() {
 #    les autres, avec install.sh et .git ; 2) system/ identique au dernier commit, sans fichier non suivi, sinon avertissement et
 #    question à part (non par défaut, --oui ne l'accepte pas) ; 3) le chemin et le commit sont affichés avant la question.
 # Retour 0 : on peut poser ; 1 : refusé (le reste de l'installation continue).
+# La ligne sudoers d'un assistant root est imprimée par l'assistant lui-même (« sudoers UTILISATEUR ») : un assistant modifié
+# pourrait donc fournir une règle trop large (« ALL ALL=(ALL) NOPASSWD: ALL » passe visudo, qui ne vérifie que la syntaxe).
+# Elle n'est acceptée que de cette forme exacte : « UTILISATEUR ALL=(root) NOPASSWD: » puis seulement des commandes
+# « /usr/local/bin/OUTIL arguments simples » séparées par « , », sur une seule ligne ; le seul joker permis est « activer * »
+# du kill switch (ses arguments sont validés par l'assistant).
+ligne_sudoers_sure() { # ligne_sudoers_sure UTILISATEUR OUTIL LIGNE
+  local u="$1" outil="$2" ligne="$3" reste el
+  case "$ligne" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  case "$ligne" in "$u ALL=(root) NOPASSWD: "*) ;; *) return 1 ;; esac
+  reste="${ligne#"$u ALL=(root) NOPASSWD: "}"
+  [ -n "$reste" ] || return 1
+  while :; do
+    el="${reste%%, *}"
+    if [ "$outil" = nc-vpn-root ] && [ "$el" = "/usr/local/bin/nc-vpn-root activer *" ]; then
+      :
+    elif ! [[ "$el" =~ ^/usr/local/bin/${outil}(\ [A-Za-z0-9_.-]+)+$ ]]; then
+      return 1
+    fi
+    [ "$el" = "$reste" ] && break
+    reste="${reste#*, }"
+  done
+  return 0
+}
+
 garde_clone_assistant() {
   local u m liste
   case "$REPO" in /*) ;; *) warn "$(t "Assistant root non posé : le chemin du clone n'est pas absolu ($REPO)." "Root helper not installed: the clone path isn't absolute ($REPO).")"; return 1 ;; esac
@@ -392,7 +416,9 @@ etape_energie_root() {
   else
     info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
     info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
-    if [ -n "$ligne_e" ] && garde_clone_assistant && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then
+    if [ -n "$ligne_e" ] && ! ligne_sudoers_sure "$(id -un)" nc-energie-root "$ligne_e"; then
+      warn "$(t "La règle sudo fournie par l'assistant d'énergie n'a pas la forme attendue : assistant non installé." "The sudo rule given by the power helper doesn't have the expected form: helper not installed.")"
+    elif [ -n "$ligne_e" ] && garde_clone_assistant && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then
       t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
       # La règle est d'abord copiée en root (« .tmp » : sudo ignore les noms avec un point), vérifiée par visudo À
       # CETTE PLACE, puis mise en service : ce qui est vérifié est exactement ce qui sert
@@ -425,7 +451,9 @@ etape_killswitch_root() {
     info "$(t "Kill switch VPN (facultatif) : un petit assistant root (/usr/local/bin/nc-vpn-root) qui ne sait que bloquer la sortie hors du" "VPN kill switch (optional): a small root helper (/usr/local/bin/nc-vpn-root) that can only block traffic outside the")"
     info "$(t "tunnel (table nft « nc_vpn »), lancé sans mot de passe. Coupé par défaut (réglage VPN_KILLSWITCH) ; nftables sera installé si besoin." "tunnel (nft table “nc_vpn”), run without a password. Off by default (VPN_KILLSWITCH setting); nftables will be installed if needed.")"
     info "$(t "Attention : firewalld est actif par défaut sur Fedora et openSUSE ; tant qu'il l'est (ou ufw), le kill switch refusera de s'activer." "Note: firewalld is on by default on Fedora and openSUSE; while it is (or ufw is), the kill switch will refuse to turn on.")"
-    if [ -n "$ligne_v" ] && garde_clone_assistant && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible && dossiers_root_surs; then
+    if [ -n "$ligne_v" ] && ! ligne_sudoers_sure "$(id -un)" nc-vpn-root "$ligne_v"; then
+      warn "$(t "La règle sudo fournie par l'assistant du kill switch n'a pas la forme attendue : assistant non installé." "The sudo rule given by the kill switch helper doesn't have the expected form: helper not installed.")"
+    elif [ -n "$ligne_v" ] && garde_clone_assistant && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible && dossiers_root_surs; then
       t_v="$(mktemp)"; printf '# noctalia-config : assistant du kill switch VPN (nc-vpn killswitch)\n%s\n' "$ligne_v" > "$t_v"
       nft_ok=1
       have nft || pkg_install nftables || nft_ok=0
