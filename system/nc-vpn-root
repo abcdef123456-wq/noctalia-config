@@ -1,0 +1,280 @@
+#!/usr/bin/python3 -I
+"""nc-vpn-root : l'assistant root du kill switch VPN (nc-vpn killswitch). Il ne fait QUE ceci, avec des arguments validés :
+
+  nc-vpn-root activer IFACE ENDPOINT…   bloque toute sortie de l'hôte hors du tunnel IFACE (table nft « inet nc_vpn »)
+  nc-vpn-root desactiver                supprime cette table (et rien d'autre)
+  nc-vpn-root etat                      « actif » ou « inactif »
+  nc-vpn-root sudoers UTILISATEUR       la ligne sudo pour ce compte (sans rien écrire)
+
+IFACE : un nom ^[A-Za-z0-9_.-]{1,15}$ qui est RÉELLEMENT un tunnel (TUN/TAP : /sys/class/net/IFACE/tun_flags, ou WireGuard :
+DEVTYPE=wireguard dans uevent), jamais une interface Wi-Fi ni une carte physique.
+ENDPOINT : une adresse IP v4 ou v6 (jamais un nom d'hôte), seule ou suivie de @PORT ou @PORT/udp ou @PORT/tcp ; 8 au plus.
+
+La table est la nôtre seule : activer la recrée d'un bloc par « nft -f - » (texte généré ici, à partir de données validées),
+désactiver fait « nft delete table inet nc_vpn ». Les autres tables ne sont jamais lues pour être modifiées ni touchées.
+Règles (chaîne output, priorité filter, policy drop) : on laisse passer la boucle locale, le tunnel, DHCP, le voisinage IPv6
+(nd-*), les ENDPOINTS du VPN, et les sous-réseaux directement attachés aux cartes physiques ; tout le reste est jeté.
+Refus clairs : nft absent, firewalld ou ufw actif, application Mullvad (utilise son « lockdown mode »).
+Codes de sortie : 0 fait, 1 échec ou pas root, 2 argument refusé, 3 refus de l'environnement (outil absent, pare-feu, Mullvad).
+Essais : NC_VPN_RACINE (faux /sys) et NC_VPN_BIN (faux outils) ne sont lus QUE hors root (sudo les efface de toute façon).
+"""
+import ipaddress
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+TABLE = "nc_vpn"
+MAX_ENDPOINTS = 8
+NOM_IFACE = re.compile(r"[A-Za-z0-9_.-]{1,15}")
+PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+S = "/sys"
+ESSAI = False
+if os.getuid() != 0 and os.environ.get("NC_VPN_RACINE"):
+    S = os.environ["NC_VPN_RACINE"]
+    ESSAI = True
+    if os.environ.get("NC_VPN_BIN"):
+        PATH = os.environ["NC_VPN_BIN"] + ":" + PATH
+
+
+class Refus(Exception):
+    def __init__(self, texte, code=2):
+        super().__init__(texte)
+        self.code = code
+
+
+# ── Validation (fonctions pures) ────────────────────────────────────────────────────────────────────────────────
+def valider_nom(nom):
+    if not isinstance(nom, str) or not NOM_IFACE.fullmatch(nom) or nom.startswith("-"):
+        raise Refus("nom d'interface refusé (1 à 15 signes : lettres, chiffres, « _ », « . », « - »)")
+    return nom
+
+
+def valider_endpoint(texte):
+    """IP[@PORT[/PROTO]] -> (ip_address, port|None, proto|None). Jamais de nom d'hôte."""
+    if not isinstance(texte, str) or not texte or len(texte) > 64:
+        raise Refus("endpoint refusé")
+    adr, _, reste = texte.partition("@")
+    try:
+        ip = ipaddress.ip_address(adr)
+    except ValueError:
+        raise Refus("endpoint refusé : une adresse IP est demandée, jamais un nom d'hôte")
+    if ip.is_unspecified or ip.is_loopback or ip.is_multicast:
+        raise Refus("endpoint refusé : adresse inutilisable")
+    port = proto = None
+    if "@" in texte:
+        p, _, proto = reste.partition("/")
+        if not re.fullmatch(r"[0-9]{1,5}", p) or not 1 <= int(p) <= 65535:
+            raise Refus("endpoint refusé : port invalide")
+        port = int(p)
+        if "/" in reste:
+            if proto not in ("udp", "tcp"):
+                raise Refus("endpoint refusé : protocole udp ou tcp seulement")
+        else:
+            proto = None
+    return ip, port, proto
+
+
+def valider_endpoints(liste):
+    if not liste:
+        raise Refus("au moins un endpoint est demandé")
+    if len(liste) > MAX_ENDPOINTS:
+        raise Refus("trop d'endpoints (%d au plus)" % MAX_ENDPOINTS)
+    res = []
+    for t in liste:
+        e = valider_endpoint(t)
+        if e not in res:
+            res.append(e)
+    return res
+
+
+# ── Le texte nft : une fonction pure, à partir de données déjà validées ──────────────────────────────────────────
+def regle_endpoint(ip, port, proto):
+    famille = "ip" if ip.version == 4 else "ip6"
+    base = "%s daddr %s" % (famille, ip)
+    if port is None:
+        return [base + " accept"]
+    protos = [proto] if proto else ["udp", "tcp"]
+    return ["%s %s dport %d accept" % (base, p, port) for p in protos]
+
+
+def generer_regles(iface, endpoints, sous_reseaux):
+    """Le texte envoyé à « nft -f - ». iface : nom validé ; endpoints : [(ip, port, proto)] ; sous_reseaux : [ip_network]."""
+    L = ["add table inet %s" % TABLE,
+         "delete table inet %s" % TABLE,
+         "table inet %s {" % TABLE,
+         "\tchain output {",
+         "\t\ttype filter hook output priority filter; policy drop;",
+         "\t\toif lo accept",
+         '\t\toifname "%s" accept' % iface,
+         "\t\tudp sport 68 udp dport 67 accept",
+         "\t\tudp sport 546 udp dport 547 accept",
+         "\t\ticmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept"]
+    for ip, port, proto in endpoints:
+        for r in regle_endpoint(ip, port, proto):
+            L.append("\t\t" + r)
+    for net in sous_reseaux:
+        L.append("\t\t%s daddr %s accept" % ("ip" if net.version == 4 else "ip6", net))
+    L += ["\t}", "}"]
+    return "\n".join(L) + "\n"
+
+
+def sous_reseaux_attaches(addr_json, tunnel, physique):
+    """Les préfixes des adresses globales des interfaces physiques (physique(nom) -> bool), triés, sans doublon.
+    Ni le tunnel, ni lo, ni les adresses d'hôte seul (/32, /128), ni /0."""
+    res = set()
+    for itf in addr_json if isinstance(addr_json, list) else []:
+        nom = itf.get("ifname") if isinstance(itf, dict) else None
+        if not isinstance(nom, str) or nom in ("lo", tunnel) or not physique(nom):
+            continue
+        for a in itf.get("addr_info") or []:
+            if not isinstance(a, dict) or a.get("scope") != "global" or a.get("family") not in ("inet", "inet6"):
+                continue
+            try:
+                net = ipaddress.ip_interface("%s/%d" % (a.get("local"), int(a.get("prefixlen")))).network
+            except (ValueError, TypeError):
+                continue
+            if net.prefixlen == 0 or net.prefixlen >= net.max_prefixlen or net.is_link_local:
+                continue
+            res.add(net)
+    return sorted(res, key=lambda n: (n.version, int(n.network_address), n.prefixlen))
+
+
+# ── Le système ──────────────────────────────────────────────────────────────────────────────────────────────────
+def lancer(argv, entree=None):
+    r = subprocess.run(argv, input=entree, capture_output=True, text=True, timeout=30,
+                       env={"PATH": PATH, "LC_ALL": "C"}, stdin=None if entree is not None else subprocess.DEVNULL)
+    return r.returncode, r.stdout, r.stderr
+
+
+def outil(nom):
+    return shutil.which(nom, path=PATH)
+
+
+def racine():
+    if not ESSAI and os.getuid() != 0:
+        raise Refus("à lancer avec sudo.", 1)
+
+
+def lire(chemin):
+    try:
+        with open(chemin, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def est_tunnel(nom):
+    d = os.path.join(S, "class/net", nom)
+    return os.path.isfile(os.path.join(d, "tun_flags")) or "DEVTYPE=wireguard" in lire(os.path.join(d, "uevent")).split()
+
+
+def est_physique(nom):
+    d = os.path.join(S, "class/net", nom)
+    return os.path.lexists(os.path.join(d, "device")) or os.path.isdir(os.path.join(d, "wireless"))
+
+
+def verifier_tunnel(nom):
+    d = os.path.join(S, "class/net", nom)
+    if not os.path.isdir(d):
+        raise Refus("l'interface %s n'existe pas" % nom)
+    if os.path.isdir(os.path.join(d, "wireless")) or est_physique(nom):
+        raise Refus("%s est une carte réseau (Wi-Fi ou Ethernet), pas un tunnel : refusé" % nom)
+    if not est_tunnel(nom):
+        raise Refus("%s n'est pas un tunnel (TUN/TAP ou WireGuard) : refusé" % nom)
+
+
+def verifier_environnement():
+    """Refus clairs, sans aucun appel à nft."""
+    if not outil("nft"):
+        raise Refus("nft est absent : installe le paquet nftables pour utiliser le kill switch.", 3)
+    for svc in ("firewalld", "ufw"):
+        if outil("systemctl") and lancer([outil("systemctl"), "is-active", svc])[1].strip() == "active":
+            raise Refus("%s est actif : le kill switch risque d'entrer en conflit avec lui, utilise plutôt ses propres règles." % svc, 3)
+    mullvad_actif = bool(outil("systemctl")) and lancer([outil("systemctl"), "is-active", "mullvad-daemon"])[1].strip() == "active"
+    if not mullvad_actif and outil("mullvad"):
+        code, sortie, _ = lancer([outil("mullvad"), "status"])
+        mullvad_actif = code == 0 and re.match(r"\s*connected", sortie, re.I) is not None
+    if mullvad_actif:
+        raise Refus("l'application Mullvad est active : deux pare-feux se battraient. Utilise sa protection : "
+                    "« mullvad lockdown-mode set on » (bloque tout hors du VPN).", 3)
+
+
+def activer(args):
+    if not args:
+        raise Refus("usage : activer IFACE ENDPOINT…")
+    iface = valider_nom(args[0])
+    endpoints = valider_endpoints(args[1:])
+    verifier_environnement()
+    racine()
+    verifier_tunnel(iface)
+    if not outil("ip"):
+        raise Refus("la commande ip est absente (paquet iproute2)", 3)
+    code, sortie, _ = lancer([outil("ip"), "-j", "addr"])
+    try:
+        adresses = json.loads(sortie) if code == 0 else None
+    except ValueError:
+        adresses = None
+    if adresses is None:
+        raise Refus("adresses du système illisibles (ip -j addr)", 1)
+    texte = generer_regles(iface, endpoints, sous_reseaux_attaches(adresses, iface, est_physique))
+    code, _, err = lancer([outil("nft"), "-f", "-"], entree=texte)
+    if code != 0:
+        raise Refus("nft a refusé les règles : " + (err.strip().splitlines() or [""])[0][:200], 1)
+    print("actif")
+
+
+def desactiver():
+    if not outil("nft"):
+        raise Refus("nft est absent", 3)
+    racine()
+    code, _, err = lancer([outil("nft"), "delete", "table", "inet", TABLE])
+    if code != 0:
+        if lancer([outil("nft"), "list", "table", "inet", TABLE])[0] != 0:
+            return print("inactif")
+        raise Refus("nft n'a pas pu supprimer la table : " + (err.strip().splitlines() or [""])[0][:200], 1)
+    print("inactif")
+
+
+def etat():
+    if not outil("nft"):
+        raise Refus("nft est absent", 3)
+    racine()
+    print("actif" if lancer([outil("nft"), "list", "table", "inet", TABLE])[0] == 0 else "inactif")
+
+
+def sudoers(u):
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]*", u or ""):
+        raise Refus("nom de compte refusé")
+    b = "/usr/local/bin/nc-vpn-root"
+    # Les endpoints varient : « activer * » ; le script valide chaque argument (aucun shell n'est jamais lancé)
+    print("%s ALL=(root) NOPASSWD: %s etat, %s desactiver, %s activer *" % (u, b, b, b))
+
+
+def main(a):
+    if not a:
+        raise Refus("usage : activer IFACE ENDPOINT… | desactiver | etat | sudoers UTILISATEUR")
+    cmd, reste = a[0], a[1:]
+    if cmd == "activer":
+        activer(reste)
+    elif cmd == "desactiver" and not reste:
+        desactiver()
+    elif cmd == "etat" and not reste:
+        etat()
+    elif cmd == "sudoers" and len(reste) == 1:
+        sudoers(reste[0])
+    else:
+        raise Refus("sous-commande refusée")
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except Refus as e:
+        print("nc-vpn-root: " + str(e), file=sys.stderr)
+        sys.exit(e.code)
+    except (OSError, subprocess.SubprocessError) as e:
+        print("nc-vpn-root: échec (%s)" % type(e).__name__, file=sys.stderr)
+        sys.exit(1)
