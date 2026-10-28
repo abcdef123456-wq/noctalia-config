@@ -1920,6 +1920,35 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
+  # Kill switch VPN (nc-vpn killswitch, panneau VPN de l'île) : un petit assistant root qui ne fait que bloquer la sortie hors du
+  # tunnel (table nft « nc_vpn » à lui seul), avec une règle sudo (activer reçoit les adresses du serveur : l'assistant les
+  # valide une à une). FACULTATIF, question à part, NON par défaut, refusée sans terminal (--oui pour l'accepter) ; le paquet
+  # nftables (même nom sur Arch, Debian, Fedora et openSUSE) n'est proposé que si tu réponds oui. Le réglage VPN_KILLSWITCH
+  # reste coupé : rien n'est bloqué tant que tu ne l'actives pas.
+  regle_v=/etc/sudoers.d/nc-vpn
+  ligne_v="$("$REPO/system/nc-vpn-root" sudoers "$(id -un)" 2>/dev/null)"
+  if cmp -s "$REPO/system/nc-vpn-root" /usr/local/bin/nc-vpn-root && [ -n "$ligne_v" ] && sudo grep -qxF "$ligne_v" "$regle_v" 2>/dev/null; then
+    ok "$(t "Assistant du kill switch VPN : déjà en place." "VPN kill switch helper: already set up.")"
+  else
+    info "$(t "Kill switch VPN (facultatif) : un petit assistant root (/usr/local/bin/nc-vpn-root) qui ne sait que bloquer la sortie hors du" "VPN kill switch (optional): a small root helper (/usr/local/bin/nc-vpn-root) that can only block traffic outside the")"
+    info "$(t "tunnel (table nft « nc_vpn »), lancé sans mot de passe. Coupé par défaut (réglage VPN_KILLSWITCH) ; nftables sera installé si besoin." "tunnel (nft table “nc_vpn”), run without a password. Off by default (VPN_KILLSWITCH setting); nftables will be installed if needed.")"
+    if [ -n "$ligne_v" ] && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible; then
+      t_v="$(mktemp)"; printf '# noctalia-config : assistant du kill switch VPN (nc-vpn killswitch)\n%s\n' "$ligne_v" > "$t_v"
+      nft_ok=1
+      have nft || pkg_install nftables || nft_ok=0
+      # Même méthode que pour l'énergie : règle copiée en « .tmp », vérifiée par visudo à cette place, puis mise en service
+      if [ "$nft_ok" = 1 ] && sudo install -Dm0755 -o root -g root "$REPO/system/nc-vpn-root" /usr/local/bin/nc-vpn-root &&
+         sudo install -m0440 -o root -g root "$t_v" "$regle_v.tmp" && sudo visudo -cf "$regle_v.tmp" >/dev/null &&
+         sudo mv -f "$regle_v.tmp" "$regle_v"; then
+        ok "$(t "Assistant du kill switch VPN installé (réglage VPN_KILLSWITCH à passer à oui dans nc-reglages)." "VPN kill switch helper installed (turn the VPN_KILLSWITCH setting on in nc-settings).")"
+      else
+        sudo rm -f "$regle_v.tmp"
+        warn "$(t "Installation de l'assistant du kill switch impossible (nftables ou règle sudo refusée)." "Couldn't install the kill switch helper (nftables or sudo rule rejected).")"
+      fi
+      rm -f "$t_v"
+    fi
+  fi
+
   # Bouton d'arrêt : un appui fait une petite animation (nc-anim bouton, raccourci XF86PowerOff ; laquelle : nc-reglages) au lieu
   # d'éteindre ; logind doit donc laisser la touche à Hyprland. Le garder appuyé éteint toujours proprement, et
   # Super + F4 éteint aussi. 50-legion-powerkey.conf : ancien nom de ce réglage, remplacé.

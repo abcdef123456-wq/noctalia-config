@@ -266,6 +266,32 @@ class DesactiverEtat(Base):
         self.assertNotIn("/home/", ROOT.read_text())
 
 
+class InstallEtDoc(unittest.TestCase):
+    def test_install_question_a_part_non_par_defaut_et_nftables_seulement_si_oui(self):
+        inst = (REPO / "install.sh").read_text()
+        i = inst.index("Kill switch VPN (nc-vpn killswitch")
+        bloc = inst[i:inst.index("# Bouton d'arrêt", i)]
+        self.assertRegex(bloc, r'ask "\$\(t "Installer l\'assistant du kill switch VPN \?"[^\n]*\)" n sensible')   # non par défaut
+        self.assertEqual(bloc.count("ask "), 1)
+        # le paquet n'est tiré qu'après le oui, par le gestionnaire commun aux quatre distributions
+        self.assertGreater(bloc.index("pkg_install nftables"), bloc.index('ask "'))
+        self.assertIn("visudo -cf", bloc)
+        self.assertIn("install -Dm0755 -o root -g root", bloc)
+        self.assertIn('"$REPO/system/nc-vpn-root" sudoers', bloc)
+        self.assertNotRegex(bloc, r"sudo nft|\nft -f|systemctl")      # l'installation ne touche jamais au pare-feu
+        self.assertIn("/usr/local/bin/nc-vpn-root", bloc)
+
+    def test_readme_limites_et_coupure_depuis_un_tty(self):
+        readme = (REPO / "README.md").read_text()
+        for mot in ("sudo nft delete table inet nc_vpn", "lockdown-mode set on", "forwarding des conteneurs", "pas de multi-remote",
+                    "nc-vpn killswitch activer", "VPN_KILLSWITCH"):
+            self.assertIn(mot, readme)
+
+    def test_reglage_coupe_par_defaut(self):
+        src = (REPO / "home/.local/bin/nc-reglages").read_text()
+        self.assertRegex(src, r'R\("VPN_KILLSWITCH", "Île", [^\n]*"ouinon", "non"')
+
+
 def netns_possible():
     try:
         return (subprocess.run(["unshare", "--user", "--map-root-user", "--net", "true"], capture_output=True, timeout=10).returncode == 0

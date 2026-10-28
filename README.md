@@ -263,8 +263,7 @@ l'île Quickshell.
   `<auth-user-pass>` (identifiant puis mot de passe) est accepté : le mot de passe va dans le trousseau de la session
   (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian, `secret-tool` sur openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
   jamais dans un fichier, et l'import est refusé s'il manque ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. **Super + Alt + V**
-  et un clic sur l'indicateur ouvrent directement ce panneau complet (une section « Protections » dira « Bientôt » tant qu'elle
-  est vide). Un bouclier vert et « Fournisseur · 🇫🇷 FR » (« +1 » s'il y a plusieurs tunnels) sont devant l'heure de la pilule
+  et un clic sur l'indicateur ouvrent directement ce panneau complet (sa section « Protections » porte le kill switch, voir plus bas). Un bouclier vert et « Fournisseur · 🇫🇷 FR » (« +1 » s'il y a plusieurs tunnels) sont devant l'heure de la pilule
   tant qu'un tunnel est RÉELLEMENT monté dans NetworkManager (`VPN_INDICATEUR`, oui par défaut) ; un client installé mais pas
   connecté ne compte jamais. Fournisseur et pays sont déduits sans réseau du nom de la connexion et de l'interface
   (`nc-vpn indicateur --json`, un seul `nmcli`) : Proton VPN, Mullvad, NordVPN, Surfshark, ExpressVPN, Private Internet Access,
@@ -282,8 +281,24 @@ l'île Quickshell.
   interfaces et IP sont masqués. Ton IP publique n'est montrée que si tu le demandes (`VPN_IP_PUBLIQUE` à oui et
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
-  client commercial, pas de kill switch. En terminal : `nc-vpn etat-json | liste |
-  connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER`.
+  client commercial.
+  **Kill switch** (facultatif, coupé par défaut : `VPN_KILLSWITCH` à oui dans `nc-reglages` → Île). Quand un tunnel est monté, il
+  bloque toute sortie de l'ordinateur hors du tunnel, pour qu'une coupure du tunnel ne laisse rien fuir. L'interrupteur « Bloquer
+  tout hors du VPN » est dans la section « Protections » du panneau (confirmation avant d'activer, rien pendant un partage
+  d'écran, couper en un clic) ; en terminal : `nc-vpn killswitch activer | desactiver | etat | limites`. Il demande un petit
+  assistant root, `system/nc-vpn-root`, que `install.sh` pose seulement si tu réponds oui à une question à part (non par défaut ;
+  il propose alors le paquet `nftables`) : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
+  être un vrai TUN/TAP ou WireGuard, jamais le Wi-Fi ni l'Ethernet ; les serveurs sont des adresses IP, 8 au plus) et n'écrit que
+  sa propre table nft `inet nc_vpn` (les autres règles ne sont ni lues ni touchées). Sortent seulement : la boucle locale, le
+  tunnel, DHCP, le voisinage IPv6, les adresses du serveur VPN et les sous-réseaux directement attachés à tes cartes réseau
+  (pas tout le réseau privé) ; le reste est jeté. Refusé avec un message clair si `nft` manque, si `firewalld` ou `ufw` est actif
+  (ils gardent la main) ou si l'application Mullvad tourne (utilise plutôt sa protection : `mullvad lockdown-mode set on`).
+  **Limites** (affichées avant l'activation) : ne dure pas après un redémarrage ; ne couvre pas le forwarding des conteneurs ni des
+  machines virtuelles ; à couper pour changer de serveur (les adresses sont figées) ; un seul serveur (pas de multi-remote, pas
+  de nom d'hôte : mets l'adresse IP) ; un tunnel doit être monté avant d'activer. **Pour tout couper depuis un TTY** :
+  `sudo nft delete table inet nc_vpn`.
+  En terminal : `nc-vpn etat-json | liste |
+  connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER | killswitch …`.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
   la page Appel coupe ou réactive le micro (sur la source qu'utilise l'appli, sinon la source par défaut) et rappelle
