@@ -1433,8 +1433,8 @@ def ecrire(sid, texte):
         # texte qui commence par un tiret (« --auto », « -f ») y serait lu comme une option : refusé, quel que soit le
         # parseur d'opencode (le passage par kitty, lui, envoie le texte comme des données, sur l'entrée standard)
         if texte.lstrip().startswith("-"):
-            sys.exit(T("nc-claude : pour OpenCode, un message ne peut pas commencer par un tiret (il serait lu comme une option).",
-                       "nc-agents: for OpenCode, a message can't start with a dash (it would be read as an option)."))
+            sys.exit(T("nc-claude : commence ton message par un mot (OpenCode lirait le tiret comme une option).",
+                       "nc-agents: start your message with a word (OpenCode would read the dash as an option)."))
         subprocess.Popen(["opencode", "run", "--session", sid.split("-", 1)[1], texte], cwd=os.path.expanduser(s.get("cwd") or "~"),
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     elif not texte or not sock or not s.get("shell"):

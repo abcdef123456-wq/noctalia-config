@@ -45,7 +45,7 @@ class OpencodeTiret(unittest.TestCase):
         for texte in ("--auto", "-x", "  --server=http://198.51.100.1", "-f fichier"):
             r = self.ecrire(texte)
             self.assertNotEqual(r.returncode, 0, texte)
-            self.assertIn("tiret", r.stderr, texte)
+            self.assertIn("commence ton message par un mot", r.stderr, texte)
         self.assertFalse(self.journal.exists(), "opencode ne doit jamais être lancé")
 
     def test_texte_ordinaire_part_en_argument(self):
