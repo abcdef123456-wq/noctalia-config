@@ -168,6 +168,17 @@ Les messages d'erreur passent par un filtre (URL, e-mail, longues suites de chif
   - CLI absente mais application `protonvpn-app` présente : l'ancien état `pilote_appli` (jamais `sans_compte` : le compte est celui de l'appli, qu'on ne
     lit pas ; sa connexion NetworkManager « ProtonVPN SERVEUR » n'existe que pendant la connexion). Ni l'une ni l'autre : `absent`. Dans la fenêtre, le tunnel
     NetworkManager « ProtonVPN … » est la ligne de la carte principale ; l'état du fournisseur ne la double pas.
+  - **Proton en Flatpak** (`com.protonvpn.www`, Flathub, installation `--user` ou système). Ordre de détection : CLI native `protonvpn`, puis
+    `flatpak info --user com.protonvpn.www`, puis `--system` (code 0 = installé, sortie jetée, aucun réseau ;
+    `flatpak` absent : silence, état `absent`). La CLI passe alors par `flatpak run [--user|--system] --command=protonvpn com.protonvpn.www ARGS` (argv,
+    stdin fermé, mêmes filtres de sortie, aucun identifiant gardé) et l'appli par `flatpak run com.protonvpn.www` (détachée). Sources : manifeste
+    github.com/flathub/com.protonvpn.www (`command: protonvpn-app`, module `proton-vpn-cli` tag v1.0.5 installé par `pip3 install --prefix=/app`) et
+    `setup.py` du tag v1.0.5 de ProtonVPN/proton-vpn-cli (`protonvpn=proton.vpn.cli:main`) : la commande `protonvpn` est donc dans le Flatpak ; le
+    manifeste ne la montre pas en toutes lettres et **aucun essai réel n'a été fait** (si elle manque, `flatpak run` échoue : `probleme` = `illisible`).
+    Toutes les gardes restent : `info` et `countries list` seulement avec `--verifier-proton`, verrou, jamais pendant « activating », jamais `status`.
+    Appli Flatpak ouverte : détectée par `flatpak ps --columns=application` (une ligne contenant exactement `com.protonvpn.www`) AVANT chaque commande de
+    la CLI ; le manifeste donne `--own-name=proton.vpn.app.gtk` à l'appli, mais nous ne comptons pas sur la CLI du bac à sable pour le voir. `ps` en
+    échec : la CLI dit elle-même si l'appli est ouverte. Rien de `/proc`. Délais : ceux de la CLI plus 15 s (démarrage du bac à sable) ; `info` et `ps` : 8 s.
 - **Mullvad** (mullvad/mullvadvpn-app, `mullvad-cli/src/cmds/account.rs`) : `status` n'affiche PAS d'avertissement de compte quand il est déconnecté.
   `account get` écrit « Not logged in on any account », « The current device has been revoked » ou « Mullvad account: <numéro> » (code 0 dans les
   trois cas) : seul le oui/non en est tiré, le numéro est lu mais jamais gardé ; `relay list` écrit « Nom (code) » par pays, les villes et relais en retrait.

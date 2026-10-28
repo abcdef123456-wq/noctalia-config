@@ -1528,14 +1528,97 @@ API_FOURNISSEURS = {
 PROTON_APPLI_OUVERTE = re.compile(r"desktop app is currently running|cannot run simultaneously", re.I)
 PROTON_SANS_COMPTE = re.compile(r"authentication required|sign in with", re.I)
 
+# Proton installé en Flatpak (com.protonvpn.www, sur Flathub). Sources lues :
+#   - manifeste github.com/flathub/com.protonvpn.www (com.protonvpn.www.yml) : `command: protonvpn-app` (l'appli), module
+#     proton-vpn-cli (tag v1.0.5) installé par `pip3 install --prefix=${FLATPAK_DEST}` ; le setup.py de ce tag
+#     (github.com/ProtonVPN/proton-vpn-cli, v1.0.5) déclare le point d'entrée « protonvpn=proton.vpn.cli:main » : la commande
+#     `protonvpn` est donc dans /app/bin du Flatpak. Le manifeste ne la montre pas en toutes lettres (aucun essai réel fait ici) :
+#     si elle manque, `flatpak run` échoue et l'état devient « illisible », sans rien de pire.
+#   - le manifeste donne `--own-name=proton.vpn.app.gtk` à l'appli : le nom D-Bus de l'appli Flatpak est le même que celui de
+#     l'appli native ; nous ne comptons pas sur la CLI du bac à sable pour le voir, nous demandons à `flatpak ps` (voir plus bas).
+#   - man flatpak-info : `flatpak info [--user|--system] NOM` rend 0 si installé (la sortie est jetée) ; man flatpak-run :
+#     `flatpak run [--user|--system] --command=COMMANDE APP ARGS…` ; man flatpak-ps : `flatpak ps --columns=application`.
+# Ordre : la CLI native d'abord, puis le Flatpak. Aucun appel réseau ; flatpak absent : silence. Le démarrage d'un Flatpak est plus
+# long (bac à sable, portails) : chaque délai de la CLI gagne DELAI_FLATPAK secondes quand elle passe par flatpak.
+FLATPAK_PROTON = "com.protonvpn.www"
+DELAI_FLATPAK = 15          # secondes ajoutées aux délais de la CLI quand elle tourne dans le Flatpak
+DELAI_FLATPAK_LECTURE = 8   # `flatpak info` et `flatpak ps`
+_FLATPAK_PORTEE = []        # mémoire du processus : ["--user"], ["--system"] ou [""]
+
+
+def flatpak_proton():
+    """« --user », « --system » ou vide : où le Flatpak Proton est installé (`flatpak info`, jamais de réseau). Une fois par processus."""
+    if _FLATPAK_PORTEE:
+        return _FLATPAK_PORTEE[0]
+    res = ""
+    exe = shutil.which("flatpak")
+    if exe:
+        for portee in ("--user", "--system"):
+            code, _, _ = lancer_borne([exe, "info", portee, FLATPAK_PROTON], DELAI_FLATPAK_LECTURE)
+            if code == 0:
+                res = portee
+                break
+    _FLATPAK_PORTEE.append(res)
+    return res
+
+
+def proton_cli_argv():
+    """La commande de la CLI : [protonvpn] (native, prioritaire) ; sinon celle du Flatpak ; sinon None."""
+    exe = shutil.which("protonvpn")
+    if exe:
+        return [exe]
+    portee = flatpak_proton()
+    if portee:
+        return [shutil.which("flatpak"), "run", portee, "--command=protonvpn", FLATPAK_PROTON]
+    return None
+
 
 def proton_cli_exe():
-    return shutil.which("protonvpn") is not None
+    return proton_cli_argv() is not None
+
+
+def proton_flatpak_ouvert():
+    """Vrai si l'APPLI Flatpak Proton tourne (`flatpak ps --columns=application`, une ligne par instance : l'identifiant). Sortie
+    illisible ou commande en échec : faux (la CLI dit elle-même si l'appli est ouverte). Rien de /proc."""
+    exe = shutil.which("flatpak")
+    if not exe:
+        return False
+    code, out, _ = lancer_borne([exe, "ps", "--columns=application"], DELAI_FLATPAK_LECTURE, 16 * 1024)
+    if code != 0:
+        return False
+    texte = nettoyer_sortie(out)
+    return any(l.split()[:1] == [FLATPAK_PROTON] for l in texte.splitlines() if l.strip())
+
+
+def proton_cli(args, delai):
+    """(code, texte propre) de `protonvpn ARGS` : CLI native ou Flatpak, même nettoyage et mêmes filtres que cli_fournisseur. Dans
+    le Flatpak, l'appli ouverte est détectée d'abord (même résultat que le message de la CLI native : « appli ouverte »)."""
+    argv = proton_cli_argv()
+    if not argv:
+        return 127, ""
+    flatpak = len(argv) > 1
+    if flatpak and proton_flatpak_ouvert():
+        return 0, "Error: Proton VPN desktop app is currently running\n"
+    code, out, err = lancer_borne(argv + args, delai + (DELAI_FLATPAK if flatpak else 0), MAX_SORTIE)
+    if code in (124, 126):
+        return code, ""
+    return code, nettoyer_sortie(out + b"\n" + err)
+
+
+def proton_appli_argv():
+    """L'application graphique officielle : `protonvpn-app` (native) ou `flatpak run com.protonvpn.www`, sinon None."""
+    exe = shutil.which("protonvpn-app")
+    if exe:
+        return [exe]
+    portee = flatpak_proton()
+    if portee:
+        return [shutil.which("flatpak"), "run", portee, FLATPAK_PROTON]
+    return None
 
 
 def proton_exe():
-    """L'application graphique officielle (`protonvpn-app`)."""
-    return shutil.which("protonvpn-app") is not None
+    """L'application graphique officielle (`protonvpn-app`, ou le Flatpak)."""
+    return proton_appli_argv() is not None
 
 
 def proton_connexions():
@@ -1674,7 +1757,7 @@ def proton_lire_cli():
     (codes ISO), "probleme"}. `info` d'abord ; la liste des pays seulement avec un compte, et si elle dépasse son délai on s'arrête là.
     Jamais `status` (voir plus haut). L'appelant tient le verrou et a vérifié qu'aucun tunnel Proton ne monte."""
     r = {"appli_ouverte": False, "compte": None, "pays": [], "probleme": "", "pays_probleme": ""}
-    code, t = cli_fournisseur("protonvpn", ["info"], 10)
+    code, t = proton_cli(["info"], 10)
     if code in (124, 126):
         r["probleme"] = "delai" if code == 124 else "lancement"
         return r
@@ -1689,7 +1772,7 @@ def proton_lire_cli():
     del m, t                                    # le nom de compte n'est gardé nulle part
     if not r["compte"]:
         return r
-    code, t = cli_fournisseur("protonvpn", ["countries", "list"], delai_pays_proton())
+    code, t = proton_cli(["countries", "list"], delai_pays_proton())
     if code == 124:                             # délai dépassé : le compte reste valide, la liste manque (dit à l'utilisateur)
         r["pays_probleme"] = "delai"
         return r
@@ -1780,7 +1863,8 @@ def proton_fournisseur():
 def proton_ouvrir(message):
     if not proton_exe():
         raise Echec(T("Proton VPN n'est pas installé.", "Proton VPN is not installed."))
-    if not ouvrir(["protonvpn-app"]):
+    argv = proton_appli_argv()
+    if not argv or not ouvrir(argv):
         raise Echec(T("Impossible de lancer l'application Proton VPN.", "Could not start the Proton VPN app."))
     print(message)
 
@@ -1788,7 +1872,7 @@ def proton_ouvrir(message):
 def proton_cli_agir(args, delai, succes):
     """Lance `protonvpn ARGS` et ne rend la main que si le code est 0 et que la sortie contient `succes` (motif en début de ligne).
     Sinon un message prévu à l'avance : la sortie brute n'est JAMAIS reprise (elle peut porter une IP, un nom de compte)."""
-    code, t = cli_fournisseur("protonvpn", args, delai)
+    code, t = proton_cli(args, delai)
     if code == 124:
         raise Echec(proton_msg_probleme("delai"))
     if code == 126:
@@ -1843,7 +1927,7 @@ def proton_login():
     if proton_exe():
         return proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, connecte ton compte dedans.",
                                "Proton VPN: the official app is opening, sign in to your account there."))
-    exe = shutil.which("protonvpn")
+    exe = shutil.which("protonvpn")           # la fenêtre de connexion ne sert qu'avec la CLI native (le Flatpak a son appli, prise plus haut)
     if not exe:
         raise Echec(T("Proton VPN n'est pas installé.", "Proton VPN is not installed."))
     kitty = shutil.which("kitty")
