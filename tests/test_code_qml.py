@@ -22,6 +22,7 @@ with (H / "appels").open("a") as f: f.write(json.dumps(sys.argv[1:], ensure_asci
 a = sys.argv[1:]
 if a[:1] == ["--liste-json"]: print((H / "projets.json").read_text())
 elif a[:1] == ["--agents-json"]: print((H / "agents.json").read_text())
+elif a[:1] == ["--github-json"]: print((H / "github.json").read_text() if (H / "github.json").exists() else json.dumps(dict(connecte=False, erreur=False, depots=[])))
 elif a[:1] == ["--apercu-json"]:
     p = json.loads((H / "apercus.json").read_text()).get(a[1])
     print(json.dumps(p) if p else "{}")
@@ -65,10 +66,10 @@ def projets(home):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class EspaceDeCode(unittest.TestCase):
-    def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None):
+    def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None, github=None, partage=0):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -89,8 +90,10 @@ class EspaceDeCode(unittest.TestCase):
                                             ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return %s}}'
                                             % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
             (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
+            if partage:
+                (q / "Partage.qml").write_text(FAUX_PARTAGE.replace("property int sessions: 0", "property int sessions: %d" % partage))
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "Texte", "Ico")))
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
@@ -98,6 +101,8 @@ class EspaceDeCode(unittest.TestCase):
             if projets_plus:
                 ps = ps + projets_plus(root)
             (root / "projets.json").write_text(json.dumps(ps))
+            if github is not None:
+                (root / "github.json").write_text(json.dumps(github).replace("@HOME@", str(root)))
             (root / "agents.json").write_text(json.dumps(agents if agents is not None else
                                                          dict(coupee=False, defaut="claude", agents=[dict(prog="claude", nom="Claude Code"), dict(prog="codex", nom="Codex")])))
             (root / "apercus.json").write_text(json.dumps({
@@ -264,7 +269,7 @@ ShellRoot {
                      touche(Qt.Key_Down); verifier(fen.selChoix === 1 && gh.actif, "Bas : Depuis GitHub")
                      touche(Qt.Key_Down); verifier(fen.selChoix === 1, "pas plus bas")
                      touche(Qt.Key_Up); touche(Qt.Key_Escape); verifier(fen.mode === "" && fen.sel === -1 && !racine.fermee, "Échap ferme le choix, pas le panneau")
-                     touche(Qt.Key_Return); touche(Qt.Key_Down); touche(Qt.Key_Return); verifier(fen.mode === "cloner", "Depuis GitHub")
+                     touche(Qt.Key_Return); touche(Qt.Key_Down); touche(Qt.Key_Return); verifier(fen.mode === "github", "Depuis GitHub")
                      touche(Qt.Key_Escape); touche(Qt.Key_Return); touche(Qt.Key_Return); taper("demo"); touche(Qt.Key_Return)
                      verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--nouveau", "demo"] in a)
         self.assertIn(["--nouveau", "demo"], appels)
@@ -281,7 +286,7 @@ ShellRoot {
                      verifier(devant !== null, "un élément à cet endroit")
                      cliquer(zone); verifier(fen.mode === "choix", "clic : le choix à deux lignes (mode " + fen.mode + ")")
                      verifier(!racine.fermee, "un clic sur Nouveau ne ferme pas")
-                     cliquer(trouver(fen.contentItem, "nc-code-choix-github")); verifier(fen.mode === "cloner", "clic sur Depuis GitHub")
+                     cliquer(trouver(fen.contentItem, "nc-code-choix-github")); verifier(fen.mode === "github", "clic sur Depuis GitHub")
                      touche(Qt.Key_Escape); fen.sel = 2
                      cliquer(zone); verifier(fen.mode === "choix", "clic aussi quand un autre projet était choisi")
                      cliquer(trouver(fen.contentItem, "nc-code-choix-vide")); verifier(fen.mode === "nouveau", "clic sur Projet vide")
@@ -295,16 +300,133 @@ ShellRoot {
 
     def test_cloner_ctrl_l(self):
         appels, ps = self.executer('''
-  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "cloner", "mode cloner")
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "github", "mode GitHub")
                      taper("moi/depot"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
                                    attendus=lambda a: ["--cloner", "moi/depot"] in a)
         self.assertIn(["--cloner", "moi/depot"], appels)
+
+    # ── Depuis GitHub ──
+    def depots_gh(self):
+        return dict(connecte=True, erreur=False, depots=[
+            dict(nom="exemple/projet-test", depot="projet-test", description="Mon <b>outil</b> brut", maj="2026-10-01T10:00:00Z", prive=False,
+                 la=True, chemin="@HOME@/dev/alpha", pris=False),
+            dict(nom="exemple/secret", depot="secret", description="", maj="", prive=True, la=False, chemin="", pris=False),
+            dict(nom="exemple/libre", depot="libre", description="Un dépôt libre", maj="", prive=False, la=False, chemin="", pris=False),
+            dict(nom="exemple/occupe", depot="occupe", description="", maj="", prive=False, la=False, chemin="", pris=True)])
+
+    def executer_gh(self, scenario, attendus=None, partage=0, connecte=True):
+        """Comme executer, avec la réponse du faux nc-code --github-json : les dépôts ci-dessus (le « déjà là » pointe vers alpha)."""
+        gh = self.depots_gh() if connecte else dict(connecte=False, erreur=False, depots=[])
+        return self.executer(scenario, attendus=attendus, github=gh, partage=partage)
+
+    def test_github_ctrl_l_liste_filtre_cadenas_et_etiquettes(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "github" && trouver(fen.contentItem, "nc-code-github-panneau").visible, "mode GitHub")
+                     verifier(!trouver(fen.contentItem, "nc-code-saisie").visible && !trouver(fen.contentItem, "nc-code-apercu").visible, "ni saisie du nom ni aperçu")
+                     etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     var l = trouver(fen.contentItem, "nc-code-depots"); verifier(l.visible && l.count === 4, "quatre dépôts : " + l.count)
+                     var cad = [], eti = []; (function tout(e) { if (e.objectName === "nc-code-depot-cadenas" && e.visible) cad.push(e)
+                                                               if (e.objectName === "nc-code-depot-etiquette" && e.visible) eti.push(e); (e.children || []).forEach(tout) })(l)
+                     verifier(cad.length === 1, "un seul cadenas (le dépôt privé) : " + cad.length)
+                     verifier(eti.length === 2, "deux étiquettes (déjà là, dossier pris) : " + eti.length)
+                     var plat = []; (function tout(e) { if (e.text !== undefined && e.text) plat.push(e.text); (e.children || []).forEach(tout) })(l)
+                     verifier(plat.indexOf("Mon <b>outil</b> brut") >= 0, "description en texte brut : " + plat)
+                     verifier(plat.indexOf("déjà là") >= 0 && plat.indexOf("dossier pris") >= 0, "libellés")
+                     taper("lib"); etape++; return }
+  if (etape === 3) { verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].nom === "exemple/libre", "filtre : " + fen.depotsFiltres.map(d => d.nom))
+                     champ().text = ""; taper("secret"); verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].prive, "filtre sur le nom")
+                     champ().text = ""; taper("oUtil"); verifier(fen.depotsFiltres.length === 1 && fen.depotsFiltres[0].nom === "exemple/projet-test", "filtre sur la description, sans casse")
+                     champ().text = ""; taper("zzz"); verifier(fen.depotsFiltres.length === 0, "rien ne correspond")
+                     touche(Qt.Key_Return); verifier(!racine.fermee, "rien à lancer")
+                     champ().text = ""; touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Down)
+                     verifier(fen.selDepot === 3, "les flèches s'arrêtent au dernier : " + fen.selDepot)
+                     touche(Qt.Key_Up); touche(Qt.Key_Up); touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.selDepot === 0, "…et au premier")
+                     touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
+                     Qt.quit() }''')
+        self.assertEqual([a for a in appels if a[:1] == ["--github-json"]], [["--github-json"]], "lu une seule fois, à l'ouverture du mode")
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"]], "rien n'est cloné par le filtrage")
+
+    def test_github_entree_ouvre_le_depot_deja_la_et_clone_les_autres(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     verifier(fen.depotsFiltres[0].la === true && fen.selDepot === 0, "le premier est « déjà là »")
+                     touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: any(x and x[0].endswith("/alpha") for x in a))
+        self.assertIn([ps[0]["chemin"]], appels, "un dépôt déjà là s'ouvre comme un projet")
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"]], "…et ne se clone pas")
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("libre"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--cloner", "exemple/libre"] in a)
+        self.assertIn(["--cloner", "exemple/libre"], appels, "un autre dépôt : nc-code --cloner propriétaire/dépôt")
+        self.assertFalse([a for a in appels if a and a[0].endswith("/alpha")], "aucun projet ouvert")
+
+    def test_github_dossier_pris_adresse_collee_et_clic(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("occupe"); touche(Qt.Key_Return); verifier(!racine.fermee, "dossier pris : ni clone ni ouverture")
+                     champ().text = ""; taper("https://github.com/exemple/ailleurs")
+                     verifier(fen.depotsFiltres.length === 0, "une adresse https n'est pas un filtre")
+                     champ().text = ""; taper("-piege"); touche(Qt.Key_Return); verifier(!racine.fermee, "jamais une option")
+                     champ().text = ""; taper("exemple/inconnu"); touche(Qt.Key_Return); verifier(racine.fermee, "propriétaire/dépôt hors liste : cloné tel quel"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/inconnu"] in a)
+        self.assertIn(["--cloner", "exemple/inconnu"], appels)
+        self.assertFalse([a for a in appels if a[:1] == ["--cloner"] and a[1] in ("exemple/occupe", "-piege")], "dossier pris et option : rien")
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     taper("https://github.com/exemple/ailleurs.git"); touche(Qt.Key_Return); verifier(racine.fermee, "adresse https : clonée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "https://github.com/exemple/ailleurs.git"] in a)
+        self.assertIn(["--cloner", "https://github.com/exemple/ailleurs.git"], appels)
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "ok") return
+                     var l = trouver(fen.contentItem, "nc-code-depots"); var it = l.itemAtIndex(2); if (!it) return
+                     clavier.mouseClick(it, it.width / 2, it.height / 2); verifier(racine.fermee, "clic sur « libre » : cloné"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/libre"] in a)
+        self.assertIn(["--cloner", "exemple/libre"], appels, "le clic sur un dépôt le clone")
+
+    def test_github_sans_gh_connecte_mode_adresse_et_phrase(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); etape++; return }
+  if (etape === 2) { if (fen.ghEtat !== "non") return
+                     var n = trouver(fen.contentItem, "nc-code-github-note")
+                     verifier(n.text === "Connecte gh (gh auth login) pour voir tes dépôts.", "phrase : " + n.text)
+                     verifier(!trouver(fen.contentItem, "nc-code-depots").visible && trouver(fen.contentItem, "nc-code-github-adresse").visible, "seul le mode adresse")
+                     taper("moi/depot"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "moi/depot"] in a, connecte=False)
+        self.assertIn(["--cloner", "moi/depot"], appels)
+
+    def test_github_liste_masquee_pendant_un_partage_d_ecran(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.enPartage, "partage en cours"); etape++; return }
+  if (etape === 2) { verifier(!fen.depotsVisibles && fen.depotsFiltres.length === 0 && !trouver(fen.contentItem, "nc-code-depots").visible, "la liste est masquée")
+                     verifier(fen.depots.length === 0 && fen.ghEtat === "", "les dépôts ne sont même pas lus")
+                     verifier(trouver(fen.contentItem, "nc-code-github-note").text.indexOf("masquée") > 0, "dit pourquoi")
+                     verifier(trouver(fen.contentItem, "nc-code-github-adresse").visible, "le champ « colle l'adresse » reste")
+                     taper("exemple/projet-test"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "exemple/projet-test"] in a, partage=1)
+        self.assertIn(["--cloner", "exemple/projet-test"], appels, "l'adresse collée se clone malgré tout")
+        self.assertFalse([a for a in appels if a[:1] == ["--github-json"]], "gh n'est même pas lancé pendant un partage")
+
+    def test_github_jamais_lu_avant_d_ouvrir_ce_mode(self):
+        appels, ps = self.executer_gh('''
+  if (etape === 1) { taper("alp"); touche(Qt.Key_Down); champ().text = ""
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Down); touche(Qt.Key_Escape)
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); touche(Qt.Key_Escape)
+                     verifier(fen.ghEtat === "" && fen.mode === "", "gh pas lu : " + fen.ghEtat); etape++; return }
+  if (etape === 2) { etape++; return }
+  if (etape === 3) { Qt.quit() }''')
+        self.assertFalse([a for a in appels if a[:1] == ["--github-json"]], "pas de gh au démarrage ni en parcourant le panneau")
 
     def test_fichiers_libelles_et_chargeur(self):
         shell = (QML / "shell.qml").read_text()
         self.assertIn("function code(): void", shell, "qs -c nc-ile ipc call ile code")
         self.assertRegex(shell, r"LazyLoader \{\s*id: chargeurCode\s*active: racine\.codeOuvert", "le panneau n'existe que lorsqu'il est ouvert")
-        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau"):
+        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeDepot"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom + " : jamais de component inline")
         code = (QML / "Code.qml").read_text()

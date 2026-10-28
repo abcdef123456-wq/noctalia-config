@@ -14,6 +14,10 @@ ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) e
   nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}], debutant}
   nc-code --apercu-json DOSSIER   l'aperçu d'un projet en JSON : branche, derniers commits (reflog), début du README
                            en texte brut, URL GitHub (https seulement) — pour le panneau de l'île ; jamais git
+  nc-code --github-json    tes dépôts GitHub en JSON, pour le panneau de l'île : {connecte, erreur, depots: [{nom, depot,
+                           description, maj, prive, la, chemin, pris}]}. gh en argv (statut 5 s, liste 10 s), seulement si gh
+                           est connecté (sinon connecte=false, rien d'autre). « la » : un projet connu a déjà cette origine
+                           (chemin = son dossier) ; « pris » : le dossier du clone existe déjà. Aucun jeton dans la sortie
   nc-code --nouveau NOM [--modele vide|python|c|web]   crée ~/Projets/NOM (CODE_DOSSIER dans nc-reglages) : git init,
                            README.md, fichiers de départ du modèle ; refuse un nom déjà pris ; puis ouvre l'espace de code
   nc-code --cloner [SOURCE]   clone un dépôt GitHub dans ~/Projets/DEPOT puis l'ouvre. SOURCE : https://github.com/PROP/DEPOT(.git),
@@ -528,12 +532,12 @@ def source_github(src):
     return owner, repo
 
 
-def gh_connecte():
+def gh_connecte(delai=15):
     """Vrai si gh est installé et connecté (gh auth status : code 0)."""
     if not shutil.which("gh"):
         return False
     try:
-        r = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=15, stdin=subprocess.DEVNULL)
+        r = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=delai, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0
@@ -552,6 +556,76 @@ def depots_gh():
         s = source_github(x.get("url") if isinstance(x, dict) else None)
         if s and x.get("name") == s[1]:
             res.append(s)
+    return res
+
+
+_NOM_COMPLET_GH = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+_DATE_GH = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z")
+
+
+def depots_valides(brut):
+    """Les dépôts de `gh repo list --json name,nameWithOwner,description,updatedAt,isPrivate` après validation stricte :
+    [{nom (PROPRIETAIRE/DEPOT), depot, description (texte brut, 200 caractères au plus), maj (date ISO ou ''), prive}] ;
+    tout ce qui n'a pas la bonne forme est écarté (nom hors [A-Za-z0-9-]/[A-Za-z0-9._-], dépôt « . », « .. » ou commençant par
+    « - », name différent de la fin de nameWithOwner). 100 au plus. Aucun autre champ n'est gardé."""
+    res = []
+    for x in brut if isinstance(brut, list) else []:
+        if not isinstance(x, dict) or len(res) >= 100:
+            continue
+        nom = x.get("nameWithOwner")
+        if not isinstance(nom, str) or not _NOM_COMPLET_GH.fullmatch(nom):
+            continue
+        s = source_github(nom)
+        if not s or x.get("name") != s[1] or len(nom) > 140:
+            continue
+        desc = x.get("description")
+        desc = imprimable(desc)[:200] if isinstance(desc, str) else ""
+        maj = x.get("updatedAt")
+        res.append(dict(nom=nom, depot=s[1], description=desc, maj=maj if isinstance(maj, str) and _DATE_GH.fullmatch(maj) else "",
+                        prive=x.get("isPrivate") is True))
+    return res
+
+
+def origines_connues():
+    """{propriétaire/dépôt en minuscules: dossier} des projets CONNUS (ouverts par nc-code, zoxide, project.nvim, Claude Code,
+    noctalia-config) dont l'origine est sur GitHub. Jamais ceux « trouvés sur le disque » seulement : une archive extraite
+    peut avoir n'importe quelle origine dans son .git/config, et l'ouvrir lancerait git (lazygit) avec la config du dépôt."""
+    res = {}
+    for d in projets():
+        if d in PAR_BALAYAGE:
+            continue
+        m = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)", origine_github(d))
+        if m:
+            res.setdefault(f"{m.group(1)}/{m.group(2)}".lower(), d)
+    return res
+
+
+def github_json():
+    """Tes dépôts GitHub pour le panneau de l'île : {connecte, erreur, depots: [{nom, depot, description, maj, prive, la, chemin,
+    pris}]}. gh en argv, délais bornés (statut 5 s, liste 10 s), seulement si gh est connecté ; rien d'autre que ces champs n'est
+    écrit (aucun jeton ne passe par ici). « la » : un projet connu a déjà cette origine (chemin = son dossier, Entrée l'ouvre) ;
+    « pris » : le dossier qu'un clone créerait existe déjà sans être ce dépôt (rien n'est cloné par-dessus)."""
+    res = dict(connecte=False, erreur=False, depots=[])
+    if not gh_connecte(5):
+        return res
+    res["connecte"] = True
+    try:
+        r = subprocess.run(["gh", "repo", "list", "--json", "name,nameWithOwner,description,updatedAt,isPrivate", "-L", "100"],
+                           capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, GH_PROMPT_DISABLED="1", NO_COLOR="1"))
+        brut = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        brut = None
+    if not isinstance(brut, list):
+        res["erreur"] = True
+        return res
+    connus = origines_connues()
+    base = dossier_projets()
+    for d in depots_valides(brut):
+        d["chemin"] = connus.get(d["nom"].lower(), "")
+        d["la"] = d["chemin"] != ""
+        d["pris"] = not d["la"] and os.path.lexists(os.path.join(base, d["depot"]))
+        res["depots"].append(d)
     return res
 
 
@@ -1282,6 +1356,9 @@ def main(a):
         r = apercu_json(a[1]) if len(a) > 1 else {}
         print(json.dumps(r, ensure_ascii=False))
         return 0 if r else 1
+    if a and a[0] == "--github-json":
+        print(json.dumps(github_json(), ensure_ascii=False))
+        return 0
     if a and a[0] == "--nouveau":
         return cmd_nouveau(a[1:])
     if a and a[0] == "--cloner":

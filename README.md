@@ -172,11 +172,14 @@ Entrée ouvre quand même. La toute première fois (aucun projet jamais ouvert),
 et Neovim trois phrases d'accueil pour débutant (onglets Code / Git / Terminal, parler à l'agent, changer de panneau),
 une seule fois (marqueurs dans `$XDG_STATE_HOME/nc/`).
 
-La première ligne de la liste, « + Nouveau projet » (Ctrl + N, ou `nc-code --nouveau NOM [--modele vide|python|c|web]`),
+La première ligne de la liste, « + Nouveau projet » (Haut depuis le premier projet, clic ou Ctrl + N : un petit choix
+« Projet vide » / « Depuis GitHub »), « Projet vide » (ou `nc-code --nouveau NOM [--modele vide|python|c|web]`)
 crée `~/Projets/NOM` (dossier réglable : `CODE_DOSSIER` dans nc-reglages) avec `git init`, un README et des fichiers de
-départ, puis l'ouvre ; un nom déjà pris est refusé, rien n'est jamais écrasé. Ctrl + L (ou `nc-code --cloner SOURCE`)
-clone un dépôt GitHub (`https://github.com/proprio/depot`, `git@github.com:proprio/depot.git` ou `proprio/depot`, rien
-d'autre) : avec `gh` connecté, la liste de tes dépôts est proposée, sinon `git clone` en https ; jamais sur un dossier
+départ, puis l'ouvre ; un nom déjà pris est refusé, rien n'est jamais écrasé. Ctrl + L (« Depuis GitHub » ; ou
+`nc-code --cloner SOURCE`) clone un dépôt GitHub (`https://github.com/proprio/depot`, `git@github.com:proprio/depot.git`
+ou `proprio/depot`, rien d'autre) : avec `gh` connecté, la liste de tes dépôts s'affiche dans le panneau
+(`nc-code --github-json`, filtrable ; un cadenas pour les privés ; « déjà là » ouvre le projet au lieu de le cloner ;
+masquée pendant un partage d'écran), sinon tu colles l'adresse et c'est `git clone` en https ; jamais sur un dossier
 déjà là, sans aucun hook. Les agents proposés (Tab) : Claude Code, Antigravity (`agy`), puis les autres installés.
 Neovim s'ouvre sur le projet (la session de la dernière fois, sinon l'explorateur et le README) ; son tableau de bord
 est en français.
