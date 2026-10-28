@@ -403,6 +403,48 @@
         }
       ],
       "readonly": false
+    },
+    {
+      "id": "vpn_etat",
+      "label": "VPN : tunnels du PC (UUID, état)",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "vpn_connecter",
+      "label": "VPN : monter un tunnel",
+      "fields": [
+        {
+          "key": "uuid",
+          "label": "UUID de la connexion (donné par « VPN : tunnels du PC »)",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "vpn_deconnecter",
+      "label": "VPN : couper un tunnel",
+      "fields": [
+        {
+          "key": "uuid",
+          "label": "UUID de la connexion",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "vpn_tout",
+      "label": "VPN : couper tous les tunnels",
+      "fields": [],
+      "readonly": false
+    },
+    {
+      "id": "vpn_killswitch",
+      "label": "VPN : état du kill switch (lecture seule)",
+      "fields": [],
+      "readonly": true
     }
   ]
 }

@@ -927,7 +927,15 @@ arguments vérifiés, jamais de shell (`nc-reglages set` valide lui-même les va
   `/nc oui` dans les deux minutes ;
 - `/nc maj` : mises à jour du système en attente (comptées par `nc-paquets` ; la mise à jour elle-même demande ton mot
   de passe dans un terminal, elle ne se lance pas depuis le téléphone) ;
-- `/nc reglage CLE [VALEUR]` : lire ou changer un réglage de `nc-reglages` (`nc-reglages liste` pour les clés).
+- `/nc reglage CLE [VALEUR]` : lire ou changer un réglage de `nc-reglages` (`nc-reglages liste` pour les clés) ;
+- `/nc vpn` : les tunnels VPN du PC (UUID, état) ; `/nc vpn connecter UUID`, `/nc vpn deconnecter UUID` et `/nc vpn tout`
+  (tout couper) demandent `/nc oui` ; `/nc vpn killswitch` LIT l’état du kill switch. Liste blanche de cinq actions
+  (`vpn_etat`, `vpn_connecter`, `vpn_deconnecter`, `vpn_tout`, `vpn_killswitch` dans le catalogue `noctalia`), `nc-vpn` appelé
+  en arguments avec `--json` ([contrat 1](vpn-contrat.md)), UUID vérifié avant l’appel, délai borné, réponse analysée puis
+  reconstruite champ par champ. Le kill switch ne s’active ni ne se coupe depuis JARVIS : couper une protection à distance,
+  avec un compte de messagerie ou une clé volés, démasquerait la connexion. Si le kill switch est actif, couper le tunnel
+  coupe aussi le réseau de JARVIS : impossible de remonter le tunnel à distance. **Après la mise à jour, relance
+  `nc-jarvis deployer`** (c’est toi qui le lances) pour que le serveur reçoive ces actions.
 
 Les mêmes actions forment la section `noctalia` du catalogue `actions.json` (op `noctalia` de `/api/nc/manage` ;
 `nc-jarvis requete` avec `tool: noctalia` y passe) : lecture sans confirmation, changement avec. Les commandes qui
