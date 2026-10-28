@@ -44,7 +44,7 @@ class ClesIA(unittest.TestCase):
             root = Path(d); q = root / "qml"; shutil.copytree(QML, q); (root / "runtime").mkdir(mode=0o700)
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Couleurs", "ClesIA", "Etincelle", "Texte", "Ico", "JarvisBouton"]
+            noms = ["Reglages", "Couleurs", "ClesIA", "Etincelle", "Texte", "Ico", "BoutonReglages", "JarvisBouton"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-ia").write_text(FAUX); (b / "nc-ia").chmod(0o755)

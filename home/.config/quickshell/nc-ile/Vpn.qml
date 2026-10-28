@@ -204,6 +204,7 @@ PanelWindow {
                 width: parent.width; height: 32
                 visible: VpnEtat.disponible
                 Rectangle {
+                    id: boutonImport
                     objectName: "nc-vpn-importer"
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                     width: importLibelle.implicitWidth + 40; height: 30; radius: 15
@@ -215,6 +216,12 @@ PanelWindow {
                         Texte { id: importLibelle; anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Importer…", "Import…"); font.pixelSize: 12 }
                     }
                     MouseArea { id: zoneImport; anchors.fill: parent; hoverEnabled: true; onClicked: vpn.importer() }
+                }
+                BoutonReglages {
+                    objectName: "nc-vpn-reglages"
+                    anchors.left: boutonImport.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                    section: "Île"
+                    onOuvert: vpn.fermer()
                 }
                 Texte {
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter

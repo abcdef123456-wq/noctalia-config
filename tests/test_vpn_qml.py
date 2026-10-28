@@ -139,7 +139,7 @@ class HorsEcran(unittest.TestCase):
     def lancer(self, corps, etats=None, reglages=None, delai=30):
         """etats : {0: état de départ, 1: état à la 2e lecture…} ; renvoie (journal de qs, appels de nc-vpn, appels de nmcli)."""
         with tempfile.TemporaryDirectory(prefix="nc-vpnqml-") as d:
-            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "VpnEtat", "VpnLigne", "VpnMullvad"),
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "VpnEtat", "VpnLigne", "VpnMullvad"),
                               extra={"Vpn.qml": panneau_hors_fenetre(), "Partage.qml": FAUX_PARTAGE}, singletons=("VpnEtat", "Partage"))
             home = root / "home"
             (home / ".local/bin").mkdir(parents=True)

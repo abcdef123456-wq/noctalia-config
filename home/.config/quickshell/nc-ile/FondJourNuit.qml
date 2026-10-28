@@ -24,6 +24,9 @@ Item {
         id: lanceur
         onRunningChanged: if (!running && fjn.attente) { fjn.attente = false; fjn.lancer(fjn.argAttente) }
     }
+    // Les heures de bascule changées (nc-reglages → Fonds d'écran) : un nouveau calcul, et le minuteur est reposé
+    readonly property string heures: Reglages.val("FONDS_JOUR_DE", "7") + "-" + Reglages.val("FONDS_NUIT_DE", "19")
+    onHeuresChanged: if (actif && vu) lancer("force")
     onActifChanged: {
         if (actif) { vu = true; lancer("force") }
         else if (vu) { vu = false; lancer("arreter") }

@@ -458,6 +458,15 @@ PanelWindow {
             onChoisir: nom => Etat.aller(nom)
         }
 
+        // ⚙ : les réglages de la page affichée (fenêtre des réglages sur la bonne section)
+        ReglagesIle {
+            anchors.right: parent.right; anchors.rightMargin: 5
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 8
+            visible: fen.ouverte && fen.points
+            vue: Etat.vue
+            onOuvert: Etat.fermer()
+        }
+
         focus: fen.ouverte
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)

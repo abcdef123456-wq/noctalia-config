@@ -155,6 +155,7 @@ FloatingWindow {
         anchors.right: cadre.right; anchors.rightMargin: 14; y: cadre.y + 16; height: 40; spacing: 8
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
+        BoutonReglages { objectName: "nc-jarvis-reglages"; anchors.verticalCenter: parent.verticalCenter; taille: 34; section: "Agents IA (coucou)" }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
     }
     // Les pages, en pastilles comme les bureaux de la vue des fenêtres, sur leur propre ligne sous l'en-tête

@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 
-JOUR_DE, NUIT_DE = 7, 19          # heures de bascule
+JOUR_DE, NUIT_DE = 7, 19          # heures de bascule par défaut (réglages FONDS_JOUR_DE et FONDS_NUIT_DE)
 IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".avif", ".jxl")
 HOME = os.path.expanduser("~")
 
@@ -44,11 +44,23 @@ def reglages():
     return v
 
 
+def heures():
+    """(heure du jour, heure de la nuit) : les réglages FONDS_JOUR_DE et FONDS_NUIT_DE (nc-reglages → Fonds d'écran), 7 et 19
+    par défaut ; deux heures qui ne se suivent pas (le jour avant la nuit) : les valeurs par défaut."""
+    v = reglages()
+    try:
+        j, n = int(v.get("FONDS_JOUR_DE", JOUR_DE)), int(v.get("FONDS_NUIT_DE", NUIT_DE))
+    except ValueError:
+        return JOUR_DE, NUIT_DE
+    return (j, n) if 0 <= j < n <= 23 else (JOUR_DE, NUIT_DE)
+
+
 def periode(maintenant):
     """('jour' ou 'nuit', prochaine bascule)."""
+    jour_de, nuit_de = heures()
     h = maintenant.replace(minute=0, second=0, microsecond=0)
-    jour7 = h.replace(hour=JOUR_DE)
-    soir = h.replace(hour=NUIT_DE)
+    jour7 = h.replace(hour=jour_de)
+    soir = h.replace(hour=nuit_de)
     if maintenant < jour7:
         return "nuit", jour7
     if maintenant < soir:
@@ -167,7 +179,7 @@ def main(argv, maintenant=None):
     maintenant = maintenant or datetime.datetime.now()
     nom, prochaine = periode(maintenant)
     impose = lire_imposition()
-    cle = nom + ":" + maintenant.date().isoformat() if nom == "jour" or maintenant.hour >= NUIT_DE else \
+    cle = nom + ":" + maintenant.date().isoformat() if nom == "jour" or maintenant.hour >= heures()[1] else \
         nom + ":" + (maintenant.date() - datetime.timedelta(days=1)).isoformat()
     if impose:
         nom, cle = impose, "impose:" + impose
