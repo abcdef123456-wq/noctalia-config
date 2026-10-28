@@ -1,7 +1,7 @@
 // Page « Presse-papiers » de l'île (Super + Maj + V) : ce que tu as copié (PressePapiers : gardé d'une session à l'autre,
 // 50 textes et 12 images au plus, épinglés d'abord). Recherche, filtre Tout / Textes / Images ; un clic recopie
 // (Ctrl + V pour coller) ; sur une carte : épingler, coller en texte brut dans la fenêtre active, supprimer ; un texte
-// long se déplie d'un clic sur sa flèche ; « Effacer » vide l'historique (les épinglés restent).
+// long se déplie d'un clic sur sa flèche ; une couleur, un lien, un chemin ou un calcul reçoit sa ligne d'action (PresseAction.qml) ; « Effacer » vide l'historique (les épinglés restent).
 // Clavier : ↑ ↓ choisir, Entrée recopier, Suppr supprimer, Échap vider la recherche.
 import QtQuick
 import Quickshell.Widgets
@@ -129,7 +129,8 @@ Item {
                     readonly property bool choisi: p.choix === index
                     readonly property bool deplie: !!p.deplies[modelData.id]
                     objectName: "nc-presse-" + modelData.id
-                    width: liste.width; height: image ? 86 : Math.min(deplie ? 320 : 64, txt.implicitHeight + 20); radius: 14
+                    readonly property int hautTexte: image ? 86 : Math.min(deplie ? 320 : 64, txt.implicitHeight + 20)
+                    width: liste.width; height: hautTexte + (act.utile ? act.height : 0); radius: 14
                     color: zone.containsMouse || choisi ? Couleurs.carteSurvol : Couleurs.carte
                     border.width: choisi ? 1.5 : 0; border.color: Couleurs.accent
                     property bool copie: false
@@ -147,9 +148,18 @@ Item {
                                 asynchronous: true; sourceSize: Qt.size(220, 140) }
                     }
                     Texte { visible: el.image; x: 132; anchors.verticalCenter: parent.verticalCenter; text: "Image" + (el.modelData.octets ? " · " + Math.round(el.modelData.octets / 1024) + Reglages.t(" Ko", " KB") : ""); secondaire: true }
+                    // Actions rapides selon le texte (PresseAction.qml) : couleur, lien, chemin, calcul ; cachées pendant un partage d'écran
+                    PresseAction {
+                        id: act
+                        objectName: "nc-presse-action-" + el.modelData.id
+                        visible: !el.image
+                        y: el.hautTexte - 6; width: parent.width
+                        texte: el.image ? "" : el.modelData.texte
+                        masque: p.masque
+                    }
                     // Actions à droite : déplier (texte long), épingler, coller en brut, supprimer, puis l'état copié
                     Row {
-                        anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                        anchors.right: parent.right; anchors.rightMargin: 10; y: Math.round((el.hautTexte - height) / 2); spacing: 2
                         Repeater {
                             model: [
                                 { id: "deplier", icone: el.deplie ? "expand_less" : "expand_more", aide: Reglages.t("Aperçu complet", "Full preview"), visible: p.longue(el.modelData), fixe: true },

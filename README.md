@@ -208,6 +208,13 @@ l'île Quickshell.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Actions rapides du presse-papiers** (`nc-reglages` → Île, réglage `ILE_PRESSE_ACTIONS`) : sous un texte copié, la page
+  Presse-papiers propose selon ce qu'il est : une couleur (`#rgb`, `#rrggbb`, `rgb(…)`) avec sa pastille et ses
+  conversions hex, rgb et hsl ; un lien http(s) avec « Ouvrir » ; un chemin qui existe avec « Ouvrir le dossier » ; un calcul
+  (`2+3*4`) avec son résultat par `qalc` s'il est installé ; un nombre avec ses écritures hexadécimale et binaire. Les
+  commandes sont lancées en argv, et seulement sur ton clic. Le calcul d'aperçu n'accepte que des chiffres et des opérateurs
+  (aucun taux de change n'est cherché en ligne), est borné à 2 s et ne se lance qu'à l'affichage de la carte. Tout est caché
+  pendant un partage d'écran.
 - **Ne pas déranger automatique** (`nc-reglages` → Notifications, réglage `NPD_AUTO`, activé par défaut) : la même retenue
   que pour le partage d'écran pendant le mode jeu et pendant une projection (écran du PC dupliqué, ou éteint au profit d'un
   projecteur ou d'un second écran avec `nc-ecrans`, Super + O ; étendre le bureau n'en fait pas partie). Les bannières
