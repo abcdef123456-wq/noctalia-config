@@ -165,7 +165,8 @@ class Bascule(Base):
 
 class Rotation(Base):
     def test_le_fond_jour_nuit_coupe_la_rotation_de_noctalia(self):
-        with patch.dict(os.environ, self.env), warnings.catch_warnings():
+        # NC_LANGUE=fr : la description est lue en français, quelle que soit la langue du système (CI en anglais)
+        with patch.dict(os.environ, dict(self.env, NC_LANGUE="fr")), warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceWarning)
             nc = runpy.run_path(str(REPO / "home/.local/bin/nc-reglages"))
             appliquer = nc["appliquer_noctalia"]
