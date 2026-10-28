@@ -90,10 +90,16 @@ local d = require("config.accueil").adapter({}).dashboard
 R.premier = d.sections[1].text and d.sections[1].text[1][1] or ""
 R.nb = #d.sections
 """
-        dans = self.nvim(scen, {"NC_CODE": "1"})
-        self.assertEqual(dans["premier"], "À droite : ton agent IA. Écris-lui ce que tu veux faire. Ici : tes fichiers.")
         hors = self.nvim(scen)
         self.assertEqual(hors["premier"], "")
+        self.assertFalse((self.tmp / "state/nc/code-aide-vue").exists(), "hors de l'espace de code : rien de noté")
+        # La première fois : trois phrases (onglets, parler à l'agent, changer de panneau), notées ; ensuite la seule ligne
+        premiere = self.nvim(scen, {"NC_CODE": "1"})
+        self.assertIn("Trois onglets", premiere["premier"])
+        self.assertEqual(premiere["nb"], hors["nb"] + 3)
+        self.assertTrue((self.tmp / "state/nc/code-aide-vue").exists())
+        dans = self.nvim(scen, {"NC_CODE": "1"})
+        self.assertEqual(dans["premier"], "À droite : ton agent IA. Écris-lui ce que tu veux faire. Ici : tes fichiers.")
         self.assertEqual(dans["nb"], hors["nb"] + 1)
 
     def test_aucun_texte_anglais_dans_la_config_du_depot(self):

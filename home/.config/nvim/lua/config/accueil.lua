@@ -20,6 +20,36 @@ M.traduction = {
 
 M.aide_code = "À droite : ton agent IA. Écris-lui ce que tu veux faire. Ici : tes fichiers."
 
+-- La première fois : trois phrases pour un débutant (les onglets, parler à l'agent, changer de panneau), puis plus jamais
+-- (marqueur dans $XDG_STATE_HOME/nc/code-aide-vue) ; ensuite la seule ligne ci-dessus
+M.aide_premiere = {
+  "Trois onglets en haut : Code (Neovim à gauche, ton agent IA à droite), Git (lazygit) et Terminal.",
+  "Pour parler à l'agent, clique dans le panneau de droite, écris en français ce que tu veux faire, puis Entrée.",
+  "Pour changer de panneau : clique dessus, ou Ctrl+Maj+] et Ctrl+Maj+[ (Ctrl+L et Ctrl+H si ton kitty les a réglés). Message affiché une seule fois.",
+}
+
+function M.fichier_aide_vue()
+  local base = vim.env.XDG_STATE_HOME
+  if not base or base == "" then
+    base = (vim.env.HOME or "") .. "/.local/state"
+  end
+  return base .. "/nc/code-aide-vue"
+end
+
+-- Vrai (et noté) la toute première fois seulement
+function M.premiere_fois()
+  local f = M.fichier_aide_vue()
+  if vim.uv.fs_stat(f) then
+    return false
+  end
+  pcall(vim.fn.mkdir, vim.fn.fnamemodify(f, ":h"), "p", "0700")
+  local h = io.open(f, "w")
+  if h then
+    h:close()
+  end
+  return true
+end
+
 -- L'aide du haut : seulement dans l'espace de code ; ailleurs rien (pas de bruit)
 function M.aide()
   if vim.env.NC_CODE == "1" then
@@ -76,7 +106,13 @@ function M.adapter(opts)
   local sections = {}
   local aide = M.aide()
   if aide then
-    table.insert(sections, { text = { { aide, hl = "special" } }, align = "center", padding = 1 })
+    if M.premiere_fois() then
+      for i, ligne in ipairs(M.aide_premiere) do
+        table.insert(sections, { text = { { ligne, hl = "special" } }, align = "center", padding = i == #M.aide_premiere and 1 or 0 })
+      end
+    else
+      table.insert(sections, { text = { { aide, hl = "special" } }, align = "center", padding = 1 })
+    end
   end
   vim.list_extend(sections, {
     { section = "header" },

@@ -3,7 +3,7 @@
 // (le plus récent en tête ; pastille du langage, branche, date), l'aperçu du projet choisi à droite (branche, état,
 // derniers commits, début du README en texte brut), une ligne d'actions rapides en bas.
 // Clavier : flèches, Entrée ouvre (nc-code DOSSIER : Neovim, l'agent de l'IA, lazygit, terminal), Tab choisit l'agent,
-// Alt + Entrée Neovim seul, Échap ferme (ou revient des agents) ; Ctrl + E le dossier dans le gestionnaire de fichiers,
+// Alt + Entrée Neovim seul, Ctrl + Entrée ouvre même si un agent y travaille déjà, Échap ferme (ou revient des agents) ; Ctrl + E le dossier dans le gestionnaire de fichiers,
 // Ctrl + Maj + C copie le chemin, Ctrl + G la page GitHub (https://github.com/… seulement, URL vérifiée ici aussi).
 // Première ligne « + Nouveau projet » (Ctrl + N : taper le nom, nc-code --nouveau) ; Ctrl + L : cloner depuis GitHub
 // (adresse ou propriétaire/dépôt, vide = tes dépôts ; nc-code --cloner ouvre une fenêtre kitty avec la progression).
@@ -11,6 +11,9 @@
 // jamais git : un dépôt trouvé sur le disque pourrait lui faire exécuter des commandes). Rien ne tourne fermé : la fenêtre n'existe
 // qu'ouverte (shell.qml, LazyLoader) ; l'aperçu part 120 ms après le dernier déplacement, jamais un processus par pas.
 // Les textes venus des dépôts (branche, message de commit, README) sont affichés en texte brut (Texte.qml).
+// Un agent suivi par nc-claude qui travaille déjà dans le dossier d'un projet : badge sur sa ligne (« Claude travaille »,
+// « t'attend »), et Entrée ramène à son terminal au lieu d'ouvrir un second espace (comparaison des chemins réels, en
+// texte brut). Première ouverture (aucun projet jamais ouvert par nc-code) : une ligne d'aide discrète en bas.
 // Verre : flou de Hyprland derrière (règle de calque nc-code, regles.lua), fond de la palette à 62 % (92 % sans flou).
 import QtQuick
 import Quickshell
@@ -43,6 +46,7 @@ PanelWindow {
     property bool lus: false
     property var agents: []                         // nc-code --agents-json : [{prog, nom}]
     property string agentDefaut: ""
+    property bool debutant: false                   // nc-code --agents-json : aucun projet jamais ouvert
     property string filtre: ""
     property int sel: 0
     property string mode: ""                        // "" = chercher un projet ; "nouveau" : taper le nom ; "cloner" : coller l'adresse
@@ -106,6 +110,7 @@ PanelWindow {
                     var d = JSON.parse(text)
                     code.agents = d && Array.isArray(d.agents) ? d.agents.filter(a => a && typeof a.prog === "string" && a.prog !== "") : []
                     code.agentDefaut = d && typeof d.defaut === "string" ? d.defaut : ""
+                    code.debutant = !!(d && d.debutant === true)
                 } catch (e) { code.agents = [] }
             }
         }
@@ -128,6 +133,43 @@ PanelWindow {
         lectureApercu.running = true
     }
     readonly property var apercuChoisi: apercu && projet && apercu.chemin === projet.chemin ? apercu : null
+
+    // ── Les agents déjà au travail dans un projet (nc-claude : cwd_reel = le chemin réel de leur dossier) ──
+    function cheminReel(s) {
+        if (!s) return ""
+        if (typeof s.cwd_reel === "string" && s.cwd_reel !== "") return s.cwd_reel
+        var c = String(s.cwd || "")
+        return c.indexOf("~/") === 0 ? Quickshell.env("HOME") + c.slice(1) : c
+    }
+    function agentOccupe(s) {
+        if (!s || s.agent === "assistant") return false
+        if (Agents.sessionActive(s)) return true
+        return s.etat === "attente" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 900
+    }
+    // chemin du projet → sa session la plus récente (Agents.sessions est trié par date)
+    readonly property var agentsParChemin: {
+        var res = {}
+        var l = Agents.sessions || []
+        for (var i = 0; i < l.length; i++) {
+            var c = cheminReel(l[i])
+            if (c !== "" && res[c] === undefined && agentOccupe(l[i])) res[c] = l[i]
+        }
+        return res
+    }
+    function sessionDe(p) { return p && p.chemin ? (agentsParChemin[p.chemin] || null) : null }
+    function badgeDe(p) {
+        var s = sessionDe(p)
+        if (!s) return ""
+        return s.etat === "travail" ? Agents.nom(s) + Reglages.t(" travaille", " is working") : Agents.nom(s) + Reglages.t(" t'attend", " is waiting")
+    }
+    function couleurBadge(p) { var s = sessionDe(p); return s ? Agents.couleurDe(s) : Couleurs.accent }
+    readonly property var sessionProjet: sessionDe(projet)
+    // Entrée : le terminal de l'agent qui y travaille déjà ; sinon un nouvel espace de code
+    function entrer() {
+        var s = sessionProjet
+        if (s && Number(s.terminal) > 0) { Agents.allerTerminal(Number(s.terminal), Number(s.shell) || 0); quitter() }
+        else ouvrir([])
+    }
 
     // ── Les actions ──
     function quitter() { code.fermer() }
@@ -181,7 +223,9 @@ PanelWindow {
         if (e.key === Qt.Key_Tab || e.key === Qt.Key_Backtab) { if (projet && mode === "") { choixAgent = !choixAgent; selAgent = 0 } return true }
         if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
             if (choixAgent) { var a = choixAgents[selAgent]; ouvrir(a && a.prog ? ["--agent", a.prog] : ["--sans-agent"]) }
-            else ouvrir(alt ? ["--nvim"] : [])
+            else if (alt) ouvrir(["--nvim"])
+            else if (ctrl) ouvrir([])
+            else entrer()
             return true
         }
         if (ctrl && e.key === Qt.Key_E) { ouvrirDossier(); return true }
@@ -282,7 +326,7 @@ PanelWindow {
             ListView {
                 id: liste
                 objectName: "nc-code-liste"
-                x: 8; y: 8 + nouveauLigne.height + 2; width: Math.round(parent.width * 0.46); height: parent.height - 16 - nouveauLigne.height - 2
+                x: 8; y: 8 + nouveauLigne.height + 2; width: Math.round(parent.width * 0.46); height: parent.height - 16 - nouveauLigne.height - 2 - (aide.visible ? aide.height : 0)
                 clip: true; spacing: 2
                 boundsBehavior: Flickable.StopAtBounds
                 model: code.visibles
@@ -294,7 +338,9 @@ PanelWindow {
                     projet: modelData
                     actif: index === code.sel
                     onSurvol: code.sel = index
-                    onOuvrir: code.ouvrir([])
+                    badge: code.badgeDe(modelData)
+                    badgeCouleur: code.couleurBadge(modelData)
+                    onOuvrir: code.entrer()
                 }
                 // La ligne choisie : un verre de l'accent qui glisse d'une ligne à l'autre avec un ressort
                 Rectangle {
@@ -307,6 +353,16 @@ PanelWindow {
                     color: Qt.alpha(Couleurs.accent, 0.22)
                     Behavior on y { enabled: !Reglages.sobre; SpringAnimation { spring: 5; damping: 0.4; epsilon: 0.5 } }
                 }
+            }
+            // Première ouverture : une phrase pour se lancer (disparaît dès qu'un projet a été ouvert)
+            Texte {
+                id: aide
+                objectName: "nc-code-aide"
+                visible: code.debutant && code.mode === ""
+                x: 20; y: parent.height - height; width: liste.width + 40; height: 26
+                secondaire: true; font.pixelSize: 11; elide: Text.ElideRight
+                text: Reglages.t("Premier projet ? Choisis-en un, puis Entrée : Neovim, ton agent IA, lazygit et un terminal s'ouvrent.",
+                                 "First project? Pick one, then Enter: Neovim, your AI agent, lazygit and a terminal open.")
             }
             Texte {
                 visible: code.lus && code.visibles.length === 0
@@ -372,7 +428,7 @@ PanelWindow {
             Row {
                 x: 20; anchors.verticalCenter: parent.verticalCenter; spacing: 14
                 Repeater {
-                    model: [["↵", Reglages.t("ouvrir", "open")], ["Tab", Reglages.t("agent", "agent")], ["Alt ↵", "Neovim"], ["Ctrl N", Reglages.t("nouveau", "new")], ["Ctrl L", "GitHub"], [Reglages.t("Échap", "Esc"), Reglages.t("fermer", "close")]]
+                    model: [["↵", Reglages.t("ouvrir", "open")], ["Tab", Reglages.t("agent", "agent")], ["Alt ↵", "Neovim"], ["Ctrl ↵", Reglages.t("ouvrir quand même", "open anyway")], [Reglages.t("Échap", "Esc"), Reglages.t("fermer", "close")]]
                     Row {
                         spacing: 6
                         Rectangle {
