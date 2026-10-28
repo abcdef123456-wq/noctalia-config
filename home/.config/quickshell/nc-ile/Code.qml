@@ -54,7 +54,15 @@ PanelWindow {
     property int selAgent: 0
     property var apercu: null                       // nc-code --apercu-json du dernier projet lu
     property bool entree: false
-    Component.onCompleted: entree = true
+    property bool ressortEntree: true               // faux = le lanceur sort de la pilule (LanceurFondu.qml) : pas de ressort 0,94
+    // Sortie de la pilule de l'île (ILE_LANCEUR_FONDU) : le clavier et le focus n'attendent rien, seul le fond grandit
+    LanceurFondu {
+        id: fondu
+        ecran: code.screen ? code.screen.name : ""
+        largeurEcran: code.largeurEcran
+        onTermine: code.fermer()
+    }
+    Component.onCompleted: { if (fondu.demarrer()) ressortEntree = false; entree = true }
 
     // ── La recherche floue, comme dans nc-code : 0 = commence par, 1 + place = contient, 100 + place = les lettres
     // dans l'ordre ; -1 = ne correspond pas. Trié par score, puis par date (l'ordre de la liste) ──
@@ -172,7 +180,7 @@ PanelWindow {
     }
 
     // ── Les actions ──
-    function quitter() { code.fermer() }
+    function quitter() { if (!fondu.fermer()) code.fermer() }
     // Ctrl + N (nouveau projet) et Ctrl + L (cloner depuis GitHub) : le champ sert à taper le nom ou l'adresse
     function demarrerMode(m) { mode = m; choixAgent = false; champ.text = ""; filtre = "" }
     function finirMode() { mode = ""; champ.text = "" }
@@ -243,11 +251,12 @@ PanelWindow {
         width: code.largeurCarte; height: code.hauteurCarte
         // Entrée : un petit ressort de 0,94 à 1 pendant le fondu de Hyprland ; direct en sobre
         scale: code.entree ? 1 : 0.94
-        Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.001 } }
+        Behavior on scale { enabled: !Reglages.sobre && code.ressortEntree; SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.001 } }
         // Contour aux couleurs de l'île (ILE_CONTOUR : dégradé de l'accent, discret, aucun)
         Rectangle {
             anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
             visible: Couleurs.aContour
+            opacity: fondu.actif ? Math.min(1, fondu.q) : 1
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
@@ -257,8 +266,14 @@ PanelWindow {
         }
         Rectangle {
             id: fondVerre
-            anchors.fill: parent; radius: code.rayon
-            color: Qt.alpha(Couleurs.fond, code.verre ? 0.62 : 0.92)
+            // Lanceur sorti de la pilule : du rectangle de la pilule (place, taille, rayon, couleur) à la carte
+            x: fondu.actif ? fondu.mix(fondu.x0 - carte.x, 0) : 0
+            y: fondu.actif ? fondu.mix(fondu.y0 - carte.y, 0) : 0
+            width: fondu.actif ? fondu.mix(fondu.w0, carte.width) : carte.width
+            height: fondu.actif ? fondu.mix(fondu.h0, carte.height) : carte.height
+            radius: fondu.actif ? fondu.mix(fondu.r0, code.rayon) : code.rayon
+            color: fondu.actif ? fondu.couleurVers(Qt.alpha(Couleurs.fond, code.verre ? 0.62 : 0.92))
+                               : Qt.alpha(Couleurs.fond, code.verre ? 0.62 : 0.92)
             // Reflet du verre : un liseré clair en haut, qui s'efface vers les bords
             Rectangle {
                 x: 28; width: parent.width - 56; height: 1; y: 1
@@ -271,6 +286,12 @@ PanelWindow {
             }
         }
         MouseArea { anchors.fill: parent }                                     // un clic dans la carte ne ferme pas
+
+        // Le contenu apparaît quand le fond est presque grand ; le focus clavier ne dépend pas de son opacité
+        Item {
+            id: contenu
+            anchors.fill: parent
+            opacity: fondu.actif ? Math.max(0, Math.min(1, (fondu.q - 0.45) / 0.4)) : 1
 
         // ── Le champ de recherche ──
         Item {
@@ -447,6 +468,7 @@ PanelWindow {
                 CodeAction { objectName: "nc-code-cloner"; glyphe: "download"; libelle: Reglages.t("Cloner", "Clone"); touche: "Ctrl L"; onClic: { code.demarrerMode("cloner"); champ.forceActiveFocus() } }
                 CodeAction { objectName: "nc-code-github"; visible: code.github !== ""; glyphe: "open_in_new"; libelle: "GitHub"; touche: "Ctrl G"; onClic: code.ouvrirGitHub() }
             }
+        }
         }
     }
 }

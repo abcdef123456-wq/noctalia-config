@@ -159,6 +159,8 @@ ShellRoot {
         // Espace de code (Super + X, par nc-code) : ouvre le sélecteur de projets ; déjà ouvert, le referme
         function code(): void {
             Etat.fermer()
+            // Déjà ouvert : il se referme comme Échap (en rétrécissant vers la pilule si ILE_LANCEUR_FONDU)
+            if (racine.codeOuvert && chargeurCode.item) { chargeurCode.item.quitter(); return }
             if (!racine.codeOuvert) Hyprland.refreshMonitors()
             racine.codeOuvert = !racine.codeOuvert
         }

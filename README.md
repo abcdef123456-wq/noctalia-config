@@ -278,6 +278,10 @@ l'île Quickshell.
   mises à jour lues dans le cache de `nc-paquets`, agenda seulement si Google Agenda par JARVIS est déjà configuré
   (une ligne absente sans donnée). Rien pendant un partage d'écran (repris à la fin s'il est encore le matin) ni en
   mode jeu. Aucun minuteur en continu : l'île note l'heure quand l'écran s'éteint (`$XDG_STATE_HOME/nc/ile-resume`).
+- **Lanceur qui sort de la pilule** (`nc-reglages` → Île, réglage `ILE_LANCEUR_FONDU`, non par défaut) : Super + X ouvre l'espace de
+  code en partant exactement de la pilule de l'île (place, taille, rayon, couleur), qui grandit avec un ressort pendant que la
+  pilule se cache ; à la fermeture, l'inverse. Rien en continu ; ouverture directe avec les animations réduites, pendant un partage
+  d'écran ou sur un autre écran que l'île. Le Spotlight est déjà la pilule qui grandit.
 - **Modes Concentration** (`nc-reglages` → Île, réglage `ILE_CONCENTRATION`) : des modes que tu crées toi-même (Travail, Nuit,
   Jeu en un clic, ou ton propre nom) par un appui long sur Ne pas déranger dans le centre de contrôle. Un mode règle d'un
   coup Ne pas déranger, un profil d'énergie de `nc-energie` (rien de plus que ce qui existe, pas de nouvelle commande

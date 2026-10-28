@@ -55,7 +55,9 @@ PanelWindow {
     // Recherche : le clavier va tout de suite à l'île ; sinon seulement quand on clique dedans
     WlrLayershell.keyboardFocus: recherche ? WlrKeyboardFocus.Exclusive : (ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
     readonly property bool recherche: ouverte && Etat.recherche
-    mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
+    // Pilule cachée le temps que le lanceur (Code.qml) sort d'elle : plus rien à cliquer à sa place
+    readonly property bool pilCachee: Etat.lanceurFondu === modelData.name
+    mask: Region { item: fen.pilCachee ? bulle : (fen.recherche ? fondClic : ile); Region { item: bulle } }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
@@ -129,7 +131,7 @@ PanelWindow {
     }
     Rectangle {
         id: pointPrive
-        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && (Etat.microActif || Etat.cameraActive)
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && (Etat.microActif || Etat.cameraActive)
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
         y: 9 + 15 - height / 2
         width: 8; height: 8; radius: 4
@@ -147,7 +149,7 @@ PanelWindow {
         readonly property bool minuteur: Etat.minuteurFin > 0
         readonly property bool agent: !minuteur && Agents.travaille
         readonly property bool terminal: !minuteur && !agent && Terminal.enCours
-        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && Etat.aMusique && !Appel.enCours
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && Etat.aMusique && !Appel.enCours
                                        && (minuteur || Agents.travaille || Terminal.enCours) && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
@@ -205,12 +207,18 @@ PanelWindow {
         height: cibleHauteur
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
         color: Couleurs.fond
+        opacity: fen.pilCachee ? 0 : 1
+        // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
+        readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
+                                        && Math.abs(height - cibleHauteur) < 1 && cibleHauteur === 30
+        Component.onCompleted: Etat.enregistrerPilule(fen.modelData.name, ile)
+        Component.onDestruction: Etat.oublierPilule(fen.modelData.name, ile)
 
         // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
         // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)
         HoverHandler {
             id: survol
-            enabled: Reglages.val("ILE_SURVOL", "oui") !== "non"
+            enabled: Reglages.val("ILE_SURVOL", "oui") !== "non" && !fen.pilCachee
             onHoveredChanged: if (hovered) { sortieSurvol.stop(); attenteSurvol.restart() } else { attenteSurvol.stop(); sortieSurvol.restart() }
         }
         Timer {

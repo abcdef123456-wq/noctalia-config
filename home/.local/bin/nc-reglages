@@ -455,6 +455,13 @@ REGLAGES = [
     R("ILE_SURVOL", "Île", L("Ouvrir au survol", "Open on hover"), "ouinon", "oui",
       L("L'île s'ouvre quand le curseur s'attarde dessus, et se referme quand il en sort (sauf si tu as cliqué dedans).",
         "The island opens when the pointer rests on it, and closes when it leaves (unless you clicked inside).")),
+    R("ILE_LANCEUR_FONDU", "Île", L("Le lanceur sort de la pilule", "Launcher grows out of the pill"), "ouinon", "non",
+      L("Super + X (espace de code) : le panneau part exactement de la pilule de l'île, grandit avec un ressort, puis rétrécit vers elle "
+        "à la fermeture ; la pilule se cache le temps de l'animation. Ouverture directe avec les animations réduites, pendant un "
+        "partage d'écran, ou si l'île n'est pas sur le même écran. Le Spotlight (Super + R) est déjà la pilule qui grandit.",
+        "Super + X (code workspace): the panel starts exactly from the island pill, grows with a spring, then shrinks back into it "
+        "on close; the pill hides during the animation. Opens directly with reduced animations, during screen sharing, or when the "
+        "island is on another screen. Spotlight (Super + R) already is the pill growing.")),
     R("ILE_DATE", "Île", L("Date à côté de l'heure", "Date next to the time"), "ouinon", "oui"),
     R("ILE_ANIM_BATTERIE", "Île", L("Animations de l'île sur batterie", "Island animations on battery"), "choix", "douces",
       L("Douces : sur batterie, l'étincelle d'une IA qui travaille tourne plus lentement (un tour en 4 s au lieu de 2,6).",
@@ -1569,7 +1576,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
+                          "ILE_LANCEUR_FONDU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la

@@ -21,6 +21,13 @@ Singleton {
     // Comme sur iPhone : d'abord les activités en cours (musique, minuteur, recharge, mode jeu), puis le centre de
     // contrôle et ses pages de détails ; on descend de l'une à l'autre (points sur le bord droit).
     property string ecranOuvert: ""
+    // Lanceur qui sort de la pilule (ILE_LANCEUR_FONDU, LanceurFondu.qml) : chaque île inscrit sa pilule (objet, jamais un
+    // état qui bouge) ; pendant l'animation, « lanceurFondu » = écran dont la pilule est cachée, « lanceurProprio » = le lanceur
+    property var pilules: ({})
+    property string lanceurFondu: ""
+    property var lanceurProprio: null
+    function enregistrerPilule(nom, pilule) { pilules[nom] = pilule }
+    function oublierPilule(nom, pilule) { if (pilules[nom] === pilule) delete pilules[nom] }
     // Musique au premier plan pendant la lecture, et encore 15 min après une pause (comme l'iPhone)
     readonly property bool aMusique: lecteur !== null && titre !== ""
                                      && (joue || (lecteur === dernierLecteur && finLecture > 0

@@ -48,7 +48,9 @@ QtObject {
     }
 }
 '''
-FAUX_ETAT = "pragma Singleton\nimport QtQuick\nQtObject { property date maintenant: new Date() }\n"
+FAUX_ETAT = ("pragma Singleton\nimport QtQuick\nQtObject { property date maintenant: new Date(); property var pilules: ({}); property string lanceurFondu: \"\"\n"
+             "  property var lanceurProprio: null }\n")
+FAUX_PARTAGE = "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false; property bool indicateur: false; property int sessions: 0 }\n"
 
 
 def projets(home):
@@ -63,10 +65,10 @@ def projets(home):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class EspaceDeCode(unittest.TestCase):
-    def executer(self, scenario, agents=None, attendus=None):
+    def executer(self, scenario, agents=None, attendus=None, fondu=False):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "Couleurs.qml", "Texte.qml", "Ico.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -77,13 +79,15 @@ class EspaceDeCode(unittest.TestCase):
                       '    WlrLayershell.namespace: "nc-code"\n',
                       "    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive\n"):
                 self.assertIn(l, source); source = source.replace(l, "")
+            source = source.replace('code.screen ? code.screen.name : ""', '"DP-1"')   # hors écran, la fenêtre n'a pas de nom d'écran
             source = source.replace("code.screen ? code.screen.width : 1600", "1600").replace("code.screen ? code.screen.height : 1000", "1000")
             (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
-            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: true;'
-                                            ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d}}')
-            (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT)
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: %s;'
+                                            ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return %s}}'
+                                            % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
+            (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
@@ -101,6 +105,8 @@ import Quickshell
 ShellRoot {
  id: racine
  property var fen: null
+ QtObject { id: pilule; property real width: 220; property real height: 30; property real radius: 15; property real y: 9
+            property color color: "#101820"; property bool auRepos: true }
  property int etape: 0
  property bool fermee: false
  function verifier(ok, m) { if (!ok) { console.error("ECHEC " + m); Qt.exit(2) } }
@@ -111,14 +117,15 @@ ShellRoot {
  function touche(k, m) { champ().forceActiveFocus(); clavier.keyClick(k, m || 0) }
  TestCase { id: clavier; name: "EspaceDeCode"; when: false }
  Timer { interval: 100; running: true; repeat: true; onTriggered: {
-  if (etape === 0) { var c = Qt.createComponent("Code.qml"); verifier(c.status === Component.Ready, c.errorString())
+  if (etape === 0) { if (FONDU) Etat.pilules["DP-1"] = pilule
+                     var c = Qt.createComponent("Code.qml"); verifier(c.status === Component.Ready, c.errorString())
                      fen = c.createObject(racine); fen.fermer.connect(function () { racine.fermee = true }); etape++; return }
   if (!fen.lus) return
   SCENARIO
  } }
  Timer { interval: 12000; running: true; onTriggered: { console.error("ECHEC délai"); Qt.exit(3) } }
 }
-'''.replace("SCENARIO", scenario.replace("@HOME@", d)))
+'''.replace("SCENARIO", scenario.replace("@HOME@", d)).replace("FONDU", "true" if fondu else "false"))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
                        XDG_CACHE_HOME=str(root / "cache"), XDG_CONFIG_HOME=str(root / "config"), XDG_STATE_HOME=str(root / "state"),
                        XDG_DATA_HOME=str(root / "data"), TMPDIR=str(root))
@@ -168,6 +175,18 @@ ShellRoot {
         self.assertIn(["--liste-json"], appels)
         self.assertIn(["--apercu-json", ps[1]["chemin"]], appels, "aperçu lu à la sélection")
         self.assertFalse([a for a in appels if a[:1] == ["--apercu-json"] and a[1] == ps[2]["chemin"]], "aucun aperçu lu pour un projet survolé un instant")
+
+    def test_lanceur_sort_de_la_pilule_clavier_des_la_premiere_image_et_echap(self):
+        """ILE_LANCEUR_FONDU=oui : le vrai Code.qml part de la pilule ; la pilule est cachée, la frappe marche pendant l'animation,
+        Échap pendant ou après l'animation ferme proprement et la pilule revient."""
+        self.executer('''
+  if (etape === 1) { taper("nvc"); verifier(fen.filtre === "nvc", "frappe pendant l'animation : " + fen.filtre); etape++; return }
+  if (etape === 2) { if (Etat.lanceurFondu === "") return
+                     verifier(Etat.lanceurProprio !== null, "pilule cachée par le lanceur")
+                     touche(Qt.Key_Escape); etape++; return }
+  if (etape === 3) { if (!racine.fermee) return
+                     verifier(Etat.lanceurFondu === "" && Etat.lanceurProprio === null, "pilule rendue : " + Etat.lanceurFondu)
+                     Qt.quit() }''', fondu=True)
 
     def test_alt_entree_neovim_seul(self):
         appels, ps = self.executer('''
