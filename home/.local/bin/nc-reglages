@@ -519,6 +519,13 @@ REGLAGES = [
     R("VPN_IP_SERVICE", "Île", L("VPN : service d'IP publique", "VPN: public IP service"), "texte", "",
       L("Adresse https://… d'un service qui répond ton IP en texte simple. Vide : aucune demande.",
         "https://… address of a service that answers your IP as plain text. Empty: no request.")),
+    R("VPN_KILLSWITCH", "Île", L("VPN : kill switch (bloquer tout hors du VPN)", "VPN: kill switch (block everything outside the VPN)"), "ouinon", "non",
+      L("Propose, dans le panneau VPN et par `nc-vpn killswitch`, de bloquer toute sortie de l'ordinateur hors du tunnel (pare-feu nft, table nc_vpn). "
+        "Il faut l'assistant root de l'installation (facultatif). Ne dure pas après un redémarrage, ne couvre pas conteneurs ni machines virtuelles. "
+        "Désactivé par défaut ; le couper reste toujours possible.",
+        "Offers, in the VPN panel and with `nc-vpn killswitch`, to block everything leaving the computer outside the tunnel (nft firewall, table nc_vpn). "
+        "Needs the installer's root helper (optional). Does not survive a reboot, does not cover containers or virtual machines. "
+        "Off by default; turning it off is always possible.")),
     R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
       L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
         "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),

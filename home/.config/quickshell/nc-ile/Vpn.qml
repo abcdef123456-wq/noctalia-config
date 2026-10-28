@@ -181,14 +181,10 @@ PanelWindow {
                 width: parent.width
             }
 
-            // ── Protections : rien de réel pour l'instant, donc pas de bouton ──
-            Column {
+            // ── Protections : le kill switch (VpnProtections.qml), absent pendant un partage d'écran ──
+            VpnProtections {
                 objectName: "nc-vpn-protections"
-                visible: VpnEtat.disponible
-                width: parent.width; spacing: 4
-                Texte { width: parent.width; secondaire: true; font.pixelSize: 12; text: Reglages.t("Protections", "Protections") }
-                Texte { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12
-                        text: Reglages.t("Bientôt.", "Coming soon.") }
+                width: parent.width
             }
 
             // ── Le dernier message de nc-vpn (texte brut) ──

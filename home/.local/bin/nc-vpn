@@ -12,6 +12,8 @@
                               (un seul nmcli ; fournisseur et pays déduits du nom de la connexion et de l'interface, sans réseau)
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
+                              assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
 Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
 Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
@@ -77,6 +79,8 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
                               (one nmcli; provider and country guessed from the connection and interface names, no network)
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
+                              (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
 Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
 Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
@@ -962,6 +966,262 @@ def ip_publique():
     print(json.dumps({"ip": ip}))
 
 
+# ── Kill switch : bloquer toute sortie hors du tunnel monté (réglage VPN_KILLSWITCH, coupé par défaut) ───────────────
+# Tout le pare-feu est fait par l'assistant root system/nc-vpn-root (table nft « inet nc_vpn » à lui seul), appelé par
+# « sudo -n » avec des arguments déjà validés ici ET là-bas. Ici : trouver le VRAI tunnel (TUN/TAP ou WireGuard) et ses
+# endpoints (adresses IP) ; jamais de nom d'hôte résolu par nous, jamais de root, jamais de shell.
+SYSFS = os.environ.get("NC_VPN_SYSFS", "/sys")                   # NC_VPN_SYSFS : un faux /sys, pour les tests
+ROOT_VPN = os.environ.get("NC_VPN_ROOT", "/usr/local/bin/nc-vpn-root")
+GDBUS_NM = ["gdbus", "call", "--system", "--dest", "org.freedesktop.NetworkManager"]
+
+
+def limites():
+    return [T("Ne dure pas après un redémarrage (à réactiver ensuite).", "Does not survive a reboot (enable it again afterwards)."),
+            T("Ne couvre pas le forwarding des conteneurs ni des machines virtuelles.", "Does not cover container or virtual machine forwarding."),
+            T("À couper pour changer de serveur : les adresses du serveur sont figées à l'activation.",
+              "Turn it off to change server: the server addresses are fixed when you enable it."),
+            T("Un seul serveur (pas de multi-remote) ; un tunnel doit être monté avant d'activer.",
+              "One server only (no multi-remote); a tunnel must be up before enabling."),
+            T("Le réseau local (sous-réseaux de tes cartes) reste joignable ; en cas de souci, depuis un terminal : sudo nft delete table inet nc_vpn",
+              "Your local network (your cards' subnets) stays reachable; if anything goes wrong, from a terminal: sudo nft delete table inet nc_vpn")]
+
+
+def iface_tunnel(nom):
+    """Vrai si /sys/class/net/NOM est un TUN/TAP (tun_flags) ou un WireGuard (DEVTYPE=wireguard)."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", nom or ""):
+        return False
+    d = os.path.join(SYSFS, "class/net", nom)
+    try:
+        if os.path.isfile(os.path.join(d, "tun_flags")):
+            return True
+        with open(os.path.join(d, "uevent"), encoding="utf-8", errors="replace") as f:
+            return "DEVTYPE=wireguard" in f.read().split()
+    except OSError:
+        return False
+
+
+def sortie_ip_json():
+    exe = shutil.which("ip")
+    if not exe:
+        return []
+    try:
+        r = subprocess.run([exe, "-j", "addr"], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, LC_ALL="C"))
+        d = json.loads(r.stdout) if r.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    return d if isinstance(d, list) else []
+
+
+def tunnel_de(c):
+    """Le vrai tunnel d'une connexion montée. NetworkManager donne parfois le Wi-Fi comme « device » d'un OpenVPN : on retrouve
+    alors le tun par les adresses que NetworkManager a données à la connexion, sinon par l'unique tunnel du système."""
+    import ipaddress
+    if iface_tunnel(c["interface"]):
+        return c["interface"]
+    code, out, _ = nmcli(["-t", "-g", "IP4.ADDRESS,IP6.ADDRESS", "connection", "show", "uuid", c["uuid"]])
+    adr = set()
+    for m in re.finditer(r"([0-9A-Fa-f:.]+)/[0-9]{1,3}", out if code == 0 else ""):
+        try:
+            adr.add(ipaddress.ip_address(m.group(1)))
+        except ValueError:
+            pass
+    trouves = []
+    for itf in sortie_ip_json():
+        nom = itf.get("ifname") if isinstance(itf, dict) else None
+        if not isinstance(nom, str) or not iface_tunnel(nom):
+            continue
+        for a in itf.get("addr_info") or []:
+            try:
+                if ipaddress.ip_address(a.get("local")) in adr:
+                    trouves.append(nom)
+            except (ValueError, TypeError):
+                pass
+    trouves = sorted(set(trouves))
+    if len(trouves) == 1:
+        return trouves[0]
+    if not trouves:
+        seuls = []
+        try:
+            seuls = [n for n in sorted(os.listdir(os.path.join(SYSFS, "class/net"))) if iface_tunnel(n)]
+        except OSError:
+            pass
+        if len(seuls) == 1:
+            return seuls[0]
+    raise Echec(T("Impossible de retrouver l'interface du tunnel (TUN/TAP ou WireGuard) de cette connexion.",
+                  "Could not find the tunnel interface (TUN/TAP or WireGuard) of this connection."))
+
+
+def ip_ou_refus(texte, port, proto):
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(texte.strip("[]"))
+    except ValueError:
+        raise Echec(T("L'adresse du serveur est un nom (« %s ») : le kill switch demande une adresse IP. Mets l'adresse IP du serveur dans la connexion."
+                      % court(texte, 60), "The server address is a name (\"%s\"): the kill switch needs an IP address. Put the server's IP address in the connection."
+                      % court(texte, 60)))
+    return "%s@%d/%s" % (ip, port, proto)
+
+
+def endpoints_openvpn(uuid):
+    code, out, _ = nmcli(["-t", "-g", "vpn.data", "connection", "show", "uuid", uuid])
+    if code != 0:
+        raise Echec(T("Réglages de la connexion illisibles.", "Could not read the connection settings."))
+    d = {}
+    for m in re.split(r",\s*(?=[A-Za-z0-9_.-]+\s*=)", out.strip().replace("\\", "")):
+        k, _, v = m.partition("=")
+        d[k.strip()] = v.strip()
+    entrees = [e.strip() for e in d.get("remote", "").split(",") if e.strip()]
+    if not entrees:
+        raise Echec(T("Pas d'adresse de serveur (remote) dans la connexion.", "No server address (remote) in the connection."))
+    if len(entrees) > 1:
+        raise Echec(T("Plusieurs serveurs (multi-remote) : le kill switch n'en gère qu'un.", "Several servers (multi-remote): the kill switch handles only one."))
+    e = entrees[0]
+    import ipaddress
+    try:
+        ipaddress.ip_address(e)
+        hote, port, proto = e, None, None
+    except ValueError:
+        m = re.fullmatch(r"\[([^\]]+)\](?::([0-9]+))?(?::([A-Za-z0-9-]+))?", e)
+        if m:
+            hote, port, proto = m.groups()
+        else:
+            p = e.split(":")
+            hote, port, proto = p[0], (p[1] if len(p) > 1 else None), (p[2] if len(p) > 2 else None)
+    port = port or d.get("port") or "1194"
+    proto = proto or ("tcp" if d.get("proto-tcp", "no") == "yes" else "udp")
+    if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+        raise Echec(T("Port du serveur invalide.", "Invalid server port."))
+    return [ip_ou_refus(hote, int(port), "tcp" if proto.startswith("tcp") else "udp")]
+
+
+def endpoints_wireguard(uuid):
+    if not shutil.which("gdbus"):
+        raise Echec(T("gdbus est absent (paquet glib2 / libglib2.0-bin) : impossible de lire les pairs WireGuard.",
+                      "gdbus is missing (glib2 / libglib2.0-bin package): cannot read the WireGuard peers."))
+
+    def appel(chemin, methode, *args):
+        try:
+            r = subprocess.run(GDBUS_NM + ["--object-path", chemin, "--method", methode] + list(args), capture_output=True, text=True,
+                               timeout=8, stdin=subprocess.DEVNULL, env=dict(os.environ, LC_ALL="C"))
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return r.stdout if r.returncode == 0 else ""
+    sortie = appel("/org/freedesktop/NetworkManager/Settings", "org.freedesktop.NetworkManager.Settings.GetConnectionByUuid", uuid)
+    m = re.search(r"'(/org/freedesktop/NetworkManager/Settings/[0-9]+)'", sortie)
+    if not m:
+        raise Echec(T("Connexion introuvable chez NetworkManager.", "Connection not found in NetworkManager."))
+    reglages = appel(m.group(1), "org.freedesktop.NetworkManager.Settings.Connection.GetSettings")
+    brut = re.findall(r"'endpoint': <'([^']+)'>", reglages)
+    if not brut:
+        raise Echec(T("Aucun serveur (endpoint) dans la connexion WireGuard.", "No server (endpoint) in the WireGuard connection."))
+    res = []
+    for b in brut[:8]:
+        hote, _, port = b.rpartition(":")
+        if not hote or not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+            raise Echec(T("Adresse de serveur WireGuard invalide.", "Invalid WireGuard server address."))
+        res.append(ip_ou_refus(hote, int(port), "udp"))
+    return res
+
+
+def resoudre_tunnel():
+    """{"tunnel", "nom", "endpoints"} du tunnel monté, ou un refus (Echec) qui dit pourquoi."""
+    e = etat()
+    if not e["disponible"]:
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+    actives = e["actives"]
+    if not actives:
+        if mullvad_etat()["connecte"]:
+            raise Echec(T("Mullvad est connecté : utilise sa protection, `mullvad lockdown-mode set on`.",
+                          "Mullvad is connected: use its own protection, `mullvad lockdown-mode set on`."))
+        raise Echec(T("Aucun tunnel monté : monte d'abord un tunnel, puis active le kill switch.", "No tunnel is up: bring one up first, then enable the kill switch."))
+    if len(actives) > 1:
+        raise Echec(T("Plusieurs tunnels montés : le kill switch n'en protège qu'un seul, coupe les autres.",
+                      "Several tunnels are up: the kill switch protects only one, bring the others down."))
+    c = actives[0]
+    iface = tunnel_de(c)
+    eps = endpoints_wireguard(c["uuid"]) if c["type"] == "wireguard" else endpoints_openvpn(c["uuid"])
+    return {"tunnel": iface, "nom": c["nom"], "endpoints": eps}
+
+
+def appeler_root(args):
+    """(code, sortie, erreur) de « sudo -n nc-vpn-root ARGS » ; Echec clair si l'assistant ou sudo manque."""
+    if not os.path.exists(ROOT_VPN):
+        raise Echec(T("L'assistant du kill switch n'est pas installé : lance install.sh pour le poser (avec ton accord).",
+                      "The kill switch helper is not installed: run install.sh to set it up (with your consent)."))
+    sudo = shutil.which("sudo")
+    if not sudo:
+        raise Echec(T("sudo est absent.", "sudo is missing."))
+    try:
+        r = subprocess.run([sudo, "-n", ROOT_VPN] + args, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, LC_ALL="C"))
+    except (OSError, subprocess.SubprocessError):
+        raise Echec(T("L'assistant du kill switch n'a pas répondu.", "The kill switch helper did not answer."))
+    if r.returncode != 0 and re.search(r"password is required|may not run sudo|not allowed|a terminal is required", r.stderr, re.I):
+        raise Echec(T("La règle sudo de l'assistant manque : relance install.sh pour la poser (avec ton accord).",
+                      "The helper's sudo rule is missing: run install.sh again to set it up (with your consent)."))
+    return r.returncode, r.stdout, r.stderr
+
+
+def message_root(err):
+    return re.sub(r"^nc-vpn-root:\s*", "", court(err, 240))
+
+
+def killswitch_etat():
+    """True / False d'après l'assistant (« etat »), None si inconnu (assistant absent, règle sudo manquante)."""
+    try:
+        code, out, _ = appeler_root(["etat"])
+    except Echec:
+        return None
+    if code != 0:
+        return None
+    return out.strip() == "actif"
+
+
+def killswitch(a):
+    if a == ["limites"]:
+        for l in limites():
+            print("- " + l)
+    elif a == ["activer"]:
+        if reglage("VPN_KILLSWITCH", "non") != "oui":
+            raise Echec(T("Le kill switch est coupé dans les réglages (nc-reglages → Île → VPN : kill switch, VPN_KILLSWITCH).",
+                          "The kill switch is off in the settings (nc-settings → Island → VPN: kill switch, VPN_KILLSWITCH)."))
+        print(T("Limites du kill switch :", "Kill switch limits:"))
+        for l in limites():
+            print("- " + l)
+        t = resoudre_tunnel()
+        code, out, err = appeler_root(["activer", t["tunnel"]] + t["endpoints"])
+        if code != 0:
+            raise Echec(T("Kill switch refusé : ", "Kill switch refused: ") + message_root(err))
+        print(T("Kill switch actif : tout ce qui sort hors du tunnel %s est bloqué." % t["tunnel"],
+                "Kill switch on: everything leaving outside tunnel %s is blocked." % t["tunnel"]))
+    elif a == ["desactiver"]:
+        code, out, err = appeler_root(["desactiver"])
+        if code != 0:
+            raise Echec(T("Impossible de couper le kill switch : ", "Could not turn the kill switch off: ") + message_root(err)
+                        + T(" (en terminal : sudo nft delete table inet nc_vpn)", " (in a terminal: sudo nft delete table inet nc_vpn)"))
+        print(T("Kill switch coupé.", "Kill switch off."))
+    elif a == ["etat"]:
+        s = killswitch_etat()
+        print(T("Kill switch : ", "Kill switch: ") + (T("actif", "on") if s else T("inactif", "off") if s is False else T("inconnu", "unknown")))
+    elif a == ["etat-json"]:
+        installe = os.path.exists(ROOT_VPN)
+        actif = killswitch_etat() if installe else None
+        refus = ""
+        if not installe:
+            refus = T("Assistant non installé : lance install.sh (avec ton accord).", "Helper not installed: run install.sh (with your consent).")
+        elif actif is not True:
+            try:
+                resoudre_tunnel()
+            except Echec as e:
+                refus = str(e)
+        print(json.dumps({"installe": installe, "voulu": reglage("VPN_KILLSWITCH", "non") == "oui", "actif": actif,
+                          "refus": refus, "limites": limites()}, ensure_ascii=False))
+    else:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "aide", "help"):
@@ -990,6 +1250,8 @@ def main():
             print(json.dumps(mullvad_json(), ensure_ascii=False))
         elif cmd == "mullvad" and len(a) >= 2:
             mullvad_agir(a[1:])
+        elif cmd == "killswitch":
+            killswitch(a[1:])
         elif cmd == "ip-publique" and len(a) == 1:
             ip_publique()
         else:

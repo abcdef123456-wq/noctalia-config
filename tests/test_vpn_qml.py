@@ -40,6 +40,11 @@ elif a[:2] == ["indicateur", "--json"]:
     else:
         print(json.dumps(dict(disponible=True, actif=True, fournisseur=act[0].get("fournisseur", ""), pays=act[0].get("pays", ""),
                               nom=act[0]["nom"], nombre=len(act), mullvad=e.get("mullvad", False))))
+elif a[:2] == ["killswitch", "etat-json"]:
+    f = H + "/ks.json"
+    print(open(f).read() if os.path.exists(f) else json.dumps(dict(installe=True, voulu=True, actif=False, refus="", limites=["Limite un", "Limite deux"])))
+elif a[:2] == ["killswitch", "activer"] or a[:2] == ["killswitch", "desactiver"]:
+    open(H + "/ks.json", "w").write(json.dumps(dict(installe=True, voulu=True, actif=a[1] == "activer", refus="", limites=["Limite un", "Limite deux"])))
 elif a[:2] == ["mullvad", "etat-json"]:
     e = json.loads(open(H + "/etat.json").read())
     print(json.dumps(e.get("mullvad_etat", dict(installe=False))))
@@ -91,7 +96,7 @@ class Sources(unittest.TestCase):
         self.shell = (QML / "shell.qml").read_text()
 
     def test_aucun_sondage_ni_component_inline(self):
-        for nom in ("Vpn", "VpnEtat", "VpnLigne"):
+        for nom in ("Vpn", "VpnEtat", "VpnLigne", "VpnProtections"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom)
             self.assertNotRegex(src, r"repeat:\s*true", nom + " : jamais de relevé toutes les N secondes")
@@ -136,10 +141,10 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, etats=None, reglages=None, delai=30):
+    def lancer(self, corps, etats=None, reglages=None, delai=30, ks=None):
         """etats : {0: état de départ, 1: état à la 2e lecture…} ; renvoie (journal de qs, appels de nc-vpn, appels de nmcli)."""
         with tempfile.TemporaryDirectory(prefix="nc-vpnqml-") as d:
-            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "VpnEtat", "VpnLigne", "VpnMullvad"),
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "VpnEtat", "VpnLigne", "VpnMullvad", "VpnProtections"),
                               extra={"Vpn.qml": panneau_hors_fenetre(), "Partage.qml": FAUX_PARTAGE}, singletons=("VpnEtat", "Partage"))
             home = root / "home"
             (home / ".local/bin").mkdir(parents=True)
@@ -150,6 +155,8 @@ class HorsEcran(unittest.TestCase):
             H.faux(root, "notify-send")
             H.faux(root, "zenity", "echo /ailleurs/labo.ovpn")
             etats = etats or {0: etat_deux_tunnels()}
+            if ks:
+                (home / "ks.json").write_text(json.dumps(ks))
             (home / "etat.json").write_text(json.dumps(etats[0]))
             for k, v in etats.items():
                 (home / ("etat-%d.json" % k)).write_text(json.dumps(v))
@@ -314,7 +321,7 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(nmcli, [], "pas de moniteur")
         self.assertEqual(appels, [], "pas de lecture")
 
-    def test_panneau_complet_protections_bientot_et_resume_masque_en_partage(self):
+    def test_panneau_complet_protections_et_resume_masque_en_partage(self):
         c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
         c[0].update(fournisseur="Proton VPN", pays="FR")
         self.lancer('''
@@ -324,7 +331,8 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
                     var corps = fen.contentItem
                     verifier(trouver(corps, "nc-vpn-protections").visible, "section Protections")
-                    verifier(textes(corps).indexOf("Bientôt.") >= 0 || textes(corps).indexOf("Coming soon.") >= 0, "bientôt : " + textes(corps))
+                    verifier(textes(corps).indexOf("Bientôt.") < 0, "plus de « Bientôt » : " + textes(corps))
+                    verifier(trouver(corps, "nc-vpn-ks-bascule").visible, "interrupteur du kill switch")
                     verifier(trouver(corps, "nc-vpn-importer").visible && trouver(corps, "nc-vpn-actifs").visible, "panneau complet")
                     verifier(textes(corps).join("|").indexOf("Proton VPN") >= 0, "résumé : " + textes(corps))
                     Partage.silence = true; etape++; ticks = 0; return }
@@ -334,6 +342,74 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', etats={0: dict(disponible=True, connexions=c, actives=c)})
+
+    def test_kill_switch_limites_confirmation_activation_coupure_et_partage(self):
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
+                    var corps = fen.contentItem
+                    verifier(trouver(corps, "nc-vpn-protections").visible, "section Protections")
+                    var tx = textes(corps).join("|")
+                    verifier(tx.indexOf("Bloquer tout hors du VPN") >= 0, "interrupteur : " + tx)
+                    verifier(tx.indexOf("Limite un") >= 0 && tx.indexOf("Limite deux") >= 0, "limites montrées avant d'activer : " + tx)
+                    verifier(!trouver(corps, "nc-vpn-ks-confirmation").visible, "pas de confirmation au départ")
+                    t.mouseClick(trouver(corps, "nc-vpn-ks-bascule")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var corps2 = fen.contentItem
+                    verifier(trouver(corps2, "nc-vpn-ks-confirmation").visible, "confirmation demandée")
+                    t.mouseClick(trouver(corps2, "nc-vpn-ks-annuler")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    var corps3 = fen.contentItem
+                    verifier(!trouver(corps3, "nc-vpn-ks-confirmation").visible, "annulé : rien de caché")
+                    t.mouseClick(trouver(corps3, "nc-vpn-ks-bascule")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 2) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-ks-confirmer")); etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 10) return
+                    verifier(VpnEtat.ksActif === true, "actif relu après l'action")
+                    verifier(textes(fen.contentItem).join("|").indexOf("Actif") >= 0, "état actif affiché")
+                    Partage.silence = true; etape++; ticks = 0; return }
+                if (etape === 6) { if (ticks < 2) return
+                    verifier(!trouver(fen.contentItem, "nc-vpn-protections").visible, "rien pendant un partage d'écran")
+                    VpnEtat.killswitchActiver(); VpnEtat.killswitchDesactiver()           // ignorés en partage
+                    Partage.silence = false; etape++; ticks = 0; return }
+                if (etape === 7) { if (ticks < 6) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-ks-bascule")); etape++; ticks = 0; return }       // coupure en un clic
+                if (etape === 8) { if (ticks < 10) return
+                    verifier(VpnEtat.ksActif === false, "coupé")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''')
+        ks = [a for a in appels if a[:1] == ["killswitch"]]
+        self.assertEqual([a[1] for a in ks if a[1] != "etat-json"], ["activer", "desactiver"])      # une activation après confirmation, une coupure
+        self.assertNotIn(["killswitch", "activer"], appels[:appels.index(["killswitch", "activer"])])
+
+    def test_kill_switch_refuse_ou_coupe_dans_les_reglages(self):
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
+                    var corps = fen.contentItem
+                    var tx = textes(corps).join("|")
+                    verifier(tx.indexOf("Refusé : Aucun tunnel monté") >= 0, "refus et raison : " + tx)
+                    t.mouseClick(trouver(corps, "nc-vpn-ks-bascule")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 3) return
+                    verifier(!trouver(fen.contentItem, "nc-vpn-ks-confirmation").visible, "refusé : pas de confirmation")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', ks=dict(installe=True, voulu=True, actif=False, refus="Aucun tunnel monté", limites=["L"]))
+        self.assertFalse([a for a in appels if a[:2] in (["killswitch", "activer"], ["killswitch", "desactiver"])])
+
+    def test_kill_switch_sources(self):
+        src = (QML / "VpnProtections.qml").read_text()
+        self.assertIn("!VpnEtat.masque", src)
+        self.assertNotRegex(src, r"(?m)^\s*component ")
+        self.assertIn("killswitchDesactiver()", src)
+        etat = (QML / "VpnEtat.qml").read_text()
+        self.assertIn('"nc-vpn", "killswitch", "etat-json"]', etat)
+        self.assertIn("panneauOuvert && disponible && !masque", etat)
 
     def test_mullvad_application_section_actions_ecoute_et_masquage(self):
         etat = dict(disponible=True, connexions=[], actives=[], mullvad=True,

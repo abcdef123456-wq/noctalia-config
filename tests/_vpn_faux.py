@@ -31,6 +31,9 @@ def esc(s): return s.replace("\\", "\\\\").replace(":", "\\:")
 if a[:4] == ["-t", "-g", "vpn.data", "connection"]:
     vd = R / "vpn_data.json"
     print((json.loads(vd.read_text()) if vd.exists() else {}).get(a[-1], ""))
+elif a[:3] == ["-t", "-g", "IP4.ADDRESS,IP6.ADDRESS"]:
+    ic = R / "ipconf.json"
+    print((json.loads(ic.read_text()) if ic.exists() else {}).get(a[-1], ""))
 elif a[-2:] == ["connection", "show"]:
     for c in etat:
         print(":".join([c["uuid"], c["type"], "yes" if c["active"] else "no", c["dev"] if c["active"] else "--", esc(c["nom"])]))
@@ -102,7 +105,12 @@ import json, os, sys
 from pathlib import Path
 with (Path(os.environ["FAUX_DIR"]) / "gdbus.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
 m = os.environ.get("GDBUS_SECRETS", "oui")
-if sys.argv[-2:-1] == ["org.freedesktop.DBus.NameHasOwner"] or "org.freedesktop.DBus.NameHasOwner" in sys.argv:
+if "org.freedesktop.NetworkManager.Settings.GetConnectionByUuid" in sys.argv:
+    if (Path(os.environ["FAUX_DIR"]) / "gdbus-settings.txt").exists(): print("(objectpath '/org/freedesktop/NetworkManager/Settings/7',)")
+    else: sys.exit(1)
+elif "org.freedesktop.NetworkManager.Settings.Connection.GetSettings" in sys.argv:
+    print((Path(os.environ["FAUX_DIR"]) / "gdbus-settings.txt").read_text())
+elif sys.argv[-2:-1] == ["org.freedesktop.DBus.NameHasOwner"] or "org.freedesktop.DBus.NameHasOwner" in sys.argv:
     print("(%s,)" % ("true" if m == "oui" else "false"))
 else:
     print("(['org.freedesktop.DBus'%s],)" % (", 'org.freedesktop.secrets'" if m == "activable" else ""))

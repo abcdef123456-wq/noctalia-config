@@ -45,6 +45,13 @@ Singleton {
     property bool mullvadInstalle: false          // la commande `mullvad` existe (dit par nc-vpn indicateur)
     property var mullvad: ({ installe: false, connecte: false, pays: "", hote: "", compte: null })   // pour le panneau
 
+    // Kill switch (nc-vpn killswitch etat-json) : lu panneau ouvert et hors partage d'écran seulement, puis après chaque action
+    property bool ksInstalle: false
+    property bool ksVoulu: false
+    property var ksActif: null                    // true, false ou null (inconnu)
+    property string ksRefus: ""                   // pourquoi on ne peut pas l'activer maintenant (texte brut de nc-vpn)
+    property var ksLimites: []
+
     readonly property bool actif: disponible && indActif
     readonly property bool indicateur: disponible && indActif && Reglages.val("VPN_INDICATEUR", "oui") !== "non"
     readonly property bool masque: Partage.silence
@@ -99,7 +106,8 @@ Singleton {
         }
     }
     onVouluChanged: if (voulu) relire()           // premier relevé, et relevé au réveil de l'écran
-    onPanneauOuvertChanged: { if (panneauOuvert) relire(); else tunnelsLus = false }
+    onPanneauOuvertChanged: { if (panneauOuvert) { relire(); lireKs() } else tunnelsLus = false }
+    onMasqueChanged: if (!masque) lireKs()
     property bool tunnelsLus: false               // la liste complète (panneau ouvert) a été lue
     Component.onCompleted: if (voulu) relire()
 
@@ -118,6 +126,26 @@ Singleton {
                     v.connexions = []; v.actives = []; v.disponible = false
                 }
                 v.lu = true; v.tunnelsLus = true
+            }
+        }
+    }
+
+    function lireKs() { if (panneauOuvert && disponible && !masque && !lectureKs.running) lectureKs.running = true }
+    onDisponibleChanged: if (disponible) lireKs()
+    Process {
+        id: lectureKs
+        command: [v.bin + "nc-vpn", "killswitch", "etat-json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var d = null
+                try { d = JSON.parse(text) } catch (e) { d = null }
+                if (d && typeof d === "object") {
+                    v.ksInstalle = d.installe === true
+                    v.ksVoulu = d.voulu === true
+                    v.ksActif = d.actif === true ? true : (d.actif === false ? false : null)
+                    v.ksRefus = typeof d.refus === "string" ? d.refus.slice(0, 240) : ""
+                    v.ksLimites = Array.isArray(d.limites) ? d.limites.filter(x => typeof x === "string").map(x => x.slice(0, 240)).slice(0, 8) : []
+                }
             }
         }
     }
@@ -179,7 +207,7 @@ Singleton {
     Process {
         id: agir
         stderr: StdioCollector { onStreamFinished: v.erreur = text.trim().split("\n")[0].slice(0, 240) }
-        onExited: { v.cible = ""; v.relire() }
+        onExited: { var ks = v.cible === "killswitch"; v.cible = ""; v.relire(); if (ks) v.lireKs() }
     }
     function lancer(args, cible) {
         if (agir.running) return
@@ -190,6 +218,8 @@ Singleton {
     function connecter(uuid) { lancer(["connecter", uuid], uuid) }
     function deconnecter(uuid) { lancer(["deconnecter", uuid], uuid) }
     function toutDeconnecter() { lancer(["tout-deconnecter"], "tout") }
+    function killswitchActiver() { if (!masque) lancer(["killswitch", "activer"], "killswitch") }
+    function killswitchDesactiver() { if (!masque) lancer(["killswitch", "desactiver"], "killswitch") }
     function mullvadConnecter() { lancer(["mullvad", "connecter"], "mullvad") }
     function mullvadDeconnecter() { lancer(["mullvad", "deconnecter"], "mullvad") }
     function mullvadPays(cc) { if (/^[a-z]{2}$/.test(cc)) lancer(["mullvad", "pays", cc], "mullvad") }
