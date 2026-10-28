@@ -301,6 +301,25 @@ class IA(unittest.TestCase):
         o = [q for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"][-1]
         self.assertEqual(o["corps"]["model"], "llama3.2:3b", "le modèle le plus récent")
 
+    def test_demander_local_prefere_ollama_sinon_le_choix_habituel(self):
+        """--local (l'île : texte des notifications) : l'IA de ce PC si elle répond, sinon le choix habituel ; lu sur l'entrée standard."""
+        u = f"http://127.0.0.1:{self.port}"
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOLLAMA_HOST={u}/ollama\n")
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="le texte secret")
+        self.assertEqual(r.stdout.strip(), "Local", r.stderr)
+        self.assertFalse([q for q in Faux.requetes if q["chemin"] == "/ant/messages"], "Ollama répond : rien ne sort du PC")
+        self.assertIn("le texte secret", json.dumps([q["corps"] for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"]))
+        Faux.requetes.clear()
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOLLAMA_HOST=http://127.0.0.1:1\n")
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="q")
+        self.assertEqual(r.stdout.strip(), "Bonjour", r.stderr)
+        self.reglages("IA_MODE=non\n")
+        self.cles(f"OLLAMA_HOST={u}/ollama\n")
+        Faux.requetes.clear()
+        r = self.lancer("demander", "--usage", "texte", "--local", "-", entree="q")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual([q for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"], [], "IA_MODE=non : rien ne part")
+
     def test_image_jointe(self):
         img = self.home / "c.png"
         img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")

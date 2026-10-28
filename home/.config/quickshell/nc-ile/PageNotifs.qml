@@ -25,7 +25,7 @@ Item {
     function defiler(dy) { return defil.defiler(dy) }
     function replier(cle) { var r = Object.assign({}, replies); if (r[cle]) delete r[cle]; else r[cle] = true; replies = r; choix = -1 }
     function menu(x, nom) { var m = Object.assign({}, menus); if (m[x.id] === nom) delete m[x.id]; else m[x.id] = nom; menus = m }
-    onVisibleChanged: { if (visible) { choix = -1; forceActiveFocus() } }
+    onVisibleChanged: { if (visible) { choix = -1; forceActiveFocus(); iaPrete.verifier() } }
     onVisiblesChanged: if (choix >= visibles.length) choix = visibles.length - 1
 
     Keys.onPressed: e => {
@@ -41,6 +41,9 @@ Item {
     // Inconnue (pas de NetworkManager) : considérée comme là.
     readonly property bool enLigne: Connexion.enLigne
     // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard
+    // IA sur une notification (NotifIA.qml, réglage NOTIFS_IA) : prête ou non, et la carte dont l'appel est en cours (un seul à la fois)
+    property string iaOccupee: ""
+    IaPrete { id: iaPrete }
     property string resumeIA: ""
     property string resumeQui: ""
     function texteNotifs() {
@@ -437,6 +440,14 @@ Item {
                                             MouseArea { id: zbc; anchors.fill: parent; onClicked: Notifs.agir(carte.modelData, parent.modelData) }
                                         }
                                     }
+                                }
+                                // « Résumer » et « Réponses suggérées » par l'IA (réglage NOTIFS_IA) : seulement sur un clic
+                                NotifIA {
+                                    lot: groupe.replie ? groupe.modelData.notifs : [carte.modelData]
+                                    prete: iaPrete.prete
+                                    cle: String(carte.modelData.id)
+                                    occupee: p.iaOccupee
+                                    onOccupe: c => p.iaOccupee = c
                                 }
                                 // Menus : reporter (15 min, 1 h, demain), masquer (1 h, toujours), répondre (champ)
                                 Row {

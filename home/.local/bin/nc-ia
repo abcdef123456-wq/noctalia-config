@@ -6,6 +6,7 @@
         --flux                         morceau par morceau : une ligne JSON {"t": …} chacun ({"ia": …} avant)
         --usage question|texte|commande|image|commit   (question par défaut)
         --ia ID                        cette IA-là (sinon : le réglage) ; --image FICHIER : une image jointe
+        --local                        l'IA de ce PC (Ollama) si elle répond, sinon le choix habituel (texte sensible)
   nc-ia texte ACTION [--presse|--selection|--stdin] [--copier] [--flux]
                                        sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
                                        reformuler, expliquer, repondre, ou une consigne libre entre guillemets
@@ -135,6 +136,7 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
         --flux                         piece by piece: one JSON line {"t": …} each ({"ia": …} first)
         --usage question|texte|commande|image|commit   (question by default)
         --ia ID                        that AI (otherwise: the setting); --image FILE: an attached image
+        --local                        the AI on this PC (Ollama) if it answers, otherwise the usual choice (sensitive text)
   nc-ai text ACTION [--presse|--selection] [--copier] [--flux]
                                        on the selected (else copied) text: resumer (summarize), traduire (translate),
                                        corriger (fix), reformuler (rephrase), expliquer (explain), repondre (reply),
@@ -5227,9 +5229,10 @@ def main(a):
         if c in ("demander", "commande"):
             flux = "--flux" in a
             usage, force, image, reste = ("commande" if c == "commande" else "question"), "", None, []
+            local = "--local" in a
             i = 0
             while i < len(a):
-                if a[i] == "--flux":
+                if a[i] in ("--flux", "--local"):
                     pass
                 elif a[i] in ("--usage", "--ia", "--image") and i + 1 < len(a):
                     usage, force, image = (a[i + 1], force, image) if a[i] == "--usage" else \
@@ -5249,6 +5252,8 @@ def main(a):
                 return 2
             if image:
                 usage = "image"
+            if local and not force and not image and not coupee() and disponible("ollama"):
+                force = "ollama"                 # --local : l'IA de ce PC si elle répond (le texte ne sort pas), sinon le choix habituel
             if c == "commande" and not flux:
                 tampon = []
                 rep, _ = demander(q, usage, force, image, sortie=tampon.append)
