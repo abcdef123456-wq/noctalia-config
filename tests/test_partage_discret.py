@@ -270,8 +270,12 @@ class Logique(unittest.TestCase):
                 if (etape === 0) {
                     if (!Notifs.pret) return
                     // Grâce de 3 s (1 s en vrai) : les captures sont à 400 ms l'une de l'autre, une machine chargée
-                    // (suite complète) peut retarder la minuterie du test de plus d'une seconde
-                    Partage.delaiFin = 3000
+                    // (suite complète) peut retarder la minuterie du test de plus d'une seconde.
+                    // Seuil de l'indicateur à 60 s (1,5 s en vrai) : il compte depuis le premier cliché ; sur une machine chargée
+                    // la rafale dure plus de 1,5 s, le partage devenait « vrai » (mesuré : 8 échecs sur 25 avec 48 boucles
+                    // en parallèle, « 2 notifications received while sharing » au lieu de la dernière bulle). Une rafale
+                    // de captures courtes ne doit jamais atteindre ce seuil : ici il ne peut plus être atteint par la charge.
+                    Partage.delaiIndicateur = 60000; Partage.delaiFin = 3000
                     Partage.evenement("1,2"); notifier("Chat", "un", "", "normal"); marquer(); etape++; return }
                 if (etape === 1) {
                     if (Notifs.liste.length < 1) return
