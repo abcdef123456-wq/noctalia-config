@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""nc-energie-liste : la LISTE BLANCHE des profils d'énergie poussés (nc-energie) et leur VALIDATEUR. C'est le seul endroit
+qui dit ce qu'un profil a le droit de régler. Un module sans effet de bord : il ne lit rien, n'écrit rien, ne lance rien ;
+nc-energie le charge et lui donne la fiche matériel de CE PC.
+
+  nc-energie-liste [--json]     la liste blanche complète (clé → valeurs), pour la doc et les tests
+
+Un profil est un JSON {nom, description, reglages: {clé: valeur}} (et, facultativement, film_batterie: true). L'IA ne
+produit rien d'autre : jamais de commande, de chemin ni de code. valider_profil() rejette le profil ENTIER (avec la
+raison) si :
+  - une clé est inconnue, ou interdite (ventilateurs, undervolt, ryzenadj, TDP brut, écriture libre dans /sys, options
+    de rendu de Hyprland : render:*, cm_*, use_fp16, xp_mode, new_render_scheduling…) ;
+  - une valeur n'est pas dans la liste de la clé (listes énumérées, jamais de borne libre) ;
+  - la capacité n'a pas été détectée sur CE PC (la fiche ne la liste pas) ;
+  - la fréquence d'écran descend sous la fréquence maximale, sauf dans un profil marqué « film sur batterie » (60 Hz) ;
+  - un texte (nom, description) n'est pas imprimable ou dépasse sa borne.
+Niveau 1 : sans root (profil du service d'énergie, luminosité, réglages de nc-reglages). Niveau 2 : matériel, par
+l'assistant root nc-energie-root (seulement ses sous-commandes et valeurs énumérées), et nc-limite-charge."""
+import json
+import re
+import sys
+
+# ── Valeurs énumérées ──────────────────────────────────────────────────────────────────────────────────────────
+PROFILS_SERVICE = ("power-saver", "balanced", "performance")
+LUMINOSITES = tuple(str(n) for n in range(20, 101, 10))              # jamais sous 20 % (écran illisible)
+EPP = ("performance", "balance_performance", "balance_power", "power")
+PLATEFORME = ("low-power", "quiet", "cool", "balanced", "balanced-performance", "performance")
+OUINON = ("oui", "non")
+ONOFF = ("on", "off")
+
+# Capacités (ce que la fiche détecte) : chaque clé de la liste blanche en demande au plus une
+CAPACITES = ("profil", "luminosite", "ecran", "batterie", "bluetooth", "epp", "boost", "freqmax", "platform",
+             "nvidia_pm", "nvidia_pl", "wifi", "usb", "audio", "clavier", "limite_charge")
+
+# cle -> (niveau, valeurs, capacité ou None, libellé français, libellé anglais). Les valeurs variables selon le PC
+# (profil, EPP, plateforme, clavier) sont resserrées par valeurs_permises() d'après la fiche.
+CLES = {
+    # Niveau 1, sans root
+    "profil":      (1, PROFILS_SERVICE, "profil", "Profil d'énergie", "Power profile"),
+    "luminosite":  (1, LUMINOSITES, "luminosite", "Luminosité de l'écran (%)", "Screen brightness (%)"),
+    # Réglages de nc-reglages (écrits par « nc-reglages set », jamais à la main)
+    "EFFETS":              (1, ("tous", "aucun"), None, "Effets visuels", "Visual effects"),
+    "ECO_EFFETS":          (1, OUINON, "batterie", "Couper les effets en Économie", "Turn off effects in Power Saver"),
+    "ECO_IMAGES":          (1, OUINON, "batterie", "Pas d'images décoratives en Économie", "No decorative images in Power Saver"),
+    "ECO_CLAVIER":         (1, OUINON, "clavier", "Éteindre le clavier lumineux en Économie", "Keyboard backlight off in Power Saver"),
+    "ECO_BLUETOOTH":       (1, OUINON, "bluetooth", "Couper le Bluetooth en Économie", "Turn off Bluetooth in Power Saver"),
+    "ECO_AUTO":            (1, ("0", "10", "15", "20", "30"), "batterie", "Économie automatique sous (%)", "Automatic Power Saver below (%)"),
+    "ECO_BRIGHTNESS_MAX":  (1, ("0", "30", "40", "50", "60"), "luminosite", "Luminosité maximale en Économie (%)", "Max brightness in Power Saver (%)"),
+    "HALO_BATTERIE":       (1, OUINON, "batterie", "Halo musical sur batterie", "Music glow on battery"),
+    "BAT_RELEVES":         (1, OUINON, "batterie", "Relevés de la barre espacés sur batterie", "Less frequent bar readings on battery"),
+    "BAT_CLAVIER":         (1, OUINON, "clavier", "Clavier lumineux au plus bas sur batterie", "Keyboard backlight lowest on battery"),
+    "FOND_ANIME":          (1, ("non", "aurore", "vivant"), None, "Fond animé", "Animated wallpaper"),
+    "FOND_ANIME_BATTERIE": (1, OUINON, "batterie", "Fond animé aussi sur batterie", "Animated wallpaper on battery too"),
+    "ILE_ANIM_BATTERIE":   (1, ("douces", "continues"), "batterie", "Animations de l'île sur batterie", "Island animations on battery"),
+    "ILE_METEO":           (1, OUINON, None, "Météo à côté de l'heure", "Weather next to the time"),
+    "ILE_PRESSE":          (1, OUINON, None, "Presse-papiers dans l'île", "Clipboard in the island"),
+    "ILE_TELECHARGEMENTS": (1, OUINON, None, "Téléchargements du navigateur dans l'île", "Browser downloads in the island"),
+    # Décoration d'Hyprland, par les réglages de nc-reglages (flou, ombres, animations) : JAMAIS une option de rendu
+    "FENETRES_FLOU":       (1, OUINON, None, "Flou derrière les fenêtres", "Blur behind windows"),
+    "FENETRES_OMBRE":      (1, ("0", "22"), None, "Ombres des fenêtres (0 : aucune)", "Window shadows (0: none)"),
+    "FENETRES_ANIMATIONS": (1, OUINON, None, "Animations des fenêtres", "Window animations"),
+    # Fréquence de l'écran : « max » (la plus haute) ; « 60 » seulement dans un profil film sur batterie (voir plus bas)
+    "HZ_PERFORMANCE":      (1, ("max",), "ecran", "Écran en Performance", "Screen in Performance"),
+    "HZ_BALANCED_AC":      (1, ("max",), "ecran", "Écran en Équilibré, sur secteur", "Screen in Balanced, plugged in"),
+    "HZ_BALANCED_BAT":     (1, ("max", "60"), "ecran", "Écran en Équilibré, sur batterie", "Screen in Balanced, on battery"),
+    "HZ_ECO":              (1, ("max", "60"), "ecran", "Écran en Économie", "Screen in Power Saver"),
+    # Niveau 2, matériel (assistant root nc-energie-root ; limite de charge : nc-limite-charge)
+    "cpu_epp":          (2, EPP, "epp", "Préférence énergie du processeur", "CPU energy preference"),
+    "cpu_boost":        (2, ONOFF, "boost", "Boost du processeur", "CPU boost"),
+    "cpu_freq_max":     (2, ("100", "80", "60"), "freqmax", "Fréquence maximale du processeur (%)", "Max CPU frequency (%)"),
+    "platform_profile": (2, PLATEFORME, "platform", "Profil de la plateforme (ACPI)", "Platform profile (ACPI)"),
+    "nvidia_pm":        (2, ("auto", "on"), "nvidia_pm", "Gestion d'énergie de la carte NVIDIA", "NVIDIA power management"),
+    "nvidia_pl":        (2, ("0", "1", "2", "3"), "nvidia_pl", "Limite de puissance NVIDIA (0 : minimum, 3 : maximum)", "NVIDIA power limit (0: min, 3: max)"),
+    "wifi_power_save":  (2, ONOFF, "wifi", "Économie d'énergie du Wi-Fi", "Wi-Fi power saving"),
+    "usb_autosuspend":  (2, ONOFF, "usb", "Veille des périphériques USB (hors saisie)", "USB autosuspend (not input devices)"),
+    "audio_power_save": (2, ONOFF, "audio", "Économie d'énergie de la puce audio", "Audio chip power saving"),
+    "clavier_retro":    (2, ("0", "1", "2", "3"), "clavier", "Rétroéclairage du clavier", "Keyboard backlight"),
+    "limite_charge":    (2, ONOFF, "limite_charge", "Limite de charge de la batterie (80 %)", "Battery charge limit (80%)"),
+}
+# Les clés de niveau 1 qui viennent de nc-reglages (toutes sauf profil et luminosité)
+CLES_REGLAGES = tuple(c for c in CLES if re.fullmatch(r"[A-Z][A-Z0-9_]*", c))
+HZ_FILM = ("HZ_BALANCED_BAT", "HZ_ECO")
+
+# Ce qu'aucun profil ne touchera jamais : refusé avec cette raison (même si une clé de ce genre avait un jour une entrée)
+INTERDITS = re.compile(
+    r"(?i)(ventil|fan|pwm|courbe|curve|undervolt|ryzenadj|ryzen_smu|tdp|stapm|fast_?limit|slow_?limit|tctl|"
+    r"/sys|/proc|/dev|\.\.|render|cm_|use_fp16|xp_mode|new_render_scheduling|hyprctl|direct_scanout|"
+    r"explicit_sync|damage|vfr|vrr|sudo|\$\(|`|;|\||&)")
+
+MAX_REGLAGES = 40
+MAX_NOM, MAX_DESCRIPTION = 40, 240
+
+
+def texte_sur(valeur, maxi, nom):
+    """(texte, None) ou (None, raison) : une chaîne imprimable, bornée, sur une ligne, sans < > ni début en « - »."""
+    if not isinstance(valeur, str):
+        return None, f"{nom} : du texte attendu"
+    v = valeur.strip()
+    if not v:
+        return None, f"{nom} : vide"
+    if len(v) > maxi:
+        return None, f"{nom} : plus de {maxi} caractères"
+    if not v.isprintable():
+        return None, f"{nom} : caractère non imprimable (retour à la ligne, contrôle…)"
+    if re.search(r"[<>]", v):
+        return None, f"{nom} : pas de < ni de >"
+    if v[0] == "-":
+        return None, f"{nom} : ne commence pas par un tiret"
+    return v, None
+
+
+def identifiant(nom):
+    """« Cours / bureautique » → cours-bureautique (lettres, chiffres et tirets : sûr dans une commande)."""
+    import unicodedata
+    base = unicodedata.normalize("NFKD", nom).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:40] or "profil"
+
+
+def a_capacite(fiche, capacite):
+    return capacite is None or capacite in (fiche.get("capacites") or [])
+
+
+def valeurs_permises(cle, fiche, film=False):
+    """Les valeurs que cette clé peut prendre SUR CE PC (liste vide : la clé n'existe pas ici), d'après la fiche."""
+    if cle not in CLES:
+        return []
+    niveau, valeurs, capacite, _fr, _en = CLES[cle]
+    if not a_capacite(fiche, capacite):
+        return []
+    v = list(valeurs)
+    if cle == "profil":
+        v = [x for x in v if x in (fiche.get("profils") or {}).get("disponibles", [])]
+    elif cle == "cpu_epp":
+        v = [x for x in v if x in (fiche.get("cpu") or {}).get("epp_disponibles", [])]
+    elif cle == "platform_profile":
+        v = [x for x in v if x in (fiche.get("plateforme") or {}).get("choix", [])]
+    elif cle == "clavier_retro":
+        v = [x for x in v if int(x) <= int((fiche.get("clavier") or {}).get("max") or 0)]
+    elif cle in HZ_FILM:
+        hz = (fiche.get("ecran") or {}).get("hz_max") or 0
+        if not (film and hz > 60):
+            v = [x for x in v if x != "60"]        # la fréquence maximale seulement, hors profil film (et écran plus rapide)
+    return v
+
+
+def liste_blanche(fiche, film=False):
+    """{clé: [valeurs]} de tout ce qu'un profil peut régler sur CE PC (sans les clés absentes)."""
+    return {c: valeurs_permises(c, fiche, film) for c in CLES if valeurs_permises(c, fiche, film)}
+
+
+def normaliser_valeur(v):
+    """Une valeur de profil : une chaîne (un entier JSON est accepté et devient sa chaîne) ; le reste est refusé."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, int):
+        return str(v)
+    return v if isinstance(v, str) else None
+
+
+def valider_profil(brut, fiche):
+    """(profil propre, None) ou (None, raison). Le profil propre : {nom, id, description, reglages: {clé: chaîne},
+    film_batterie: bool}. Toute erreur rejette le profil entier. N'accepte que la liste blanche, jamais autre chose."""
+    if not isinstance(brut, dict):
+        return None, "le profil n'est pas un objet JSON"
+    inconnus = set(brut) - {"nom", "description", "reglages", "film_batterie"}
+    if inconnus:
+        return None, "champ inconnu : " + ", ".join(sorted(str(k)[:30] for k in inconnus)[:3])
+    nom, err = texte_sur(brut.get("nom"), MAX_NOM, "nom")
+    if err:
+        return None, err
+    description, err = texte_sur(brut.get("description"), MAX_DESCRIPTION, "description")
+    if err:
+        return None, err
+    film = brut.get("film_batterie", False)
+    if not isinstance(film, bool):
+        return None, "film_batterie : vrai ou faux attendu"
+    reglages = brut.get("reglages")
+    if not isinstance(reglages, dict) or not reglages:
+        return None, "reglages : un objet non vide attendu"
+    if len(reglages) > MAX_REGLAGES:
+        return None, f"reglages : plus de {MAX_REGLAGES} entrées"
+    propres = {}
+    for cle, val in reglages.items():
+        if not isinstance(cle, str):
+            return None, "clé illisible"
+        court = cle[:40]
+        if INTERDITS.search(cle):
+            return None, f"clé interdite : {court}"
+        if cle not in CLES:
+            return None, f"clé inconnue : {court}"
+        v = normaliser_valeur(val)
+        if v is None:
+            return None, f"{cle} : une valeur de la liste attendue"
+        if INTERDITS.search(v):
+            return None, f"{cle} : valeur interdite"
+        _niveau, _valeurs, capacite, _fr, _en = CLES[cle]
+        if not a_capacite(fiche, capacite):
+            return None, f"{cle} : ce PC n'a pas cette capacité ({capacite})"
+        permises = valeurs_permises(cle, fiche, film)
+        if v not in permises:
+            if cle in HZ_FILM and v == "60":
+                if not film:
+                    return None, f"{cle} : 60 Hz seulement dans un profil « film sur batterie »"
+                return None, f"{cle} : 60 Hz impossible sur cet écran"
+            return None, f"{cle} : valeur hors liste ({v[:30]}), permises : {', '.join(permises) or 'aucune'}"
+        propres[cle] = v
+    return {"nom": nom, "id": identifiant(nom), "description": description, "reglages": propres,
+            "film_batterie": film}, None
+
+
+def valider_liste(brut, fiche, maxi=4):
+    """Une réponse d'IA {profils: [...]} (ou une liste de profils) → (profils valides, [{nom, raison}] des rejetés)."""
+    if isinstance(brut, dict):
+        brut = brut.get("profils")
+    if not isinstance(brut, list):
+        return [], [{"nom": "?", "raison": "pas de liste de profils"}]
+    bons, rejets, ids = [], [], set()
+    for p in brut[:maxi + 3]:
+        profil, raison = valider_profil(p, fiche)
+        nom = str(p.get("nom", "?"))[:40] if isinstance(p, dict) and isinstance(p.get("nom", ""), str) else "?"
+        nom = "".join(c for c in nom if c.isprintable()) or "?"
+        if profil is None:
+            rejets.append({"nom": nom, "raison": raison})
+        elif profil["id"] in ids:
+            rejets.append({"nom": nom, "raison": "nom en double"})
+        elif len(bons) >= maxi:
+            rejets.append({"nom": nom, "raison": "trop de profils"})
+        else:
+            ids.add(profil["id"])
+            bons.append(profil)
+    return bons, rejets
+
+
+if __name__ == "__main__":
+    sortie = {c: {"niveau": n, "valeurs": list(v), "capacite": cap} for c, (n, v, cap, _f, _e) in CLES.items()}
+    if "--json" in sys.argv[1:]:
+        print(json.dumps(sortie, ensure_ascii=False, indent=1))
+    else:
+        for c, d in sortie.items():
+            print(f"niveau {d['niveau']}  {c} = {' | '.join(d['valeurs'])}" + (f"   (capacité : {d['capacite']})" if d["capacite"] else ""))
