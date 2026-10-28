@@ -1686,10 +1686,14 @@ if [ "$MODE" = full ]; then
       info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
       if [ -n "$ligne_e" ] && ask "$(t "L'installer ?" "Install it?")" n sensible; then
         t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
+        # La règle est d'abord copiée en root (« .tmp » : sudo ignore les noms avec un point), vérifiée par visudo À
+        # CETTE PLACE, puis mise en service : ce qui est vérifié est exactement ce qui sert
         if sudo install -Dm0755 -o root -g root "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root &&
-           sudo visudo -cf "$t_e" >/dev/null && sudo install -m0440 -o root -g root "$t_e" "$regle_e"; then
+           sudo install -m0440 -o root -g root "$t_e" "$regle_e.tmp" && sudo visudo -cf "$regle_e.tmp" >/dev/null &&
+           sudo mv -f "$regle_e.tmp" "$regle_e"; then
           ok "$(t "Assistant des profils d'énergie poussés installé." "Advanced power profiles helper installed.")"
         else
+          sudo rm -f "$regle_e.tmp"
           warn "$(t "Installation de l'assistant d'énergie impossible (règle sudo refusée par visudo)." "Couldn't install the power helper (sudo rule rejected by visudo).")"
         fi
         rm -f "$t_e"

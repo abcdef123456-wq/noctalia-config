@@ -287,6 +287,12 @@ PROFIL_IA = {"nom": "Cours / bureautique", "description": "Sobre pour la journé
 
 
 class AvecIA(Energie):
+    def test_cle_en_double_dans_la_reponse_de_l_ia_refusee(self):
+        """Relecture : avec une clé en double, la dernière gagnerait en silence ; la réponse entière est refusée."""
+        self.ia('{"profils": [{"nom": "A", "description": "x", "reglages": {"luminosite": "40", "luminosite": "100"}}]}')
+        r = self.nc("proposer", "--ia", "--json")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+
     def test_profils_de_l_ia_valides(self):
         q = self.ia("Voilà :\n" + json.dumps({"profils": [PROFIL_IA, {
             "nom": "Film sur batterie", "description": "Autonomie.", "film_batterie": True,
@@ -490,27 +496,32 @@ class Appliquer(Energie):
         self.assertEqual(r.returncode, 2, "le profil n'est plus valable sur ce PC : refusé avant tout changement")
         self.assertEqual(self.etat_materiel(), avant)
 
-    def test_echec_de_l_assistant_pendant_l_application(self):
+    def test_limite_nvidia_refusee_sautee_le_reste_applique(self):
+        """Beaucoup de cartes de portable refusent nvidia-smi -pl (relecture) : ce réglage est sauté et dit, le profil
+        n'est pas annulé pour autant."""
         avant = self.etat_materiel()
-        # L'assistant échoue (code 3) au milieu : la carte NVIDIA s'endort entre l'aperçu et l'application
         self.sauver_profils([dict(self.profil, reglages={"cpu_epp": "power", "nvidia_pl": "1", "luminosite": "40"})])
         ecrire(self.sys / "bus/pci/devices/0000:01:00.0/power/runtime_status", "active")
         self.faux("nvidia-smi", f'case "$*" in *query*) echo "50.00, 140.00, 140.00" ;; *) exit 1 ;; esac\n')
         r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
-        self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("remis comme avant", json.loads(r.stdout)["erreur"])
-        self.assertEqual(self.etat_materiel(), avant)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        d = json.loads(r.stdout)
+        self.assertTrue(d["sautes"])
+        self.assertIn("Sautés", d["message"])
+        self.assertNotEqual(self.etat_materiel(), avant)                                # l'EPP est bien passé
 
     def test_sans_assistant_refus_net(self):
+        """Sans l'assistant (PC fixe, ou refusé), la fiche ne propose aucun réglage matériel (relecture) : un profil
+        qui en contient est refusé avant tout changement."""
         avant = self.etat_materiel()
         e = {"NC_ENERGIE_ROOT": str(self.tmp / "absent")}
-        ap = self.json("apercu", "cours-bureautique", env=e)
-        self.assertFalse(ap["applicable"])
-        self.assertIn("nc-energie-root", ap["raison"])
+        f = self.json("fiche", env=e)
+        self.assertFalse(f["assistant_root"])
+        for cap in ("epp", "boost", "freqmax", "platform", "nvidia_pm", "nvidia_pl", "wifi", "usb", "audio", "clavier"):
+            self.assertNotIn(cap, f["capacites"])
         r = self.nc("appliquer", "cours-bureautique", "--oui", env=e)
         self.assertEqual(r.returncode, 2)
         self.assertEqual(self.etat_materiel(), avant)
-        self.assertFalse(self.json("fiche", env=e)["assistant_root"])
 
     def test_profil_sans_materiel_marche_sans_assistant(self):
         self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "FOND_ANIME": "non"})])

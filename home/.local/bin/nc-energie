@@ -162,15 +162,20 @@ def nvidia_limites():
     return (mn, mx, cur) if mx > mn else None
 
 
+# Classes USB jamais mises en veille (comme nc-energie-root) : saisie 03, audio 01, impression 07, Bluetooth e0
+USB_GARDES = {"03", "01", "07", "e0"}
+
+
 def usb_reglables():
-    """Périphériques USB dont la veille est réglable, sans ceux de saisie (classe HID 03, au niveau du périphérique ou d'une interface)."""
+    """Périphériques USB dont la veille est réglable : ni saisie, ni audio, ni impression, ni Bluetooth, au niveau du
+    périphérique ou d'une de ses interfaces."""
     res = []
     for d in glob_(os.path.join(SYS, "bus/usb/devices/*")):
         if ":" in os.path.basename(d) or not os.path.isfile(os.path.join(d, "power/control")):
             continue
-        if lire(os.path.join(d, "bDeviceClass")) == "03":
+        if (lire(os.path.join(d, "bDeviceClass")) or "").lower() in USB_GARDES:
             continue
-        if any(lire(i) == "03" for i in glob_(os.path.join(d, "*:*/bInterfaceClass"))):
+        if any((lire(i) or "").lower() in USB_GARDES for i in glob_(os.path.join(d, "*:*/bInterfaceClass"))):
             continue
         res.append(d)
     return res
@@ -304,8 +309,13 @@ def fiche():
         caps.append("audio")
     if kbd_max > 0:
         caps.append("clavier")
-    if limite_charge_possible(bats):
+    if limite_charge_possible(bats) and os.access(os.environ.get("NC_LIMITE_CHARGE") or LIMITE_CHARGE, os.X_OK):
         caps.append("limite_charge")
+    # Sans l'assistant root (PC fixe : install.sh ne le propose que sur un portable ; ou refusé), les réglages matériels
+    # ne sont pas proposés : un profil qui en contiendrait serait refusé en entier
+    if not assistant_present():
+        materiel = {cap for (n, _v, cap, _f, _e) in L.CLES.values() if n == 2 and cap} - {"limite_charge"}
+        caps = [c for c in caps if c not in materiel]
     return {"version": 1,
             "cpu": {"marque": marque, "coeurs": coeurs, "pilote": lire(os.path.join(p0, "scaling_driver")) or "inconnu",
                     "epp_disponibles": epp_dispo, "boost": boost},
@@ -448,6 +458,8 @@ def appliquer_cle(cle, valeur):
         return False, "l'assistant nc-energie-root n'est pas installé (relance install.sh et accepte-le)"
     cmd = [direct, sous, valeur] if direct else ["sudo", "-n", ASSISTANT, sous, valeur]
     code, _ = lancer(cmd, delai=30)
+    if code == 3 and cle == "nvidia_pl":
+        return None, "la carte refuse sa limite de puissance (souvent le cas sur un portable) : sautée"
     if code == 3:
         return False, f"{cle} : rien de tel sur ce PC en ce moment"
     return code == 0, f"{cle} refusé par l'assistant (code {code})"
@@ -464,6 +476,16 @@ def poser_profil(valeur):
 
 
 # ── Profils gardés ─────────────────────────────────────────────────────────────────────────────────────────────
+def sans_doublon(paires):
+    """Objet JSON de l'IA : une clé en double (la dernière gagnerait en silence) rend la réponse invalide."""
+    d = {}
+    for k, v in paires:
+        if k in d:
+            raise ValueError("clé en double : " + str(k)[:40])
+        d[k] = v
+    return d
+
+
 def ecrire_json(chemin, donnees):
     """Écriture atomique, en 0600, dans un dossier 0700."""
     dossier = os.path.dirname(chemin)
@@ -593,7 +615,7 @@ def demander_ia(f):
         return None, "l'IA n'a pas pu répondre"
     debut = min([i for i in (sortie.find("{"), sortie.find("[")) if i >= 0], default=-1)
     try:
-        rep = json.JSONDecoder().raw_decode(sortie[debut:])[0] if debut >= 0 else None
+        rep = json.JSONDecoder(object_pairs_hook=sans_doublon).raw_decode(sortie[debut:])[0] if debut >= 0 else None
     except ValueError:
         rep = None
     if rep is None:
@@ -679,11 +701,15 @@ def apercu(p, f):
                             "_avant": avant, "_apres": apres, "niveau": niveau})
         if avant is None:
             avert.append(f"{L.CLES[cle][3]} : l'état d'avant est inconnu, il ne pourra pas être remis par « revenir »")
+        elif cle in SOUS_COMMANDES and avant not in L.CLES[cle][1]:
+            # ex. platform_profile « custom » ou « max-power » d'une Legion, EPP numérique : l'assistant ne sait pas le remettre
+            avert.append(f"{L.CLES[cle][3]} : l'état d'avant (« {avant} ») n'est pas une valeur que l'assistant sait remettre ; "
+                         "« revenir » ne pourra pas le rétablir")
     changements.sort(key=lambda c: (ORDRE_NIVEAU[c["niveau"]], c["cle"]))
     root = [c for c in changements if c["cle"] in SOUS_COMMANDES]
     applicable, raison = True, ""
     if root and not f.get("assistant_root"):
-        applicable, raison = False, "l'assistant nc-energie-root n'est pas installé (install.sh te le propose, accord demandé)"
+        applicable, raison = False, "l'assistant nc-energie-root n'est pas installé (install.sh le propose sur un portable, avec ton accord)"
     hz = [c for c in changements if c["cle"] in L.HZ_FILM and c["_apres"] == "60"]
     return {"id": p["id"], "nom": p["nom"], "description": p["description"], "film_batterie": p["film_batterie"],
             "changements": changements, "inchanges": inchanges, "avertissements": avert, "applicable": applicable,
@@ -747,9 +773,12 @@ def appliquer(nom, oui=False, oui_hz=False, interactif=False):
             fusion.update({k: v for k, v in precedent["avant"].items() if k in L.CLES})     # l'état d'origine d'abord
         ecrire_json(FICHIER_AVANT, {"version": 1, "profil": p["id"], "nom": p["nom"], "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                     "avant": fusion})
-        faites = []
+        faites, sautees = [], []
         for c in ap["changements"]:
             ok, raison = appliquer_cle(c["cle"], c["_apres"])
+            if ok is None:                                  # réglage refusé par le matériel lui-même : sauté, pas d'échec
+                sautees.append(f"{c['libelle']} ({raison})")
+                continue
             faites.append((c["cle"], c["_avant"]))
             if not ok:
                 rates = defaire(faites)
@@ -764,8 +793,10 @@ def appliquer(nom, oui=False, oui_hz=False, interactif=False):
                 if rates:
                     msg += " Mais n'ont pas pu être remis : " + ", ".join(rates) + "."
                 raise Erreur(msg, 1)
-    return {"ok": True, "applique": True, "nom": p["nom"], "changements": len(ap["changements"]),
-            "message": f"Profil « {p['nom']} » appliqué ({len(ap['changements'])} changements). « nc-energie revenir » remet l'état d'avant."}
+    msg = f"Profil « {p['nom']} » appliqué ({len(faites)} changements). « nc-energie revenir » remet l'état d'avant."
+    if sautees:
+        msg += " Sautés : " + ", ".join(sautees) + "."
+    return {"ok": True, "applique": True, "nom": p["nom"], "changements": len(faites), "sautes": sautees, "message": msg}
 
 
 def revenir():
@@ -774,6 +805,8 @@ def revenir():
         return {"ok": True, "revenu": False, "message": "Rien à remettre : aucun profil n'a été appliqué."}
     with Verrou():
         avant = [(k, v) for k, v in d["avant"].items() if k in L.CLES and (v is None or isinstance(v, str))]
+        # jamais un écran noir au retour : une luminosité d'avant sous 5 % est remise à 5 %
+        avant = [(k, "5" if k == "luminosite" and entier(v) is not None and entier(v) < 5 else v) for k, v in avant]
         # Le matériel en dernier à remettre = en premier appliqué : l'ordre inverse de l'application
         avant.sort(key=lambda kv: (ORDRE_NIVEAU[L.CLES[kv[0]][0]], kv[0]))
         rates = defaire(avant)

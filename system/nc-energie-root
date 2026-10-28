@@ -84,18 +84,21 @@ wifis() {
     printf '%s\n' "$n"
   done
 }
-# Périphériques USB (pas les interfaces « 1-1:1.0 ») sans aucune interface de saisie (classe 03 : clavier, souris…)
+# Périphériques USB (pas les interfaces « 1-1:1.0 ») jamais mis en veille s'ils sont, ou ont une interface, de saisie
+# (03 : clavier, souris), audio (01 : un casque coupé au milieu d'un son), d'impression (07) ou Bluetooth (e0 : la souris
+# et le casque sans fil passent par lui)
 usbs() {
-  local d i saisie
+  local d i garde
   for d in "$S"/bus/usb/devices/*; do
     case "${d##*/}" in *:*) continue ;; esac
     [ -f "$d/power/control" ] || continue
-    saisie=0
-    [ "$(lire "$d/bDeviceClass")" = 03 ] && saisie=1
+    garde=0
+    case "$(lire "$d/bDeviceClass")" in 03|01|07|e0|E0) garde=1 ;; esac
     for i in "$d"/*:*/bInterfaceClass; do
-      [ -f "$i" ] && [ "$(lire "$i")" = 03 ] && saisie=1
+      [ -f "$i" ] || continue
+      case "$(lire "$i")" in 03|01|07|e0|E0) garde=1 ;; esac
     done
-    [ "$saisie" = 0 ] && printf '%s\n' "$d"
+    [ "$garde" = 0 ] && printf '%s\n' "$d"
   done
 }
 politiques() { local p; for p in "$S"/devices/system/cpu/cpufreq/policy[0-9]*; do [ -d "$p" ] && printf '%s\n' "$p"; done; }
@@ -161,7 +164,8 @@ EOF
   case "$mn$mx" in ''|*[!0-9]*) absent "limites de puissance illisibles" ;; esac
   [ "$mx" -gt "$mn" ] || absent "limites de puissance illisibles"
   w=$((mn + (mx - mn) * $1 / 3))
-  nvidia-smi -pl "$w" >/dev/null 2>&1 || echec "la limite de puissance a été refusée"
+  # beaucoup de cartes de portable refusent -pl : « rien de tel » (code 3), le profil continue sans ce réglage
+  nvidia-smi -pl "$w" >/dev/null 2>&1 || absent "la carte refuse de changer sa limite de puissance"
 }
 do_wifi() {
   command -v iw >/dev/null 2>&1 || absent "iw absent"
@@ -225,7 +229,8 @@ sudoers() {   # la ligne exacte pour ce compte : une commande par sous-commande 
   local u="$1" v
   local bin=/usr/local/bin/nc-energie-root
   local liste="$bin etat"
-  case "$u" in ''|*[!a-zA-Z0-9_.-]*|-*) refus "nom de compte refusé" ;; esac
+  # un vrai nom de compte : minuscules, chiffres, « _ » et « - », pas en tête (ni ALL, ni %groupe, ni majuscules)
+  case "$u" in ''|*[!a-z0-9_-]*|[!a-z_]*) refus "nom de compte refusé" ;; esac
   for v in $EPP; do liste="$liste, $bin epp $v"; done
   for v in $ONOFF; do liste="$liste, $bin boost $v"; done
   for v in $FREQ; do liste="$liste, $bin freqmax $v"; done

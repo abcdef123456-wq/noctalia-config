@@ -194,6 +194,18 @@ class Ecritures(Base):
         self.assertEqual(self.lancer("usb-autosuspend", "off").returncode, 0)
         self.assertEqual(self.lire("bus/usb/devices/1-1/power/control"), "on")
 
+    def test_usb_jamais_audio_impression_bluetooth(self):
+        """Relecture : un casque USB (01), une imprimante (07) ou l'adaptateur Bluetooth (e0, souris et casques sans fil)
+        ne sont jamais mis en veille, au niveau du périphérique ou d'une interface."""
+        for nom, f, classe in (("1-4", "bDeviceClass", "e0"), ("1-5", "1-5:1.0/bInterfaceClass", "01"),
+                               ("1-6", "1-6:1.0/bInterfaceClass", "07"), ("1-7", "1-7:1.1/bInterfaceClass", "E0")):
+            ecrire(self.sys / f"bus/usb/devices/{nom}/power/control", "on")
+            ecrire(self.sys / f"bus/usb/devices/{nom}/{f}", classe)
+        self.assertEqual(self.lancer("usb-autosuspend", "on").returncode, 0)
+        for nom in ("1-4", "1-5", "1-6", "1-7"):
+            self.assertEqual(self.lire(f"bus/usb/devices/{nom}/power/control"), "on", nom)
+        self.assertEqual(self.lire("bus/usb/devices/1-1/power/control"), "auto")
+
     def test_audio_et_clavier(self):
         self.assertEqual(self.lancer("audio-ps", "on").returncode, 0)
         self.assertEqual(self.lire("module/snd_hda_intel/parameters/power_save"), "1")
@@ -231,6 +243,13 @@ class Ecritures(Base):
 
 
 class Sudoers(Base):
+    def test_compte_strict(self):
+        """Relecture : jamais ALL, un %groupe, des majuscules ou un tiret en tête dans la règle sudo."""
+        for compte in ("ALL", "Alice", "%wheel", "-x", "a b", "a,b", "", "a:b"):
+            with self.subTest(compte=compte):
+                self.assertEqual(self.lancer("sudoers", compte).returncode, 2)
+        self.assertEqual(self.lancer("sudoers", "alice_2-b").returncode, 0)
+
     def ligne(self, compte="alice"):
         r = self.lancer("sudoers", compte)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -266,7 +285,8 @@ class Sudoers(Base):
         self.assertIn("ask \"$(t \"L'installer ?\" \"Install it?\")\" n sensible", INSTALL.split("nc-energie-root", 1)[1])
         self.assertIn("sudo install -Dm0755 -o root -g root \"$REPO/system/nc-energie-root\" /usr/local/bin/nc-energie-root", INSTALL)
         self.assertIn("/etc/sudoers.d/nc-energie", INSTALL)
-        self.assertIn('sudo visudo -cf "$t_e"', INSTALL)
+        self.assertIn('sudo visudo -cf "$regle_e.tmp"', INSTALL)          # vérifiée à sa place, en root, puis mise en service
+        self.assertIn('sudo mv -f "$regle_e.tmp" "$regle_e"', INSTALL)
 
     def test_pas_d_installation_sans_accord(self):
         # La question est « sensible » avec NON par défaut : sans terminal, install.sh ne pose rien (sauf --oui)

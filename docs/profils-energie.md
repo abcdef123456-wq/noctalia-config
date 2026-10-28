@@ -77,3 +77,15 @@ fréquence maximale à 70 %) ne peut pas être remise par l'assistant : l'aperç
 - Mesure du gain avec `nc-conso` (5 minutes avant et après).
 - Les messages sont en français seulement.
 - Pas de réglage `vfr` : il n'existe pas parmi les réglages de `nc-reglages`.
+
+## Tout retirer
+
+`nc-energie revenir` remet d'abord l'état d'avant le dernier profil. Pour retirer ensuite les assistants root et leurs
+règles sudo (posés par install.sh avec ton accord) :
+
+```bash
+sudo rm -f /etc/sudoers.d/nc-energie /usr/local/bin/nc-energie-root            # profils d'énergie poussés
+sudo rm -f /etc/sudoers.d/nc-limite-charge /usr/local/bin/nc-limite-charge     # limite de charge de la batterie
+```
+
+Sans eux, nc-energie ne propose plus que les réglages sans root (profil, luminosité, effets…).
