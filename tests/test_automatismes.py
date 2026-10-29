@@ -132,6 +132,7 @@ for n, p in pairs(motifs) do print(n .. "\t" .. p) end
         for fichier in ("Parametres.qml", "Jarvis.qml"):
             for titre in titres[fichier]:
                 self.assertRegex(titre, libres, f"souris-libres doit exclure « {titre} »")
+        self.assertRegex("VPN", libres, "souris-libres doit exclure la fenêtre VPN (placée par automatismes.lua)")
         # Place pleine (automatismes.lua) : jamais mémorisée comme fenêtre flottante ordinaire
         with tempfile.TemporaryDirectory() as d:
             for titre in titres["Parametres.qml"] | titres["Jarvis.qml"]:

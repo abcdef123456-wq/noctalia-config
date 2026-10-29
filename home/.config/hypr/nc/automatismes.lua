@@ -190,7 +190,7 @@ local function exclue(w)
     return c == "" or c == "dropterm" or c == "nc-code" or c == "fingerpop" or est_jeu(w) or w.pinned
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
-        or t == FENETRE_VPN or w.title == FENETRE_VPN
+        or (w.class == "org.quickshell" and (t == FENETRE_VPN or w.title == FENETRE_VPN))
 end
 
 -- Les 200 dernières seulement (un titre qui change à chaque fois en créerait sans fin) : le fichier est dans l'ordre
@@ -275,7 +275,7 @@ end)
 -- Fenêtre VPN de l'île (règle nc-vpn-fenetre : flottante) : centrée dans la zone utile de son écran (sous la barre), 900 de large
 -- au plus et 90 % de la hauteur utile au plus (son contenu défile). Placée ici, à l'ouverture, et non par une règle size/move.
 hl.on("window.open", function(w)
-    if not w or not w.floating or (w.title or w.initial_title or "") ~= FENETRE_VPN then return end
+    if not w or not w.floating or w.class ~= "org.quickshell" or (w.title or w.initial_title or "") ~= FENETRE_VPN then return end
     local m = w.monitor or hl.get_active_monitor()
     local mx, my, lw, lh = ecran(w)
     if not (m and lw) then return end

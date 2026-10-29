@@ -236,8 +236,8 @@ print(r.match.title, tostring(r.match.class), tostring(r.float), tostring(r.size
         r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=10, env=dict(PATH="/usr/bin:/bin"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         titre, classe, flottante, taille, deplace = r.stdout.split()
-        self.assertEqual((titre, classe, flottante, taille, deplace), ("^(VPN)$", "nil", "true", "nil", "nil"),
-                         "flottante, limitée au titre exact, ni size ni move (écrasés par la mémoire des fenêtres)")
+        self.assertEqual((titre, classe, flottante, taille, deplace), ("^(VPN)$", "^(org.quickshell)$", "true", "nil", "nil"),
+                         "flottante, limitée au titre exact et à Quickshell, ni size ni move (écrasés par la mémoire des fenêtres)")
         for titre_autre in ("VPN Manager", "NordVPN", "vpn", "Mon VPN"):
             self.assertNotRegex(titre_autre, "^(VPN)$")
 
@@ -272,6 +272,8 @@ emettre("window.close", w)
 -- Un autre titre n'est pas touché
 appels = {}
 emettre("window.open", { class = "autre", title = "VPN Manager", initial_title = "VPN Manager", floating = true, address = "0x2" })
+-- Une fenêtre d'une autre appli titrée « VPN » n'est pas touchée non plus
+emettre("window.open", { class = "autre", title = "VPN", initial_title = "VPN", floating = true, address = "0x3" })
 print(#appels)''', d)
             self.assertEqual(sortie.split("\n")[0].split(), ["900", "780", "550", "130", "2"])
             self.assertEqual(sortie.split("\n")[1], "0")
