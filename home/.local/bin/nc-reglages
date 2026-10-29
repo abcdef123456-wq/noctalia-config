@@ -1567,7 +1567,8 @@ REGLAGES = [
         ("codex", "Codex", " Codex demande d'approuver ses hooks une fois : /hooks.", " Codex asks to approve its hooks once: /hooks."),
         ("gemini", "Gemini CLI", "", ""),
         ("cursor", "Cursor", " Dans l'éditeur et en terminal (cursor-agent).", " In the editor and in the terminal (cursor-agent)."),
-        ("copilot", "Copilot CLI", "", ""), ("qwen", "Qwen Code", "", ""), ("kiro", "Kiro", "", ""), ("amp", "Amp", "", ""))
+        ("copilot", "Copilot CLI", "", ""), ("qwen", "Qwen Code", "", ""), ("kiro", "Kiro", "", ""), ("amp", "Amp", "", ""),
+        ("omp", "Oh My Pi", "", ""))
 ] + [
     # Google, par la connexion Google déjà faite pour JARVIS (integrations/google-workspace, setup_oauth.py) : rien dans
     # l'île sans ce réglage, pour ne rien changer à l'affichage de ceux qui n'ont pas de compte Google relié
@@ -1645,7 +1646,7 @@ MATERIEL = {
     "COUVERCLE": "couvercle", "COUVERCLE_VERROU": "couvercle",
     "DEFILEMENT_NATUREL": "pave", "TAPOTER_CLIC": "pave", "GESTES": "pave",
     "LUMINOSITE_PAS": "ecran",
-    **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp")}, "ECO_BRIGHTNESS_MAX": "ecran",
+    **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp", "omp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
@@ -1692,7 +1693,7 @@ def materiel():
            "opencode": (("opencode",), ("~/.config/opencode",)), "codex": (("codex",), ("~/.codex",)),
            "gemini": (("gemini",), ()), "cursor": (("cursor-agent", "cursor"), ("~/.cursor",)),
            "copilot": (("copilot",), ("~/.copilot",)), "qwen": (("qwen",), ("~/.qwen",)),
-           "kiro": (("kiro-cli", "kiro"), ("~/.kiro",)), "amp": (("amp",), ("~/.config/amp",))}
+           "kiro": (("kiro-cli", "kiro"), ("~/.kiro",)), "amp": (("amp",), ("~/.config/amp",)), "omp": (("omp",), ("~/.omp",))}
     dispo = {"ia:" + k: any(shutil.which(p) for p in v[0]) or any(os.path.isdir(os.path.expanduser(d)) for d in v[1])
              for k, v in ias.items()}
     # PC hybride : une carte NVIDIA et une autre (même détection que nc-profile-sync)

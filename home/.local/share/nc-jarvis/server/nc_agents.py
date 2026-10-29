@@ -41,7 +41,7 @@ JOURNAL_LIGNES = 200
 
 # Les agents suivis par nc-claude (IAS de nc-claude) ; un autre nom, jamais affiché tel quel
 NOMS = {"claude": "Claude Code", "antigravity": "Antigravity", "opencode": "OpenCode", "codex": "Codex", "gemini": "Gemini CLI",
-        "cursor": "Cursor", "copilot": "Copilot", "qwen": "Qwen Code", "kiro": "Kiro", "amp": "Amp", "assistant": "JARVIS"}
+        "cursor": "Cursor", "copilot": "Copilot", "qwen": "Qwen Code", "kiro": "Kiro", "amp": "Amp", "omp": "Oh My Pi", "assistant": "JARVIS"}
 # États internes de nc-claude → ce qui s'affiche
 ETATS = {"attente": "t'attend", "demande": "demande ton accord", "terminal": "demande ton accord", "travail": "travaille",
          "fini": "fini", "pret": "prêt"}

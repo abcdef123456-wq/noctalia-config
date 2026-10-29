@@ -186,7 +186,7 @@ class Liste(Base):
         self.assertEqual((self.appels[0][1], self.appels[0][3]), (self.m.DELAI_ETAT, False), "délai borné, stderr à part")
         self.assertIn("1. Claude Code · mon-projet · t'attend", r)
         self.assertIn("2. Codex · outil · travaille", r)
-        self.assertIn("3. omp · site · fini", r)
+        self.assertIn("3. Oh My Pi · site · fini", r)
         self.assertIn("4. OpenCode · docs · t'attend", r)
         self.assertIn("5. Gemini CLI · autre · fini\n   ↳ réponse impossible à distance (terminal non pris en charge)", r)
         self.assertNotIn("/home", r, "jamais le chemin, seulement le nom du dossier")
@@ -251,17 +251,17 @@ class Liste(Base):
         self.sessions = [self.sessions[2], self.sessions[0], session("claude-nouvelle", "claude", "nouveau", "fini")]
         r = self.un("/agents", t=1000 + 599)
         self.assertIn("1. Claude Code · mon-projet", r)
-        self.assertIn("3. omp · site", r)
+        self.assertIn("3. Oh My Pi · site", r)
         self.assertIn("6. Claude Code · nouveau", r, "les numéros 2, 4 et 5 (sessions disparues) ne sont pas réattribués pendant 10 min")
         self.assertNotIn("2. Claude Code", r)
         r = self.un("/agents", t=1000 + 599 + 601)
-        self.assertLess(r.index("1. omp · site"), r.index("2. Claude Code · mon-projet"), "plus de 10 min : repart de 1")
+        self.assertLess(r.index("1. Oh My Pi · site"), r.index("2. Claude Code · mon-projet"), "plus de 10 min : repart de 1")
 
     def test_numeros_par_discussion_et_utilisateur(self):
         self.un("/agents", user=42, chat=7)
         self.sessions = self.sessions[2:]
         r = self.un("/agents", user=43, chat=8, autorises=(42, 43))
-        self.assertIn("1. omp · site", r)
+        self.assertIn("1. Oh My Pi · site", r)
 
 
 class Reponse(Base):
