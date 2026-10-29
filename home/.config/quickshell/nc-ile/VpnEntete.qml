@@ -1,5 +1,5 @@
 // L'en-tête de la fenêtre VPN : grand titre « Réseau privé », sous-titre « VPN · connexions et protection » ; à droite le bouton
-// « Fermer » (Échap ferme aussi) et le ⚙ (BoutonReglages) vers la section des réglages VPN (VPN_INDICATEUR, VPN_IP_PUBLIQUE,
+// « Fermer » (Échap ferme aussi) et le ⚙ (BoutonReglages) vers la section des réglages VPN (VPN_INDICATEUR, VPN_PILULE_BARRE, VPN_MASQUER_TRAY, VPN_IP_PUBLIQUE,
 // VPN_IP_SERVICE, VPN_KILLSWITCH).
 import QtQuick
 

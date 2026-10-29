@@ -271,7 +271,7 @@ l'île Quickshell.
   Windscribe, CyberGhost, IVPN, AirVPN ; un pays est un code ISO à deux lettres du nom (`FR#12`, `fr1`, `fr-par…`), le drapeau
   vient des indicateurs régionaux Unicode (jamais une image). Nom inconnu : seulement le nom de la connexion. Pendant un partage
   d'écran, la pilule et le panneau disent « VPN » seul. Si le client commercial met aussi une icône dans ta barre d'état, tu peux
-  la masquer dans ses propres réglages ou dans ceux de ta barre : nous n'y touchons pas.
+  la masquer dans ses propres réglages, dans ceux de ta barre, ou avec `VPN_MASQUER_TRAY` (voir plus bas).
   **Mullvad** : les fichiers WireGuard du générateur de Mullvad (`nc-vpn importer se-got-wg-001.conf`) sont reconnus par le nom du
   profil (`se-got-wg-001` : pays `SE`). Avec l'application officielle (commande `mullvad`, tunnel hors de NetworkManager), si
   aucun tunnel NetworkManager n'est monté, la pilule lit `mullvad status --json` (2 s au plus, seulement si la commande existe),
@@ -283,6 +283,16 @@ l'île Quickshell.
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
   client commercial.
+  **Vraie fenêtre et barre** : le panneau est une vraie fenêtre (titre exact « VPN », flottante, centrée à l'ouverture par
+  `nc/automatismes.lua`, jamais mémorisée comme les autres fenêtres flottantes, sans focus clavier exclusif) : elle apparaît dans
+  l'aperçu des bureaux, **Super + Q** la ferme sans toucher à l'île, et son contenu défile quand elle est basse. Réglage
+  `VPN_PILULE_BARRE` (non par défaut : la barre ne change pas tant que tu ne le demandes pas) : une pilule VPN dans la barre
+  Noctalia, juste avant le profil d'énergie (plugin `nc/vpn`) : bouclier, fournisseur et pays réellement connectés (« VPN » seul
+  pendant un partage d'écran), un clic ouvre la même fenêtre, même déconnecté. L'île écrit son état dans
+  `$XDG_RUNTIME_DIR/nc-vpn-barre.json` (0600) quand il change ; la pilule le lit seulement s'il a changé et écran allumé, aucune
+  commande réseau. Réglage `VPN_MASQUER_TRAY` (non par défaut) : cache dans la barre les icônes de NordVPN, Proton VPN et Mullvad
+  (liste `hidden` du widget `tray` de Noctalia) sans rien désinstaller. Les deux réglages sont dans le ⚙ de la fenêtre VPN
+  (section Île) et dans la fenêtre des réglages.
   **Fournisseurs** (`nc-vpn fournisseurs-json`, pour la fenêtre VPN ; contrat dans `docs/vpn-contrat.md`) : NordVPN (CLI officielle
   `nordvpn`), Proton VPN (CLI officielle `protonvpn`, sinon l'application `protonvpn-app`) et Mullvad (`mullvad`), chacun dans l'un de trois états : **absent**
   (commande introuvable, silencieux), **sans compte** (installé, pas de compte connecté) ou **prêt** (compte connecté) ; les pays ne

@@ -833,4 +833,4 @@ class ExportDepotReel(unittest.TestCase):
         ligne = next(l for l in (self.depot / "home/.config/noctalia/config.toml").read_text().splitlines()
                      if l.startswith("enabled = ["))
         self.assertEqual(ligne, 'enabled = ["nc/launcher", "nc/carousel", "nc/sessions", "nc/keys", "nc/verrou", '
-                                '"nc/fenetres", "nc/batterie", "nc/horloge"@PLUGIN_ILE@]')
+                                '"nc/fenetres", "nc/vpn", "nc/batterie", "nc/horloge"@PLUGIN_ILE@]')

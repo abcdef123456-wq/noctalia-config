@@ -71,6 +71,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-ile
   .local/share/noctalia/plugins/nc-fenetres
   .local/share/noctalia/plugins/nc-batterie
+  .local/share/noctalia/plugins/nc-vpn
   .config/quickshell/nc-ile
   .local/share/nc/firefox
   .local/share/nc/finger.png

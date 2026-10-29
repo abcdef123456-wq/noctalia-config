@@ -303,5 +303,5 @@ background = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/sessions", "nc/keys", "nc/verrou", "nc/fenetres", "nc/batterie"@PLUGIN_ILE@]
+enabled = ["nc/launcher", "nc/carousel", "nc/sessions", "nc/keys", "nc/verrou", "nc/fenetres", "nc/vpn", "nc/batterie"@PLUGIN_ILE@]
 auto_update = "none"
