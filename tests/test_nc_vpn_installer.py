@@ -70,6 +70,8 @@ case "$nom" in
       rmdir) for a in "$@"; do case "$a" in "$FAUX_DIR"/*) rmdir "$a" 2>/dev/null || true ;; esac; done ;;
     esac ;;
 esac
+# FAUX_SUDO_ECHEC=OUTIL : « sudo OUTIL … » échoue (une base pacman en retard, par exemple)
+if [ "$nom" = sudo ] && [ -n "${FAUX_SUDO_ECHEC:-}" ] && [ "$1" = "$FAUX_SUDO_ECHEC" ]; then exit 1; fi
 exit 0
 '''
 
@@ -257,6 +259,19 @@ class Execution(Base):
         (self.r / "appels").unlink()
         self.assertEqual(self.lancer("mullvad", entree="o\n", FAUX_UNAME="aarch64").returncode, 0)
         self.assertIn("arch=arm64]", (self.r / "copies/mullvad.list").read_text())
+
+    def test_arch_pacman_en_echec_dit_de_mettre_a_jour_sans_le_faire(self):
+        """pacman -S échoue (base en retard, 404) : le script s'arrête et dit « sudo pacman -Syu », sans jamais le lancer."""
+        for f in ("mullvad", "proton"):
+            with self.subTest(f):
+                (self.r / "appels").unlink(missing_ok=True)
+                self.poser_os("arch")
+                r = self.lancer(f, entree="o\n", FAUX_SUDO_ECHEC="pacman")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("sudo pacman -Syu", r.stderr)
+                sudo = [a[1:] for a in self.appels() if a[0] == "sudo"]
+                self.assertNotIn("-Syu", [x for a in sudo for x in a], "jamais de -Syu automatique")
+                self.assertFalse([a for a in sudo if a[0] == "systemctl"], "rien après l'échec de pacman")
 
     def test_architecture_inconnue_arret_avant_ecriture(self):
         self.poser_os("debian13")

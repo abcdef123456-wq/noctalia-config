@@ -184,6 +184,10 @@ nettoyer_cache() {
   fi
 }
 nettoyer() {
+  if [ -n "${CONSEIL_PACMAN:-}" ]; then
+    printf '\n%s\n' "$(t "pacman a échoué. Mets d'abord le système à jour : sudo pacman -Syu, puis relance l'installation." \
+                          "pacman failed. Update the system first: sudo pacman -Syu, then run the installation again.")" >&2
+  fi
   nettoyer_cache
   # L'agent lancé par gpg dans le trousseau jetable : arrêté avant de retirer son dossier
   if [ -n "$TMP" ] && [ -d "$TMP/gh" ] && command -v gpgconf >/dev/null 2>&1; then gpgconf --homedir "$TMP/gh" --kill all >/dev/null 2>&1 || true; fi
@@ -203,6 +207,14 @@ etape() { # etape COMMANDE ARGUMENTS… : affiche la commande exacte, puis la la
   "$@"
 }
 arreter() { printf '\n%s\n' "$(t "$1" "$2")" >&2; exit 1; }
+# Arch : un « pacman -S » sur une base de paquets en retard échoue (404) ; jamais de -Syu automatique. Si pacman arrête le
+# script (set -e), le nettoyage de sortie le dit (CONSEIL_PACMAN)
+CONSEIL_PACMAN=""
+pacman_installer() { # pacman_installer PAQUET
+  CONSEIL_PACMAN=1
+  etape sudo pacman -S "$1"
+  CONSEIL_PACMAN=""
+}
 
 telecharger() { # telecharger URL FICHIER : HTTPS seulement, taille bornée ; l'URL est une constante de ce script
   etape curl -q --proto '=https' --tlsv1.2 -fsSL --max-time 120 --max-filesize 2097152 -o "$2" "$1"
@@ -261,7 +273,7 @@ depot_present() { # depot_present FICHIER_NOTRE_NOM CONTENU_ATTENDU DOSSIER… :
 }
 
 mullvad_arch() {
-  etape sudo pacman -S mullvad-vpn
+  pacman_installer mullvad-vpn
   etape sudo systemctl enable --now mullvad-daemon.service
 }
 mullvad_debian() {
@@ -303,7 +315,7 @@ mullvad_fedora() {
   etape sudo dnf install mullvad-vpn
 }
 proton_arch() {
-  etape sudo pacman -S proton-vpn-cli
+  pacman_installer proton-vpn-cli
 }
 somme_proton() { # somme_proton FICHIER : vrai si la somme SHA-256 est celle publiée par Proton
   local vue
