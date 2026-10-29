@@ -63,7 +63,82 @@ maximum hors profil film.
 audio-ps V | kbd V` (et `sudoers COMPTE`, qui n'écrit rien : la ligne sudo exacte). La règle sudo a une commande par
 sous-commande et valeur (`nc-energie-root sudoers COMPTE` la montre) ; `visudo -cf` la vérifie à l'installation. Les chemins de
 `/sys` sont construits dans le script, chaque écriture vérifie que le fichier existe déjà, aucune chaîne libre n'est acceptée.
-Codes : 0 fait, 1 échec, 2 refusé, 3 rien de tel sur ce PC. Rien n'est réappliqué au démarrage.
+Codes : 0 fait, 1 échec, 2 refusé, 3 rien de tel sur ce PC, 4 écrit mais la valeur relue est différente. Rien n'est réappliqué au démarrage.
+
+## Profil de la plateforme (ventilateurs, limites du firmware)
+
+Le noyau expose le profil de la plateforme dans `/sys/firmware/acpi/platform_profile` (choix communs dans
+`platform_profile_choices`) et, par pilote, dans `/sys/class/platform-profile/*/{name,choices,profile}`. Avec plusieurs pilotes,
+le fichier global ne propose que les choix communs et vaut `custom` quand leurs profils diffèrent (doc du noyau :
+`Documentation/userspace-api/sysfs-platform_profile.rst`). Un portable n'a pas toujours les noms « standard » : `quiet` ou
+`cool` à la place de `low-power`, `balanced-performance` sans `performance`.
+
+Qui écrit le profil de la plateforme (un seul responsable) :
+
+| Service de profils actif | Responsable du profil de la plateforme | Ce que fait le dépôt |
+|---|---|---|
+| TLP + `tlp-pd` (installé par `install.sh` sur portable) | TLP | écrit `/etc/tlp.d/12-nc-plateforme.conf` d'après les choix du noyau |
+| `power-profiles-daemon` | lui (TLP ne touche pas au profil quand il tourne) | rien : `nc-diag` lit et compare |
+| `tuned-ppd` / `tuned` | tuned | rien : `nc-diag` lit et compare |
+
+`nc-profile-sync` n'écrit jamais dans `/sys` : il lit le profil du service et adapte l'interface et les cartes graphiques.
+
+### TLP : une valeur par profil, choisie pour ce portable
+
+`system/nc-tlp-plateforme` (lancé par `install.sh`, sans droits) lit les choix du noyau et produit le fichier TLP :
+Performance : `performance`, sinon `balanced-performance` ; Équilibré : `balanced` ; Économie : `low-power`, sinon `quiet`,
+sinon `cool`. `max-power` n'est jamais choisi. Un profil sans équivalent n'est pas écrit. Un réglage `PLATFORM_PROFILE_ON_*`
+que tu as mis toi-même dans `/etc/tlp.conf` ou dans un de tes fichiers de `/etc/tlp.d` reste prioritaire : le fichier du dépôt
+n'est alors pas posé.
+
+Versions de TLP lues (sources `defaults.conf` et `func.d/10-tlp-func-cpu`) :
+
+| TLP | Paramètres | Plusieurs valeurs ? |
+|---|---|---|
+| 1.9.0, 1.9.1, 1.10.0, 1.10.1, 1.10.2 | `PLATFORM_PROFILE_ON_AC` / `_BAT` / `_SAV` | non : une valeur, écrite telle quelle |
+| 1.11.0-beta.2 | `_PRF` / `_BAL` / `_SAV` (les anciens `_AC` / `_BAT` sont traduits à l'exécution) | oui, mais chaque valeur trouvée est écrite dans l'ordre, sans s'arrêter à la première : la dernière l'emporte |
+
+Une seule valeur choisie ici donne donc le même résultat avec toutes ces versions. Les anciens suffixes ne sont pas écrits pour
+TLP 1.11 (ils y remplaceraient la liste de TLP par une seule valeur).
+
+À savoir, sans l'avoir confirmé sur un vrai PC : dans le pilote `acer-wmi` du noyau (chemin « Predator V4 »), `performance`
+correspond au mode Turbo d'Acer et `balanced-performance` au mode Performance. TLP 1.11 préfère `balanced-performance` pour
+les portables de jeu (moins de bruit de ventilateur). Ici Performance garde `performance` d'abord ; si l'usage montre trop de
+bruit sur un Nitro, il suffit de mettre `balanced-performance` d'abord dans `system/nc-tlp-plateforme`.
+
+### Diagnostic
+
+`nc-diag` (section Énergie) distingue le **profil logiciel actif** (service de profils) du **mode matériel** lu dans `/sys` :
+service qui pilote, profil demandé, profil lu et choix du noyau, contrôleurs (nom, profil, choix). Le mode matériel n'est
+« confirmé » que s'il correspond au profil logiciel (power-saver : `low-power`, `quiet` ou `cool` ; balanced : `balanced` ;
+performance : `performance` ou `balanced-performance`). Sans service : valeur lue, rien n'est confirmé. Pilote absent,
+lecture refusée, `custom` ou contrôleurs en désaccord : un avertissement qui le dit, jamais un faux succès.
+`nc-energie-root etat` donne les mêmes lectures (`platform`, `platform_choices`, `platform_ctl=nom|profil|choix`).
+
+### Écriture par `nc-energie` (profils avancés)
+
+`nc-energie-root platform V` n'écrit que le fichier global, si `V` est dans `platform_profile_choices`, puis **relit** la valeur
+(après 0,2 s, le temps qu'un service la réécrive) et celle de chaque contrôleur (en lecture seule). Code 4 : écrit mais relu
+différent (un service l'a réécrit, ou le firmware l'a refusé) ; `nc-energie` annule alors le profil entier et le dit. Dans
+`nc-energie appliquer`, le profil du service passe AVANT le profil de la plateforme (le service réécrit souvent ce dernier).
+
+### Valider sur un Acer Nitro (compatibilité réelle à confirmer)
+
+Tant que ce test n'a pas eu lieu, rien ne prouve que les profils matériels marchent sur un Nitro précis : le pilote peut ne pas
+fournir de profil matériel du tout, auquel cas seuls les profils logiciels agissent (CPU, écran, interface). Procédure, sans
+numéro de série :
+
+1. Référence du PC : `cat /sys/class/dmi/id/product_name /sys/class/dmi/id/board_name` (jamais le numéro de série).
+2. Distribution, noyau (`uname -r`), service actif (`systemctl is-active tlp-pd power-profiles-daemon tuned-ppd tuned`), version
+   de TLP (`tlp-stat -s`).
+3. Choix et états : `cat /sys/firmware/acpi/platform_profile /sys/firmware/acpi/platform_profile_choices`, et pour chaque
+   dossier de `/sys/class/platform-profile/` : `name`, `choices`, `profile`. `nc-diag` affiche l'essentiel.
+4. `cat /etc/tlp.d/12-nc-plateforme.conf` (valeurs choisies pour ce PC).
+5. Pour chaque profil (Performance, Équilibré, Économie), **sur secteur puis sur batterie** : le choisir dans la barre
+   (Super + Alt + P), attendre 5 secondes, relire `platform_profile` et noter la valeur relue ; lancer `nc-diag`.
+6. S'il existe une touche physique Acer de mode : l'appuyer, relire la valeur, et noter si le service la remet.
+7. Joindre ces résultats à un ticket : la compatibilité n'est confirmée qu'avec la valeur relue de chaque profil sur secteur et
+   sur batterie.
 
 ## Appliquer et revenir
 
