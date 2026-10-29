@@ -1334,8 +1334,12 @@ class BacReelIA(Base):
             with self.assertRaises(Exception):
                 list(self.m.appel_programme("qwen", "c", "t", None, "question"))
             self.assertLess(time.monotonic() - debut, 8, "arrêtée au délai, pas à RuntimeMaxSec (délai + 10 s)")
-            time.sleep(0.5)
-            r = subprocess.run(["systemctl", "--user", "list-units", "--no-legend", "nc-ia-test-*"], capture_output=True, text=True)
+            # l'arrêt de l'unité est asynchrone : on attend qu'elle tombe, mais avant RuntimeMaxSec (12 s depuis le début)
+            while True:
+                r = subprocess.run(["systemctl", "--user", "list-units", "--no-legend", "nc-ia-test-*"], capture_output=True, text=True)
+                if "running" not in r.stdout or time.monotonic() - debut > 10:
+                    break
+                time.sleep(0.2)
             self.assertNotIn("running", r.stdout)
 
     def test_les_dollars_arrivent_tels_quels(self):
