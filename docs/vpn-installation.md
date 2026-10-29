@@ -14,9 +14,26 @@ commande `nc-vpn installer-client ID` refuse un client déjà installé. À la f
 ## Règles du script
 
 - Fournisseur validé par liste blanche (`nord`, `proton`, `mullvad`) avant tout ; `set -eu` ; chaque commande est affichée (`%q`) avant d'être lancée.
-- Jamais `curl | sh`, jamais de script téléchargé exécuté. Une clé de dépôt est téléchargée (HTTPS seulement, taille bornée) dans un dossier
-  temporaire `0700`, son **empreinte** est comparée à celle épinglée dans le script **avant** tout import ou toute écriture ; une empreinte
-  fausse arrête tout (aucune écriture, aucun `sudo`). La clé installée est le fichier vérifié, pas un second téléchargement.
+- Jamais `curl | sh`, jamais de script téléchargé exécuté. **Le fichier de clé téléchargé n'est jamais installé.** Il est téléchargé (HTTPS
+  seulement, taille bornée) dans un dossier temporaire `0700`, contrôlé avec gpg (`--homedir` jetable sous ce dossier) : exactement UNE clé
+  publique principale, aucune ligne `sec:` ni `ssb:` (clé secrète), un état ni révoqué, ni expiré, ni invalide (`r`, `e`, `i`), et une empreinte
+  exactement égale à celle épinglée dans le script. Sinon arrêt avant toute importation ou écriture (aucun `sudo`). Si tout va bien, la clé est
+  importée dans le trousseau jetable puis **ré-exportée** (`gpg --export --export-options export-minimal --armor EMPREINTE`) ; l'export est contrôlé
+  à nouveau et c'est lui, seul, qui est installé. Le format armuré (`.asc`) est celui que les pages de Mullvad utilisent pour `signed-by` (apt) et
+  `gpgkey` (rpm) ; `rpm --import` lit aussi l'armuré.
+- Entre la vérification et l'usage, rien ne reste dans un dossier de l'utilisateur : le fichier vérifié est copié par `sudo install` dans
+  `/var/cache/nc-vpn-installer` (dossier de root, `0755`, noms fixes), la somme ou l'empreinte est **revérifiée sur cette copie**, et seule la copie
+  est installée (`sudo install`) ou passée à `apt-get install` (chemin absolu). Après l'installation, `sudo cmp` compare le fichier posé à la copie.
+  À la fin (ou en cas d'échec), les fichiers à nom fixe sont retirés (`sudo rm -f --`, puis `sudo rmdir`), jamais de `rm -rf` sur un motif.
+- Une autre source Mullvad déjà présente (le fichier `mullvad.list` ou `mullvad.repo` avec un autre contenu, ou toute autre source qui mentionne
+  `repository.mullvad.net`) arrête tout avant la moindre écriture, avec un message : rien n'est écrasé en silence. Le fichier identique à celui
+  qu'écrirait le script ne gêne pas (relance sans effet).
+- `gpg` absent : message clair (« gpg absent : installe gnupg »), aucune commande lancée.
+- Environnement : le script fixe lui-même `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` et `umask 022` juste après
+  `set -eu` ; `nc-vpn installer-client` n'ouvre le terminal qu'avec une copie de l'environnement de la session SANS `BASH_ENV`, `ENV`, `CDPATH`,
+  `GNUPGHOME`, `LD_*`, `BASH_FUNC_*`, `SSL_CERT_*`, `CURL_*` ni variable de test, et avec ce même PATH fixe.
+- `NC_OS_RELEASE`, `NC_TEST_EMPREINTE`, `NC_TEST_CACHE`, `NC_TEST_APT_DIR` et `NC_TEST_YUM_DIR` n'existent que pour les tests : ils ne sont lus
+  que si `NC_INSTALLER_TEST=1` (qui garde aussi le PATH reçu, pour de faux outils). En usage réel `nc-vpn` les retire, et le script les ignore.
 - Les fichiers de dépôt sont écrits par le script lui-même (jamais téléchargés : un fichier reçu pourrait désactiver la vérification des
   signatures), avec des noms fixes : `/usr/share/keyrings/mullvad-keyring.asc`, `/etc/apt/sources.list.d/mullvad.list`,
   `/etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad`, `/etc/yum.repos.d/mullvad.repo`. Rien d'autre n'est touché ; le pare-feu (firewalld, ufw) jamais.
@@ -24,15 +41,17 @@ commande `nc-vpn installer-client ID` refuse un client déjà installé. À la f
   Debian : version 13 seulement ; Fedora : 41 et plus ; Arch : `ID=arch` ou `ID_LIKE=arch` (pas Manjaro, dont les dépôts diffèrent) ;
   tout le reste (openSUSE, Ubuntu et dérivés, inconnu) : parcours guidé.
 - Les textes du parcours guidé sont fixes dans le script ; `nc-vpn` ne relaie que des lignes à caractères sûrs et un lien `https://` vers
-  `protonvpn.com`, `mullvad.net` ou `support.nordvpn.com` (liste blanche), puis la fenêtre les contrôle encore.
+  `protonvpn.com`, `mullvad.net` ou `support.nordvpn.com` (liste blanche). La fenêtre (VpnEtat.qml) refait le contrôle du mode et du lien
+  (même liste d'hôtes, mêmes caractères permis), borne le nombre et la longueur des étapes et les affiche en texte brut ; `xdg-open` ne reçoit
+  que ce lien contrôlé, en argv.
 
 ## Matrice finale
 
 | Distribution | Proton VPN | Mullvad | NordVPN |
 | --- | --- | --- | --- |
 | **Arch** | `sudo pacman -S proton-vpn-cli` | `sudo pacman -S mullvad-vpn`, puis `sudo systemctl enable --now mullvad-daemon.service` | guidé |
-| **Debian 13** | `curl` du paquet de dépôt, **SHA-256 épinglé**, `sudo dpkg -i`, `sudo apt-get update`, `sudo apt-get install proton-vpn-gnome-desktop` | `curl` de la clé, **empreinte épinglée**, `sudo install` (clé, source apt), `sudo apt-get update`, `sudo apt-get install mullvad-vpn` | guidé |
-| **Fedora (41+)** | guidé | `curl` de la clé, **empreinte épinglée**, `sudo install` (clé), `sudo rpm --import`, `sudo install` (fichier `.repo` écrit par le script), `sudo dnf install mullvad-vpn` | guidé |
+| **Debian 13** | `curl` du paquet de dépôt, **SHA-256 épinglé** (fichier puis copie de root), `sudo apt-get install /var/cache/nc-vpn-installer/protonvpn-stable-release_1.0.10_all.deb`, `sudo apt-get update`, `sudo apt-get install proton-vpn-gnome-desktop` | `curl` de la clé, contrôle + **empreinte épinglée** + export, copie de root, `sudo install` (clé et fichier de source apt), `sudo cmp`, `sudo apt-get update`, `sudo apt-get install mullvad-vpn` | guidé |
+| **Fedora (41+)** | guidé | `curl` de la clé, contrôle + **empreinte épinglée** + export, copie de root, `sudo install` (clé), `sudo cmp`, `sudo rpm --import`, `sudo install` (fichier `.repo` écrit par le script, avec `gpgcheck=1` et `repo_gpgcheck=1`), `sudo cmp`, `sudo dnf install mullvad-vpn` | guidé |
 | **openSUSE** (Tumbleweed et Leap) | guidé | guidé | guidé |
 
 ### Pourquoi une case est « guidée » (rien n'est exécuté)
@@ -54,10 +73,11 @@ commande `nc-vpn installer-client ID` refuse un client déjà installé. À la f
 
 Proton VPN
 - Guide d'installation Linux : https://protonvpn.com/support/linux-vpn-setup (distributions prises en charge : Debian, Ubuntu, Fedora, Arch ; Flatpak « maintenu par un tiers »).
-- Debian : https://protonvpn.com/support/official-linux-vpn-debian et https://protonvpn.com/support/cli-debian-ubuntu : paquet
+- Debian : https://protonvpn.com/support/linux-vpn-debian-ubuntu (les anciennes adresses `official-linux-vpn-debian` et `cli-debian-ubuntu`
+  redirigent vers elle, 301) : paquet
   `https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.10_all.deb`, somme SHA-256
   `c8a9fffb4ebdd63db08ce7f11c9b0ac394064ae6a210feb9ab63a0f7d8d060a7` (publiée par Proton), puis `dpkg -i`, `apt update`,
-  `apt install proton-vpn-gnome-desktop`. La page dit de ne pas vérifier la signature du paquet de dépôt (autre clé que le dépôt) ; la somme est la vérification officielle.
+  `apt install proton-vpn-gnome-desktop` (le script installe le paquet de dépôt par `apt-get install` avec un chemin absolu, qui règle aussi ses dépendances). La page dit de ne pas vérifier la signature du paquet de dépôt (autre clé que le dépôt) ; la somme est la vérification officielle.
 - Fedora : https://protonvpn.com/support/official-linux-vpn-fedora (pas de somme du `.rpm`) et https://protonvpn.com/support/cli-fedora.
 - Arch : https://protonvpn.com/support/linux-vpn-arch (`pacman -S proton-vpn-cli` ou `proton-vpn-gtk-app`, paquet maintenu par un contributeur) ;
   le paquet est dans le dépôt officiel `extra` : https://archlinux.org/packages/extra/any/proton-vpn-cli/
@@ -71,8 +91,9 @@ Mullvad
 - Empreinte : https://mullvad.net/en/help/verifying-signatures, clé « Mullvad (code signing) »
   `A1198702FC3E0A09A9AE5B75D5A1D4F266DE8DDF`. Les pages d'installation ne donnent PAS d'empreinte pour le trousseau du dépôt ; il a donc été
   vérifié (sans rien installer, dans un trousseau gpg jetable) que les deux trousseaux ont **exactement cette clé principale** (sous-clés
-  `277AE267A409C9C19D5B2B63C187D22C089EF64E` et `CA83A46153BC58D69518ED49A26581F219C8314C`). Le script exige UNE seule clé principale, égale à
-  cette empreinte.
+  `277AE267A409C9C19D5B2B63C187D22C089EF64E` et `CA83A46153BC58D69518ED49A26581F219C8314C`). Le script exige UNE seule clé publique principale,
+  sans clé secrète, ni révoquée ni expirée, égale à cette empreinte, puis n'installe que son export (règles ci-dessus). `repo_gpgcheck=1` du
+  fichier `.repo` : les métadonnées du dépôt rpm (`repomd.xml.asc`) sont signées par la sous-clé `CA83A461…` de cette même clé.
 - Arch, paquets officiels : https://archlinux.org/packages/extra/x86_64/mullvad-vpn/ (dépend de `mullvad-vpn-daemon`, qui apporte
   `usr/lib/systemd/system/mullvad-daemon.service`, d'après https://archlinux.org/packages/extra/x86_64/mullvad-vpn-daemon/files/).
 
@@ -83,8 +104,9 @@ NordVPN
 
 ## Limites connues
 
-- Debian, Proton : `dpkg -i` lit le fichier du dossier temporaire de l'utilisateur après la vérification de la somme. Un autre processus du même
-  utilisateur pourrait le remplacer entre-temps (il pourrait aussi lancer `sudo` lui-même une fois le mot de passe saisi). Le dossier est en `0700`.
+- Le fichier vérifié est copié dans un dossier de root avant d'être installé, puis re-vérifié (voir « Règles du script ») : un autre processus
+  de l'utilisateur ne peut plus le remplacer entre la vérification et l'usage. Reste la lecture de la clé et de la somme par `gpg`/`sha256sum`
+  dans le dossier temporaire `0700` de l'utilisateur, avant toute commande root.
 - Les noms de paquets et de services viennent des pages ci-dessus ; les paquets Arch et Fedora/Debian changent de version sans prévenir (la
   somme SHA-256 de Proton est celle de la version `1.0.10` du paquet de dépôt : si Proton publie une autre version, la somme ne correspond
   plus et le script s'arrête avec un message clair, jusqu'à ce que l'épinglage soit mis à jour).

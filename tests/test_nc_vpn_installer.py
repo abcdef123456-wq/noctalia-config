@@ -24,7 +24,7 @@ SORTIE_GPG_BONNE = "tru::1:1:1:0:3:1:5\npub:-:4096:1:D5A1D4F266DE8DDF:1477548074
                    "uid:-::::1477568799::AB::Mullvad (code signing) <admin@example.org>::::::::::0:\nsub:-:4096:1:AAAA:1:::::s::::::23:\n" \
                    "fpr:::::::::277AE267A409C9C19D5B2B63C187D22C089EF64E:\n"
 OUTILS_SURS = ("bash", "sed", "tail", "tr", "awk", "mktemp", "chmod", "rm", "cut", "cat", "head", "dirname", "env", "sh", "grep", "mkdir",
-               "install", "ls", "printf", "python3", "basename", "cp")
+               "install", "ls", "printf", "python3", "basename", "cp", "cmp", "rmdir")
 
 OS = {
     "arch": 'NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n',
@@ -52,13 +52,23 @@ case "$nom" in
     out=""; url=""
     while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; https://*) url="$1" ;; esac; shift; done
     case "$url" in *.deb) cp "$FAUX_DIR/paquet.deb" "$out" ;; *) cp "$FAUX_DIR/cle.asc" "$out" ;; esac ;;
-  gpg)    case " $* " in *" --show-keys "*) cat "$FAUX_DIR/gpg.out" ;; esac ;;
+  gpg)    case " $* " in *" --show-keys "*) cat "$FAUX_DIR/gpg.out" ;; *" --export "*) cat "$FAUX_DIR/export.asc" ;; esac ;;
   sha256sum) printf '%s  %s\n' "$(cat "$FAUX_DIR/sha")" "$2" ;;
   uname)  echo "${FAUX_UNAME:-x86_64}" ;;
-  sudo)   # copie le fichier source d'« install » pour le relire
-    if [ "$1" = install ]; then
-      for a in "$@"; do case "$a" in */mullvad.list|*/mullvad.repo|*/mullvad-keyring.asc) mkdir -p "$FAUX_DIR/copies"; cp "$a" "$FAUX_DIR/copies/$(basename "$a")" 2>/dev/null || true ;; esac; done
-    fi ;;
+  sudo)   # seulement dans le dossier de test : « install » copie, rm et rmdir retirent ; ailleurs rien ne se passe
+    case "$1" in
+      install)
+        dest=""; src=""
+        for a in "$@"; do src="$dest"; dest="$a"; done
+        if [ "$2" = -d ]; then
+          case "$dest" in "$FAUX_DIR"/*) mkdir -p "$dest" ;; esac
+        else
+          case "$dest" in "$FAUX_DIR"/*) cp "$src" "$dest" ;; esac
+          mkdir -p "$FAUX_DIR/copies"; cp "$src" "$FAUX_DIR/copies/$(basename "$dest")" 2>/dev/null || true
+        fi ;;
+      rm) for a in "$@"; do case "$a" in "$FAUX_DIR"/*) rm -f "$a" ;; esac; done ;;
+      rmdir) for a in "$@"; do case "$a" in "$FAUX_DIR"/*) rmdir "$a" 2>/dev/null || true ;; esac; done ;;
+    esac ;;
 esac
 exit 0
 '''
@@ -71,6 +81,8 @@ class Base(unittest.TestCase):
         self.r = Path(self._tmp.name)
         for d in ("home", "tmp", "faux", "sur", "run", "cfg", "etat"):
             (self.r / d).mkdir(mode=0o700)
+        (self.r / "apt/sources.list.d").mkdir(parents=True)
+        (self.r / "yum").mkdir()
         for o in OUTILS_SURS:
             p = shutil.which(o)
             if p:
@@ -83,6 +95,7 @@ class Base(unittest.TestCase):
         (self.r / "cle.asc").write_text("CLE DE TEST\n")
         (self.r / "paquet.deb").write_text("PAQUET DE TEST\n")
         (self.r / "gpg.out").write_text(SORTIE_GPG_BONNE)
+        (self.r / "export.asc").write_text("EXPORT DE TEST\n")
         (self.r / "sha").write_text(SHA_PROTON)
 
     def poser_os(self, nom):
@@ -92,7 +105,8 @@ class Base(unittest.TestCase):
         e = {"PATH": str(self.r / "faux") + ":" + str(self.r / "sur"), "HOME": str(self.r / "home"), "TMPDIR": str(self.r / "tmp"),
              "XDG_CONFIG_HOME": str(self.r / "cfg"), "XDG_RUNTIME_DIR": str(self.r / "run"), "XDG_STATE_HOME": str(self.r / "etat"),
              "XDG_CACHE_HOME": str(self.r / "etat"), "XDG_DATA_HOME": str(self.r / "etat"), "FAUX_DIR": str(self.r),
-             "NC_OS_RELEASE": str(self.r / "os-release"), "NC_LANGUE": "fr", "LANG": "C.UTF-8"}
+             "NC_INSTALLER_TEST": "1", "NC_OS_RELEASE": str(self.r / "os-release"), "NC_TEST_CACHE": str(self.r / "cache"),
+             "NC_TEST_APT_DIR": str(self.r / "apt"), "NC_TEST_YUM_DIR": str(self.r / "yum"), "NC_LANGUE": "fr", "LANG": "C.UTF-8"}
         e.update(plus)
         return e
 
@@ -107,7 +121,7 @@ class Base(unittest.TestCase):
         t = str(self.r / "tmp")
         res = []
         for l in p.read_text().splitlines():
-            m = re.sub(re.escape(t) + r"/tmp\.[A-Za-z0-9]+", "<T>", l)
+            m = re.sub(re.escape(t) + r"/tmp\.[A-Za-z0-9]+", "<T>", l).replace(str(self.r / "cache"), "<C>")
             res.append(m.split("\x1f"))
         return res
 
@@ -126,27 +140,40 @@ class Base(unittest.TestCase):
 
 
 CURL = ["curl", "--proto", "=https", "--tlsv1.2", "-fsSL", "--max-time", "120", "--max-filesize", "2097152", "-o"]
-GPG = ["gpg", "--batch", "--no-tty", "--show-keys", "--with-colons", "<T>/mullvad-keyring.asc"]
-DEB_PROTON = "<T>/protonvpn-stable-release_1.0.10_all.deb"
+GPGA = ["gpg", "--homedir", "<T>/gh", "--batch", "--no-tty"]
+DEB_PROTON = "protonvpn-stable-release_1.0.10_all.deb"
+PRE = lambda url: [CURL + ["<T>/cle-telechargee.asc", url], GPGA + ["--show-keys", "--with-colons", "<T>/cle-telechargee.asc"],
+                   GPGA + ["--import", "<T>/cle-telechargee.asc"], GPGA + ["--export", "--export-options", "export-minimal", "--armor", EMPREINTE],
+                   GPGA + ["--show-keys", "--with-colons", "<T>/cle-exportee.asc"]]
+MKCACHE = ["sudo", "install", "-d", "-m0755", "<C>"]
+CLE_CACHE = [MKCACHE, ["sudo", "install", "-m0644", "<T>/cle-exportee.asc", "<C>/mullvad-keyring.asc"],
+             GPGA + ["--show-keys", "--with-colons", "<C>/mullvad-keyring.asc"]]
+NETTOYAGE = lambda *noms: [["sudo", "rm", "-f", "--", "<C>/" + n] for n in noms] + [["sudo", "rmdir", "--", "<C>"]]
 
 SUITES = {
     ("mullvad", "arch"): [["sudo", "pacman", "-S", "mullvad-vpn"], ["sudo", "systemctl", "enable", "--now", "mullvad-daemon.service"]],
-    ("mullvad", "debian13"): [
-        ["uname", "-m"], CURL + ["<T>/mullvad-keyring.asc", "https://repository.mullvad.net/deb/mullvad-keyring.asc"], GPG,
-        ["sudo", "install", "-Dm0644", "<T>/mullvad-keyring.asc", "/usr/share/keyrings/mullvad-keyring.asc"],
-        ["sudo", "install", "-Dm0644", "<T>/mullvad.list", "/etc/apt/sources.list.d/mullvad.list"],
-        ["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "mullvad-vpn"]],
-    ("mullvad", "fedora44"): [
-        CURL + ["<T>/mullvad-keyring.asc", "https://repository.mullvad.net/rpm/mullvad-keyring.asc"], GPG,
-        ["sudo", "install", "-Dm0644", "<T>/mullvad-keyring.asc", "/etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad"],
+    ("mullvad", "debian13"): [["uname", "-m"]] + PRE("https://repository.mullvad.net/deb/mullvad-keyring.asc") + CLE_CACHE + [
+        MKCACHE, ["sudo", "install", "-m0644", "<T>/mullvad.list", "<C>/mullvad.list"],
+        ["sudo", "install", "-Dm0644", "<C>/mullvad-keyring.asc", "/usr/share/keyrings/mullvad-keyring.asc"],
+        ["sudo", "install", "-Dm0644", "<C>/mullvad.list", "/etc/apt/sources.list.d/mullvad.list"],
+        ["sudo", "cmp", "--", "<C>/mullvad-keyring.asc", "/usr/share/keyrings/mullvad-keyring.asc"],
+        ["sudo", "cmp", "--", "<C>/mullvad.list", "/etc/apt/sources.list.d/mullvad.list"],
+        ["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "mullvad-vpn"]] + NETTOYAGE("mullvad-keyring.asc", "mullvad.list"),
+    ("mullvad", "fedora44"): PRE("https://repository.mullvad.net/rpm/mullvad-keyring.asc") + CLE_CACHE + [
+        MKCACHE, ["sudo", "install", "-m0644", "<T>/mullvad.repo", "<C>/mullvad.repo"],
+        ["sudo", "install", "-Dm0644", "<C>/mullvad-keyring.asc", "/etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad"],
+        ["sudo", "cmp", "--", "<C>/mullvad-keyring.asc", "/etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad"],
         ["sudo", "rpm", "--import", "/etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad"],
-        ["sudo", "install", "-Dm0644", "<T>/mullvad.repo", "/etc/yum.repos.d/mullvad.repo"],
-        ["sudo", "dnf", "install", "mullvad-vpn"]],
+        ["sudo", "install", "-Dm0644", "<C>/mullvad.repo", "/etc/yum.repos.d/mullvad.repo"],
+        ["sudo", "cmp", "--", "<C>/mullvad.repo", "/etc/yum.repos.d/mullvad.repo"],
+        ["sudo", "dnf", "install", "mullvad-vpn"]] + NETTOYAGE("mullvad-keyring.asc", "mullvad.repo"),
     ("proton", "arch"): [["sudo", "pacman", "-S", "proton-vpn-cli"]],
     ("proton", "debian13"): [
-        CURL + [DEB_PROTON, "https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.10_all.deb"],
-        ["sha256sum", "--", DEB_PROTON],
-        ["sudo", "dpkg", "-i", DEB_PROTON], ["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "proton-vpn-gnome-desktop"]],
+        CURL + ["<T>/" + DEB_PROTON, "https://repo.protonvpn.com/debian/dists/stable/main/binary-all/" + DEB_PROTON],
+        ["sha256sum", "--", "<T>/" + DEB_PROTON], MKCACHE, ["sudo", "install", "-m0644", "<T>/" + DEB_PROTON, "<C>/" + DEB_PROTON],
+        ["sha256sum", "--", "<C>/" + DEB_PROTON],
+        ["sudo", "apt-get", "install", "<C>/" + DEB_PROTON], ["sudo", "apt-get", "update"],
+        ["sudo", "apt-get", "install", "proton-vpn-gnome-desktop"]] + NETTOYAGE(DEB_PROTON),
 }
 GUIDEES = [("nord", o) for o in ("arch", "debian13", "fedora44", "tumbleweed", "leap")] + \
           [("proton", "fedora44"), ("proton", "tumbleweed"), ("proton", "leap"), ("mullvad", "tumbleweed"), ("mullvad", "leap")]
@@ -215,7 +242,9 @@ class Execution(Base):
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 self.assertEqual(self.appels(), attendu)
                 # chaque étape est affichée avant d'être lancée
-                self.assertIn("[1/", r.stdout)
+                self.assertIn("[1] ", r.stdout)
+                self.assertEqual(list((self.r / "cache").glob("*")) if (self.r / "cache").exists() else [], [])      # le dossier de root est vidé
+                self.assertFalse((self.r / "cache").exists())
                 self.assertIn("Terminé", r.stdout)
                 # le dossier temporaire a disparu
                 self.assertEqual(list((self.r / "tmp").iterdir()), [])
@@ -247,21 +276,81 @@ class Execution(Base):
         self.assertEqual([a[-1] for a in self.appels() if a[0] == "curl"], ["https://repository.mullvad.net/rpm/mullvad-keyring.asc"])
 
     def test_empreinte_fausse_arret_avant_tout_import_et_toute_ecriture(self):
+        pub = lambda champ2, fpr: "pub:" + champ2 + ":4096:1:X:1:::-:::scESC::::::23::0:\nfpr:::::::::" + fpr + ":\n"
         for o in ("debian13", "fedora44"):
-            for sortie in ("pub:-:4096:1:X:1:::-:::scESC::::::23::0:\nfpr:::::::::" + AUTRE + ":\n",
+            for sortie in (pub("-", AUTRE),
                            "",                                                    # gpg ne lit rien
-                           SORTIE_GPG_BONNE + "pub:-:4096:1:Y:1:::-:::scESC::::::23::0:\nfpr:::::::::" + AUTRE + ":\n",     # une 2e clé principale en plus
-                           "pub:-:4096:1:Y:1:::-:::scESC::::::23::0:\nfpr:::::::::" + AUTRE + ":\n" + SORTIE_GPG_BONNE):
+                           SORTIE_GPG_BONNE + pub("-", AUTRE),                     # une 2e clé principale en plus
+                           pub("-", AUTRE) + SORTIE_GPG_BONNE,
+                           SORTIE_GPG_BONNE + "sec:-:4096:1:X:1:::-:::scESC::::::23::0:\nfpr:::::::::" + EMPREINTE + ":\nssb:-:4096:1:Y:1:::::e::::::23:\n",   # clé secrète en plus
+                           pub("r", EMPREINTE), pub("e", EMPREINTE), pub("i", EMPREINTE)):      # révoquée, expirée, invalide
                 with self.subTest(o=o, sortie=sortie):
                     (self.r / "appels").unlink(missing_ok=True)
                     (self.r / "gpg.out").write_text(sortie)
                     self.poser_os(o)
                     r = self.lancer("mullvad", entree="o\n")
                     self.assertNotEqual(r.returncode, 0)
-                    self.assertIn("Empreinte", r.stdout + r.stderr)
+                    self.assertRegex(r.stdout + r.stderr, r"Empreinte|illisible|UNE clé|SECRÈTE|révoquée")
                     noms = [a[0] for a in self.appels() if a[0] != "uname"]
-                    self.assertEqual(noms, ["curl", "gpg"])             # ni sudo, ni install, ni rpm --import, ni apt
+                    self.assertEqual(noms, ["curl", "gpg"])             # ni sudo, ni install, ni rpm --import, ni apt, ni import dans gpg
                     self.assertEqual(list((self.r / "tmp").iterdir()), [])
+                    self.assertFalse((self.r / "cache").exists())
+
+    def test_gpg_absent_message_clair(self):
+        (self.r / "faux" / "gpg").unlink()
+        self.poser_os("debian13")
+        r = self.lancer("mullvad", entree="o\n")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("gpg absent : installe gnupg", r.stdout + r.stderr)
+        self.assertNotIn("Empreinte", r.stdout + r.stderr)
+        self.assertEqual([a[0] for a in self.appels() if a[0] != "uname"], [])
+
+    def test_le_fichier_installe_est_l_export_pas_le_telechargement(self):
+        for o, nom in (("debian13", "mullvad-keyring.asc"), ("fedora44", "mullvad-keyring.asc")):
+            (self.r / "appels").unlink(missing_ok=True)
+            self.poser_os(o)
+            self.assertEqual(self.lancer("mullvad", entree="o\n").returncode, 0)
+            self.assertEqual((self.r / "copies" / nom).read_text(), "EXPORT DE TEST\n")
+            self.assertNotEqual((self.r / "copies" / nom).read_text(), (self.r / "cle.asc").read_text())
+
+    def test_source_mullvad_deja_la_arret_avant_toute_ecriture(self):
+        self.poser_os("debian13")
+        liste = self.r / "apt/sources.list.d/mullvad.list"
+        cas = (("mullvad.list", "deb https://repository.mullvad.net/deb/beta beta main\n"),            # notre nom, autre contenu
+               ("mullvad-beta.list", "deb [arch=amd64] https://repository.mullvad.net/deb/beta beta main\n"),   # une autre source
+               ("autre.sources", "Types: deb\nURIs: https://repository.mullvad.net/deb/stable\n"),
+               ("mullvad.list", "# vide\n"))
+        for nom, contenu in cas:
+            with self.subTest(nom=nom):
+                for f in (self.r / "apt/sources.list.d").iterdir():
+                    f.unlink()
+                (self.r / "appels").unlink(missing_ok=True)
+                (self.r / "apt/sources.list.d" / nom).write_text(contenu)
+                r = self.lancer("mullvad", entree="o\n")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("avant toute écriture", r.stdout + r.stderr)
+                self.assertEqual([a[0] for a in self.appels() if a[0] != "uname"], [])
+        for f in (self.r / "apt/sources.list.d").iterdir():
+            f.unlink()
+        (self.r / "apt/sources.list").write_text("deb https://repository.mullvad.net/deb/stable stable main\n")
+        self.assertNotEqual(self.lancer("mullvad", entree="o\n").returncode, 0)
+        (self.r / "apt/sources.list").unlink()
+        # exactement notre fichier : on continue (relance idempotente)
+        liste.write_text("deb [signed-by=/usr/share/keyrings/mullvad-keyring.asc arch=amd64] https://repository.mullvad.net/deb/stable stable main\n")
+        self.assertEqual(self.lancer("mullvad", entree="o\n").returncode, 0)
+
+    def test_source_mullvad_deja_la_fedora(self):
+        self.poser_os("fedora44")
+        for nom, contenu in (("mullvad.repo", "[x]\nbaseurl=https://repository.mullvad.net/rpm/beta/$basearch\n"),
+                             ("autre.repo", "[y]\nbaseurl=https://repository.mullvad.net/rpm/stable/$basearch\n")):
+            with self.subTest(nom=nom):
+                for f in (self.r / "yum").iterdir():
+                    f.unlink()
+                (self.r / "appels").unlink(missing_ok=True)
+                (self.r / "yum" / nom).write_text(contenu)
+                r = self.lancer("mullvad", entree="o\n")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertEqual([a[0] for a in self.appels()], [])
 
     def test_somme_proton_fausse_arret_avant_sudo(self):
         (self.r / "sha").write_text("0" * 64)
@@ -333,11 +422,16 @@ class Statique(unittest.TestCase):
 
     def test_aucun_sh_ni_bash_sur_un_contenu_telecharge(self):
         code = "\n".join(l for l in self.SRC.splitlines() if not l.lstrip().startswith("#"))
-        for motif in (r"\|\s*(sudo\s+)?(ba|z|da)?sh\b", r"\b(ba|z|da)?sh\s+<\(", r"\b(ba|z|da)?sh\s+-c\b", r"\beval\b", r"\bsource\b", r"(^|\s)\.\s+[\"$/]",
-                      r"curl[^\n]*\|", r"wget", r"\bsudo\s+(ba|z|da)?sh\b", r"-k\b.*curl|curl[^\n]*(--insecure|\s-k\s)", r"gpgcheck=0", r"--nogpgcheck",
+        for motif in (r"\|\s*(sudo\s+)?(ba|z|da)?sh\b", r"\b(ba|z|da)?sh\s+<\(", r"\b(ba|z|da)?sh\s+-c\b", r"\beval\b", r"(^|[;&|(]\s*)source\s", r"(^|\s)\.\s+[\"$/]",
+                      r"curl[^\n]*\|", r"wget", r"\bsudo\s+(ba|z|da)?sh\b", r"curl[^\n]*(--insecure|\s-k\s)", r"gpgcheck=0", r"--nogpgcheck",
                       r"--gpg-auto-import-keys", r"--allow-unauthenticated", r"Trusted:\s*yes", r"apt-key", r"firewall-cmd|\bufw\b",
-                      r"sudoers", r"visudo", r"zypper\s+(add|install|ar|in)", r"flatpak\s+install", r"\byay\b|\bparu\b|\bmakepkg\b"):
+                      r"sudoers", r"visudo", r"zypper\s+(add|install|ar|in)", r"flatpak\s+install", r"\byay\b|\bparu\b|\bmakepkg\b",
+                      r"(?i)trusted=yes", r"--force", r"allow-insecure", r"repo_gpgcheck=0", r"sslverify=0", r"--no-gpg-checks", r"localpkg_gpgcheck=0"):
             self.assertIsNone(re.search(motif, code, re.M), motif)
+        # la clé reçue n'est jamais installée telle quelle : seul l'export part vers sudo
+        self.assertNotIn("cle-telechargee.asc\" /", code)
+        for m in re.finditer(r"^\s*(etape sudo|poser_cache) .*$", code, re.M):
+            self.assertNotIn("cle-telechargee", m.group(0))
 
     def test_telechargements_https_seulement_en_fichier(self):
         urls = re.findall(r"https?://[^\s\"']+", "\n".join(l for l in self.SRC.splitlines() if not l.lstrip().startswith("#") and "lien=" not in l))
@@ -355,16 +449,31 @@ class Statique(unittest.TestCase):
         self.assertLess(self.SRC.index("nord|proton|mullvad) ;;"), self.SRC.index("etape sudo"))
 
     def test_chaque_commande_root_passe_par_etape(self):
+        autorises = (r"^etape sudo ", r"^printf", r"^dire ", r"^RAISON", r"^\"", r"^for f in \"\$\{CACHE_FICHIERS", r"^sudo rmdir -- \"\$CACHE\" ")
         for m in re.finditer(r"^(.*)\bsudo\b(.*)$", "\n".join(l for l in self.SRC.splitlines() if not l.lstrip().startswith("#")), re.M):
             ligne = m.group(0).strip()
-            if ligne.startswith("etape sudo ") or ligne.startswith("printf") or ligne.startswith("dire ") or "EXTRA_" in ligne or ligne.startswith("RAISON") or ligne.startswith('"'):
+            if "EXTRA_" in ligne or any(re.search(a, ligne) for a in autorises):
                 continue
             self.fail(ligne)
 
     def test_chaque_etape_root_a_des_arguments_constants(self):
         for m in re.finditer(r"^\s*etape sudo (.*)$", self.SRC, re.M):
             for mot in m.group(1).split():
-                self.assertRegex(mot, r'^(-?[A-Za-z0-9._/+-]+|"\$f"|"\$TMP/[a-z.-]+")$', m.group(0))
+                self.assertRegex(mot, r'^(-?-?[A-Za-z0-9._/+-]+|"\$(1|CACHE(/[A-Za-z0-9._$-]+|/\$nom)?)"|"\$CACHE/\$nom")$', m.group(0))
+
+    def test_path_fixe_et_umask_juste_apres_set_eu(self):
+        lignes = [l for l in self.SRC.splitlines() if l and not l.startswith("#")]
+        self.assertEqual(lignes[0], "set -eu")
+        self.assertEqual(lignes[1], 'if [ "${NC_INSTALLER_TEST:-}" != 1 ]; then')
+        self.assertEqual(lignes[2].strip(), "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        self.assertEqual(lignes[3].strip(), "export PATH")
+        self.assertEqual(lignes[5], "umask 022")
+
+    def test_variables_de_test_seulement_derriere_l_indicateur(self):
+        for var in ("NC_OS_RELEASE", "NC_TEST_EMPREINTE", "NC_TEST_CACHE", "NC_TEST_APT_DIR", "NC_TEST_YUM_DIR"):
+            for m in re.finditer(r"^.*\b" + var + r"\b.*$", "\n".join(l for l in self.SRC.splitlines() if not l.lstrip().startswith("#")), re.M):
+                ligne = m.group(0)
+                self.assertTrue("NC_INSTALLER_TEST" in ligne or ligne.strip().startswith("CACHE=\"${NC_TEST") or ligne.strip().startswith(("APT_DIR=", "YUM_DIR=")), ligne)
 
     def test_shellcheck(self):
         if not shutil.which("shellcheck"):
@@ -377,29 +486,131 @@ class Statique(unittest.TestCase):
         self.assertIn("PROTON_DEB_SHA256=" + SHA_PROTON, self.SRC)
         self.assertNotRegex(self.SRC, r"@[A-Z_]+@")                      # aucun @MARQUEUR@ que install.sh remplacerait
 
-    def test_gpg_reel_lit_la_cle_comme_l_attend_le_script(self):
-        """Avec un vrai gpg et une clé de test faite à la volée : la fonction d'empreinte du script rend exactement l'empreinte de la clé."""
-        gpg = shutil.which("gpg")
-        if not gpg:
-            self.skipTest("gpg absent")
-        with tempfile.TemporaryDirectory(prefix="nc-gpg-") as d:
-            d = Path(d)
-            (d / "gh").mkdir(mode=0o700)
-            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(d), "GNUPGHOME": str(d / "gh")}
-            r = subprocess.run([gpg, "--batch", "--quiet", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key", "Test Cle <test@example.org>", "ed25519", "sign", "never"],
-                               env=env, capture_output=True, text=True, timeout=60)
-            if r.returncode != 0:
-                self.skipTest("gpg ne crée pas de clé ici : " + r.stderr[:100])
-            r = subprocess.run([gpg, "--batch", "--armor", "--export"], env=env, capture_output=True, text=True)
-            (d / "cle.asc").write_text(r.stdout)
-            vraie = subprocess.run([gpg, "--batch", "--with-colons", "--show-keys", str(d / "cle.asc")], env=env, capture_output=True, text=True)
-            fpr = [l.split(":")[9] for l in vraie.stdout.splitlines() if l.startswith("fpr:")][0]
-            # on extrait la fonction empreintes_cle du script et on l'exécute telle quelle
-            debut = self.SRC.index("empreintes_cle() {")
-            fin = self.SRC.index("verifier_cle()")
-            prog = "set -eu\n" + self.SRC[debut:fin] + "\nempreintes_cle \"$1\"\n"
-            s = subprocess.run(["bash", "-c", prog, "x", str(d / "cle.asc")], env=dict(env, TMPDIR=str(d)), capture_output=True, text=True)
-            self.assertEqual(s.stdout.strip(), fpr, s.stderr)
+
+class Environnement(Base):
+    """PATH fixe et variables de test : sans NC_INSTALLER_TEST=1, ni le PATH ni NC_OS_RELEASE reçus ne comptent."""
+    def test_path_recu_ignore_sans_indicateur(self):
+        marque = self.r / "marque"
+        faux_sed = self.r / "faux" / "sed"
+        faux_sed.write_text("#!/bin/sh\necho x >> \"" + str(marque) + "\"\nexit 0\n")
+        faux_sed.chmod(0o755)
+        reg = self.r / "home" / ".config" / "nc"
+        reg.mkdir(parents=True)
+        (reg / "reglages.conf").write_text('LANGUE="fr"\n')
+        # sans NC_LANGUE, langue_lire lance sed : le vrai (PATH fixe), jamais celui du PATH reçu
+        e = {k: v for k, v in self.env().items() if k not in ("NC_LANGUE", "NC_INSTALLER_TEST")}
+        subprocess.run(["bash", str(SCRIPT), "nord", "--plan"], env=e, capture_output=True, text=True, timeout=30)
+        self.assertFalse(marque.exists(), "le PATH reçu a été suivi")
+        subprocess.run(["bash", str(SCRIPT), "nord", "--plan"], env=dict(e, NC_INSTALLER_TEST="1"), capture_output=True, text=True, timeout=30)
+        self.assertTrue(marque.exists(), "avec l'indicateur de test, le PATH reçu est gardé")
+
+    def test_os_release_recu_ignore_sans_indicateur(self):
+        (self.r / "os-release").write_text(OS["gentoo"])
+        e = self.env()
+        sans = {k: v for k, v in e.items() if k not in ("NC_OS_RELEASE", "NC_INSTALLER_TEST")}
+        ref = subprocess.run(["bash", str(SCRIPT), "mullvad", "--plan"], env=sans, capture_output=True, text=True, timeout=30).stdout
+        avec_var_seule = subprocess.run(["bash", str(SCRIPT), "mullvad", "--plan"], env=dict(sans, NC_OS_RELEASE=str(self.r / "os-release")),
+                                        capture_output=True, text=True, timeout=30).stdout
+        self.assertEqual(avec_var_seule, ref)                       # NC_OS_RELEASE sans l'indicateur : le vrai os-release de la machine
+        test = subprocess.run(["bash", str(SCRIPT), "mullvad", "--plan"], env=e, capture_output=True, text=True, timeout=30).stdout
+        self.assertIn("mode=guide", test)
+
+    def test_variables_de_test_ignorees_sans_indicateur(self):
+        # l'empreinte et le dossier de root ne se changent pas depuis l'environnement hors essais
+        src = SCRIPT.read_text()
+        self.assertIn('if [ "${NC_INSTALLER_TEST:-}" = 1 ] && [ -n "${NC_TEST_EMPREINTE:-}" ]', src)
+
+
+@unittest.skipUnless(shutil.which("gpg"), "gpg absent")
+class VraiGpg(Base):
+    """Le contrôle de la clé avec le VRAI gpg et des clés jetables (trousseau sous un dossier temporaire) : le fichier reçu n'est jamais
+    installé tel quel, seul son export l'est ; clé secrète, révoquée, expirée ou 2 clés principales : refus avant tout sudo."""
+    def setUp(self):
+        super().setUp()
+        (self.r / "faux" / "gpg").unlink()
+        (self.r / "faux" / "gpg").symlink_to(shutil.which("gpg"))
+        self.gen = self.r / "gen"
+        self.gen.mkdir(mode=0o700)
+        self.poser_os("debian13")
+
+    def gpg(self, *args, entree=None, home=None, batch=True, **kw):
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.r / "home"), "LANG": "C"}
+        return subprocess.run(["gpg", "--homedir", str(home or self.gen)] + (["--batch"] if batch else []) + ["--no-tty"] + list(args), env=env, input=entree,
+                              capture_output=True, text=True, timeout=60, **kw)
+
+    def cle(self, nom, extra=(), home=None):
+        r = self.gpg("--pinentry-mode", "loopback", "--passphrase", "", *extra, "--quick-gen-key", nom + " <" + nom.lower() + "@example.org>",
+                     "ed25519", "sign", "never" if "--faked-system-time" not in extra else "1d", home=home)
+        if r.returncode != 0:
+            self.skipTest("gpg ne crée pas de clé ici : " + r.stderr[:120])
+        out = self.gpg("--with-colons", "--list-keys", nom.lower() + "@example.org", home=home).stdout
+        return [l.split(":")[9] for l in out.splitlines() if l.startswith("fpr:")][0]
+
+    def pub(self, fpr, home=None):
+        return self.gpg("--armor", "--export", fpr, home=home).stdout
+
+    def secret(self, fpr, home=None):
+        return self.gpg("--pinentry-mode", "loopback", "--passphrase", "", "--armor", "--export-secret-keys", fpr, home=home).stdout
+
+    def lancer_avec(self, contenu, fpr):
+        (self.r / "cle.asc").write_text(contenu)
+        (self.r / "appels").unlink(missing_ok=True)
+        return self.lancer("mullvad", entree="o\n", NC_TEST_EMPREINTE=fpr)
+
+    def refuse(self, r, mot):
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn(mot, r.stdout + r.stderr)
+        self.assertEqual([a[0] for a in self.appels() if a[0] not in ("uname", "curl")], [])       # jamais un sudo, ni d'import
+        self.assertFalse((self.r / "copies").exists())
+        self.assertEqual(list((self.r / "tmp").iterdir()), [])
+
+    def test_cle_seule_le_fichier_installe_est_l_export(self):
+        fpr = self.cle("Seule")
+        recu = "# commentaire du serveur, absent de l'export\n" + self.pub(fpr)
+        r = self.lancer_avec(recu, fpr)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        installe = (self.r / "copies" / "mullvad-keyring.asc").read_text()
+        self.assertNotEqual(installe, recu)
+        self.assertNotIn("commentaire du serveur", installe)
+        self.assertTrue(installe.startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----"))
+        # l'export est bien la même clé (une seule clé principale, même empreinte)
+        v = self.gpg("--with-colons", "--show-keys", str(self.r / "copies" / "mullvad-keyring.asc")).stdout
+        self.assertEqual([l.split(":")[9] for l in v.splitlines() if l.startswith("fpr:")][:1], [fpr])
+        self.assertEqual(len([l for l in v.splitlines() if l.startswith("pub:")]), 1)
+        self.assertEqual([l for l in v.splitlines() if l.startswith(("sec:", "ssb:"))], [])
+        # la copie dans le dossier de root a été retirée
+        self.assertFalse((self.r / "cache").exists())
+
+    def test_trousseau_avec_cle_secrete_refuse_avant_tout_sudo(self):
+        fpr = self.cle("Secrete")
+        r = self.lancer_avec(self.pub(fpr) + self.secret(fpr), fpr)
+        self.refuse(r, "SECRÈTE")
+        r = self.lancer_avec(self.secret(fpr), fpr)                       # seulement la clé secrète : refus aussi
+        self.refuse(r, "SECRÈTE")
+
+    def test_cle_revoquee_refusee(self):
+        fpr = self.cle("Revoquee")
+        rev = self.gpg("--yes", "--pinentry-mode", "loopback", "--passphrase", "", "--command-fd", "0", "--armor", "--gen-revoke", fpr, entree="y\n0\n\ny\n", batch=False)
+        if "BEGIN PGP PUBLIC KEY BLOCK" not in rev.stdout:
+            self.skipTest("gpg ne crée pas de certificat de révocation ici : " + rev.stderr[:120])
+        self.gpg("--import", entree=rev.stdout)
+        self.refuse(self.lancer_avec(self.pub(fpr), fpr), "révoquée")
+
+    def test_cle_expiree_refusee(self):
+        fpr = self.cle("Expiree", extra=("--faked-system-time", "20200101T000000"))
+        v = self.gpg("--with-colons", "--list-keys", fpr).stdout
+        self.assertRegex(v, r"(?m)^pub:e:")
+        self.refuse(self.lancer_avec(self.pub(fpr), fpr), "expirée")
+
+    def test_deux_cles_principales_refusees(self):
+        a = self.cle("PremiereCle")
+        b = self.cle("SecondeCle")
+        self.refuse(self.lancer_avec(self.pub(a) + self.pub(b), a), "UNE clé")
+        self.refuse(self.lancer_avec(self.pub(b) + self.pub(a), a), "UNE clé")
+
+    def test_mauvaise_empreinte_refusee(self):
+        a = self.cle("CleReelle")
+        self.refuse(self.lancer_avec(self.pub(a), AUTRE), "Empreinte")
 
 
 class AvecNcVpn(BaseVpn):
@@ -416,7 +627,7 @@ class AvecNcVpn(BaseVpn):
         k.chmod(0o755)
 
     def lire(self, **plus):
-        r = self.seul("fournisseurs-json", NC_OS_RELEASE=str(self.r / "os-release"), **plus)
+        r = self.seul("fournisseurs-json", NC_OS_RELEASE=str(self.r / "os-release"), NC_INSTALLER_TEST="1", **plus)
         self.assertEqual(r.returncode, 0, r.stderr)
         return {f["id"]: f for f in json.loads(r.stdout)["fournisseurs"]}
 
@@ -498,6 +709,26 @@ class AvecNcVpn(BaseVpn):
         self.assertEqual(self.seul("installer-client").returncode, 2)
         self.assertEqual(self.seul("installer-client", "nord", "x").returncode, 2)
         self.assertFalse((self.r / "appels-kitty").exists())
+
+    def test_installer_client_nettoie_l_environnement_du_terminal(self):
+        k = self.r / "faux-bin" / "kitty"
+        k.write_text("#!/bin/sh\nenv > \"$FAUX_DIR/env-kitty\"\n")
+        k.chmod(0o755)
+        piege = self.r / "piege.sh"
+        piege.write_text("touch " + str(self.r / "PIEGE") + "\n")
+        r = self.seul("installer-client", "proton", BASH_ENV=str(piege), ENV=str(piege), NC_OS_RELEASE="/tmp/x", NC_INSTALLER_TEST="1",
+                      NC_TEST_EMPREINTE="0" * 40, NC_TEST_CACHE="/tmp/y", NC_TEST_APT_DIR="/tmp/z", LD_PRELOAD="/tmp/lib.so", GNUPGHOME="/tmp/g",
+                      CURL_CA_BUNDLE="/tmp/ca", SSL_CERT_FILE="/tmp/ca", CDPATH="/tmp", **{"BASH_FUNC_ls%%": "() { echo pwned; }"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        env = dict(l.split("=", 1) for l in (self.r / "env-kitty").read_text().splitlines() if "=" in l)
+        for var in ("BASH_ENV", "ENV", "NC_OS_RELEASE", "NC_INSTALLER_TEST", "NC_TEST_EMPREINTE", "NC_TEST_CACHE", "NC_TEST_APT_DIR", "LD_PRELOAD",
+                    "GNUPGHOME", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "CDPATH"):
+            self.assertNotIn(var, env)
+        self.assertFalse([k for k in env if k.startswith("BASH_FUNC_")])
+        self.assertEqual(env["PATH"], "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        self.assertEqual(env["NC_LANGUE"], "fr")
+        self.assertEqual(env["HOME"], str(self.r / "home"))                  # le reste de la session (écran, session) est gardé
+        self.assertFalse((self.r / "PIEGE").exists())
 
     def test_installer_client_sans_kitty(self):
         (self.r / "faux-bin" / "kitty").unlink()

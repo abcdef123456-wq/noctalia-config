@@ -12,6 +12,13 @@
 # Distribution lue dans os-release (ID, ID_LIKE, VERSION_ID) ; non prise en charge, ou sans voie officielle vérifiable : parcours guidé
 # (texte et lien officiel, rien n'est exécuté). Sources officielles de chaque case : docs/vpn-installation.md.
 set -eu
+# PATH fixe et umask sûr, quoi que contienne l'environnement de l'appelant. Seul NC_INSTALLER_TEST=1 (les tests, avec de faux outils)
+# garde le PATH reçu et permet NC_OS_RELEASE, NC_TEST_EMPREINTE, NC_TEST_CACHE et NC_TEST_APT_DIR ; nc-vpn l'efface avant d'ouvrir le terminal.
+if [ "${NC_INSTALLER_TEST:-}" != 1 ]; then
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+fi
+umask 022
 
 # ── Langue : NC_LANGUE (fr|en), sinon LANGUE du réglage nc, sinon la langue du système ───────────────────────────────────────
 langue_lire() {
@@ -51,7 +58,8 @@ fi
 # ── Distribution : os-release lu ligne à ligne (jamais exécuté), valeurs limitées à des caractères sûrs ───────────────────────
 OS_ID=""; OS_LIKE=""; OS_VER=""
 os_lire() {
-  local f="${NC_OS_RELEASE:-/etc/os-release}" k v
+  local f=/etc/os-release k v
+  if [ "${NC_INSTALLER_TEST:-}" = 1 ] && [ -n "${NC_OS_RELEASE:-}" ]; then f="$NC_OS_RELEASE"; fi
   [ -r "$f" ] || return 0
   while IFS='=' read -r k v || [ -n "$k" ]; do
     v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
@@ -76,9 +84,10 @@ esac
 # Mullvad : clé de signature publiée par Mullvad (https://mullvad.net/en/help/verifying-signatures) ; le trousseau du dépôt
 # (https://repository.mullvad.net/deb/mullvad-keyring.asc et …/rpm/mullvad-keyring.asc) porte cette clé principale.
 MULLVAD_EMPREINTE=A1198702FC3E0A09A9AE5B75D5A1D4F266DE8DDF
+if [ "${NC_INSTALLER_TEST:-}" = 1 ] && [ -n "${NC_TEST_EMPREINTE:-}" ]; then MULLVAD_EMPREINTE="$NC_TEST_EMPREINTE"; fi   # essais avec une clé jetable
 MULLVAD_CLE_DEB=https://repository.mullvad.net/deb/mullvad-keyring.asc
 MULLVAD_CLE_RPM=https://repository.mullvad.net/rpm/mullvad-keyring.asc
-# Proton (Debian) : somme SHA-256 du paquet de dépôt, publiée par Proton (https://protonvpn.com/support/official-linux-vpn-debian)
+# Proton (Debian) : somme SHA-256 du paquet de dépôt, publiée par Proton (https://protonvpn.com/support/linux-vpn-debian-ubuntu)
 PROTON_DEB_VERSION=1.0.10
 PROTON_DEB_URL=https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.10_all.deb
 PROTON_DEB_SHA256=c8a9fffb4ebdd63db08ce7f11c9b0ac394064ae6a210feb9ab63a0f7d8d060a7
@@ -99,7 +108,7 @@ plan() {
       RAISON_FR="Mullvad ne documente pas de dépôt signé pour cette distribution."
       RAISON_EN="Mullvad doesn't document a signed repository for this distribution." ;;
     proton:arch)    MODE=auto; ACTION=proton_arch;    LIEN=https://protonvpn.com/support/linux-vpn-arch ;;
-    proton:debian)  MODE=auto; ACTION=proton_debian;  LIEN=https://protonvpn.com/support/official-linux-vpn-debian ;;
+    proton:debian)  MODE=auto; ACTION=proton_debian;  LIEN=https://protonvpn.com/support/linux-vpn-debian-ubuntu ;;
     proton:fedora)
       LIEN=https://protonvpn.com/support/official-linux-vpn-fedora
       RAISON_FR="Pour Fedora, Proton ne publie aucune somme de contrôle du paquet de dépôt : rien n'est installé pour toi."
@@ -154,18 +163,39 @@ if [ "$MODE" = guide ]; then
 fi
 
 # ── Voie automatique : étapes visibles, sudo demande lui-même le mot de passe ─────────────────────────────────────────────────
+# Rien de ce qui est téléchargé n'est installé tel quel : la clé est importée dans un trousseau jetable (sous $TMP), contrôlée, puis
+# RÉ-EXPORTÉE ; seul l'export (contrôlé à nouveau) est copié, d'abord dans un dossier de root (CACHE), re-contrôlé là, puis installé.
+CACHE=/var/cache/nc-vpn-installer
+APT_DIR=/etc/apt
+YUM_DIR=/etc/yum.repos.d
+if [ "${NC_INSTALLER_TEST:-}" = 1 ]; then
+  CACHE="${NC_TEST_CACHE:-$CACHE}"
+  APT_DIR="${NC_TEST_APT_DIR:-$APT_DIR}"
+  YUM_DIR="${NC_TEST_YUM_DIR:-$YUM_DIR}"
+fi
 TMP=""
-nettoyer() { if [ -n "$TMP" ] && [ -d "$TMP" ]; then rm -rf -- "$TMP"; fi; }
+CACHE_FICHIERS=()                 # les fichiers (à nom fixe) posés dans CACHE, retirés à la fin
+nettoyer_cache() {
+  local f
+  if [ "${#CACHE_FICHIERS[@]}" -gt 0 ]; then
+    for f in "${CACHE_FICHIERS[@]}"; do sudo rm -f -- "$f" || true; done
+    sudo rmdir -- "$CACHE" 2>/dev/null || true
+    CACHE_FICHIERS=()
+  fi
+}
+nettoyer() {
+  nettoyer_cache
+  if [ -n "$TMP" ] && [ -d "$TMP" ]; then rm -rf -- "$TMP"; fi
+}
 trap nettoyer EXIT
 trap 'exit 130' INT TERM
 TMP="$(mktemp -d)"
 chmod 700 "$TMP"
 
 N=0
-TOTAL=0
 etape() { # etape COMMANDE ARGUMENTS… : affiche la commande exacte, puis la lance (set -e : une erreur arrête tout)
   N=$((N + 1))
-  printf '\n[%s/%s] ' "$N" "$TOTAL"
+  printf '\n[%s] ' "$N"
   printf '%q ' "$@"
   printf '\n'
   "$@"
@@ -175,29 +205,60 @@ arreter() { printf '\n%s\n' "$(t "$1" "$2")" >&2; exit 1; }
 telecharger() { # telecharger URL FICHIER : HTTPS seulement, taille bornée ; l'URL est une constante de ce script
   etape curl --proto '=https' --tlsv1.2 -fsSL --max-time 120 --max-filesize 2097152 -o "$2" "$1"
 }
-empreintes_cle() { # l'empreinte de chaque clé principale du fichier, une par ligne (gpg dans un trousseau jetable)
-  local d r=0
-  command -v gpg >/dev/null 2>&1 || return 1
-  d="$(mktemp -d)" || return 1
-  chmod 700 "$d"
-  GNUPGHOME="$d" gpg --batch --no-tty --show-keys --with-colons "$1" 2>/dev/null |
-    awk -F: '/^pub:/ { p = 1; next } /^sub:/ { p = 0 } /^fpr:/ && p { print $10; p = 0 }' || r=1
-  rm -rf -- "$d"
-  return "$r"
+gpg_jetable() { gpg --homedir "$TMP/gh" --batch --no-tty "$@"; }
+controler_cle() { # controler_cle FICHIER EMPREINTE : UNE seule clé publique principale, aucune clé secrète, ni révoquée, expirée ou
+                  # invalide, et son empreinte est exactement celle-là. Rend 0 ou 1 (message sur la sortie d'erreur).
+  local lu
+  lu="$(gpg_jetable --show-keys --with-colons "$1" 2>/dev/null | awk -F: '
+      /^sec:|^ssb:/ { bad = "secrete" }
+      /^pub:/ { pub++; p = 1; if ($2 ~ /^[reid]/ && bad == "") bad = "invalide"; next }
+      /^sub:/ { p = 0 }
+      /^fpr:/ && p { f = $10; p = 0 }
+      END { if (bad != "") print "ERR " bad; else if (pub != 1) print "ERR clés:" pub + 0; else print "FPR " f }')" || lu=""
+  if [ "$lu" = "FPR $2" ]; then return 0; fi
+  case "$lu" in
+    "ERR secrete") printf '%s\n' "$(t "La clé reçue contient une clé SECRÈTE." "The received key file contains a SECRET key.")" >&2 ;;
+    "ERR invalide") printf '%s\n' "$(t "La clé reçue est révoquée, expirée ou invalide." "The received key is revoked, expired or invalid.")" >&2 ;;
+    "ERR clés:"*) printf '%s\n' "$(t "Le trousseau reçu doit contenir exactement UNE clé principale (reçu : ${lu#ERR clés:})." "The received keyring must hold exactly ONE primary key (received: ${lu#ERR clés:}).")" >&2 ;;
+    "FPR "*) printf '%s\n' "$(t "Empreinte différente de celle attendue (reçue : ${lu#FPR })." "Fingerprint differs from the expected one (received: ${lu#FPR }).")" >&2 ;;
+    *) printf '%s\n' "$(t "Clé illisible (reçue : aucune empreinte)." "Unreadable key (received: no fingerprint).")" >&2 ;;
+  esac
+  return 1
 }
-verifier_cle() { # verifier_cle FICHIER EMPREINTE : arrêt net si la clé n'est pas exactement celle-là (avant tout import)
-  local vues
+preparer_cle() { # preparer_cle URL EMPREINTE : télécharge, contrôle, importe dans le trousseau jetable, ré-exporte et contrôle l'export.
+                 # Le fichier à installer est $TMP/cle-exportee.asc (armuré : signed-by d'apt et rpm --import le lisent) ; jamais le téléchargement.
+  command -v gpg >/dev/null 2>&1 || arreter "gpg absent : installe gnupg (paquet « gnupg » ou « gnupg2 »), puis relance." "gpg is missing: install gnupg (package “gnupg” or “gnupg2”), then run again."
+  mkdir -m 700 "$TMP/gh"
+  telecharger "$1" "$TMP/cle-telechargee.asc"
   printf '\n%s\n' "$(t "Vérification de la clé : empreinte attendue $2" "Checking the key: expected fingerprint $2")"
-  vues="$(empreintes_cle "$1")" || vues=""
-  if [ "$vues" != "$2" ]; then
-    arreter "Empreinte de la clé différente de celle attendue (reçue : ${vues:-aucune}). Arrêt : rien n'est importé ni écrit." \
-            "Key fingerprint differs from the expected one (received: ${vues:-none}). Stopped: nothing was imported or written."
+  controler_cle "$TMP/cle-telechargee.asc" "$2" || arreter "Clé refusée. Arrêt : rien n'est importé ni écrit." "Key refused. Stopped: nothing was imported or written."
+  gpg_jetable --import "$TMP/cle-telechargee.asc" 2>/dev/null || arreter "Import dans le trousseau jetable impossible. Arrêt." "Import into the throwaway keyring failed. Stopped."
+  gpg_jetable --export --export-options export-minimal --armor "$2" > "$TMP/cle-exportee.asc" || arreter "Export impossible. Arrêt." "Export failed. Stopped."
+  controler_cle "$TMP/cle-exportee.asc" "$2" || arreter "Clé exportée refusée. Arrêt : rien n'est écrit." "Exported key refused. Stopped: nothing was written."
+  dire "Clé conforme : c'est son export (et non le fichier reçu) qui sera installé." "Key matches: its export (not the received file) will be installed."
+}
+poser_cache() { # poser_cache FICHIER_LOCAL NOM_FIXE : copie dans le dossier de root, rien d'autre ; le chemin posé est $CACHE/NOM_FIXE
+  etape sudo install -d -m0755 "$CACHE"
+  etape sudo install -m0644 "$1" "$CACHE/$2"
+  CACHE_FICHIERS+=("$CACHE/$2")
+}
+depot_present() { # depot_present FICHIER_NOTRE_NOM CONTENU_ATTENDU DOSSIER… : arrêt si une autre source Mullvad existe déjà (rien n'est écrasé)
+  local ours="$1" attendu="$2" f; shift 2
+  if [ -e "$ours" ] && ! cmp -s "$ours" "$attendu"; then
+    arreter "Le fichier $ours existe déjà avec un autre contenu : arrêt avant toute écriture (rien n'est écrasé). Retire-le ou compare-le à la main." \
+            "The file $ours already exists with other content: stopped before any write (nothing is overwritten). Remove it or compare it by hand."
   fi
-  dire "Empreinte conforme." "Fingerprint matches."
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    [ "$f" = "$ours" ] && continue
+    if grep -q -- 'repository\.mullvad\.net' "$f" 2>/dev/null; then
+      arreter "Une source Mullvad existe déjà dans $f : arrêt avant toute écriture (pas de doublon, rien n'est écrasé)." \
+              "A Mullvad source already exists in $f: stopped before any write (no duplicate, nothing is overwritten)."
+    fi
+  done
 }
 
 mullvad_arch() {
-  TOTAL=2
   etape sudo pacman -S mullvad-vpn
   etape sudo systemctl enable --now mullvad-daemon.service
 }
@@ -208,43 +269,58 @@ mullvad_debian() {
     aarch64) arch=arm64 ;;
     *) arreter "Architecture non prise en charge : parcours guidé (voir $LIEN)." "Unsupported architecture: guided path (see $LIEN)." ;;
   esac
-  TOTAL=6
-  telecharger "$MULLVAD_CLE_DEB" "$TMP/mullvad-keyring.asc"
-  verifier_cle "$TMP/mullvad-keyring.asc" "$MULLVAD_EMPREINTE"
   printf 'deb [signed-by=/usr/share/keyrings/mullvad-keyring.asc arch=%s] https://repository.mullvad.net/deb/stable stable main\n' "$arch" > "$TMP/mullvad.list"
-  etape sudo install -Dm0644 "$TMP/mullvad-keyring.asc" /usr/share/keyrings/mullvad-keyring.asc
-  etape sudo install -Dm0644 "$TMP/mullvad.list" /etc/apt/sources.list.d/mullvad.list
+  depot_present "$APT_DIR/sources.list.d/mullvad.list" "$TMP/mullvad.list" "$APT_DIR/sources.list" "$APT_DIR"/sources.list.d/*
+  preparer_cle "$MULLVAD_CLE_DEB" "$MULLVAD_EMPREINTE"
+  poser_cache "$TMP/cle-exportee.asc" mullvad-keyring.asc
+  controler_cle "$CACHE/mullvad-keyring.asc" "$MULLVAD_EMPREINTE" || arreter "La copie de root ne correspond pas. Arrêt." "The root copy doesn't match. Stopped."
+  poser_cache "$TMP/mullvad.list" mullvad.list
+  cmp -s "$TMP/mullvad.list" "$CACHE/mullvad.list" || arreter "La copie de root du fichier de source ne correspond pas. Arrêt." "The root copy of the source file doesn't match. Stopped."
+  etape sudo install -Dm0644 "$CACHE/mullvad-keyring.asc" /usr/share/keyrings/mullvad-keyring.asc
+  etape sudo install -Dm0644 "$CACHE/mullvad.list" /etc/apt/sources.list.d/mullvad.list
+  etape sudo cmp -- "$CACHE/mullvad-keyring.asc" /usr/share/keyrings/mullvad-keyring.asc
+  etape sudo cmp -- "$CACHE/mullvad.list" /etc/apt/sources.list.d/mullvad.list
   etape sudo apt-get update
   etape sudo apt-get install mullvad-vpn
 }
 mullvad_fedora() {
-  TOTAL=6
-  telecharger "$MULLVAD_CLE_RPM" "$TMP/mullvad-keyring.asc"
-  verifier_cle "$TMP/mullvad-keyring.asc" "$MULLVAD_EMPREINTE"
   # Le fichier de dépôt est écrit ici (jamais celui du réseau : il pourrait désactiver la vérification des signatures)
   # shellcheck disable=SC2016   # $basearch est lu par dnf, pas par le shell
-  printf '[mullvad-stable]\nname=Mullvad VPN\nbaseurl=https://repository.mullvad.net/rpm/stable/$basearch\ntype=rpm\nenabled=1\ngpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad\n' > "$TMP/mullvad.repo"
-  etape sudo install -Dm0644 "$TMP/mullvad-keyring.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
+  printf '[mullvad-stable]\nname=Mullvad VPN\nbaseurl=https://repository.mullvad.net/rpm/stable/$basearch\ntype=rpm\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad\n' > "$TMP/mullvad.repo"
+  depot_present "$YUM_DIR/mullvad.repo" "$TMP/mullvad.repo" "$YUM_DIR"/*
+  preparer_cle "$MULLVAD_CLE_RPM" "$MULLVAD_EMPREINTE"
+  poser_cache "$TMP/cle-exportee.asc" mullvad-keyring.asc
+  controler_cle "$CACHE/mullvad-keyring.asc" "$MULLVAD_EMPREINTE" || arreter "La copie de root ne correspond pas. Arrêt." "The root copy doesn't match. Stopped."
+  poser_cache "$TMP/mullvad.repo" mullvad.repo
+  cmp -s "$TMP/mullvad.repo" "$CACHE/mullvad.repo" || arreter "La copie de root du fichier de dépôt ne correspond pas. Arrêt." "The root copy of the repository file doesn't match. Stopped."
+  etape sudo install -Dm0644 "$CACHE/mullvad-keyring.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
+  etape sudo cmp -- "$CACHE/mullvad-keyring.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
   etape sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
-  etape sudo install -Dm0644 "$TMP/mullvad.repo" /etc/yum.repos.d/mullvad.repo
+  etape sudo install -Dm0644 "$CACHE/mullvad.repo" /etc/yum.repos.d/mullvad.repo
+  etape sudo cmp -- "$CACHE/mullvad.repo" /etc/yum.repos.d/mullvad.repo
   etape sudo dnf install mullvad-vpn
 }
 proton_arch() {
-  TOTAL=1
   etape sudo pacman -S proton-vpn-cli
 }
-proton_debian() {
-  local f="$TMP/protonvpn-stable-release_${PROTON_DEB_VERSION}_all.deb" vue
-  TOTAL=4
-  telecharger "$PROTON_DEB_URL" "$f"
-  printf '\n%s\n' "$(t "Vérification de la somme SHA-256 publiée par Proton : $PROTON_DEB_SHA256" "Checking the SHA-256 sum published by Proton: $PROTON_DEB_SHA256")"
-  vue="$(sha256sum -- "$f" | cut -d' ' -f1)" || vue=""
+somme_proton() { # somme_proton FICHIER : vrai si la somme SHA-256 est celle publiée par Proton
+  local vue
+  vue="$(sha256sum -- "$1" | cut -d' ' -f1)" || vue=""
   if [ "$vue" != "$PROTON_DEB_SHA256" ]; then
-    arreter "Somme SHA-256 différente de celle publiée par Proton (reçue : ${vue:-aucune}). Arrêt : rien n'est installé." \
-            "SHA-256 sum differs from the one Proton publishes (received: ${vue:-none}). Stopped: nothing was installed."
+    printf '%s\n' "$(t "Somme SHA-256 différente de celle publiée par Proton (reçue : ${vue:-aucune})." "SHA-256 sum differs from the one Proton publishes (received: ${vue:-none}).")" >&2
+    return 1
   fi
-  dire "Somme conforme." "Sum matches."
-  etape sudo dpkg -i "$f"
+  return 0
+}
+proton_debian() {
+  local nom="protonvpn-stable-release_${PROTON_DEB_VERSION}_all.deb"
+  telecharger "$PROTON_DEB_URL" "$TMP/$nom"
+  printf '\n%s\n' "$(t "Vérification de la somme SHA-256 publiée par Proton : $PROTON_DEB_SHA256" "Checking the SHA-256 sum published by Proton: $PROTON_DEB_SHA256")"
+  somme_proton "$TMP/$nom" || arreter "Arrêt : rien n'est installé." "Stopped: nothing was installed."
+  poser_cache "$TMP/$nom" "$nom"
+  somme_proton "$CACHE/$nom" || arreter "La copie de root ne correspond pas. Arrêt : rien n'est installé." "The root copy doesn't match. Stopped: nothing was installed."
+  dire "Somme conforme (fichier et copie de root)." "Sum matches (file and root copy)."
+  etape sudo apt-get install "$CACHE/$nom"
   etape sudo apt-get update
   etape sudo apt-get install proton-vpn-gnome-desktop
 }
@@ -259,6 +335,7 @@ read -r reponse || reponse=""
 case "$reponse" in o|O|oui|OUI|y|Y|yes|YES) ;; *) dire "Annulé : rien n'a été fait." "Cancelled: nothing was done."; exit 0 ;; esac
 
 "$ACTION"
+nettoyer_cache
 
 dire "Terminé. Ferme cette fenêtre : la fenêtre VPN redétecte le client." "Done. Close this window: the VPN window detects the client again."
 dire "Ensuite, connecte ton compte depuis la fenêtre VPN." "Next, sign in to your account from the VPN window."

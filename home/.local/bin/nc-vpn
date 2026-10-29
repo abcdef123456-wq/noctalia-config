@@ -2129,6 +2129,23 @@ INSTALLEUR_LIEN = re.compile(r"https://([a-z0-9.-]+)/[A-Za-z0-9._~/%?=&-]{0,200}
 INSTALLEUR_TEXTE = re.compile(r"[\w .,;:'’\"()/$«»…!?+=-]{1,300}")
 
 
+# Variables qui changeraient ce que le script root-adjacent lit ou lance : retirées avant d'ouvrir le terminal. Le PATH y est fixe.
+INSTALLEUR_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+INSTALLEUR_RETIRE = ("BASH_ENV", "ENV", "CDPATH", "GLOBIGNORE", "SHELLOPTS", "BASHOPTS", "PS4", "IFS", "GNUPGHOME", "CURL_HOME", "CURL_CA_BUNDLE",
+                     "SSL_CERT_FILE", "SSL_CERT_DIR", "NC_OS_RELEASE", "NC_INSTALLER_TEST", "NC_TEST_EMPREINTE", "NC_TEST_CACHE",
+                     "NC_TEST_APT_DIR", "NC_TEST_YUM_DIR")
+
+
+def installeur_env():
+    """Environnement du terminal d'installation : celui de la session, sans BASH_ENV, ENV, LD_*, BASH_FUNC_* ni variables de test,
+    avec un PATH fixe et la langue du bureau."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in INSTALLEUR_RETIRE and not k.startswith(("LD_", "BASH_FUNC_", "NC_TEST_"))}
+    env["PATH"] = INSTALLEUR_PATH
+    env["NC_LANGUE"] = "en" if EN else "fr"
+    return env
+
+
 def installeur_chemin():
     """Le script fixe du dépôt, installé à côté de ~/.local/bin (…/libexec/nc-vpn-installer), ou None."""
     p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "libexec", "nc-vpn-installer")
@@ -2191,8 +2208,7 @@ def installer_client(fid):
                       "kitty not found: open a terminal and run \"bash ~/.local/libexec/nc-vpn-installer " + fid + "\"."))
     titre = T("Installer ", "Install ") + f["nom"]
     try:
-        r = subprocess.run([kitty, "--hold", "--title", titre, bash, exe, fid], stdin=subprocess.DEVNULL,
-                           env=dict(os.environ, NC_LANGUE="en" if EN else "fr"))
+        r = subprocess.run([kitty, "--hold", "--title", titre, bash, exe, fid], stdin=subprocess.DEVNULL, env=installeur_env())
     except (OSError, subprocess.SubprocessError):
         raise Echec(T("Impossible d'ouvrir kitty.", "Could not open kitty."))
     if r.returncode != 0:
