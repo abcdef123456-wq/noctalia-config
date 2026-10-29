@@ -19,6 +19,7 @@
   nc-reglages capture [fin]       Hyprland sans ses raccourcis le temps de taper une combinaison (20 s au plus), puis rendu
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
+  nc-reglages vpn-un-indicateur   un seul indicateur VPN : la pilule de la barre (les 4 réglages VPN d'affichage d'un coup)
   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
   nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
 
@@ -106,6 +107,7 @@ USAGE_EN = """nc-settings (also nc-reglages): noctalia-config settings, in the i
   nc-settings graphics-mode       change graphics mode (Hybrid ↔ Discrete): confirmation in the island, otherwise here
   nc-settings get KEY             a setting's value
   nc-settings set KEY VALUE       change a setting (e.g. nc-settings set HZ_ECO 60)
+  nc-settings vpn-single-indicator  a single VPN indicator: the bar pill (the 4 VPN display settings at once)
   nc-settings reset [KEY]         back to the config's value (every setting without KEY)
   nc-settings apply               rewrite what depends on them (run by updates)
   nc-settings news                what's new in the latest updates of the config
@@ -550,6 +552,13 @@ REGLAGES = [
         "Rien n'est désinstallé ni arrêté ; remets Non pour les revoir.",
         "Hides the NordVPN, Proton VPN and Mullvad icons from the bar that duplicate the VPN pill (the tray widget's `hidden` list in Noctalia). "
         "Nothing is uninstalled or stopped; set No to see them again."), groupe="noctalia"),
+    R("VPN_BOUCLIER_WIFI", "Île", L("VPN : bouclier de Noctalia à la place du Wi-Fi", "VPN: Noctalia's shield instead of Wi-Fi"), "ouinon", "oui",
+      L("Quand un VPN est connecté, l'icône réseau de la barre de Noctalia devient un bouclier (son réglage « vpn_status »). Non : l'icône Wi-Fi "
+        "reste affichée, sans bouclier, pour n'avoir qu'un seul indicateur VPN (la pilule VPN, par exemple). Écrit dans zy-reglages.toml, "
+        "jamais dans config.toml ; Oui par défaut : rien ne change tant que tu ne le demandes pas.",
+        "When a VPN is connected, the network icon in Noctalia's bar becomes a shield (its \"vpn_status\" setting). No: the Wi-Fi icon stays, "
+        "without a shield, so you only have one VPN indicator (the VPN pill, for example). Written to zy-reglages.toml, never to config.toml; "
+        "Yes by default: nothing changes until you ask."), groupe="noctalia"),
     R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
       L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
         "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),
@@ -2159,6 +2168,10 @@ def montrer_sure(vals, cle):
     return PAR_CLE[cle].montrer(v) + (T(" (valeur invalide ignorée)", " (invalid value ignored)") if invalide else "")
 
 
+# « Un seul indicateur VPN » (nc-reglages vpn-un-indicateur, bouton de la fenêtre VPN)
+UN_INDICATEUR_VPN = (("VPN_PILULE_BARRE", "oui"), ("VPN_MASQUER_TRAY", "oui"), ("VPN_INDICATEUR", "non"), ("VPN_BOUCLIER_WIFI", "non"))
+
+
 def regler(vals, cle, v):
     """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
     r = PAR_CLE[cle]
@@ -2482,6 +2495,10 @@ def appliquer_noctalia(vals):
     if vals.get("VPN_MASQUER_TRAY") == "oui":
         # Les icônes des clients VPN qui font doublon avec la pilule : liste « hidden » du widget tray (rien n'est désinstallé)
         mettre("widget.tray", "hidden", list(TRAY_VPN))
+    if vals.get("VPN_BOUCLIER_WIFI") == "non":
+        # Widget réseau de Noctalia v5 : vpn_status vaut replace (défaut : bouclier à la place du Wi-Fi), both ou hidden
+        # (src/shell/bar/widgets/network_widget_definition.cpp)
+        mettre("widget.network", "vpn_status", "hidden")
     for cle, nom in (("DOCK", "enabled"), ("DOCK_AUTO", "auto_hide"), ("DOCK_LOUPE", "magnification")):
         if cle in vals:
             mettre("dock", nom, oui(cle))
@@ -4163,6 +4180,14 @@ def cli(a):
             m = "●" if r.cle in vals else " "
             print(f"   {m} {r.nom:<44} {montrer_sure(vals, r.cle):<30} {r.cle}")
         print()
+    elif a[0] in ("vpn-un-indicateur", "vpn-single-indicator") and len(a) == 1:
+        # Bouton « Un seul indicateur » de la fenêtre VPN : la pilule VPN de la barre seule, près du profil d'énergie (les icônes
+        # des clients VPN, le bouclier de l'île et celui de Noctalia sont cachés) ; chaque réglage reste changeable un par un
+        groupes = set()
+        for cle, v in UN_INDICATEUR_VPN:
+            groupes.add(regler(vals, cle, v))
+        appliquer([g for g in groupes if g], vals)
+        print(T("Un seul indicateur VPN : la pilule de la barre.", "A single VPN indicator: the bar pill."))
     elif a[0] == "get" and len(a) == 2 and a[1] in PAR_CLE:
         print(valeur_sure(vals, a[1])[0])
     elif a[0] == "set" and len(a) == 4 and a[1] == "--distant":

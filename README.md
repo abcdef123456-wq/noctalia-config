@@ -291,11 +291,14 @@ l'île Quickshell.
   pendant un partage d'écran), un clic ouvre la même fenêtre, même déconnecté. L'île écrit son état dans
   `$XDG_RUNTIME_DIR/nc-vpn-barre.json` (0600) quand il change ; la pilule le lit seulement s'il a changé et écran allumé, aucune
   commande réseau. Réglage `VPN_MASQUER_TRAY` (non par défaut) : cache dans la barre les icônes de NordVPN, Proton VPN et Mullvad
-  (liste `hidden` du widget `tray` de Noctalia) sans rien désinstaller. Les deux réglages sont dans le ⚙ de la fenêtre VPN
-  (section Île) et dans la fenêtre des réglages.
+  (liste `hidden` du widget `tray` de Noctalia) sans rien désinstaller. Réglage `VPN_BOUCLIER_WIFI` (oui par défaut) : non garde
+  l'icône Wi-Fi de Noctalia au lieu de son bouclier VPN (`vpn_status = "hidden"` du widget `network`, écrit dans `zy-reglages.toml`,
+  jamais dans `config.toml`). Le bouton « Un seul indicateur » de la fenêtre VPN (`nc-reglages vpn-un-indicateur`) pose les quatre
+  d'un coup : la pilule de la barre seule (`VPN_PILULE_BARRE=oui`, `VPN_MASQUER_TRAY=oui`, `VPN_INDICATEUR=non`, `VPN_BOUCLIER_WIFI=non`).
+  Ces réglages sont dans le ⚙ de la fenêtre VPN (section Île) et dans la fenêtre des réglages.
   **Fournisseurs** (`nc-vpn fournisseurs-json`, pour la fenêtre VPN ; contrat dans `docs/vpn-contrat.md`) : NordVPN (CLI officielle
   `nordvpn`), Proton VPN (CLI officielle `protonvpn`, sinon l'application `protonvpn-app`) et Mullvad (`mullvad`), chacun dans l'un de trois états : **absent**
-  (commande introuvable, silencieux), **sans compte** (installé, pas de compte connecté) ou **prêt** (compte connecté) ; les pays ne
+  (commande introuvable, silencieux), **sans compte** (installé, pas de compte connecté ; pour Nord aussi : abonnement VPN inactif ou non confirmé) ou **prêt** (compte connecté) ; les pays ne
   sont proposés qu'à l'état prêt. `nc-vpn fournisseur nord|proton|mullvad connecter FR | deconnecter | login` (code pays en deux
   lettres MAJUSCULES, vérifié avant tout appel). Nord : l'état vient de `nordvpn account` (seul « connecté ou non » est gardé,
   jamais l'e-mail ni un jeton), les pays de `nordvpn countries`, `connect` reçoit le nom exact de la CLI ; `login` lance `nordvpn

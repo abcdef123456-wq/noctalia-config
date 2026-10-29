@@ -6,6 +6,8 @@
   sont coupés ; réglages présents dans le catalogue (donc dans le ⚙ de la fenêtre VPN, section Île, et dans Parametres.qml).
 - La règle Hyprland de la fenêtre VPN ne vise que son titre ; elle est placée à l'ouverture et exclue de la mémoire des fenêtres.
 Tout est isolé (faux HOME) ; le vrai Noctalia, le vrai Hyprland et la vraie île ne sont jamais touchés."""
+import contextlib
+import io
 import json
 import os
 import re
@@ -219,6 +221,43 @@ class Configuration(unittest.TestCase):
             self.assertNotIn("pinned", t["widget"]["tray"])
             appliquer({"VPN_MASQUER_TRAY": "non"})
             self.assertFalse(sortie.exists(), "réglage coupé : liste retirée, rien n'est désinstallé")
+
+    def test_bouclier_wifi_oui_par_defaut_non_ecrit_vpn_status_hidden(self):
+        with tempfile.TemporaryDirectory(prefix="nc-vpn-barre-") as d:
+            nc, sortie = self.charger(d)
+            r = nc["PAR_CLE"]["VPN_BOUCLIER_WIFI"]
+            self.assertEqual((r.section, r.genre, r.defaut, r.groupe), ("Île", "ouinon", "oui", "noctalia"))
+            appliquer = nc["appliquer_noctalia"]
+            appliquer({"VPN_BOUCLIER_WIFI": "oui"})
+            self.assertFalse(sortie.exists(), "oui (le défaut de Noctalia, replace) : rien d'écrit")
+            appliquer({"VPN_BOUCLIER_WIFI": "non"})
+            self.assertEqual(tomllib.loads(sortie.read_text())["widget"]["network"], {"vpn_status": "hidden"})
+            self.assertEqual(sortie.name, "zy-reglages.toml")
+            conf = (Path(d) / ".config/noctalia/config.toml").read_text()
+            self.assertEqual(conf, CONFIG.read_text(), "config.toml (à marqueurs) n'est jamais réécrit")
+            appliquer({})
+            self.assertFalse(sortie.exists(), "remis à oui : retiré")
+
+    def test_un_seul_indicateur_regle_les_4_d_un_coup(self):
+        with tempfile.TemporaryDirectory(prefix="nc-vpn-barre-") as d:
+            nc, sortie = self.charger(d)
+            conf = sortie.parent / "config.toml"
+            conf.write_text(re.sub(r"@[A-Z0-9_]+@", "0", conf.read_text().replace("@ILE_CENTRE@", "").replace("@NOTIF_WIDGET@", "").replace("@PLUGIN_ILE@", "")))
+            env = dict(HOME=d, XDG_CONFIG_HOME=str(Path(d) / ".config"), NC_LANGUE="fr")
+            with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()) as out:
+                nc["cli"](["vpn-un-indicateur"])
+            self.assertIn("Un seul indicateur", out.getvalue())
+            lu = nc["lire"]()
+            self.assertEqual({k: lu.get(k) for k in ("VPN_PILULE_BARRE", "VPN_MASQUER_TRAY", "VPN_INDICATEUR", "VPN_BOUCLIER_WIFI")},
+                             {"VPN_PILULE_BARRE": "oui", "VPN_MASQUER_TRAY": "oui", "VPN_INDICATEUR": "non", "VPN_BOUCLIER_WIFI": "non"})
+            t = tomllib.loads(sortie.read_text())
+            self.assertIn("nc/vpn:vpn", t["bar"]["default"]["end"])
+            self.assertIn("mullvad-vpn", t["widget"]["tray"]["hidden"])
+            self.assertEqual(t["widget"]["network"]["vpn_status"], "hidden")
+        entete = (REPO / "home/.config/quickshell/nc-ile/VpnEntete.qml").read_text()
+        self.assertIn('"vpn-un-indicateur"])', entete)          # en argv, jamais une ligne de shell
+        self.assertIn('visible: !e.unSeul', entete)
+        self.assertIn('VPN_BOUCLIER_WIFI', entete)
 
 
 class HyprlandFenetre(unittest.TestCase):
