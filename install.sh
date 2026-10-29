@@ -1970,7 +1970,7 @@ if [ "$MODE" = full ]; then
     BATLIM=$'# /etc/tlp.d/20-battery-limit.conf : limite de charge (noctalia-config). Recharge sous 75 %, arrêt à 80 %.\n# Charge complète ponctuelle : sudo tlp fullcharge   ·   Pour l\'enlever : sudo rm /etc/tlp.d/20-battery-limit.conf\nSTART_CHARGE_THRESH_BAT0=75\nSTOP_CHARGE_THRESH_BAT0=80'
   fi
   # Réglages TLP faits par toi (autres fichiers de /etc/tlp.d que ceux du dépôt) : gardés tels quels, rien n'est ajouté
-  TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|11-nc-frequence|20-battery-limit)\.conf$' || true)"
+  TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|11-nc-frequence|12-nc-plateforme|20-battery-limit)\.conf$' || true)"
   tlp_regle() {   # réglages du dépôt dans /etc/tlp.d (et la limite de charge si choisie) ; vrai si quelque chose a changé
     local ch=1
     if [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ] && [ ! -f /etc/tlp.d/10-legion.conf ]; then
@@ -1984,6 +1984,20 @@ if [ "$MODE" = full ]; then
     if [ -n "$fmax" ]; then
       freq="$(printf '# /etc/tlp.d/11-nc-frequence.conf : fréquence maximale du processeur en Performance et Équilibré\n# (noctalia-config ; le profil Économie la plafonne à 2 GHz, voir 10-nc.conf).\nCPU_SCALING_MAX_FREQ_ON_AC=%s\nCPU_SCALING_MAX_FREQ_ON_BAT=%s\n' "$fmax" "$fmax")"
       [ "$(cat /etc/tlp.d/11-nc-frequence.conf 2>/dev/null)" = "$freq" ] || { printf '%s\n' "$freq" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/11-nc-frequence.conf; ch=0; }
+    fi
+    # Profils de la plateforme (ventilateurs, limites du firmware) : une valeur choisie d'après les choix du noyau de CE
+    # portable (quiet ou cool à la place de low-power, balanced-performance à la place de performance). Rien à écrire
+    # quand le noyau n'expose pas de profil : un ancien fichier est alors retiré.
+    # Si tu as réglé toi-même PLATFORM_PROFILE_ON_* (/etc/tlp.conf ou un de tes fichiers de /etc/tlp.d), ton choix reste.
+    plat="$("$REPO/system/nc-tlp-plateforme" 2>/dev/null)" || plat=""
+    # shellcheck disable=SC2086
+    if grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' /etc/tlp.conf $TLP_PERSO; then
+      plat=""   # (un ancien fichier du dépôt serait aussi retiré ci-dessous : ton réglage prend sa place)
+    fi
+    if [ -n "$plat" ]; then
+      [ "$(cat /etc/tlp.d/12-nc-plateforme.conf 2>/dev/null)" = "$plat" ] || { printf '%s\n' "$plat" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/12-nc-plateforme.conf; ch=0; }
+    elif [ -f /etc/tlp.d/12-nc-plateforme.conf ]; then
+      sudo rm -f /etc/tlp.d/12-nc-plateforme.conf; ch=0
     fi
     if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
       info "$(t "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché." "Your battery supports a charge limit (about 80%), which preserves it if the PC is often plugged in.")"

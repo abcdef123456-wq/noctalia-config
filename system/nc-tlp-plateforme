@@ -1,0 +1,58 @@
+#!/bin/bash
+# nc-tlp-plateforme : écrit (sur la sortie) le fichier /etc/tlp.d/12-nc-plateforme.conf adapté à CE portable.
+# Lancé par install.sh avec les droits de l'utilisateur ; il ne lit que /sys et le fichier de valeurs par défaut de TLP,
+# n'écrit rien et ne lance rien.
+#
+# Pourquoi : un portable ne propose pas toujours les profils « standard » de la plateforme (platform_profile_choices).
+# Certains n'ont pas « low-power » mais « quiet » ou « cool » ; d'autres n'ont pas « performance » mais
+# « balanced-performance ». TLP 1.9 et 1.10 n'acceptent qu'UNE valeur par réglage (PLATFORM_PROFILE_ON_AC/BAT/SAV) ;
+# TLP 1.11 (bêta) accepte des listes (PLATFORM_PROFILE_ON_PRF/BAL/SAV), mais écrit chaque valeur trouvée dans l'ordre,
+# sans s'arrêter à la première : la dernière l'emporte. Une seule valeur, choisie ici d'après les choix du noyau,
+# donne donc le même résultat avec toutes les versions.
+#
+# Intention :  Performance -> performance, sinon balanced-performance
+#              Équilibré   -> balanced
+#              Économie    -> low-power, sinon quiet, sinon cool
+# « max-power » n'est jamais choisi. Un profil sans équivalent sur ce PC n'est pas écrit (TLP garde alors son défaut,
+# qu'il ignore sans bruit si le matériel ne l'accepte pas).
+#
+# Sortie : le contenu du fichier (code 0), ou rien (code 3) quand le noyau n'expose aucun profil de plateforme.
+# Essais : NC_SYSFS (faux /sys) et NC_TLP_DEFAUTS (faux defaults.conf de TLP).
+set -u
+export LC_ALL=C
+S="${NC_SYSFS:-/sys}"
+DEF="${NC_TLP_DEFAUTS:-/usr/share/tlp/defaults.conf}"
+CH="$S/firmware/acpi/platform_profile_choices"
+
+[ -r "$CH" ] || exit 3
+read -r brut < "$CH" 2>/dev/null || brut=""
+# Seulement des mots de la liste blanche : tout le reste est ignoré
+choix=""
+for m in $brut; do
+  case "$m" in
+    low-power|quiet|cool|balanced|balanced-performance|performance) choix="$choix $m " ;;
+  esac
+done
+[ -n "$choix" ] || exit 3
+a() { case "$choix" in *" $1 "*) return 0 ;; esac; return 1; }
+
+# TLP 1.11 et plus : paramètres _PRF/_BAL/_SAV ; avant : _AC/_BAT/_SAV (l'ancien nom marche aussi en 1.11, mais il y
+# remplacerait la liste par une seule valeur : on écrit le nom du cas, sans doublon)
+if grep -q '^PLATFORM_PROFILE_ON_PRF=' "$DEF" 2>/dev/null; then
+  sfx_prf=PRF; sfx_bal=BAL; v="1.11 ou plus"
+else
+  sfx_prf=AC; sfx_bal=BAT; v="1.9 et 1.10"
+fi
+
+prf=""; bal=""; sav=""
+if a performance; then prf=performance; elif a balanced-performance; then prf=balanced-performance; fi
+a balanced && bal=balanced
+if a low-power; then sav=low-power; elif a quiet; then sav=quiet; elif a cool; then sav=cool; fi
+
+printf '# /etc/tlp.d/12-nc-plateforme.conf : profils de la plateforme de CE portable (noctalia-config, TLP %s).\n' "$v"
+printf '# Écrit par install.sh d'"'"'après les choix du noyau (platform_profile_choices :%s). Ne pas modifier à la main :\n' "${choix% }"
+printf '# install.sh le réécrit. Pour l'"'"'enlever : sudo rm /etc/tlp.d/12-nc-plateforme.conf\n'
+[ -n "$prf" ] && printf 'PLATFORM_PROFILE_ON_%s=%s\n' "$sfx_prf" "$prf"
+[ -n "$bal" ] && printf 'PLATFORM_PROFILE_ON_%s=%s\n' "$sfx_bal" "$bal"
+[ -n "$sav" ] && printf 'PLATFORM_PROFILE_ON_SAV=%s\n' "$sav"
+exit 0
