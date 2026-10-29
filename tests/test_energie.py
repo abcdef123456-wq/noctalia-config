@@ -527,6 +527,83 @@ esac
         self.assertIn("Tout a été remis comme avant", msg)
         self.assertEqual({k: v for k, v in self.etat_materiel().items() if k != "wifi"}, {k: v for k, v in avant.items() if k != "wifi"})
 
+    def service_qui_reecrit(self, ecrit, epp=None):
+        """Un faux powerprofilesctl dont « set » réécrit le profil de la plateforme (et l'EPP si demandé), comme le fait un
+        service de profils en changeant de profil."""
+        j, e, pf = self.journal, self.etat, self.sys / "firmware/acpi/platform_profile"
+        action = f'echo {ecrit} > "{pf}"'
+        if epp:
+            for n in (0, 1):
+                action += f'; echo {epp} > "{self.sys}/devices/system/cpu/cpufreq/policy{n}/energy_performance_preference"'
+        lancement = action
+        self.outil("powerprofilesctl", f'''echo "powerprofilesctl $*" >> "{j}"
+case "$1" in
+  list) printf '* balanced:\\n    Driver: x\\n\\n  power-saver:\\n    Driver: x\\n\\n  performance:\\n    Driver: x\\n' ;;
+  get) cat "{e}/profil" 2>/dev/null || echo balanced ;;
+  set) echo "$2" > "{e}/profil"; {lancement} ;;
+esac
+''')
+
+    def test_revenir_remet_le_profil_du_service_avant_celui_de_la_plateforme(self):
+        self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "platform_profile": "low-power"})])
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+        self.json("appliquer", "cours-bureautique", "--oui")
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "low-power")
+        # Le service réécrit « performance » à chaque changement de profil : au retour, la plateforme passe donc après
+        self.service_qui_reecrit("performance")
+        r = self.json("revenir")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+        self.assertEqual((self.etat / "profil").read_text().strip(), "balanced")
+
+    def test_annulation_apres_un_echec_meme_ordre(self):
+        self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "platform_profile": "low-power", "FOND_ANIME": "non"})])
+        self.service_qui_reecrit("performance")
+        (self.etat / "echec_FOND_ANIME").write_text("")
+        r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("Tout a été remis comme avant", json.loads(r.stdout)["erreur"])
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+        self.assertEqual((self.etat / "profil").read_text().strip(), "balanced")
+
+    def test_service_qui_reecrit_en_retard_pendant_la_pose(self):
+        """Le service détaché réécrit la plateforme un instant après l'écriture (course) : relu en boucle, jamais un faux
+        succès. Le faux « sleep » de l'assistant joue le service : à son 2e appel, il remet « performance »."""
+        self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "platform_profile": "low-power"})])
+        n, pf = self.tmp / "n_sleep", self.sys / "firmware/acpi/platform_profile"
+        n.write_text("0")
+        (self.bin / "sleep").write_text(f'#!/bin/sh\nn=$(cat "{n}"); n=$((n+1)); echo $n > "{n}"\n'
+                                       f'[ "$n" = 2 ] && echo performance > "{pf}"\nexit 0\n')
+        (self.bin / "sleep").chmod(0o755)
+        r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        msg = json.loads(r.stdout)["erreur"]
+        self.assertIn("non confirmé", msg)
+        self.assertIn("Tout a été remis comme avant", msg)
+
+    def test_verification_finale_signale_un_reglage_reecrit(self):
+        """L'EPP est posé AVANT le profil du service, qui le réécrit : la relecture finale le dit (code 4), pas de succès."""
+        self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "cpu_epp": "power"})])
+        self.service_qui_reecrit("balanced", epp="balance_performance")
+        r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
+        self.assertEqual(r.returncode, 4, r.stdout)
+        msg = json.loads(r.stdout)["erreur"]
+        self.assertIn("réécrit par le service", msg)
+        self.assertIn("cpu_epp", msg)
+        self.assertTrue((self.tmp / "state/nc/energie-avant.json").exists(), "de quoi revenir")
+
+    def test_controleur_different_message_a_part(self):
+        d = self.sys / "class/platform-profile/platform-profile-0"
+        ecrire(d / "name", "acer-wmi")
+        ecrire(d / "profile", "balanced")
+        ecrire(d / "choices", "low-power balanced performance")
+        self.sauver_profils([dict(self.profil, reglages={"platform_profile": "low-power"})])
+        r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        msg = json.loads(r.stdout)["erreur"]
+        self.assertIn("un contrôleur de la plateforme a gardé un autre profil", msg)
+        self.assertNotIn("relu « low-power » : un service", msg)
+
     def test_echec_du_materiel_rien_d_autre_n_a_bouge(self):
         avant = self.etat_materiel()
         # Le noyau ne propose plus « low-power » : l'assistant répond « rien de tel » (3) et tout s'arrête là

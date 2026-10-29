@@ -462,23 +462,67 @@ def appliquer_cle(cle, valeur):
         return None, "la carte refuse sa limite de puissance (souvent le cas sur un portable) : sautée"
     if code == 3:
         return False, f"{cle} : rien de tel sur ce PC en ce moment"
-    if code == 4 and cle == "platform_profile":
+    if code in (4, 5) and cle == "platform_profile":
         relu = lire_actuel("platform_profile") or "?"
         if not re.fullmatch(r"[a-z-]{1,24}", relu):
             relu = "?"
+        if code == 5:
+            return False, (f"profil matériel « {valeur} » écrit (relu « {relu} »), mais un contrôleur de la plateforme a gardé un autre "
+                           "profil (voir nc-diag) : non confirmé")
         return False, (f"profil matériel « {valeur} » demandé mais « {relu} » relu : un service (TLP, power-profiles-daemon, tuned) "
-                       "l'a réécrit, ou le firmware l'a refusé")
+                       "l'a réécrit, ou le firmware l'a refusé : non confirmé")
     return code == 0, f"{cle} refusé par l'assistant (code {code})"
+
+
+def stable(lecteur, attendu, duree=5.0, pas=0.2):
+    """(vrai, dernière lecture) quand lecteur() vaut `attendu` sur 2 lectures de suite, relues toutes les 0,2 s pendant
+    5 s au plus ; (faux, dernière lecture) sinon : jamais un succès non confirmé. (Un service comme tlp-pd lance son
+    travail détaché, sans attendre : la valeur peut changer un instant après la réponse.)"""
+    fin = time.monotonic() + duree
+    de_suite, v = 0, None
+    while True:
+        v = lecteur()
+        de_suite = de_suite + 1 if v == attendu else 0
+        if de_suite >= 2:
+            return True, v
+        if time.monotonic() >= fin:
+            return False, v
+        time.sleep(pas)
 
 
 def poser_profil(valeur):
     if outil("powerprofilesctl"):
         code, _ = lancer(["powerprofilesctl", "set", valeur], delai=15)
-        return code == 0, "profil refusé par le service d'énergie"
+        if code != 0:
+            return False, "profil refusé par le service d'énergie"
+        ok, relu = stable(lire_profil_service, valeur)
+        return ok, f"profil « {valeur} » non confirmé par le service d'énergie (relu « {relu or '?'} »)"
     if outil("tuned-adm") and valeur in TUNED:
         code, _ = lancer(["tuned-adm", "profile", TUNED[valeur]], delai=30)
-        return code == 0, "profil refusé par tuned"
+        if code != 0:
+            return False, "profil refusé par tuned"
+        ok, relu = stable(lire_profil_service, valeur)
+        return ok, f"profil « {valeur} » non confirmé par tuned (relu « {relu or '?'} »)"
     return False, "aucun service de profils"
+
+
+# Réglages qu'un service de profils (TLP, power-profiles-daemon, tuned) peut réécrire : relus à la fin
+VERIFIES = ("profil", "platform_profile", "cpu_epp", "cpu_boost", "cpu_freq_max")
+
+
+def verifier_final(attendus):
+    """[(clé, attendu, relu)] des réglages réécrits par un service ou non confirmés (lecture bornée et stable pour chacun)."""
+    ecarts = []
+    for cle in VERIFIES:
+        if cle in attendus and attendus[cle] is not None:
+            ok, relu = stable(lambda c=cle: lire_actuel(c), attendus[cle])
+            if not ok:
+                ecarts.append((cle, attendus[cle], relu))
+    return ecarts
+
+
+def texte_ecarts(ecarts):
+    return "; ".join(f"{c} : voulu « {a} », relu « {r if r and re.fullmatch(r'[A-Za-z0-9_.-]{1,24}', r) else '?'} »" for c, a, r in ecarts)
 
 
 # ── Profils gardés ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -692,7 +736,7 @@ def montrer(cle, v):
     return VALEURS.get(v, v)
 
 
-ORDRE_NIVEAU = {2: 0, 1: 1}                         # le matériel d'abord : s'il échoue, rien d'autre n'a bougé
+ORDRE_NIVEAU = {2: 0, 1: 1}                         # le matériel sans service d'abord (les autres sont ensuite annulés si besoin)
 
 
 def ordre_cle(cle):
@@ -754,16 +798,26 @@ class Verrou:
         self.f.close()
 
 
+def ordre_retour(cle):
+    """Au retour (revenir, annulation) : le profil du service d'abord, puis le reste, puis le profil de la plateforme en
+    dernier : le service le réécrit en changeant de profil."""
+    return 0 if cle == "profil" else (2 if cle == "platform_profile" else 1)
+
+
 def defaire(etapes):
-    """Remet, dans l'ordre inverse, les valeurs d'avant de ces étapes [(clé, avant)] ; renvoie les clés non remises."""
-    rates = []
-    for cle, avant in reversed(etapes):
+    """Remet les valeurs d'avant de ces étapes [(clé, avant)] (ordre inverse, mais profil du service d'abord et profil de la
+    plateforme en dernier) ; renvoie les clés non remises ou non confirmées à la relecture finale."""
+    rates, remis = [], {}
+    for cle, avant in sorted(reversed(etapes), key=lambda e: ordre_retour(e[0])):
         if avant is None:
             rates.append(cle)
             continue
         ok, _ = appliquer_cle(cle, avant)
         if not ok:
             rates.append(cle)
+        else:
+            remis[cle] = avant
+    rates += [c for c, _a, _r in verifier_final(remis) if c not in rates]
     return rates
 
 
@@ -811,6 +865,11 @@ def appliquer(nom, oui=False, oui_hz=False, interactif=False):
                 if rates:
                     msg += " Mais n'ont pas pu être remis : " + ", ".join(rates) + "."
                 raise Erreur(msg, 1)
+        # Un service peut avoir réécrit un réglage après coup : relire, jamais un succès non confirmé
+        ecarts = verifier_final({c["cle"]: c["_apres"] for c in ap["changements"]})
+        if ecarts:
+            raise Erreur(f"profil « {p['nom']} » non confirmé, réécrit par le service : {texte_ecarts(ecarts)}. "
+                         "« nc-energie revenir » remet l'état d'avant.", 4)
     msg = f"Profil « {p['nom']} » appliqué ({len(faites)} changements). « nc-energie revenir » remet l'état d'avant."
     if sautees:
         msg += " Sautés : " + ", ".join(sautees) + "."
@@ -825,12 +884,12 @@ def revenir():
         avant = [(k, v) for k, v in d["avant"].items() if k in L.CLES and (v is None or isinstance(v, str))]
         # jamais un écran noir au retour : une luminosité d'avant sous 5 % est remise à 5 %
         avant = [(k, "5" if k == "luminosite" and entier(v) is not None and entier(v) < 5 else v) for k, v in avant]
-        # Le matériel en dernier à remettre = en premier appliqué : l'ordre inverse de l'application
+        # defaire remet le profil du service d'abord et le profil de la plateforme en dernier, puis relit tout
         avant.sort(key=lambda kv: ordre_cle(kv[0]))
         rates = defaire(avant)
         if rates:
             ecrire_json(FICHIER_AVANT, dict(d, avant={k: v for k, v in d["avant"].items() if k in rates}))
-            return {"ok": False, "revenu": True, "message": "Remis, sauf : " + ", ".join(rates) + " (état d'avant inconnu ou refusé)."}
+            return {"ok": False, "revenu": True, "message": "Remis, sauf : " + ", ".join(rates) + " (état d'avant inconnu ou refusé, ou réécrit par le service : non confirmé)."}
         try:
             os.unlink(FICHIER_AVANT)
         except OSError:

@@ -10,7 +10,7 @@
 #   nc-energie-root platform low-power|quiet|cool|balanced|balanced-performance|performance
 #                                             (seulement si le noyau le propose : platform_profile_choices ; la valeur est
 #                                             relue après l'écriture, et les contrôleurs de /sys/class/platform-profile
-#                                             aussi, en lecture seule : un autre résultat = code 4, jamais un faux succès)
+#                                             aussi, en lecture seule, toutes les 0,2 s pendant 5 s au plus : un autre résultat = code 4 ou 5, jamais un faux succès)
 #   nc-energie-root nvidia-pm auto|on         gestion d'énergie de la carte NVIDIA (power/control)
 #   nc-energie-root nvidia-pl 0|1|2|3         limite de puissance NVIDIA : 0 = minimum, 3 = maximum, entre les deux en
 #                                             paliers égaux ; seulement si la carte est ACTIVE (jamais réveillée pour ça)
@@ -24,7 +24,8 @@
 # aucune chaîne libre n'est acceptée (sous-commande et valeur sont comparées à une liste) ; ni ventilateurs, ni
 # undervolt, ni TDP brut, ni écriture libre. Rien n'est réappliqué tout seul au démarrage.
 # Codes de sortie : 0 fait, 1 échec ou pas root, 2 sous-commande ou valeur refusée, 3 rien de tel sur ce PC,
-# 4 écrit mais la valeur relue est différente (réécrite par un service, ou refusée en silence par le firmware).
+# 4 écrit mais la valeur relue est différente ou instable (réécrite par un service, ou refusée par le firmware),
+# 5 profil global juste mais un contrôleur de la plateforme garde un autre profil.
 # Essais : NC_ENERGIE_RACINE (faux /sys) et NC_ENERGIE_BIN (faux outils) ne sont lus QUE hors root (sudo les efface de
 # toute façon) : lancé en root, cet assistant ne regarde que le vrai /sys et le PATH système.
 set -u
@@ -66,7 +67,7 @@ lire() { local f="$1"; [ -r "$f" ] && { read -r l < "$f"; printf '%s' "$l"; }; }
 # Écrit dans un fichier qui existe déjà, jamais dans un fichier créé
 ecrire() {   # ecrire VALEUR FICHIER
   [ -f "$2" ] || return 1
-  printf '%s\n' "$1" > "$2" 2>/dev/null
+  printf '%s\n' "$1" 2>/dev/null > "$2"
 }
 
 # Cartes NVIDIA : périphériques PCI de classe 0x03xxxx et de fabricant 0x10de
@@ -159,23 +160,30 @@ do_platform() {
   dans_mots "$1" "$choix" || absent "ce PC ne propose pas le profil de plateforme « $1 » (choix du noyau : $(propre "$choix"))"
   # Valeur « custom » : des contrôleurs ont des profils différents ; écrire un profil commun ici les remet tous au même
   ecrire "$1" "$f" || echec "écriture du profil de plateforme refusée par le noyau ou le firmware"
-  # Un service (TLP, power-profiles-daemon, tuned) peut le réécrire aussitôt : relire après un court instant
-  sleep 0.2
-  apres="$(lire "$f")"
+  # Un service (TLP, power-profiles-daemon, tuned) peut le réécrire un instant après : relire toutes les 0,2 s pendant 5 s au
+  # plus, jusqu'à la valeur demandée sur 2 lectures de suite (global ET contrôleurs, ceux-ci en lecture seule)
+  local i=0 stable=0
+  while [ "$i" -lt 25 ]; do
+    sleep 0.2
+    apres="$(lire "$f")"; bad=""
+    for d in $(controleurs); do
+      [ -r "$d/profile" ] || continue
+      p="$(lire "$d/profile")"
+      [ "$p" = "$1" ] || bad="$bad $(propre "$(lire "$d/name")")=$(propre "$p")"
+    done
+    if [ "$apres" = "$1" ] && [ -z "$bad" ]; then stable=$((stable + 1)); [ "$stable" -ge 2 ] && return 0; else stable=0; fi
+    i=$((i + 1))
+  done
   if [ "$apres" != "$1" ]; then
-    echo "nc-energie-root: profil de plateforme demandé « $1 », relu « $(propre "$apres") » : un autre service l'a réécrit ou le firmware l'a refusé" >&2
+    echo "nc-energie-root: profil de la plateforme demandé « $1 », relu « $(propre "$apres") » : un autre service l'a réécrit ou le firmware l'a refusé" >&2
     exit 4
   fi
-  # Chaque contrôleur doit avoir suivi (le noyau les met tous au même profil quand le choix est commun)
-  for d in $(controleurs); do
-    [ -r "$d/profile" ] || continue
-    p="$(lire "$d/profile")"
-    [ "$p" = "$1" ] || bad="$bad $(propre "$(lire "$d/name")")=$(propre "$p")"
-  done
   if [ -n "$bad" ]; then
     echo "nc-energie-root: profil de plateforme « $1 » écrit, mais des contrôleurs ont un autre profil :$bad" >&2
-    exit 4
+    exit 5
   fi
+  echo "nc-energie-root: profil de plateforme « $1 » non stable : relu différent à un moment" >&2
+  exit 4
 }
 do_nvidia_pm() {
   local d n=0

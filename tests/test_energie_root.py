@@ -294,6 +294,16 @@ class PlateformePortables(Base):
         self.assertIn("relu", r.stderr)
         self.assertIn("balanced", r.stderr)
 
+    def test_service_qui_reecrit_en_retard(self):
+        """Un service détaché (tlp-pd) réécrit un instant après l'écriture : la relecture bornée le voit (code 4)."""
+        self.choix("quiet balanced performance")
+        compteur = self.tmp / "n"
+        compteur.write_text("0")
+        self.faux("sleep", f'n=$(cat "{compteur}"); n=$((n+1)); echo $n > "{compteur}"\n'
+                           f'[ "$n" = 2 ] && echo balanced > "{self.sys}/firmware/acpi/platform_profile"\nexit 0')
+        r = self.lancer("platform", "performance")
+        self.assertEqual(r.returncode, 4, r.stderr)
+
     def test_relecture_identique_est_un_succes(self):
         self.choix("quiet balanced performance")
         self.faux("sleep", "exit 0")
@@ -306,12 +316,12 @@ class PlateformePortables(Base):
         self.faux("sleep", f'echo quiet > "{self.sys}/class/platform-profile/platform-profile-0/profile"')
         self.assertEqual(self.lancer("platform", "quiet").returncode, 0)
 
-    def test_controleur_en_retard_code_4(self):
+    def test_controleur_en_retard_code_5(self):
         self.choix("quiet balanced balanced-performance")
         self.controleur(0, "acer-wmi", "balanced")
         self.controleur(1, "autre-pilote", "balanced")
         r = self.lancer("platform", "quiet")
-        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertEqual(r.returncode, 5, r.stderr)        # global juste, contrôleurs différents : code à part
         self.assertIn("acer-wmi=balanced", r.stderr)
         self.assertEqual(self.lire("class/platform-profile/platform-profile-0/profile"), "balanced", "contrôleurs jamais écrits ici")
 
