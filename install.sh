@@ -1365,12 +1365,16 @@ fi
 if have gsettings; then
   # La valeur d'avant est gardée dans $BK/silencieux/gsettings-avant.sh (« sh » ce fichier remet tout comme avant)
   gs_set() { # gs_set SCHÉMA CLÉ VALEUR
-    local ancien
+    local ancien nouveau
     ancien="$(gsettings get "$1" "$2" 2>/dev/null)" || return 0
     if [ "$ancien" = "$3" ] || [ "$ancien" = "'$3'" ]; then return 0; fi
+    gsettings set "$1" "$2" "$3" 2>/dev/null || return 0
+    # Noté seulement si la valeur a vraiment changé (sans dconf, gsettings garde tout en mémoire et rien ne change :
+    # pas de sauvegarde inutile à chaque passage)
+    nouveau="$(gsettings get "$1" "$2" 2>/dev/null)" || return 0
+    [ "$nouveau" != "$ancien" ] || return 0
     mkdir -p "$BK/silencieux"
     printf 'gsettings set %s %s %s\n' "$1" "$2" "$ancien" >> "$BK/silencieux/gsettings-avant.sh"
-    gsettings set "$1" "$2" "$3" 2>/dev/null || true
   }
   gs_set org.gnome.desktop.interface color-scheme prefer-dark
   gs_set org.gnome.desktop.interface icon-theme "$ICON_THEME"
