@@ -231,9 +231,11 @@ def key_label(raw):
     return KEYCODES.get(last, last.capitalize() if len(last) > 1 else last.upper())
 
 
-def collect():
+def collect(exiger=False):
+    """Les sections de la fiche. exiger (la fiche, nc-keys lancé seul) : sans aucun raccourci décrit, une raison et code 1 ;
+    nc-raccourci liste, qui ajoute ses propres lignes, s'en passe."""
     binds = lire_binds()
-    if not any(b.get("description", "").strip() and not b.get("submap", "").strip() for b in binds):
+    if exiger and not any(b.get("description", "").strip() and not b.get("submap", "").strip() for b in binds):
         # Jamais une fiche vide ou réduite aux lignes ajoutées ici : la fiche dit pourquoi
         print(T("nc-keys : « hyprctl binds » ne donne aucun raccourci décrit (config de Hyprland en erreur ? "
                 "voir hyprctl configerrors)",
@@ -294,7 +296,7 @@ if __name__ == "__main__":
         print(T(__doc__.strip(), USAGE_EN))
         sys.exit(0)             # l'aide ne demande pas Hyprland
     try:
-        data = collect()
+        data = collect(exiger=True)
     except Exception as e:      # la fiche (plugin nc/keys) affiche la 1re ligne de stderr : une ligne claire, pas une trace
         print(T(f"nc-keys : erreur inattendue : {type(e).__name__}: {e}", f"nc-keys: unexpected error: {type(e).__name__}: {e}"),
               file=sys.stderr)

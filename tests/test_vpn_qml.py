@@ -274,7 +274,7 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 0) { var c = Qt.createComponent("Vpn.qml"); verifier(c.status === Component.Ready, c.errorString())
                                    fen = c.createObject(racine); fen.fermer.connect(function () { fermee = true }); etape++; return }
                 if (etape === 1) {
-                    if (!VpnEtat.lu) return
+                    if (!VpnEtat.tunnelsLus) return       // pas « lu » : la lecture de l'indicateur peut finir avant celle des tunnels
                     var corps = fen.contentItem
                     verifier(tous(corps, "nc-vpn-actif").length === 2, "deux tunnels montés : " + tous(corps, "nc-vpn-actif").length)
                     verifier(tous(corps, "nc-vpn-autre").length === 3, "les trois profils dans la liste : " + tous(corps, "nc-vpn-autre").length)

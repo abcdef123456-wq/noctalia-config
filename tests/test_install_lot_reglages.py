@@ -289,7 +289,8 @@ class GardesReglages(unittest.TestCase):
             self.assertFalse(visibles & set(self.ILE))
 
     def test_toute_cle_lue_seulement_par_l_ile_est_gardee(self):
-        """Une clé proposée par nc-reglages et lue par les QML de l'île, mais par rien d'autre dans home/, doit être gardée."""
+        """Une clé proposée par nc-reglages et lue par les QML de l'île, mais par rien d'autre dans home/, doit être gardée.
+        Sauf celles que nc-reglages applique lui-même à Noctalia (groupe « noctalia ») : elles servent aussi sans l'île."""
         nc = charger_reglages(self.home)
         qml = set()
         for f in (REPO / "home/.config/quickshell/nc-ile").rglob("*.qml"):
@@ -301,7 +302,7 @@ class GardesReglages(unittest.TestCase):
                     ailleurs += f.read_text(errors="ignore")
                 except OSError:
                     pass
-        manquantes = [c for c in sorted(qml & {r.cle for r in nc.REGLAGES})
+        manquantes = [c for c in sorted(qml & {r.cle for r in nc.REGLAGES if r.groupe != "noctalia"})
                       if c not in nc.MATERIEL and not re.search(r"\b" + c + r"\b", ailleurs)]
         self.assertEqual(manquantes, [])
 
