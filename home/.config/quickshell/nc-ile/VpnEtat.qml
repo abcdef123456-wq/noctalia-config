@@ -62,6 +62,10 @@ Singleton {
     // Nord et Proton d'après « nc-vpn fournisseurs-json » (contrat 1), lecture tolérante : commande absente ou réponse illisible = {}
     // {id: {id, nom, etat, message, pays: [{cc, nom}], paysActif, connecte, peutLogin}}
     property var externe: ({})
+    // Comment avoir le client d'un fournisseur ABSENT (nord, proton, mullvad) : {id: {mode: auto | guide, lien, etapes}}, filtré ici
+    // (mode connu, lien https d'un site officiel connu, textes bornés) ; vide si nc-vpn ne le donne pas : alors aucun bouton
+    property var installations: ({})
+    property string installation: ""              // fournisseur dont le terminal d'installation est ouvert ("" : aucun)
     // L'heure (secondes) tenue par VpnDebit.qml, seulement fenêtre ouverte et écran allumé ; sert à la durée de connexion
     property real maintenant: 0
 
@@ -93,7 +97,8 @@ Singleton {
     readonly property var fournisseurs: {
         var l = [fiche("proton", "Proton VPN"), fiche("nord", "NordVPN"),
                  { id: "mullvad", fournisseur: "Mullvad", bientot: false, peutLogin: false, message: "",
-                   etat: !mullvadInstalle ? "absent" : (mullvad.compte === false ? "sans_compte" : "pret"), pays: mullvadPays }]
+                   etat: !mullvadInstalle ? "absent" : (mullvad.compte === false ? "sans_compte" : "pret"), pays: mullvadPays,
+                   installation: !mullvadInstalle ? (installations.mullvad || null) : null }]
         if (connexions.some(c => c.fournisseur === "CyberGhost"))
             l.push({ id: "cyberghost", fournisseur: "CyberGhost", etat: "pret", bientot: false, peutLogin: false, message: "", pays: [] })
         return l
@@ -103,7 +108,8 @@ Singleton {
         var x = externe[id]
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
         return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
-                 connecte: x.connecte, probleme: x.probleme, paysProbleme: x.paysProbleme }
+                 connecte: x.connecte, probleme: x.probleme, paysProbleme: x.paysProbleme,
+                 installation: x.etat === "absent" ? (installations[id] || null) : null }
     }
     // « 🇫🇷 » pour « FR » ; vide si le code n'est pas deux lettres majuscules
     function drapeauDe(cc) {
@@ -182,8 +188,15 @@ Singleton {
         var d = null
         try { d = JSON.parse(text) } catch (e) { d = null }
         var res = {}
+        var inst = {}
         if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
             d.fournisseurs.forEach(x => {
+                // « installation » : seulement pour un client absent, mode et lien contrôlés ici aussi (le texte vient de nc-vpn-installer)
+                var p = x && x.etat === "absent" && ["nord", "proton", "mullvad"].indexOf(x.id) >= 0 ? x.installation : null
+                if (p && (p.mode === "auto" || p.mode === "guide") && typeof p.lien === "string" && lienOfficiel(p.lien)) {
+                    var et = Array.isArray(p.etapes) ? p.etapes.filter(e => typeof e === "string" && e !== "").map(e => e.slice(0, 300)).slice(0, 8) : []
+                    if (p.mode === "auto" || et.length > 0) inst[x.id] = { mode: p.mode, lien: p.lien, etapes: p.mode === "guide" ? et : [] }
+                }
                 if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
                 var pays = x.etat === "pret" && Array.isArray(x.pays)
                     ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
@@ -197,6 +210,32 @@ Singleton {
             })
         }
         v.externe = res
+        v.installations = inst
+    }
+    // Un lien https vers un des sites officiels des trois fournisseurs (liste blanche, aucun caractère étrange)
+    function lienOfficiel(u) {
+        var m = /^https:\/\/([a-z0-9.-]+)\/[A-Za-z0-9._~\/%?=&-]{0,200}$/.exec(String(u))
+        return m !== null && ["protonvpn.com", "mullvad.net", "support.nordvpn.com"].indexOf(m[1]) >= 0
+    }
+    function ouvrirLien(u) {
+        if (lienOfficiel(u)) Quickshell.execDetached(["xdg-open", String(u)])
+    }
+    // Installer le client d'un fournisseur ABSENT : un terminal s'ouvre (nc-vpn installer-client), sudo y demande le mot de passe. Un
+    // Process à part (comme la connexion au compte) ; l'état est relu à la fermeture du terminal. Jamais lancé sans un clic.
+    function installerClient(id) {
+        if ((id !== "nord" && id !== "proton" && id !== "mullvad") || installeurClient.running) return
+        installation = id
+        installeurClient.command = [bin + "nc-vpn", "installer-client", id]
+        installeurClient.running = true
+    }
+    Process {
+        id: installeurClient
+        stderr: StdioCollector { id: erreurInstallation }
+        onExited: code => {
+            v.installation = ""
+            if (code !== 0) v.notifier(erreurInstallation.text.trim().split("\n")[0] || Reglages.t("Installation impossible.", "Couldn't start the installation."))
+            v.relire()
+        }
     }
 
     function relire() {

@@ -113,6 +113,7 @@ Ce contrat est la version 1.
 | `probleme` | `""`, ou `permission` (groupe `nordvpn` manquant), `consentement` (première exécution de `nordvpn` : question interactive), `demon` (service arrêté), `delai`, `lancement`, `revoque` (Mullvad : l'appareil a été révoqué), `illisible` (Proton : `protonvpn info` n'a rien donné de lisible), `non_verifie` (Proton : le compte n'a pas encore été vérifié, voir plus bas), `appli_ouverte` (Proton : l'application graphique tourne, la CLI refuse de travailler en même temps) ; le `message` dit quoi faire |
 | `pilotage` | `direct` : on pilote la CLI ; `appli` : on ouvre seulement l'application officielle (Proton sans sa CLI, ou application ouverte) |
 | `pays_probleme` | `""`, ou `delai` : Proton prêt dont `protonvpn countries list` a dépassé son délai (20 s). Le compte reste valide (`etat` vaut `pret`) et `pays` est vide ; l'île affiche « Liste des pays indisponible (délai dépassé) » avec un bouton « Réessayer » qui relance `fournisseurs-json --verifier-proton` (mêmes gardes : verrou, pas pendant un tunnel « activating »). Toujours `""` hors de l'état `pret`. Champ ajouté sans changer de version : un client ignore les champs qu'il ne connaît pas |
+| `installation` | **seulement à l'état `absent`** : `{"mode": "auto" \| "guide", "lien": "https://…", "etapes": [str]}`, d'après `nc-vpn-installer ID --plan` (ni réseau ni root), relu avec une liste blanche (mode connu, lien `https://` vers `protonvpn.com`, `mullvad.net` ou `support.nordvpn.com`, textes aux caractères sûrs). `auto` : le bouton « Installer » lance `nc-vpn installer-client ID` ; `guide` : « Voir comment installer » affiche `etapes` (jamais vide) et ouvre `lien`. Champ absent si le script est introuvable : aucun bouton. Champ ajouté sans changer de version |
 
 Jamais dans la sortie : adresse e-mail, nom ou numéro de compte, jeton, adresse IP, URL de connexion. Identifiants lus par la CLI mais jamais gardés : Proton (`protonvpn info` écrit le nom du compte, `connect` écrit une IP) et Mullvad ; seuls des booléens et un code pays en sont tirés. Le numéro de compte Mullvad est lu par la CLI mais jamais gardé :
 `mullvad account get` n'est lancé que pour un oui/non, sa sortie est lue en mémoire (4 Kio au plus), analysée puis jetée, et n'apparaît dans aucun
@@ -121,6 +122,9 @@ le groupe de processus est arrêté (SIGTERM puis SIGKILL).
 
 ### Agir
 
+- `nc-vpn installer-client ID` (`nord`, `proton`, `mullvad`) : seulement si le client est `absent` (sinon refus, code 1). Ouvre une fenêtre kitty qui lance
+  le script fixe `~/.local/libexec/nc-vpn-installer ID` (étapes affichées, `sudo` demande lui-même le mot de passe, aucune règle sudoers) et rend la
+  main quand la fenêtre est fermée. Le détail, la matrice par distribution et les sources : `docs/vpn-installation.md`. Jamais lancé automatiquement.
 - `nc-vpn fournisseur ID connecter CC` : `CC` doit être exactement deux lettres majuscules d'un pays ISO (`FR`) ; sinon refus (code 1) sans appel.
   Nord : `nordvpn connect NOM` (le nom exact donné par `nordvpn countries`). Mullvad : `mullvad relay set location fr`, puis `mullvad connect`.
   Proton avec sa CLI : `protonvpn connect --country FR` (le code ISO en majuscules, forme exacte des sources) ; sans la CLI, ouvre l'application officielle (choisir le pays s'y fait).

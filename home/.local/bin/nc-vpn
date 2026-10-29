@@ -15,6 +15,9 @@
   nc-vpn mullvad pays-json    les pays de Mullvad (`mullvad relay list`) en JSON : {"pays": [{"cc", "nom"}]}
   nc-vpn fournisseurs-json [--verifier-proton]    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (seulement à l'état pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+                              (fournisseur absent : "installation": {"mode": auto | guide, "lien", "etapes"})
+  nc-vpn installer-client nord|proton|mullvad    client absent seulement : ouvre un terminal (kitty) qui lance le script fixe nc-vpn-installer (étapes
+                              visibles, sudo demande lui-même le mot de passe, aucune règle sudoers) ; rend la main à la fermeture de la fenêtre
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC : deux lettres MAJUSCULES (FR). Nord : la CLI nordvpn ;
                               Mullvad : mullvad ; Proton : la CLI officielle protonvpn (sinon ouvre l'appli, sans la piloter ni la fermer).
                               Le login lance le parcours officiel (navigateur, appli) : jamais de mot de passe, de numéro de compte ni de jeton chez nous
@@ -96,6 +99,9 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn mullvad pays-json    Mullvad's countries (`mullvad relay list`) as JSON: {"pays": [{"cc", "nom"}]}
   nc-vpn fournisseurs-json [--verifier-proton]    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (only when pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+                              (absent provider: "installation": {"mode": auto | guide, "lien", "etapes"})
+  nc-vpn installer-client nord|proton|mullvad    absent client only: opens a terminal (kitty) running the fixed nc-vpn-installer script (visible
+                              steps, sudo asks for the password itself, no sudoers rule); returns when the window is closed
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC: two UPPERCASE letters (FR). Nord: the nordvpn CLI;
                               Mullvad: mullvad; Proton: the official protonvpn CLI (else opens the app, never driving or closing it).
                               Login starts the official flow (browser, app): never a password, account number or token on our side
@@ -2113,8 +2119,85 @@ API_FOURNISSEURS["mullvad"] = {"fiche": mullvad_fournisseur, "connecter": mullva
                                "login": mullvad_login}
 
 
+# ── Installer le client d'un fournisseur absent (V6c) ───────────────────────────────────────────────────────────────────────
+# Le plan (voie automatique ou parcours guidé) vient du script fixe du dépôt, `nc-vpn-installer ID --plan` (ni réseau ni root).
+# Sa sortie est relue avec une liste blanche stricte : mode connu, lien https vers un site officiel connu, lignes de texte aux
+# caractères sûrs. Rien d'autre n'est relayé tel quel dans l'île.
+INSTALLEUR_IDS = ("nord", "proton", "mullvad")
+INSTALLEUR_HOTES = ("protonvpn.com", "mullvad.net", "support.nordvpn.com")
+INSTALLEUR_LIEN = re.compile(r"https://([a-z0-9.-]+)/[A-Za-z0-9._~/%?=&-]{0,200}")
+INSTALLEUR_TEXTE = re.compile(r"[\w .,;:'’\"()/$«»…!?+=-]{1,300}")
+
+
+def installeur_chemin():
+    """Le script fixe du dépôt, installé à côté de ~/.local/bin (…/libexec/nc-vpn-installer), ou None."""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "libexec", "nc-vpn-installer")
+    return p if os.path.isfile(p) else None
+
+
+def installation_plan(fid):
+    """{"mode": "auto" | "guide", "lien": str, "etapes": [str]} d'après `nc-vpn-installer ID --plan`, ou None (script absent, réponse
+    illisible ou refusée par la liste blanche)."""
+    exe = installeur_chemin()
+    bash = shutil.which("bash")
+    if fid not in INSTALLEUR_IDS or not exe or not bash:
+        return None
+    code, out, _ = lancer_borne([bash, exe, fid, "--plan"], 5, 8 * 1024)
+    if code != 0:
+        return None
+    mode, lien, etapes = "", "", []
+    for ligne in out.decode("utf-8", "replace").splitlines():
+        cle, _, val = ligne.partition("=")
+        if cle == "mode" and val in ("auto", "guide"):
+            mode = val
+        elif cle == "lien":
+            m = INSTALLEUR_LIEN.fullmatch(val)
+            if m and m.group(1) in INSTALLEUR_HOTES:
+                lien = val
+        elif cle == "etape" and INSTALLEUR_TEXTE.fullmatch(val) and "$(" not in val and len(etapes) < 8:
+            etapes.append(val)
+    if not mode or not lien or (mode == "guide" and not etapes):
+        return None
+    return {"mode": mode, "lien": lien, "etapes": etapes if mode == "guide" else []}
+
+
 def fournisseurs_json():
-    return {"contrat": CONTRAT_FOURNISSEURS, "fournisseurs": [a["fiche"]() for a in API_FOURNISSEURS.values()]}
+    res = []
+    for a in API_FOURNISSEURS.values():
+        f = a["fiche"]()
+        if f.get("etat") == "absent":                # « Installer » / « Voir comment installer » : seulement pour un client absent
+            plan = installation_plan(f.get("id"))
+            if plan:
+                f["installation"] = plan
+        res.append(f)
+    return {"contrat": CONTRAT_FOURNISSEURS, "fournisseurs": res}
+
+
+def installer_client(fid):
+    """nc-vpn installer-client ID : ouvre une fenêtre kitty qui lance le script fixe du dépôt (étapes visibles, sudo demande lui-même
+    le mot de passe dans ce terminal, aucune règle sudoers). Jamais lancé automatiquement ; refusé si le client est déjà là. On attend
+    la fermeture de la fenêtre (l'appelant relit alors l'état)."""
+    if fid not in INSTALLEUR_IDS:
+        raise Echec(T("Fournisseur inconnu.", "Unknown provider."))
+    f = API_FOURNISSEURS[fid]["fiche"]()
+    if f.get("etat") != "absent":
+        raise Echec(T("Le client est déjà installé.", "The client is already installed."))
+    exe, bash, kitty = installeur_chemin(), shutil.which("bash"), shutil.which("kitty")
+    if not exe or not bash:
+        raise Echec(T("Le script d'installation (nc-vpn-installer) est introuvable : relance install.sh.",
+                      "The installer script (nc-vpn-installer) was not found: run install.sh again."))
+    if not kitty:
+        raise Echec(T("kitty est introuvable : ouvre un terminal et lance « bash ~/.local/libexec/nc-vpn-installer " + fid + " ».",
+                      "kitty not found: open a terminal and run \"bash ~/.local/libexec/nc-vpn-installer " + fid + "\"."))
+    titre = T("Installer ", "Install ") + f["nom"]
+    try:
+        r = subprocess.run([kitty, "--hold", "--title", titre, bash, exe, fid], stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, NC_LANGUE="en" if EN else "fr"))
+    except (OSError, subprocess.SubprocessError):
+        raise Echec(T("Impossible d'ouvrir kitty.", "Could not open kitty."))
+    if r.returncode != 0:
+        raise Echec(T("La fenêtre d'installation s'est mal terminée.", "The installation window ended badly."))
+    print(T("Fenêtre d'installation fermée, l'état est relu.", "Installation window closed, the state is read again."))
 
 
 def fournisseur_agir(a):
@@ -2509,6 +2592,8 @@ def main():
         elif cmd == "fournisseurs-json" and (len(a) == 1 or a[1:] == ["--verifier-proton"]):
             VERIFIER_PROTON = len(a) == 2
             print(json.dumps(fournisseurs_json(), ensure_ascii=False))
+        elif cmd == "installer-client" and len(a) == 2:
+            installer_client(a[1])
         elif cmd == "fournisseur" and len(a) >= 3:
             fournisseur_agir(a[1:])
         elif cmd == "killswitch":

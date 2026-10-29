@@ -41,6 +41,9 @@ FloatingWindow {
     // Connexion au compte d'un fournisseur : un terminal ou une application s'ouvre PAR-DESSUS ; cette fenêtre garde tout le clavier
     // (fenêtre au premier plan) et avalerait ce qu'on y tape (nom de compte, mot de passe) : elle se ferme d'abord, comme pour l'import
     function connecterCompte(id) { VpnEtat.fournisseurLogin(id); quitter() }
+    // Installer un client absent : le terminal (kitty) s'ouvre PAR-DESSUS, comme pour la connexion au compte, donc la fenêtre se ferme
+    // d'abord (le mot de passe de sudo se tape dans le terminal) ; l'état est relu à la fermeture du terminal (VpnEtat.installerClient)
+    function installerClient(id) { VpnEtat.installerClient(id); quitter() }
     Component.onCompleted: VpnEtat.panneauOuvert = true
     Component.onDestruction: VpnEtat.panneauOuvert = false
 
@@ -150,6 +153,8 @@ FloatingWindow {
                 filtre: filtres.filtre
                 recherche: filtres.recherche
                 onConnecterCompte: id => vpn.connecterCompte(id)
+                onInstallerClient: id => vpn.installerClient(id)
+                onOuvrirLien: lien => VpnEtat.ouvrirLien(lien)
                 maxHauteur: Math.max(170, Math.min(340, Math.round(vpn.hauteurEcran * 0.3)))
             }
 

@@ -92,6 +92,7 @@ HOME_FILES=(
   .local/bin/nc-code
   .local/bin/nc-vpn
   .local/bin/nc-assistant-install
+  .local/libexec/nc-vpn-installer
   .local/bin/nc-assistant
   .local/bin/nc-noeud
   .local/bin/nc-bac

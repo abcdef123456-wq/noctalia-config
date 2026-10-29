@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# nc-vpn-installer : installe le client d'un fournisseur VPN (Proton, Mullvad, NordVPN) depuis la fenêtre VPN de l'île.
+#   nc-vpn-installer FOURNISSEUR          lance l'installation dans CE terminal (kitty, ouvert par « nc-vpn installer-client ») ;
+#                                         chaque étape est affichée avant d'être lancée, sudo demande lui-même le mot de passe
+#   nc-vpn-installer FOURNISSEUR --plan   n'installe rien, n'utilise ni le réseau ni root : écrit « mode=auto|guide »,
+#                                         « lien=https://… » et, pour un parcours guidé, des lignes « etape=… »
+# FOURNISSEUR : nord | proton | mullvad (liste blanche, vérifiée avant tout).
+# Règles : aucun script téléchargé n'est exécuté (jamais curl | sh) ; la clé d'un dépôt est téléchargée dans un dossier temporaire
+# et son EMPREINTE (publiée par l'éditeur, épinglée ci-dessous) est vérifiée avant tout import ; une empreinte fausse arrête tout
+# avant la moindre écriture. Aucune règle sudoers n'est ajoutée : chaque commande root passe par « sudo » (mot de passe demandé ici).
+# Les dépôts sont écrits par ce script dans les fichiers standard de la distribution, avec des noms fixes ; le pare-feu n'est jamais touché.
+# Distribution lue dans os-release (ID, ID_LIKE, VERSION_ID) ; non prise en charge, ou sans voie officielle vérifiable : parcours guidé
+# (texte et lien officiel, rien n'est exécuté). Sources officielles de chaque case : docs/vpn-installation.md.
+set -eu
+
+# ── Langue : NC_LANGUE (fr|en), sinon LANGUE du réglage nc, sinon la langue du système ───────────────────────────────────────
+langue_lire() {
+  local l="${NC_LANGUE:-}" v
+  if [ "$l" != fr ] && [ "$l" != en ]; then
+    l=""
+    if [ -r "${HOME:-/nonexistent}/.config/nc/reglages.conf" ]; then
+      v="$(sed -n 's/^LANGUE=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -n 1 | tr -d '"' || true)"
+      case "$v" in fr|en) l="$v" ;; esac
+    fi
+  fi
+  if [ -z "$l" ]; then
+    case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in fr*) l=fr ;; *) l=en ;; esac
+  fi
+  printf '%s' "$l"
+}
+LANGUE="$(langue_lire)"
+t() { if [ "$LANGUE" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+dire() { printf '%s\n' "$(t "$1" "$2")"; }
+
+# ── Fournisseur : liste blanche avant tout ────────────────────────────────────────────────────────────────────────────────
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  dire "Usage : nc-vpn-installer nord|proton|mullvad [--plan]" "Usage: nc-vpn-installer nord|proton|mullvad [--plan]" >&2
+  exit 2
+fi
+FOURNISSEUR="$1"
+case "$FOURNISSEUR" in
+  nord|proton|mullvad) ;;
+  *) dire "Fournisseur refusé (attendu : nord, proton ou mullvad)." "Provider refused (expected: nord, proton or mullvad)." >&2; exit 2 ;;
+esac
+PLAN=0
+if [ "$#" -eq 2 ]; then
+  [ "$2" = "--plan" ] || { dire "Argument refusé." "Argument refused." >&2; exit 2; }
+  PLAN=1
+fi
+
+# ── Distribution : os-release lu ligne à ligne (jamais exécuté), valeurs limitées à des caractères sûrs ───────────────────────
+OS_ID=""; OS_LIKE=""; OS_VER=""
+os_lire() {
+  local f="${NC_OS_RELEASE:-/etc/os-release}" k v
+  [ -r "$f" ] || return 0
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    case "$v" in *[!a-z0-9._\ -]*) v="" ;; esac
+    [ "${#v}" -le 80 ] || v=""
+    case "$k" in ID) OS_ID="$v" ;; ID_LIKE) OS_LIKE="$v" ;; VERSION_ID) OS_VER="$v" ;; esac
+  done < "$f"
+}
+os_lire
+FAMILLE="inconnue"
+case " $OS_LIKE " in *" arch "*) FAMILLE=arch ;; *" suse "*|*" opensuse "*) FAMILLE=suse ;; esac
+case "$OS_ID" in
+  arch) FAMILLE=arch ;;
+  manjaro) FAMILLE=inconnue ;;                         # ses dépôts ne sont pas ceux d'Arch : pas de paquet vérifié
+  debian) case "$OS_VER" in 13) FAMILLE=debian ;; *) FAMILLE=inconnue ;; esac ;;   # Debian 13 seulement (les dérivés : parcours guidé)
+  fedora) case "$OS_VER" in ''|*[!0-9]*) FAMILLE=inconnue ;; *) if [ "$OS_VER" -ge 41 ]; then FAMILLE=fedora; else FAMILLE=inconnue; fi ;; esac ;;
+  opensuse*|sles|suse) FAMILLE=suse ;;
+  ubuntu|linuxmint|pop) FAMILLE=inconnue ;;
+esac
+
+# ── Ce qui est épinglé, avec sa source (détail : docs/vpn-installation.md) ────────────────────────────────────────────────────
+# Mullvad : clé de signature publiée par Mullvad (https://mullvad.net/en/help/verifying-signatures) ; le trousseau du dépôt
+# (https://repository.mullvad.net/deb/mullvad-keyring.asc et …/rpm/mullvad-keyring.asc) porte cette clé principale.
+MULLVAD_EMPREINTE=A1198702FC3E0A09A9AE5B75D5A1D4F266DE8DDF
+MULLVAD_CLE_DEB=https://repository.mullvad.net/deb/mullvad-keyring.asc
+MULLVAD_CLE_RPM=https://repository.mullvad.net/rpm/mullvad-keyring.asc
+# Proton (Debian) : somme SHA-256 du paquet de dépôt, publiée par Proton (https://protonvpn.com/support/official-linux-vpn-debian)
+PROTON_DEB_VERSION=1.0.10
+PROTON_DEB_URL=https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.10_all.deb
+PROTON_DEB_SHA256=c8a9fffb4ebdd63db08ce7f11c9b0ac394064ae6a210feb9ab63a0f7d8d060a7
+
+# ── Le plan : voie automatique ou parcours guidé, pour ce fournisseur sur cette distribution ───────────────────────────────────
+MODE=guide
+LIEN=""
+RAISON_FR=""; RAISON_EN=""
+EXTRA_FR=""; EXTRA_EN=""
+ACTION=""
+plan() {
+  case "$FOURNISSEUR:$FAMILLE" in
+    mullvad:arch)   MODE=auto; ACTION=mullvad_arch;   LIEN=https://mullvad.net/en/help/install-mullvad-app-linux ;;
+    mullvad:debian) MODE=auto; ACTION=mullvad_debian; LIEN=https://mullvad.net/en/help/install-mullvad-app-linux ;;
+    mullvad:fedora) MODE=auto; ACTION=mullvad_fedora; LIEN=https://mullvad.net/en/help/install-mullvad-app-linux ;;
+    mullvad:*)
+      LIEN=https://mullvad.net/en/download/vpn/linux
+      RAISON_FR="Mullvad ne documente pas de dépôt signé pour cette distribution."
+      RAISON_EN="Mullvad doesn't document a signed repository for this distribution." ;;
+    proton:arch)    MODE=auto; ACTION=proton_arch;    LIEN=https://protonvpn.com/support/linux-vpn-arch ;;
+    proton:debian)  MODE=auto; ACTION=proton_debian;  LIEN=https://protonvpn.com/support/official-linux-vpn-debian ;;
+    proton:fedora)
+      LIEN=https://protonvpn.com/support/official-linux-vpn-fedora
+      RAISON_FR="Pour Fedora, Proton ne publie aucune somme de contrôle du paquet de dépôt : rien n'est installé pour toi."
+      RAISON_EN="For Fedora, Proton publishes no checksum for the repository package: nothing is installed for you." ;;
+    proton:*)
+      LIEN=https://protonvpn.com/download-linux
+      RAISON_FR="Proton ne prend pas en charge officiellement cette distribution avec un paquet vérifiable."
+      RAISON_EN="Proton doesn't officially support this distribution with a verifiable package." ;;
+    nord:*)
+      LIEN=https://support.nordvpn.com/hc/en-us/articles/20196094470929-Installing-NordVPN-on-Linux-distributions
+      RAISON_FR="NordVPN ne propose que son script (une commande qui télécharge puis lance un script) : on ne le lance jamais, et aucune empreinte de leur clé n'est publiée."
+      RAISON_EN="NordVPN only offers its script (a command that downloads then runs a script): it is never run here, and no fingerprint of their key is published."
+      EXTRA_FR="Une fois NordVPN installé : sudo usermod -aG nordvpn \"\$USER\", sudo systemctl enable --now nordvpnd, puis reconnecte-toi à ta session pour que le groupe prenne effet."
+      EXTRA_EN="Once NordVPN is installed: sudo usermod -aG nordvpn \"\$USER\", sudo systemctl enable --now nordvpnd, then sign out and back in so the group takes effect." ;;
+  esac
+}
+plan
+
+if [ "$PLAN" = 1 ]; then
+  printf 'mode=%s\nlien=%s\n' "$MODE" "$LIEN"
+  if [ "$MODE" = guide ]; then
+    printf 'etape=%s\n' "$(t "$RAISON_FR" "$RAISON_EN")"
+    printf 'etape=%s\n' "$(t "Ouvre la page officielle (bouton ci-dessous) et lis les commandes proposées pour ta distribution." "Open the official page (button below) and read the commands offered for your distribution.")"
+    printf 'etape=%s\n' "$(t "Lance-les toi-même dans un terminal, après les avoir lues." "Run them yourself in a terminal, after reading them.")"
+    [ -z "$EXTRA_FR" ] || printf 'etape=%s\n' "$(t "$EXTRA_FR" "$EXTRA_EN")"
+    printf 'etape=%s\n' "$(t "Reviens ensuite dans cette fenêtre : le client sera détecté." "Then come back to this window: the client will be detected.")"
+  fi
+  exit 0
+fi
+
+# ── Déjà installé ? ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+deja=0
+case "$FOURNISSEUR" in
+  nord) if command -v nordvpn >/dev/null 2>&1; then deja=1; fi ;;
+  proton) if command -v protonvpn >/dev/null 2>&1 || command -v protonvpn-app >/dev/null 2>&1; then deja=1; fi ;;
+  mullvad) if command -v mullvad >/dev/null 2>&1; then deja=1; fi ;;
+esac
+if [ "$deja" = 1 ]; then
+  dire "Le client est déjà installé : rien à faire." "The client is already installed: nothing to do."
+  exit 0
+fi
+
+# ── Parcours guidé : texte et lien, rien n'est exécuté ────────────────────────────────────────────────────────────────────────
+if [ "$MODE" = guide ]; then
+  dire "Parcours guidé : rien n'est installé par cette fenêtre." "Guided path: nothing is installed by this window."
+  printf '\n%s\n' "$(t "$RAISON_FR" "$RAISON_EN")"
+  printf '1. %s\n   %s\n' "$(t "Ouvre la page officielle :" "Open the official page:")" "$LIEN"
+  printf '2. %s\n' "$(t "Lance toi-même, dans un terminal, les commandes qu'elle donne pour ta distribution, après les avoir lues." "Run the commands it gives for your distribution yourself, in a terminal, after reading them.")"
+  if [ -n "$EXTRA_FR" ]; then printf '3. %s\n' "$(t "$EXTRA_FR" "$EXTRA_EN")"; fi
+  printf '\n%s\n' "$(t "Ferme cette fenêtre quand tu as fini : la fenêtre VPN redétecte le client." "Close this window when you are done: the VPN window detects the client again.")"
+  exit 0
+fi
+
+# ── Voie automatique : étapes visibles, sudo demande lui-même le mot de passe ─────────────────────────────────────────────────
+TMP=""
+nettoyer() { if [ -n "$TMP" ] && [ -d "$TMP" ]; then rm -rf -- "$TMP"; fi; }
+trap nettoyer EXIT
+trap 'exit 130' INT TERM
+TMP="$(mktemp -d)"
+chmod 700 "$TMP"
+
+N=0
+TOTAL=0
+etape() { # etape COMMANDE ARGUMENTS… : affiche la commande exacte, puis la lance (set -e : une erreur arrête tout)
+  N=$((N + 1))
+  printf '\n[%s/%s] ' "$N" "$TOTAL"
+  printf '%q ' "$@"
+  printf '\n'
+  "$@"
+}
+arreter() { printf '\n%s\n' "$(t "$1" "$2")" >&2; exit 1; }
+
+telecharger() { # telecharger URL FICHIER : HTTPS seulement, taille bornée ; l'URL est une constante de ce script
+  etape curl --proto '=https' --tlsv1.2 -fsSL --max-time 120 --max-filesize 2097152 -o "$2" "$1"
+}
+empreintes_cle() { # l'empreinte de chaque clé principale du fichier, une par ligne (gpg dans un trousseau jetable)
+  local d r=0
+  command -v gpg >/dev/null 2>&1 || return 1
+  d="$(mktemp -d)" || return 1
+  chmod 700 "$d"
+  GNUPGHOME="$d" gpg --batch --no-tty --show-keys --with-colons "$1" 2>/dev/null |
+    awk -F: '/^pub:/ { p = 1; next } /^sub:/ { p = 0 } /^fpr:/ && p { print $10; p = 0 }' || r=1
+  rm -rf -- "$d"
+  return "$r"
+}
+verifier_cle() { # verifier_cle FICHIER EMPREINTE : arrêt net si la clé n'est pas exactement celle-là (avant tout import)
+  local vues
+  printf '\n%s\n' "$(t "Vérification de la clé : empreinte attendue $2" "Checking the key: expected fingerprint $2")"
+  vues="$(empreintes_cle "$1")" || vues=""
+  if [ "$vues" != "$2" ]; then
+    arreter "Empreinte de la clé différente de celle attendue (reçue : ${vues:-aucune}). Arrêt : rien n'est importé ni écrit." \
+            "Key fingerprint differs from the expected one (received: ${vues:-none}). Stopped: nothing was imported or written."
+  fi
+  dire "Empreinte conforme." "Fingerprint matches."
+}
+
+mullvad_arch() {
+  TOTAL=2
+  etape sudo pacman -S mullvad-vpn
+  etape sudo systemctl enable --now mullvad-daemon.service
+}
+mullvad_debian() {
+  local arch
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64) arch=arm64 ;;
+    *) arreter "Architecture non prise en charge : parcours guidé (voir $LIEN)." "Unsupported architecture: guided path (see $LIEN)." ;;
+  esac
+  TOTAL=6
+  telecharger "$MULLVAD_CLE_DEB" "$TMP/mullvad-keyring.asc"
+  verifier_cle "$TMP/mullvad-keyring.asc" "$MULLVAD_EMPREINTE"
+  printf 'deb [signed-by=/usr/share/keyrings/mullvad-keyring.asc arch=%s] https://repository.mullvad.net/deb/stable stable main\n' "$arch" > "$TMP/mullvad.list"
+  etape sudo install -Dm0644 "$TMP/mullvad-keyring.asc" /usr/share/keyrings/mullvad-keyring.asc
+  etape sudo install -Dm0644 "$TMP/mullvad.list" /etc/apt/sources.list.d/mullvad.list
+  etape sudo apt-get update
+  etape sudo apt-get install mullvad-vpn
+}
+mullvad_fedora() {
+  TOTAL=6
+  telecharger "$MULLVAD_CLE_RPM" "$TMP/mullvad-keyring.asc"
+  verifier_cle "$TMP/mullvad-keyring.asc" "$MULLVAD_EMPREINTE"
+  # Le fichier de dépôt est écrit ici (jamais celui du réseau : il pourrait désactiver la vérification des signatures)
+  # shellcheck disable=SC2016   # $basearch est lu par dnf, pas par le shell
+  printf '[mullvad-stable]\nname=Mullvad VPN\nbaseurl=https://repository.mullvad.net/rpm/stable/$basearch\ntype=rpm\nenabled=1\ngpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad\n' > "$TMP/mullvad.repo"
+  etape sudo install -Dm0644 "$TMP/mullvad-keyring.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
+  etape sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-mullvad
+  etape sudo install -Dm0644 "$TMP/mullvad.repo" /etc/yum.repos.d/mullvad.repo
+  etape sudo dnf install mullvad-vpn
+}
+proton_arch() {
+  TOTAL=1
+  etape sudo pacman -S proton-vpn-cli
+}
+proton_debian() {
+  local f="$TMP/protonvpn-stable-release_${PROTON_DEB_VERSION}_all.deb" vue
+  TOTAL=4
+  telecharger "$PROTON_DEB_URL" "$f"
+  printf '\n%s\n' "$(t "Vérification de la somme SHA-256 publiée par Proton : $PROTON_DEB_SHA256" "Checking the SHA-256 sum published by Proton: $PROTON_DEB_SHA256")"
+  vue="$(sha256sum -- "$f" | cut -d' ' -f1)" || vue=""
+  if [ "$vue" != "$PROTON_DEB_SHA256" ]; then
+    arreter "Somme SHA-256 différente de celle publiée par Proton (reçue : ${vue:-aucune}). Arrêt : rien n'est installé." \
+            "SHA-256 sum differs from the one Proton publishes (received: ${vue:-none}). Stopped: nothing was installed."
+  fi
+  dire "Somme conforme." "Sum matches."
+  etape sudo dpkg -i "$f"
+  etape sudo apt-get update
+  etape sudo apt-get install proton-vpn-gnome-desktop
+}
+
+# Ce qui va se passer, puis un accord explicite (non par défaut)
+dire "Installation de $FOURNISSEUR : chaque étape est affichée avant d'être lancée. Le mot de passe est demandé par sudo, dans ce terminal." \
+     "Installing $FOURNISSEUR: each step is shown before it runs. sudo asks for the password in this terminal."
+dire "Distribution lue : ${OS_ID:-?} ${OS_VER}. Rien ne sera lancé sans ton accord." "Distribution read: ${OS_ID:-?} ${OS_VER}. Nothing runs without your agreement."
+printf '%s ' "$(t "Continuer ? [o/N]" "Continue? [y/N]")"
+reponse=""
+read -r reponse || reponse=""
+case "$reponse" in o|O|oui|OUI|y|Y|yes|YES) ;; *) dire "Annulé : rien n'a été fait." "Cancelled: nothing was done."; exit 0 ;; esac
+
+"$ACTION"
+
+dire "Terminé. Ferme cette fenêtre : la fenêtre VPN redétecte le client." "Done. Close this window: the VPN window detects the client again."
+dire "Ensuite, connecte ton compte depuis la fenêtre VPN." "Next, sign in to your account from the VPN window."
