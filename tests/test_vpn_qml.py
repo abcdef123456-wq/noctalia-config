@@ -104,17 +104,19 @@ def etat_deux_tunnels():
 
 
 def panneau_hors_fenetre():
-    """Vpn.qml comme dans test_code_qml : une fenêtre ordinaire à la place du calque Wayland."""
+    """Vpn.qml comme dans test_code_qml : une fenêtre ordinaire à la place de la FloatingWindow de Quickshell (qui n'existe pas
+    hors de Quickshell) ; ce qui est propre à Quickshell (taille voulue, taille minimale, signal closed) est retiré, et vérifié à part."""
     source = (QML / "Vpn.qml").read_text()
-    source = source.replace("import Quickshell.Wayland\n", "import QtQuick.Window\n").replace("PanelWindow {", "Window {")
-    for l in ("import Quickshell.Hyprland\n", "    anchors { top: true; bottom: true; left: true; right: true }\n", "    exclusionMode: ExclusionMode.Ignore\n",
-              "    WlrLayershell.layer: Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject\n"
-              "                         && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0 ? WlrLayer.Overlay : WlrLayer.Top\n",
-              '    WlrLayershell.namespace: "nc-vpn"\n', "    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive\n"):
+    assert "FloatingWindow {" in source
+    source = source.replace("FloatingWindow {", "Window {")
+    for l in ("    implicitWidth: vpn.largeurCarte\n",
+              "    implicitHeight: Math.min(Math.round(vpn.hauteurEcran * 0.9), contenu.implicitHeight + 48)\n",
+              "    minimumSize: Qt.size(420, 260)\n", "    onClosed: vpn.fermer()\n"):
         assert l in source, l
         source = source.replace(l, "")
     source = source.replace("vpn.screen ? vpn.screen.width : 1600", "1600").replace("vpn.screen ? vpn.screen.height : 1000", "1000")
-    return source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n')
+    assert '    color: "transparent"\n' in source
+    return source.replace('    color: "transparent"\n', '    color: "transparent"; width: 900; height: 800; visible: true\n')
 
 
 class Sources(unittest.TestCase):
@@ -175,7 +177,6 @@ class Sources(unittest.TestCase):
         self.assertIn("ile vpn", lua)
         self.assertIn("Super` + `Alt` + `V", (REPO / "RACCOURCIS.md").read_text())
         self.assertIn("Super + Alt + V", (REPO / "README.md").read_text())
-        self.assertIn('namespace = "^nc-vpn$"', (REPO / "home/.config/hypr/nc/regles.lua").read_text())
         compact = (QML / "Compact.qml").read_text()
         self.assertIn("visible: VpnEtat.indicateur", compact)
         self.assertIn("VpnEtat.libelle", compact)
@@ -184,7 +185,10 @@ class Sources(unittest.TestCase):
         self.assertEqual(lua.count('SUPER .. " + ALT + code:55"'), 1)
 
     def test_aucune_ligne_de_shell_construite_avec_un_nom(self):
-        self.assertEqual(self.etat.count('["sh", "-c"'), 1)      # le seul : l'enveloppe de zenity, texte fixe, fichier choisi jamais dedans
+        # deux seulement : l'enveloppe de zenity (texte fixe, fichier choisi jamais dedans) et l'écriture du fichier d'état de la barre
+        # (texte fixe aussi : le JSON arrive en $1, jamais collé dans la ligne)
+        self.assertEqual(self.etat.count('["sh", "-c"'), 2)
+        self.assertIn('"sh", barreEnCours]', self.etat)
         self.assertNotIn("execDetached([\"sh\"", self.etat)
 
 
@@ -202,6 +206,8 @@ class HorsEcran(unittest.TestCase):
                 (ou / nom).write_text(texte)
                 (ou / nom).chmod(0o755)
             H.faux(root, "notify-send")
+            # Écriture du fichier d'état de la barre : chaque contenu posé (mv) est gardé dans « contenus-barre », puis le vrai mv
+            H.faux(root, "mv", 'cat "$2" >> "%s/contenus-barre"; exec /usr/bin/mv "$@"' % root)
             H.faux(root, "zenity", "echo /ailleurs/labo.ovpn")
             etats = etats or {0: etat_deux_tunnels()}
             if ks:
@@ -239,6 +245,9 @@ class HorsEcran(unittest.TestCase):
                 code, sortie = H.lancer(root, delai=delai, **plus)
             finally:
                 arret.set()
+            run = root / "run"
+            self.fichiers_run = {f.name: (f.stat().st_mode & 0o777, f.read_text()) for f in run.iterdir() if f.is_file()}
+            self.contenus_barre = [json.loads(x) for x in (root / "contenus-barre").read_text().splitlines()] if (root / "contenus-barre").exists() else []
             for e in H.ERREURS:
                 self.assertNotIn(e, sortie, sortie)
             self.assertIn("FINI", sortie, sortie)
@@ -299,7 +308,8 @@ class HorsEcran(unittest.TestCase):
         self.assertIn("function onOuvrirPanneau() { if (!racine.vpnOuvert)", shell)                         # clic sur l'indicateur
         self.assertIn("racine.vpnOuvert = true", shell)
         self.assertIn("VpnEtat.demanderPanneau()", (QML / "Ile.qml").read_text())
-        self.assertIn('namespace: "nc-vpn"', vpn.replace("WlrLayershell.namespace: ", "namespace: "))
+        self.assertRegex(vpn, r"(?m)^FloatingWindow \{")
+        self.assertNotIn("PanelWindow", vpn)
         compact = (QML / "Compact.qml").read_text()
         self.assertIn('nom: "shield_lock"', compact)         # notre glyphe, pas celui des clients
         self.assertIn('objectName: "nc-vpn-pill-glyphe"', compact)
@@ -1009,6 +1019,105 @@ class HorsEcran(unittest.TestCase):
             } }
         ''')
         self.assertEqual(appels, [["indicateur", "--json"]], "un seul relevé léger, au réveil, sans panneau")
+
+    def test_fermeture_native_desactive_le_lazyloader_et_l_ile_reste_vivante(self):
+        """Super + Q ferme la vraie fenêtre : Vpn émet fermer (onClosed / fenêtre plus visible), shell.qml remet vpnOuvert à faux, le
+        LazyLoader se désactive et le processus continue (il arrive au bout du test)."""
+        self.lancer('''
+            property bool ouvert: false
+            LazyLoader { id: chargeur; active: racine.ouvert; Vpn { onFermer: racine.ouvert = false } }
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { racine.ouvert = true; etape++; ticks = 0; return }
+                if (etape === 1) { if (!chargeur.item) return
+                    verifier(chargeur.item.title === "VPN", "titre VPN : " + chargeur.item.title)
+                    verifier(VpnEtat.panneauOuvert, "panneau ouvert côté état")
+                    chargeur.item.visible = false; etape++; ticks = 0; return }       // la fermeture native
+                if (etape === 2) { if (ticks < 3) return
+                    verifier(!racine.ouvert && !chargeur.active, "LazyLoader inactif après la fermeture native")
+                    verifier(chargeur.item === null, "fenêtre détruite")
+                    verifier(!VpnEtat.panneauOuvert, "panneau fermé côté état")
+                    racine.ouvert = true; etape++; ticks = 0; return }                  // elle se rouvre sans problème
+                if (etape === 3) { if (!chargeur.item) return
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''')
+
+    def test_contenu_defile_quand_la_fenetre_est_basse(self):
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var c = Qt.createComponent("Vpn.qml"); fen = c.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu) return
+                    fen.height = 220; etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 3) return
+                    var d = trouver(fen.contentItem, "nc-vpn-defile")
+                    verifier(d !== null && d.clip, "zone qui défile")
+                    verifier(d.contentHeight > d.height + 100, "le contenu dépasse la zone : " + d.contentHeight + " / " + d.height)
+                    d.contentY = 150
+                    verifier(d.contentY > 100, "on peut faire défiler : " + d.contentY)
+                    verifier(trouver(d.contentItem, "nc-vpn-contenu") !== null, "tout le contenu est dans la zone qui défile")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''')
+
+    def test_fichier_d_etat_de_la_barre_sur_changement_seulement_0600_atomique_et_masque_en_partage(self):
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c)
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { if (!VpnEtat.lu) return; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 6) return
+                    Partage.silence = true; etape++; ticks = 0; return }                  // partage d'écran : ni fournisseur ni pays
+                if (etape === 2) { if (ticks < 6) return
+                    Partage.silence = false; etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return
+                    VpnEtat.relire(); etape++; ticks = 0; return }                         // même état relu : aucune écriture
+                if (etape === 4) { if (ticks < 12) return
+                    VpnEtat.indActif = false; VpnEtat.indFournisseur = ""; VpnEtat.indPays = ""; VpnEtat.indNom = ""; VpnEtat.indNombre = 0
+                    etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 8) return
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat}, reglages={"VPN_PILULE_BARRE": "oui"})
+        plein = dict(connecte=True, masque_partage=False, fournisseur="Proton VPN", pays="FR")
+        self.assertEqual(self.contenus_barre, [plein, dict(plein, masque_partage=True, fournisseur="", pays=""), plein,
+                                                dict(connecte=False, masque_partage=False, fournisseur="", pays="")],
+                         "une écriture par changement, aucune quand rien ne change, rien de sensible en partage")
+        mode, texte = self.fichiers_run["nc-vpn-barre.json"]
+        self.assertEqual(mode, 0o600)
+        self.assertEqual(json.loads(texte), self.contenus_barre[-1])
+        self.assertNotIn("nc-vpn-barre.json.tmp", self.fichiers_run, "écriture atomique : le fichier temporaire est renommé")
+        self.assertEqual(set(json.loads(texte)), {"connecte", "fournisseur", "pays", "masque_partage"})
+
+    def test_fichier_d_etat_de_la_barre_retire_quand_le_reglage_est_coupe_et_absent_par_defaut(self):
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c)
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { if (!VpnEtat.lu) return; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 6) return
+                    Reglages.valeurs = ({ VPN_PILULE_BARRE: "non" }); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 8) return
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat}, reglages={"VPN_PILULE_BARRE": "oui"})
+        self.assertEqual(len(self.contenus_barre), 1)
+        self.assertNotIn("nc-vpn-barre.json", self.fichiers_run, "réglage coupé : le fichier est retiré")
+        # Par défaut (réglage absent) : aucun fichier, aucune écriture
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { if (!VpnEtat.lu) return; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(self.contenus_barre, [])
+        self.assertNotIn("nc-vpn-barre.json", self.fichiers_run)
 
     def test_importer_ferme_le_panneau_et_lance_le_selecteur_puis_nc_vpn(self):
         _, appels, _ = self.lancer('''

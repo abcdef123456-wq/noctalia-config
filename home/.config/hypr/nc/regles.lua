@@ -31,7 +31,7 @@ hl.window_rule({ name = "sans-nom", match = { class = "^$", title = "^$" }, no_i
 -- Mode souris (nc-reglages → Clavier et souris, SAISIE=souris) : fenêtres libres et centrées, comme sur Windows
 -- (automatismes.lua les rouvre ensuite à la place et à la taille où tu les as laissées)
 if nc.reglage("SAISIE", "clavier") == "souris" then
-    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS|Réglages du bureau|Desktop settings)$" }, float = true, center = true })   -- sauf le cockpit et les réglages, placés par nc/automatismes.lua
+    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS|Réglages du bureau|Desktop settings|VPN)$" }, float = true, center = true })   -- sauf le cockpit, les réglages et la fenêtre VPN, placés par nc/automatismes.lua
     hl.window_rule({ name = "souris-terminal", match = { class = "^(kitty)$" }, size = { "monitor_w*0.5", "monitor_h*0.55" } })
 end
 hl.window_rule({ name = "hyprland-run",match = { class = "hyprland-run" }, float = true, move = "20 monitor_h-120" })
@@ -138,4 +138,7 @@ hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blu
 if nc.reglage("ILE_LANCEUR_FONDU", "non") == "oui" then
     hl.layer_rule({ name = "nc-code-sans-anim", match = { namespace = "^nc-code$" }, no_anim = true })
 end
-hl.layer_rule({ name = "nc-vpn-verre", match = { namespace = "^nc-vpn$" }, blur = true, ignore_alpha = 0.2 })
+-- Fenêtre VPN de l'île (Super + Alt + V ; Vpn.qml) : une vraie fenêtre, titre exact « VPN » (stable, pas traduit), flottante.
+-- Règle limitée à ce titre ET à la classe de Quickshell (« VPN » seul est un titre courant). Sa taille et sa place (centrée sous la barre) sont posées à l'ouverture par nc/automatismes.lua :
+-- la mémoire des fenêtres flottantes écraserait une règle size/move, et cette fenêtre en est exclue.
+hl.window_rule({ name = "nc-vpn-fenetre", match = { class = "^(org.quickshell)$", title = "^(VPN)$" }, float = true })

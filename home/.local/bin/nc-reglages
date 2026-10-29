@@ -536,6 +536,20 @@ REGLAGES = [
         "Offers, in the VPN panel and with `nc-vpn killswitch`, to block everything leaving the computer outside the tunnel (nft firewall, table nc_vpn). "
         "Needs the installer's root helper (optional). Does not survive a reboot, does not cover containers or virtual machines. "
         "Off by default; turning it off is always possible.")),
+    R("VPN_PILULE_BARRE", "Île", L("VPN : pilule dans la barre", "VPN: pill in the bar"), "ouinon", "non",
+      L("Ajoute dans la barre, juste avant le profil d'énergie, une pilule VPN : bouclier, fournisseur et pays réellement connectés (« VPN » seul "
+        "pendant un partage d'écran). Un clic ouvre la même fenêtre VPN que Super + Alt + V, même déconnecté. L'île écrit son état dans un petit "
+        "fichier du dossier de session quand il change ; la pilule le lit seulement écran allumé (aucune commande réseau, aucune géolocalisation). "
+        "Désactivé par défaut : la barre ne change pas tant que tu ne le demandes pas.",
+        "Adds a VPN pill to the bar, just before the power profile: shield, provider and country really connected (\"VPN\" alone "
+        "while your screen is shared). A click opens the same VPN window as Super + Alt + V, even when disconnected. The island writes its state to a "
+        "small file in the session folder when it changes; the pill only reads it while the screen is on (no network command, no geolocation). "
+        "Off by default: the bar doesn't change until you ask."), groupe="noctalia"),
+    R("VPN_MASQUER_TRAY", "Île", L("VPN : masquer les icônes des clients VPN dans la zone de notification", "VPN: hide VPN clients' icons from the tray"), "ouinon", "non",
+      L("Cache dans la barre les icônes de NordVPN, Proton VPN et Mullvad qui font doublon avec la pilule VPN (liste `hidden` du widget tray de Noctalia). "
+        "Rien n'est désinstallé ni arrêté ; remets Non pour les revoir.",
+        "Hides the NordVPN, Proton VPN and Mullvad icons from the bar that duplicate the VPN pill (the tray widget's `hidden` list in Noctalia). "
+        "Nothing is uninstalled or stopped; set No to see them again."), groupe="noctalia"),
     R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
       L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
         "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),
@@ -1650,7 +1664,7 @@ MATERIEL = {
     **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE", "SPOTLIGHT_EMOJI",
                           "SPOTLIGHT_MOTEUR", "SPOTLIGHT_CALCULS", "SPOTLIGHT_FENETRES", "VUE_BUREAUX", "VUE_RECUL", "VUE_VOISINS",
                           "VUE_DUREE", "GOOGLE_INTEGRATION", "GOOGLE_CALENDRIER", "NPD_NUIT", "NPD_DEBUT", "NPD_FIN",
-                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE")},
+                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE", "VPN_PILULE_BARRE")},
     # Réglages d'un logiciel : cachés si ce logiciel n'est pas là (Firefox, kitty, Neovim)
     **{c: "firefox" for c in ("FIREFOX_STYLE", "FIREFOX_COULEURS", "FIREFOX_ONGLETS_VERTICAUX", "FIREFOX_SESSION", "FIREFOX_DEFILEMENT_DOUX")},
     **{c: "kitty" for c in ("TERMINAL_OPACITE", "TERMINAL_TAILLE", "TERMINAL_POLICE", "TERMINAL_CURSEUR", "TERMINAL_TRAINEE",
@@ -2394,6 +2408,17 @@ def toml_val(v):
     return json.dumps(v, ensure_ascii=False)
 
 
+# Pilule VPN de la barre (plugin nc/vpn, widget « vpn ») et identifiants de tray (StatusNotifierItem : id, titre, nom du processus ou
+# de l'icône, comparés sans tenir compte de la casse, « _ » et « - » équivalents) des clients VPN. NordVPN : « nordvpn-tray-white »
+# (relevé sur un poste réel). Proton VPN (« protonvpn-app », « proton-vpn-app ») et Mullvad (« mullvad-vpn ») : noms des applications
+# officielles, non vérifiés sur un poste ici ; la liste sert de filet, une icône inconnue reste affichée (la voir dans le tray de
+# Noctalia : clic droit sur l'icône).
+PILULE_VPN = "nc/vpn:vpn"
+TRAY_VPN = ("nordvpn-tray-white", "nordvpn-tray-black", "nordvpn-tray", "nordvpn", "nordvpn-gui",
+            "protonvpn-app", "proton-vpn-app", "protonvpn", "Proton VPN", "ProtonVPN",
+            "mullvad-vpn", "Mullvad VPN", "mullvad-gui")
+
+
 def appliquer_noctalia(vals):
     tables = {}
 
@@ -2440,15 +2465,22 @@ def appliquer_noctalia(vals):
             mettre(table, "transition_duration", nombre(vals, cle + "_DUREE", True))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", nombre(vals, "BARRE_OPACITE") / 100)
-    if "BARRE_SYSTEME" in vals:
-        # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système
+    if "BARRE_SYSTEME" in vals or vals.get("VPN_PILULE_BARRE") == "oui":
+        # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système, et avec la pilule VPN
+        # (plugin nc/vpn) juste avant le profil d'énergie si elle est demandée
         try:
             fin = fin_barre(os.path.join(NOCTALIA_DIR, "config.toml"))
-            if not oui("BARRE_SYSTEME"):
+            if "BARRE_SYSTEME" in vals and not oui("BARRE_SYSTEME"):
                 fin = [w for w in fin if w != "group:sys"]
+            if vals.get("VPN_PILULE_BARRE") == "oui" and PILULE_VPN not in fin:
+                i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
+                fin = fin[:i] + [PILULE_VPN] + fin[i:]
             mettre("bar.default", "end", fin)
         except (OSError, KeyError, ValueError):
             pass
+    if vals.get("VPN_MASQUER_TRAY") == "oui":
+        # Les icônes des clients VPN qui font doublon avec la pilule : liste « hidden » du widget tray (rien n'est désinstallé)
+        mettre("widget.tray", "hidden", list(TRAY_VPN))
     for cle, nom in (("DOCK", "enabled"), ("DOCK_AUTO", "auto_hide"), ("DOCK_LOUPE", "magnification")):
         if cle in vals:
             mettre("dock", nom, oui(cle))

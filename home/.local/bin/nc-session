@@ -88,7 +88,7 @@ TERMINAUX = {"kitty": "kitty", "foot": "foot", "alacritty": "alacritty", "org.we
              "com.mitchellh.ghostty": "ghostty"}
 # Les fenêtres du bureau lui-même : jamais dans une session
 EXCLUS_CLASSES = {"dropterm", "org.quickshell", "nc-ia", "nctest", "nc-paquets", "fingerpop"}
-EXCLUS_TITRES = {"JARVIS", "JARVIS Chat", "Réglages du bureau", "Desktop settings", "Connexion JARVIS", "JARVIS connection", "Clés des IA", "AI keys"}
+EXCLUS_TITRES = {"JARVIS", "JARVIS Chat", "Réglages du bureau", "Desktop settings", "Connexion JARVIS", "JARVIS connection", "Clés des IA", "AI keys", "VPN"}
 INTERACTIFS = {"nvim", "vim", "vi", "nano", "helix", "hx", "htop", "btop", "top", "less", "man", "lazygit", "ranger", "yazi",
                "ncdu", "python", "python3", "ipython", "node", "ssh", "tmux", "zellij", "gitui", "nnn", "mc", "micro"}
 # Une console Python ou Node est rouverte, pas un script : python3 migrer.py --oui serait relancé à chaque ouverture

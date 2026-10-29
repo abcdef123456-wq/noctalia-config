@@ -1,5 +1,7 @@
-// Fenêtre VPN « Réseau privé » (Super + Alt + V, ou un clic sur l'indicateur VPN de la pilule : la MÊME fenêtre). Une carte de verre
-// centrée, de haut en bas :
+// Fenêtre VPN « Réseau privé » (Super + Alt + V, un clic sur l'indicateur VPN de la pilule ou sur la pilule VPN de la barre : la MÊME
+// fenêtre). Une VRAIE fenêtre (FloatingWindow), titre « VPN » (stable : les règles de Hyprland la reconnaissent à ce titre exact,
+// regles.lua et automatismes.lua), sans focus clavier exclusif : elle apparaît dans l'aperçu des bureaux, Super + Q la ferme
+// (signal closed → fermer → shell.qml désactive le LazyLoader ; l'île reste vivante). Une carte de verre, de haut en bas :
 //   1. l'en-tête (VpnEntete.qml) : titre, sous-titre, « Fermer », ⚙ vers les réglages VPN ;
 //   2. la carte principale (VpnCarte.qml) : état, un tunnel par ligne avec « Déconnecter », IP publique (si demandée), durée, débits,
 //      et « Tout déconnecter » ;
@@ -7,52 +9,44 @@
 //   4. les filtres et la recherche (VpnFiltres.qml) ;
 //   5. la liste (VpnListe.qml) : pays de Mullvad, profils de NetworkManager, ou la carte d'état d'un fournisseur pas prêt ;
 //   6. le pied (VpnPied.qml).
-// Tout vient de nc-vpn par VpnEtat.qml (mise à jour sur événements de NetworkManager, jamais en boucle). Rien n'existe fermé :
+// Tout le contenu défile (Flickable) quand la fenêtre est basse. Tout vient de nc-vpn par VpnEtat.qml (mise à jour sur événements de NetworkManager, jamais en boucle). Rien n'existe fermé :
 // la fenêtre n'est créée qu'ouverte (shell.qml, LazyLoader) ; les débits (VpnDebit.qml) ne sont relevés que fenêtre ouverte et
 // écran allumé. Échap ferme. Noms en texte brut (Texte.qml) ; pendant un partage d'écran (Partage.qml) les noms, pays, serveurs,
 // interfaces et IP sont masqués ou remplacés par « Tunnel N ».
-// Verre : flou de Hyprland derrière (règle de calque nc-vpn, regles.lua), fond de la palette à 62 % (92 % sans flou).
+// Verre : fenêtre transparente, flou de Hyprland derrière, fond de la palette à 62 % (92 % sans flou).
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
-import Quickshell.Wayland
 
-PanelWindow {
+FloatingWindow {
     id: vpn
     signal fermer()
-    anchors { top: true; bottom: true; left: true; right: true }
-    exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.layer: Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject
-                         && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0 ? WlrLayer.Overlay : WlrLayer.Top
-    WlrLayershell.namespace: "nc-vpn"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    title: Reglages.t("VPN", "VPN")                 // le même mot dans les deux langues : la règle de Hyprland vise ce titre exact
     color: "transparent"
+    implicitWidth: vpn.largeurCarte
+    implicitHeight: Math.min(Math.round(vpn.hauteurEcran * 0.9), contenu.implicitHeight + 48)
+    minimumSize: Qt.size(420, 260)
+    // Fermeture native (Super + Q, killactive) : la fenêtre n'est plus là, le LazyLoader de shell.qml se désactive
+    onClosed: vpn.fermer()
+    onVisibleChanged: if (!visible) vpn.fermer()
 
     readonly property real largeurEcran: vpn.screen ? vpn.screen.width : 1600
     readonly property real hauteurEcran: vpn.screen ? vpn.screen.height : 1000
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
     readonly property int rayon: 26
     readonly property int largeurCarte: Math.min(880, Math.round(largeurEcran * 0.92))
-    property bool entree: false
     property bool ksDetail: false                 // le détail du kill switch (VpnProtections.qml) est déplié
 
     function quitter() { vpn.fermer() }
     function importer() { VpnEtat.choisirFichier(); quitter() }
     // Connexion au compte d'un fournisseur : un terminal ou une application s'ouvre PAR-DESSUS ; cette fenêtre garde tout le clavier
-    // (focus exclusif) et avalerait ce qu'on y tape (nom de compte, mot de passe) : elle se ferme d'abord, comme pour l'import
+    // (fenêtre au premier plan) et avalerait ce qu'on y tape (nom de compte, mot de passe) : elle se ferme d'abord, comme pour l'import
     function connecterCompte(id) { VpnEtat.fournisseurLogin(id); quitter() }
-    Component.onCompleted: { entree = true; VpnEtat.panneauOuvert = true }
+    Component.onCompleted: VpnEtat.panneauOuvert = true
     Component.onDestruction: VpnEtat.panneauOuvert = false
-
-    MouseArea { anchors.fill: parent; onClicked: vpn.quitter() }          // un clic à côté ferme
 
     Item {
         id: carte
-        x: Math.round((vpn.largeurEcran - width) / 2); y: Math.round((vpn.hauteurEcran - height) * 0.35)
-        width: vpn.largeurCarte
-        height: Math.min(Math.round(vpn.hauteurEcran * 0.94), contenu.implicitHeight + 48)
-        scale: vpn.entree ? 1 : 0.94
-        Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.001 } }
+        anchors.fill: parent
         Keys.onEscapePressed: vpn.quitter()                                // Échap, d'où que vienne le focus (champ de recherche compris)
         Rectangle {
             anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
@@ -79,7 +73,6 @@ PanelWindow {
                 }
             }
         }
-        MouseArea { anchors.fill: parent }                                 // un clic dans la carte ne ferme pas
 
         // Le focus clavier de départ (quand le champ de recherche ne l'a pas)
         Item { id: clavier; objectName: "nc-vpn-clavier"; anchors.fill: parent; focus: true }
@@ -92,10 +85,18 @@ PanelWindow {
             interfaces: VpnEtat.tunnels.map(t => t.interface).filter(x => x !== "")
         }
 
+        Flickable {
+            id: defile
+            objectName: "nc-vpn-defile"
+            anchors.fill: parent; anchors.margins: 1
+            contentWidth: width; contentHeight: contenu.implicitHeight + 48
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
         Column {
             id: contenu
             objectName: "nc-vpn-contenu"
-            x: 26; y: 24; width: parent.width - 52
+            x: 26; y: 24; width: defile.width - 52
             spacing: 14
 
             VpnEntete { width: parent.width; onFermer: vpn.quitter() }
@@ -161,6 +162,7 @@ PanelWindow {
             }
 
             VpnPied { width: parent.width }
+        }
         }
         Component.onCompleted: filtres.donnerFocus()
     }

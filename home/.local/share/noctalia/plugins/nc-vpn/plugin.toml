@@ -1,0 +1,18 @@
+id          = "nc/vpn"
+name        = "Pilule VPN"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Pilule VPN de la barre, près du profil d'énergie : bouclier, fournisseur et pays réellement connectés ; un clic ouvre la fenêtre VPN de l'île (Super + Alt + V)."
+dependencies = ["qs"]
+
+# Dans la barre, ajoutée par nc-reglages (VPN_PILULE_BARRE=oui) juste avant power_profile, jamais sans ce réglage.
+# Clic = fenêtre VPN de l'île (qs -c nc-ile ipc call ile vpn). Aucune action dans config.toml : le clic est géré par le widget,
+# qui ne garde aucune zone de clic quand il est caché.
+[[widget]]
+id = "vpn"
+entry = "vpn.luau"
+
+  [widget.actions]
+  middle = "none"

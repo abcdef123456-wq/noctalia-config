@@ -18,7 +18,7 @@ pragma Singleton
 //     seulement si la commande existe ; rafraîchie par `mullvad status listen` (une ligne = une relecture, son texte n'est jamais
 //     lu ni gardé) uniquement écran allumé ET (panneau ouvert OU tunnel actif) ; jamais de numéro de compte lu ni affiché.
 // Réglages (nc-reglages → Île) : VPN_INDICATEUR (oui : bouclier dans la pilule quand un tunnel est monté), VPN_IP_PUBLIQUE (non),
-// VPN_IP_SERVICE (vide).
+// VPN_IP_SERVICE (vide), VPN_PILULE_BARRE (non : pilule VPN dans la barre Noctalia, fichier d'état ci-dessous).
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -117,8 +117,10 @@ Singleton {
                                      && String(Reglages.val("VPN_IP_SERVICE", "")).indexOf("https://") === 0
     // Une signature des tunnels montés : l'IP n'est redemandée que si elle change
     readonly property string signature: actives.map(c => c.uuid).sort().join(",")
-    readonly property bool veille: Etat.ecranVu && disponible && (panneauOuvert || Reglages.val("VPN_INDICATEUR", "oui") !== "non")
-    readonly property bool voulu: Etat.ecranVu && (panneauOuvert || Reglages.val("VPN_INDICATEUR", "oui") !== "non")
+    // La pilule VPN de la barre Noctalia (plugin nc/vpn, VPN_PILULE_BARRE) : l'île POUSSE son état dans un petit fichier
+    readonly property bool barreVoulue: Reglages.val("VPN_PILULE_BARRE", "non") === "oui"
+    readonly property bool veille: Etat.ecranVu && disponible && (panneauOuvert || barreVoulue || Reglages.val("VPN_INDICATEUR", "oui") !== "non")
+    readonly property bool voulu: Etat.ecranVu && (panneauOuvert || barreVoulue || Reglages.val("VPN_INDICATEUR", "oui") !== "non")
 
     // Le drapeau : les deux indicateurs régionaux Unicode du code pays validé ; jamais une image
     readonly property string drapeau: /^[A-Z]{2}$/.test(indPays)
@@ -131,6 +133,28 @@ Singleton {
         if (indPays !== "") t += " · " + drapeau + " " + indPays
         if (indNombre > 1) t += " +" + (indNombre - 1)
         return t
+    }
+
+    // ── Fichier d'état de la pilule de la barre ($XDG_RUNTIME_DIR/nc-vpn-barre.json, 0600, écriture atomique) ──
+    // {connecte, fournisseur, pays, masque_partage} ; écrit à chaque CHANGEMENT seulement ; en partage d'écran ni fournisseur ni pays
+    // n'y sont mis ; jamais de géolocalisation, de secret ni d'IP. Réglage coupé ou NetworkManager absent : le fichier est retiré.
+    readonly property string barreJson: !barreVoulue || !lu || !disponible ? "" : JSON.stringify({
+        connecte: indActif, masque_partage: masque,
+        fournisseur: masque || !indActif ? "" : (indFournisseur !== "" ? indFournisseur : indNom),
+        pays: masque || !indActif ? "" : indPays })
+    property string barreEcrit: ""                // ce qui est sur disque ("" : pas de fichier)
+    property string barreEnCours: ""
+    onBarreJsonChanged: lancerBarre()
+    function lancerBarre() {
+        if (ecritureBarre.running || barreJson === barreEcrit) return
+        barreEnCours = barreJson
+        ecritureBarre.command = ["sh", "-c", "umask 077; d=${XDG_RUNTIME_DIR:-}; [ -n \"$d\" ] && [ -d \"$d\" ] || exit 0; f=\"$d/nc-vpn-barre.json\"; "
+                                 + "if [ -n \"$1\" ]; then printf '%s\\n' \"$1\" > \"$f.tmp\" && mv -f \"$f.tmp\" \"$f\"; else rm -f \"$f\"; fi", "sh", barreEnCours]
+        ecritureBarre.running = true
+    }
+    Process {
+        id: ecritureBarre
+        onExited: { v.barreEcrit = v.barreEnCours; v.lancerBarre() }
     }
 
     function lireExterne() { if (panneauOuvert && !lectureExterne.running) lectureExterne.running = true }
