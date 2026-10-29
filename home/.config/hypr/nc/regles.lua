@@ -138,4 +138,7 @@ hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blu
 if nc.reglage("ILE_LANCEUR_FONDU", "non") == "oui" then
     hl.layer_rule({ name = "nc-code-sans-anim", match = { namespace = "^nc-code$" }, no_anim = true })
 end
-hl.layer_rule({ name = "nc-vpn-verre", match = { namespace = "^nc-vpn$" }, blur = true, ignore_alpha = 0.2 })
+-- Fenêtre VPN de l'île (Super + Alt + V ; Vpn.qml) : une vraie fenêtre, titre exact « VPN » (stable, pas traduit), flottante.
+-- Règle limitée à ce titre. Sa taille et sa place (centrée sous la barre) sont posées à l'ouverture par nc/automatismes.lua :
+-- la mémoire des fenêtres flottantes écraserait une règle size/move, et cette fenêtre en est exclue.
+hl.window_rule({ name = "nc-vpn-fenetre", match = { title = "^(VPN)$" }, float = true })

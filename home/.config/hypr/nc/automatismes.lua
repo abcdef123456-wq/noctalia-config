@@ -176,6 +176,8 @@ local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true, ["Desk
 -- À la fermeture d'une fenêtre flottante, sa taille et sa place (en proportion de l'écran) sont notées par appli ;
 -- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, sélecteur de l'espace de code, incrustation vidéo, jeux,
 -- cockpit JARVIS (sa place est fixe, voir plus bas).
+-- Fenêtre VPN de l'île (Vpn.qml, titre exact « VPN ») : placée plus bas, jamais mémorisée
+local FENETRE_VPN = "VPN"
 local MEMOIRE = STATE .. "fenetres-flottantes"
 os.execute("mkdir -p '" .. STATE .. "'")
 
@@ -188,6 +190,7 @@ local function exclue(w)
     return c == "" or c == "dropterm" or c == "nc-code" or c == "fingerpop" or est_jeu(w) or w.pinned
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
+        or t == FENETRE_VPN or w.title == FENETRE_VPN
 end
 
 -- Les 200 dernières seulement (un titre qui change à chaque fois en créerait sans fin) : le fichier est dans l'ordre
@@ -267,6 +270,22 @@ hl.on("window.open", function(w)
     local arrondi = function(v) return math.floor(v + 0.5) end     -- 2560 / 1,6 vaut 1599,999… en virgule flottante
     hl.dispatch(hl.dsp.window.resize({ x = arrondi(lw - rg - rd - 2 * g), y = arrondi(lh - rh - rb - 2 * g), window = w }))
     hl.dispatch(hl.dsp.window.move({ x = arrondi(mx + rg + g), y = arrondi(my + rh + g), window = w }))
+end)
+
+-- Fenêtre VPN de l'île (règle nc-vpn-fenetre : flottante) : centrée dans la zone utile de son écran (sous la barre), 900 de large
+-- au plus et 90 % de la hauteur utile au plus (son contenu défile). Placée ici, à l'ouverture, et non par une règle size/move.
+hl.on("window.open", function(w)
+    if not w or not w.floating or (w.title or w.initial_title or "") ~= FENETRE_VPN then return end
+    local m = w.monitor or hl.get_active_monitor()
+    local mx, my, lw, lh = ecran(w)
+    if not (m and lw) then return end
+    local r = nc.reserve(m)
+    local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
+    local arrondi = function(v) return math.floor(v + 0.5) end
+    local zl, zh = lw - rg - rd, lh - rh - rb
+    local l, h = arrondi(math.min(900, zl * 0.92)), arrondi(math.min(780, zh * 0.9))
+    hl.dispatch(hl.dsp.window.resize({ x = l, y = h, window = w }))
+    hl.dispatch(hl.dsp.window.move({ x = arrondi(mx + rg + (zl - l) / 2), y = arrondi(my + rh + (zh - h) / 2), window = w }))
 end)
 
 -- Couvercle du portable : en mode « l'écran s'éteint, le PC continue » (nc-reglages, COUVERCLE=ecran), nc-couvercle
