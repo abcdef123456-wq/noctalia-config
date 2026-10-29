@@ -88,11 +88,28 @@ class Source(unittest.TestCase):
         self.assertEqual(m.group(1), "Partage d'écran discret")
         self.assertIn('Reglages.val("PARTAGE_DISCRET", "oui") !== "non"', self.partage)
 
-    def test_ile_coupe_ses_animations_au_silence(self):
+    def test_ile_garde_ses_transitions_en_partage(self):
+        """En partage, chaque changement de page ou de taille passe par le même Behavior qu'hors partage (un cadre qui
+        sautait faisait une île « trop brute » en stream) ; seule la bannière est retirée sans attendre."""
         ile = (QML / "Ile.qml").read_text()
-        self.assertEqual(len(re.findall(r"enabled: !Notifs\.enPause && !Partage\.silence", ile)), 4)
+        self.assertEqual(len(re.findall(r"enabled: !Notifs\.enPause;", ile)), 3)                  # largeur, hauteur, rayon
+        self.assertIn("enabled: !Notifs.enPause && !fen.recherche;", ile)                            # la pilule (Spotlight : suit la largeur)
         self.assertIn("garderBanniere.running && !Notifs.enPause && !Partage.silence", ile)
-        self.assertNotRegex(ile, r"enabled: !Notifs\.enPause;")
+        for f in sorted(QML.glob("*.qml")):
+            for l in f.read_text().splitlines():
+                if "Behavior on" in l or re.search(r"\b(enabled|running):", l) and "Animation" in l:
+                    self.assertNotRegex(l, r"Partage\.(silence|indicateur|retient)", f"{f.name} : {l.strip()}")
+
+    def test_appli_qui_lit_l_ecran_par_son_nom_seulement(self):
+        code = self.code
+        self.assertIn("import Quickshell.Services.Pipewire", self.partage)
+        self.assertIn("Pipewire.linkGroups.values", code)
+        self.assertIn("/^xdph-streaming/.test(g.source.name", code)
+        self.assertIn("if (!silence) return", code)                 # rien lu hors partage
+        self.assertNotRegex(code, r"properties\[|media\.name|application\.process|Process \{")
+        page = (QML / "PageNotifs.qml").read_text()
+        self.assertIn("arrête le partage dans l'appli", page)
+        self.assertIn("stop sharing in the app", page)
 
     def test_textes_francais_et_anglais(self):
         for fr, en in (("1 notification reçue pendant le partage", "1 notification received while sharing"),
@@ -205,6 +222,48 @@ class Logique(unittest.TestCase):
         self.assertIsNotNone(memo)
         self.assertEqual(set(memo), {"masques", "lus", "heures", "attentes"})
         self.assertNotIn("partage", json.dumps(memo).lower())
+
+    def test_long_partage_ecran_fixe_puis_fin_tout_revient(self):
+        """Début, partage confirmé, puis une heure d'écran fixe simulée (fins et débuts espacés de plus que la grâce
+        courte) : jamais de sortie du partage ni d'indicateur qui clignote ; à la vraie fin, après la grâce longue, tout
+        revient à l'état de départ. Une capture courte ensuite garde la grâce de 1 s. Délais réduits pour le test."""
+        self.executer('''
+                if (etape === 0) {
+                    if (!Notifs.pret) return
+                    verifier(Partage.delaiFinLong === 65000 && Partage.delaiConfirme === 5000, "délais par défaut")
+                    Partage.delaiConfirme = 300; Partage.delaiFinLong = 2500
+                    Partage.evenement("1,0"); marquer(); etape++; return }
+                if (etape === 1) {
+                    if (!Partage.indicateur || !passe(1500 + 400)) return
+                    verifier(Partage.confirme(), "partage confirmé")
+                    Partage.evenement("0,0"); marquer(); etape++; return }       // écran fixe : fin après 0,5 s sans image
+                if (etape === 2) {
+                    verifier(Partage.silence && Partage.indicateur, "sorti du partage pendant un écran fixe")
+                    if (!passe(1400)) return                                    // plus que la grâce courte (1 s)
+                    notifier("Chat", "pendant", "", "normal")
+                    Partage.evenement("1,0")                                    // l'image suivante
+                    verifier(Partage.silence && Partage.indicateur && Notifs.banniere === null, "indicateur éteint ou bulle au retour")
+                    Partage.evenement("0,0"); marquer(); etape++; return }
+                if (etape === 3) {
+                    verifier(Partage.silence && Partage.indicateur && Notifs.banniere === null, "oscillation au 2e écran fixe")
+                    if (!passe(1400)) return
+                    Partage.evenement("1,0"); Partage.evenement("0,0"); marquer(); etape++; return }   // la vraie fin
+                if (etape === 4) {
+                    if (!passe(2300)) { verifier(Partage.silence, "fin trop tôt après un partage confirmé"); return }
+                    if (Partage.silence) return
+                    verifier(passe(2450), "grâce longue trop courte")
+                    verifier(!Partage.indicateur && Partage.sessions === 0 && Partage.compte === 0 && Partage.depuisIndicateur === 0
+                             && Partage.appliCapture === "", "état non remis à zéro")
+                    etape++; return }
+                if (etape === 5) {
+                    if (Notifs.banniere === null) return
+                    verifier(Notifs.banniere.summary === "1 notification received while sharing", "fin : " + Notifs.banniere.summary)
+                    Partage.evenement("1,0"); Partage.evenement("0,0"); marquer(); etape++; return }   // capture courte
+                if (etape === 6) {
+                    if (Partage.silence) return
+                    verifier(!passe(1900), "capture courte : grâce longue appliquée")
+                    Qt.quit() }
+        ''')
 
     def test_capture_courte_la_bulle_retenue_est_montree_a_la_fin(self):
         self.executer('''

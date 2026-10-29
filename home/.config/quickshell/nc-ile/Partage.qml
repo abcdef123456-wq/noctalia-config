@@ -9,15 +9,23 @@ pragma Singleton
 // avant le prochain début (rien n'est silencieux entre-temps).
 //   silence    dès le premier début, sans délai : Notifs.qml garde les bulles (retenir) au lieu de les montrer
 //   indicateur après 1,5 s de partage continu : « Partage » dans la pilule (Compact.qml), carte dans la page Notifications
-//   fin        1 s de grâce après chaque fin (écran fixe : fin puis début au cliché suivant, sans bulle entre les deux), puis :
+//   fin        1 s de grâce après chaque fin (écran fixe : fin puis début au cliché suivant, sans bulle entre les deux) ;
+//              65 s après un partage confirmé (indicateur allumé depuis 5 s) : xdph ne copie une image que si l'écran
+//              change, et Hyprland envoie fin après 0,5 s sans image ; un écran fixe en stream (l'horloge change chaque
+//              minute) faisait sortir puis rentrer l'île du partage sans arrêt. Puis :
 //              partage de 1,5 s ou plus : tout revient, puis une bulle courte « N reçues pendant le partage » (clic : page Notifications)
 //              capture courte (moins de 1,5 s) : la dernière bulle retenue est montrée, sans message
 // La Concentration de l'utilisateur n'est jamais touchée : ce silence est un état à part, que Notifs.montrer consulte.
 // Le compteur reste en mémoire (un nombre), jamais écrit sur le disque.
+// L'appli qui lit l'écran (appliCapture) : le nom du nœud PipeWire branché sur le flux de xdph (« xdph-streaming-… »),
+// rien d'autre ; la carte « Partage » de la page Notifications dit de l'arrêter dans l'appli (Discord garde parfois la
+// capture ouverte après la fin du stream : pour Hyprland, le partage continue). Lu par les événements de PipeWire,
+// seulement pendant un partage.
 // Réglage PARTAGE_DISCRET (nc-reglages) : non = rien de tout ça.
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Services.Pipewire
 
 Singleton {
     id: p
@@ -33,6 +41,22 @@ Singleton {
     property int delaiIndicateur: 1500    // ms ; contre le clignotement d'une simple capture d'écran
     property int delaiFin: 1000           // ms de grâce après toute fin : sur un écran fixe, Hyprland envoie fin (0,5 s sans cliché)
                                           // puis début au cliché suivant ; les bulles ne repartent pas entre les deux
+    property int delaiFinLong: 65000      // ms de grâce après un partage confirmé : plus qu'une minute d'écran fixe (horloge)
+    property int delaiConfirme: 5000      // ms d'indicateur allumé pour parler de partage confirmé (une capture reste à 1 s)
+    property real depuisIndicateur: 0     // Date.now() à l'allumage de l'indicateur, 0 éteint
+    onIndicateurChanged: depuisIndicateur = indicateur ? Date.now() : 0
+    function confirme() { return indicateur && depuisIndicateur > 0 && Date.now() - depuisIndicateur >= delaiConfirme }   // lu à la fin
+    // Les applis branchées sur le flux de xdph, par leur nom seulement (texte brut, 40 caractères), pendant un partage
+    readonly property string appliCapture: {
+        if (!silence) return ""
+        var noms = []
+        for (const g of Pipewire.linkGroups.values) {
+            if (!g || !g.source || !g.target || !/^xdph-streaming/.test(g.source.name || "")) continue
+            var n = String(g.target.description || g.target.name || "").replace(/[\x00-\x1f]/g, " ").trim().slice(0, 40)
+            if (n !== "" && noms.indexOf(n) < 0) noms.push(n)
+        }
+        return noms.join(", ")
+    }
     property int delaiFilet: 86400000     // 24 h : filet si une fin se perdait (ne tourne que pendant un partage). Hyprland n'envoie screencast
                                           // qu'au début et à la fin : un filet court coupait l'indicateur en plein partage long
     signal courteFinie(var notif)
@@ -95,7 +119,9 @@ Singleton {
         if (sessions <= 0) return          // fin sans début (île relancée en plein partage) : ignorée
         sessions--
         if (sessions > 0) return
-        grace.restart()          // toujours : terminer() distingue ensuite partage et capture courte
+        // toujours : terminer() distingue ensuite partage et capture courte ; grâce longue après un partage confirmé
+        grace.interval = confirme() ? delaiFinLong : delaiFin
+        grace.restart()
     }
     // Tout revient comme avant ; la Concentration n'a jamais bougé
     function terminer() {
@@ -134,5 +160,5 @@ Singleton {
 
     Timer { id: seuil; interval: p.delaiIndicateur; onTriggered: { if (p.sessions > 0) p.indicateur = true; else p.seuilEchu = true } }
     Timer { id: filet; interval: p.delaiFilet; onTriggered: { p.sessions = 0; p.terminer() } }
-    Timer { id: grace; interval: p.delaiFin; onTriggered: p.terminer() }
+    Timer { id: grace; interval: p.delaiFin; onTriggered: p.terminer() }     // interval posé par fin()
 }

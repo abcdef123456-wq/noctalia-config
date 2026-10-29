@@ -238,19 +238,26 @@ PanelWindow {
         clip: true
 
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
-        // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation
-        Behavior on width { enabled: !Notifs.enPause && !Partage.silence; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
-        Behavior on height { enabled: !Notifs.enPause && !Partage.silence; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
-        Behavior on radius { enabled: !Notifs.enPause && !Partage.silence; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+        // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
+        // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
+        // sont coupées (Loader plus bas, retirées sans attendre) et le contenu sensible masqué ; un cadre qui saute à
+        // chaque page faisait une île « trop brute » en stream
+        Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
+        Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
+        Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()
+        // Spotlight : son contenu apparaît avec la largeur de l'île (0 à 300 px, 1 à 560 px), et la pilule ne s'efface qu'à
+        // mesure : l'île n'est jamais une forme vide pendant qu'elle s'étire (un « carré noir » quand la pilule partait en
+        // 90 ms et le Spotlight n'apparaissait qu'au-delà de 560 px). Suit le ressort image par image : rien de plus lent
+        readonly property real apparitionRecherche: fen.recherche ? Math.max(0, Math.min(1, (width - 300) / 260)) : 0
 
         Compact {
             id: compact
             anchors.centerIn: parent
             width: parent.width
-            opacity: fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1
-            Behavior on opacity { enabled: !Notifs.enPause && !Partage.silence; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
+            opacity: fen.recherche ? 1 - ile.apparitionRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1)
+            Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
         }
 
         // Spotlight : longue capsule de recherche
@@ -265,9 +272,9 @@ PanelWindow {
             active: fen.recherche || garderSpot.running || occupe
             sourceComponent: Recherche {
                 actif: fen.recherche
-                opacity: fen.recherche && ile.width > 560 ? 1 : 0
+                opacity: ile.apparitionRecherche
                 visible: opacity > 0.01
-                Behavior on opacity { NumberAnimation { duration: fen.recherche ? 160 : 70; easing.type: Easing.OutCubic } }
+                Behavior on opacity { enabled: !fen.recherche; NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }   // fermeture
             }
         }
         Connections {
