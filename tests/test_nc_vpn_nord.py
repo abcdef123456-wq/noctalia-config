@@ -219,5 +219,82 @@ class Nord(BaseVpn):
         self.assertEqual(self.appels_de("nordvpn"), [])                      # l'indicateur ne regarde jamais la CLI Nord
 
 
+def compte(*lignes):
+    """Sortie de `nordvpn account` (forme de cli/cli_account.go), avec une adresse fictive qui ne doit jamais ressortir."""
+    return "Account information\nEmail address: moi@exemple.invalid\nAccount created: Jan 1, 2020\n" + "".join(l + "\n" for l in lignes)
+
+
+class Abonnement(BaseVpn):
+    """Un compte connecté ne suffit pas : « pret » (et des pays) seulement si l'abonnement VPN est actif ; sinon sans_compte avec
+    probleme abonnement_inactif ou abonnement_inconnu, ni pays, ni bouton de connexion au compte, ni connect."""
+    def fiche(self, sortie):
+        self.poser("nordvpn", {"account": {"out": sortie}, "countries": {"out": PAYS}, "status": {"out": "Status: Disconnected\n"},
+                               "connect": {"out": "Connected\n"}})
+        r = self.seul("fournisseurs-json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["contrat"], 1)
+        self.assertNotIn("exemple.invalid", r.stdout + r.stderr)
+        return next(f for f in d["fournisseurs"] if f["id"] == "nord")
+
+    def refuse(self, sortie, probleme):
+        f = self.fiche(sortie)
+        self.assertEqual((f["etat"], f["probleme"], f["peut_login"], f["connecte"]), ("sans_compte", probleme, False, False))
+        self.assertNotIn("pays", f)
+        self.assertTrue(f["message"])
+        self.assertEqual(self.appels_de("nordvpn"), [["account"]])           # les pays ne sont même pas demandés
+        r = self.seul("fournisseur", "nord", "connecter", "FR")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("exemple.invalid", r.stdout + r.stderr)
+        self.assertEqual([a[0] for a in self.appels_de("nordvpn")], ["account", "account"])    # revérifié, jamais de connect
+        return f
+
+    def pret(self, sortie):
+        f = self.fiche(sortie)
+        self.assertEqual((f["etat"], f["probleme"]), ("pret", ""))
+        self.assertIn({"code": "FR", "nom": "France"}, f["pays"])
+        r = self.seul("fournisseur", "nord", "connecter", "FR")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.appels_de("nordvpn")[-1], ["connect", "France"])
+        self.assertNotIn("exemple.invalid", r.stdout + r.stderr)
+
+    def test_subscription_active(self):
+        self.pret(compte("Subscription: Active until Mar 3, 2099", "Dedicated IP: Inactive"))
+
+    def test_subscription_inactive(self):
+        self.refuse(compte("Subscription: Inactive"), "abonnement_inactif")
+
+    def test_ancien_vpn_service_active(self):
+        self.pret(compte("VPN Service: Active (Expires on Mar 3rd, 2099)"))
+
+    def test_ancien_vpn_service_expired(self):
+        self.refuse(compte("VPN Service: Expired"), "abonnement_inactif")
+
+    def test_champ_absent(self):
+        # « Dedicated IP » a la même forme mais ne dit rien de l'abonnement VPN
+        self.refuse(compte("Dedicated IP: Active until Mar 3, 2099"), "abonnement_inconnu")
+
+    def test_valeur_inconnue(self):
+        self.refuse(compte("Subscription: Pending"), "abonnement_inconnu")
+
+    def test_not_active_et_no_subscription(self):
+        for v in ("Not active", "No subscription", "inactive", "EXPIRED (on Jan 1, 2020)"):
+            with self.subTest(v=v):
+                self.refuse(compte("Subscription: " + v), "abonnement_inactif")
+                (self.r / "appels-nordvpn.jsonl").unlink(missing_ok=True)     # chaque cas compte ses propres appels
+
+    def test_un_refus_l_emporte(self):
+        self.refuse(compte("VPN Service: Active (Expires on Mar 3rd, 2099)", "Subscription: Inactive"), "abonnement_inactif")
+
+    def test_e_mail_jamais_expose(self):
+        # Sortie ANSI, avec l'adresse : rien n'en ressort, ni dans le JSON, ni dans les messages d'échec
+        sortie = "\x1b[1;32mAccount information\x1b[0m\r\nEmail address: moi@exemple.invalid\r\nSubscription: Inactive\r\n"
+        f = self.refuse(sortie, "abonnement_inactif")
+        self.assertNotIn("exemple.invalid", json.dumps(f))
+        for argv in (("fournisseur", "nord", "connecter", "DE"), ("fournisseurs-json", "--verifier-proton")):
+            r = self.seul(*argv)
+            self.assertNotIn("exemple.invalid", r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

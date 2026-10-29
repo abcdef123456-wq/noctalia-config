@@ -657,7 +657,7 @@ class AvecNcVpn(BaseVpn):
                 self.assertRegex(f["installation"]["lien"], r"^https://(protonvpn\.com|mullvad\.net|support\.nordvpn\.com)/")
 
     def test_le_bouton_n_existe_que_si_absent(self):
-        self.poser("nordvpn", {"account": {"out": "Account information\n"}, "countries": {"out": "France\n"}})
+        self.poser("nordvpn", {"account": {"out": "Account information\nSubscription: Active until Jan 1, 2099\n"}, "countries": {"out": "France\n"}})
         (self.r / "mullvad.json").write_text(json.dumps({"texte": "Disconnected", "compte": "Not logged in on any account",
                                                          "json": json.dumps({"state": "disconnected"})}))
         d = self.lire()
@@ -717,7 +717,7 @@ class AvecNcVpn(BaseVpn):
         self.assertNotEqual(k[4], str(self.r / "faux-bin" / "bash"))
 
     def test_installer_client_refuse_client_deja_la_et_fournisseur_inconnu(self):
-        self.poser("nordvpn", {"account": {"out": "Account information\n"}, "countries": {"out": "France\n"}})
+        self.poser("nordvpn", {"account": {"out": "Account information\nSubscription: Active until Jan 1, 2099\n"}, "countries": {"out": "France\n"}})
         r = self.seul("installer-client", "nord")
         self.assertEqual(r.returncode, 1)
         self.assertIn("déjà installé", r.stderr)

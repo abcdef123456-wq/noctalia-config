@@ -1,7 +1,9 @@
 // La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (tant que nc-vpn ne
 // répond pas), « client absent », « installé, pas de compte » (Proton : bouton « Se connecter au compte »), « se pilote dans son
 // application » (Proton sans sa CLI : bouton « Ouvrir Proton VPN », qui lance l'application officielle, rien de caché) et
-// « application ouverte » (Proton : la CLI ne tourne pas avec l'application, le message de nc-vpn dit de la fermer). Un message clair, jamais de faux bouton.
+// « application ouverte » (Proton : la CLI ne tourne pas avec l'application, le message de nc-vpn dit de la fermer), « abonnement inactif » et
+// « abonnement à vérifier » (Nord : compte connecté, mais abonnement VPN inactif ou non confirmé ; état sans_compte du contrat, sans pays ni
+// bouton de connexion au compte). Un message clair, jamais de faux bouton.
 // Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays}.
 import QtQuick
 
@@ -12,15 +14,26 @@ Rectangle {
     signal connecterCompte(string id)             // « Se connecter au compte » / « Ouvrir » : la fenêtre se ferme et lance le login (Vpn.qml)
     property var modele: ({ fournisseur: "", etat: "absent", bientot: false, peutLogin: false, message: "" })
     readonly property string etatTexte: modele.bientot ? "bientot" : modele.etat
+    // Compte connecté, abonnement VPN inactif (ou non confirmé) : l'état reste sans_compte (contrat v1), le texte le dit autrement
+    readonly property bool abonnement: modele.etat === "sans_compte" && (modele.probleme === "abonnement_inactif" || modele.probleme === "abonnement_inconnu")
     readonly property string titre: {
         if (modele.bientot) return modele.fournisseur + " · " + Reglages.t("bientôt", "coming soon")
         if (modele.etat === "pilote_appli")
             return modele.fournisseur + " · " + (modele.probleme === "appli_ouverte" ? Reglages.t("application ouverte", "app is open")
                    : (modele.connecte === true ? Reglages.t("connecté", "connected") : Reglages.t("se pilote dans son application", "driven from its app")))
+        if (k.abonnement)
+            return modele.fournisseur + " · " + (modele.probleme === "abonnement_inactif" ? Reglages.t("abonnement inactif", "subscription inactive")
+                                                                                        : Reglages.t("abonnement à vérifier", "subscription to check"))
         if (modele.etat === "sans_compte") return modele.fournisseur + " · " + Reglages.t("installé, sans compte", "installed, no account")
         return modele.fournisseur + " · " + Reglages.t("client absent", "client not installed")
     }
     readonly property string message: {
+        if (!modele.bientot && modele.probleme === "abonnement_inactif" && modele.etat === "sans_compte")
+            return Reglages.t("Ton compte " + modele.fournisseur + " est bien connecté, mais son abonnement VPN est inactif ou expiré : aucun pays ne peut être choisi. Renouvelle-le sur le site du service, puis rouvre cette fenêtre.",
+                              "Your " + modele.fournisseur + " account is signed in, but its VPN subscription is inactive or expired: no country can be chosen. Renew it on the service's website, then reopen this window.")
+        if (!modele.bientot && modele.probleme === "abonnement_inconnu" && modele.etat === "sans_compte")
+            return Reglages.t("Ton compte " + modele.fournisseur + " est connecté, mais l'état de son abonnement VPN n'a pas pu être confirmé : aucun pays n'est proposé tant qu'il ne l'est pas. Vérifie-le dans ton compte, puis rouvre cette fenêtre.",
+                              "Your " + modele.fournisseur + " account is signed in, but its VPN subscription status could not be confirmed: no country is offered until it is. Check it in your account, then reopen this window.")
         if (modele.etat === "pilote_appli" && modele.probleme === "appli_ouverte" && typeof modele.message === "string" && modele.message !== "")
             return modele.message                  // l'application est ouverte : la CLI ne peut pas piloter, nc-vpn dit de la fermer
         if (modele.etat === "pilote_appli" && modele.connecte === true)
@@ -45,7 +58,7 @@ Rectangle {
         x: 20; y: 18; width: parent.width - 40; spacing: 14
         Ico {
             anchors.top: parent.top
-            nom: k.etatTexte === "bientot" ? "schedule" : (k.etatTexte === "sans_compte" ? "person_off" : (k.etatTexte === "pilote_appli" ? "open_in_new" : "download"))
+            nom: k.etatTexte === "bientot" ? "schedule" : k.abonnement ? "credit_card_off" : (k.etatTexte === "sans_compte" ? "person_off" : (k.etatTexte === "pilote_appli" ? "open_in_new" : "download"))
             taille: 26; color: Couleurs.texteSec
         }
         Column {
@@ -53,7 +66,7 @@ Rectangle {
             Texte { objectName: "nc-vpn-fournisseur-titre"; width: parent.width; text: k.titre; font.pixelSize: 15; font.weight: Font.DemiBold }
             Rectangle {
                 objectName: "nc-vpn-fournisseur-login"
-                visible: k.modele.peutLogin === true && k.modele.etat === "sans_compte" && !k.modele.bientot
+                visible: k.modele.peutLogin === true && k.modele.etat === "sans_compte" && !k.modele.bientot && !k.abonnement
                 width: libelleLogin.implicitWidth + 32; height: 32; radius: 16
                 color: zoneLogin.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6

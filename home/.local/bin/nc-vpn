@@ -1375,7 +1375,8 @@ def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, pe
 # ou une demande de reconnexion), `countries` (noms avec « _ », un par ligne quand la sortie n'est pas un terminal),
 # `connect NOM`, `disconnect`, `status` (« Status: Connected », « Country: Nom »), `login` (affiche « Continue in the browser: URL »
 # et ne lance pas lui-même le navigateur ; pose la question du consentement si besoin) ; socket refusé : « Permission denied… ».
-# `account` affiche l'adresse e-mail : sa sortie n'est JAMAIS gardée, seule la présence de « Account information » compte.
+# `account` affiche l'adresse e-mail : sa sortie n'est JAMAIS gardée ; seuls comptent « Account information » et l'état de
+# l'abonnement (ligne « Subscription: » ou, avant, « VPN Service: », cli/cli_account.go), lu en mémoire par nord_abonnement.
 def nord_exe():
     return shutil.which("nordvpn") is not None
 
@@ -1399,7 +1400,28 @@ def nord_pays_liste():
     return res, ""
 
 
-def nord_fournisseur():
+def nord_abonnement(t):
+    """« actif », « inactif » ou « inconnu », lu dans la sortie de `account` (en mémoire seulement, jamais renvoyée). Seules les
+    lignes « Subscription: » (CLI actuelle : « Active until Mar 3, 2026 » ou « Inactive ») et « VPN Service: » (anciennes
+    versions : « Active (Expires on …) », « Expired ») comptent ; « Dedicated IP » et « Dedicated Server » ont la même forme et
+    ne disent rien du VPN. Un refus l'emporte ; sans ligne ou avec une valeur inconnue : rien n'est confirmé."""
+    vus = set()
+    for v in re.findall(r"(?im)^[ \t]*(?:Subscription|VPN Service)[ \t]*:[ \t]*([^\n]{0,80})$", t):
+        if re.match(r"(?:inactive|expired|not active|no subscription|none)\b", v, re.I):
+            vus.add("inactif")
+        elif re.match(r"active\b", v, re.I):
+            vus.add("actif")
+        else:
+            vus.add("inconnu")
+    if "inactif" in vus:
+        return "inactif"
+    return "actif" if vus == {"actif"} else "inconnu"
+
+
+def nord_acces():
+    """None si NordVPN est installé, le compte connecté ET l'abonnement VPN actif ; sinon la fiche qui dit pourquoi. Un compte
+    connecté ne suffit pas : sans abonnement, `connect` échoue (« Your account has expired »). Appelé par la liste des
+    fournisseurs et avant toute connexion."""
     if not nord_exe():
         return fiche("nord", "NordVPN", "absent", T("NordVPN n'est pas installé.", "NordVPN is not installed."))
     code, t = cli_fournisseur("nordvpn", ["account"], 10)
@@ -1410,6 +1432,28 @@ def nord_fournisseur():
         return fiche("nord", "NordVPN", "sans_compte",
                      T("NordVPN est installé, mais aucun compte n'est connecté.", "NordVPN is installed, but no account is signed in."),
                      peut_login=True)
+    abo = nord_abonnement(t)
+    if abo == "inactif":
+        return fiche("nord", "NordVPN", "sans_compte",
+                     T("Le compte NordVPN est connecté, mais son abonnement VPN est inactif ou expiré : aucun pays n'est disponible. "
+                       "Renouvelle-le sur le site de NordVPN, puis rouvre cette fenêtre.",
+                       "The NordVPN account is signed in, but its VPN subscription is inactive or expired: no country is available. "
+                       "Renew it on the NordVPN website, then reopen this window."),
+                     probleme="abonnement_inactif")
+    if abo != "actif":
+        return fiche("nord", "NordVPN", "sans_compte",
+                     T("Le compte NordVPN est connecté, mais l'état de son abonnement VPN n'a pas pu être confirmé. "
+                       "Vérifie-le avec « nordvpn account » ou dans ton compte NordVPN.",
+                       "The NordVPN account is signed in, but its VPN subscription status could not be confirmed. "
+                       "Check it with \"nordvpn account\" or in your NordVPN account."),
+                     probleme="abonnement_inconnu")
+    return None
+
+
+def nord_fournisseur():
+    refus = nord_acces()
+    if refus:
+        return refus
     pays, _ = nord_pays_liste()
     code, t = cli_fournisseur("nordvpn", ["status"], 8)
     connecte = code == 0 and re.search(r"^\s*Status:\s*Connected\s*$", t, re.I | re.M) is not None
@@ -1434,6 +1478,9 @@ def nord_connecter(cc):
     if killswitch_etat() is True:
         raise Echec(T("Coupe d'abord le kill switch : il bloquerait NordVPN.", "Turn the kill switch off first: it would block NordVPN."),
                     "killswitch_actif")
+    refus = nord_acces()                 # compte connecté et abonnement actif, revérifiés juste avant connect
+    if refus:
+        raise Echec(refus["message"])
     pays, p = nord_pays_liste()
     if p:
         raise Echec(message_probleme("nord", p))
