@@ -17,15 +17,11 @@ pragma Singleton
 //              capture courte (moins de 1,5 s) : la dernière bulle retenue est montrée, sans message
 // La Concentration de l'utilisateur n'est jamais touchée : ce silence est un état à part, que Notifs.montrer consulte.
 // Le compteur reste en mémoire (un nombre), jamais écrit sur le disque.
-// L'appli qui lit l'écran (appliCapture) : le nom du nœud PipeWire branché sur le flux de xdph (« xdph-streaming-… »),
-// rien d'autre ; la carte « Partage » de la page Notifications dit de l'arrêter dans l'appli (Discord garde parfois la
-// capture ouverte après la fin du stream : pour Hyprland, le partage continue). Lu par les événements de PipeWire,
-// seulement pendant un partage.
+// L'appli qui lit l'écran : PartageCapture.qml, chargé par la carte « Partage » de la page Notifications pendant un partage.
 // Réglage PARTAGE_DISCRET (nc-reglages) : non = rien de tout ça.
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
-import Quickshell.Services.Pipewire
 
 Singleton {
     id: p
@@ -46,17 +42,6 @@ Singleton {
     property real depuisIndicateur: 0     // Date.now() à l'allumage de l'indicateur, 0 éteint
     onIndicateurChanged: depuisIndicateur = indicateur ? Date.now() : 0
     function confirme() { return indicateur && depuisIndicateur > 0 && Date.now() - depuisIndicateur >= delaiConfirme }   // lu à la fin
-    // Les applis branchées sur le flux de xdph, par leur nom seulement (texte brut, 40 caractères), pendant un partage
-    readonly property string appliCapture: {
-        if (!silence) return ""
-        var noms = []
-        for (const g of Pipewire.linkGroups.values) {
-            if (!g || !g.source || !g.target || !/^xdph-streaming/.test(g.source.name || "")) continue
-            var n = String(g.target.description || g.target.name || "").replace(/[\x00-\x1f]/g, " ").trim().slice(0, 40)
-            if (n !== "" && noms.indexOf(n) < 0) noms.push(n)
-        }
-        return noms.join(", ")
-    }
     property int delaiFilet: 86400000     // 24 h : filet si une fin se perdait (ne tourne que pendant un partage). Hyprland n'envoie screencast
                                           // qu'au début et à la fin : un filet court coupait l'indicateur en plein partage long
     signal courteFinie(var notif)

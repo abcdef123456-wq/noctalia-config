@@ -179,19 +179,22 @@ Item {
             // ── Écran partagé (Partage.qml) : les bulles sont retenues ; l'appli qui lit l'écran (son nom seulement) est
             //    nommée, pour arrêter le partage chez elle (Discord garde parfois la capture après la fin du stream) ──
             Rectangle {
+                id: carteAppli
                 objectName: "nc-notifs-partage"
                 visible: Partage.silence
-                width: parent.width; height: visible ? (Partage.appliCapture !== "" ? 74 : 56) : 0; radius: 16; color: Couleurs.carte
+                readonly property string appli: capture.item ? capture.item.appli : ""
+                width: parent.width; height: visible ? (appli !== "" ? 74 : 56) : 0; radius: 16; color: Couleurs.carte
+                Loader { id: capture; active: Partage.silence; source: "PartageCapture.qml" }
                 Rectangle { id: pointPartage; x: 18; anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
                 Column {
                     anchors.left: pointPartage.right; anchors.leftMargin: 14; anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 2
                     Texte { width: parent.width; text: Reglages.t("Ton écran est partagé", "Your screen is being shared"); font.weight: Font.DemiBold; font.pixelSize: 13; elide: Text.ElideRight }
                     Texte { width: parent.width; secondaire: true; font.pixelSize: 11; elide: Text.ElideRight
                             text: Reglages.t("Les notifications restent ici, sans bulle, jusqu'à la fin du partage.", "Notifications stay here, without a banner, until sharing ends.") }
-                    Texte { objectName: "nc-notifs-partage-appli"; visible: Partage.appliCapture !== ""; width: parent.width; secondaire: true
+                    Texte { objectName: "nc-notifs-partage-appli"; visible: carteAppli.appli !== ""; width: parent.width; secondaire: true
                             font.pixelSize: 11; elide: Text.ElideRight
-                            text: Reglages.t(Partage.appliCapture + " lit encore l'écran : arrête le partage dans l'appli.",
-                                             Partage.appliCapture + " is still reading the screen: stop sharing in the app.") }
+                            text: Reglages.t(carteAppli.appli + " lit encore l'écran : arrête le partage dans l'appli.",
+                                             carteAppli.appli + " is still reading the screen: stop sharing in the app.") }
                 }
             }
 

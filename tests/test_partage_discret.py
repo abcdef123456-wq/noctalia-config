@@ -101,13 +101,14 @@ class Source(unittest.TestCase):
                     self.assertNotRegex(l, r"Partage\.(silence|indicateur|retient)", f"{f.name} : {l.strip()}")
 
     def test_appli_qui_lit_l_ecran_par_son_nom_seulement(self):
-        code = self.code
-        self.assertIn("import Quickshell.Services.Pipewire", self.partage)
-        self.assertIn("Pipewire.linkGroups.values", code)
-        self.assertIn("/^xdph-streaming/.test(g.source.name", code)
-        self.assertIn("if (!silence) return", code)                 # rien lu hors partage
-        self.assertNotRegex(code, r"properties\[|media\.name|application\.process|Process \{")
+        self.assertNotIn("Pipewire", self.code)                      # Partage.qml ne se connecte jamais à PipeWire
+        capture = re.sub(r"//.*", "", (QML / "PartageCapture.qml").read_text())
+        self.assertIn("import Quickshell.Services.Pipewire", capture)
+        self.assertIn("Pipewire.linkGroups.values", capture)
+        self.assertIn("/^xdph-streaming/.test(g.source.name", capture)
+        self.assertNotRegex(capture, r"properties\[|media\.name|application\.process|Process \{")
         page = (QML / "PageNotifs.qml").read_text()
+        self.assertIn('Loader { id: capture; active: Partage.silence; source: "PartageCapture.qml" }', page)   # rien lu hors partage
         self.assertIn("arrête le partage dans l'appli", page)
         self.assertIn("stop sharing in the app", page)
 
@@ -253,7 +254,7 @@ class Logique(unittest.TestCase):
                     if (Partage.silence) return
                     verifier(passe(2450), "grâce longue trop courte")
                     verifier(!Partage.indicateur && Partage.sessions === 0 && Partage.compte === 0 && Partage.depuisIndicateur === 0
-                             && Partage.appliCapture === "", "état non remis à zéro")
+                             , "état non remis à zéro")
                     etape++; return }
                 if (etape === 5) {
                     if (Notifs.banniere === null) return
