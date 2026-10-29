@@ -89,7 +89,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           # Scripts sh/bash/dash par leur shebang ; .shellcheckrc dit ce qui est écarté, et pourquoi
           # core.quotepath=off : les noms non ASCII (« Résumer ») sont donnés tels quels, pas entre guillemets
-          for f in $(git -c core.quotepath=off ls-files 'home/.local/bin/*' 'home/.local/share/*' install.sh export.sh get.sh); do
+          for f in $(git -c core.quotepath=off ls-files 'home/.local/bin/*' 'home/.local/libexec/*' 'home/.local/share/*' install.sh export.sh get.sh); do
             head -n1 "$f" 2>/dev/null | grep -qE '^#!.*[/ ](ba|da)?sh([[:space:]]|$)' && printf '%s\0' "$f"
           done | xargs -0 shellcheck -S warning
 

@@ -94,7 +94,7 @@ if sys.argv[1:] == ["status", "listen"]:
     time.sleep(20)
 '''
 NOMS_VPN = ("VpnEtat", "VpnLigne", "VpnProtections", "VpnEntete", "VpnCarte", "VpnStat", "VpnBarre", "VpnPastille", "VpnFiltres",
-            "VpnListe", "VpnRangee", "VpnCarteFournisseur", "VpnPied", "VpnDebit", "VpnCompteur")
+            "VpnListe", "VpnRangee", "VpnCarteFournisseur", "VpnInstaller", "VpnPied", "VpnDebit", "VpnCompteur")
 LIGNE_J = lambda uuid, nom, typ, active, iface: dict(uuid=uuid, nom=nom, type=typ, active=active, interface=iface if active else "")
 
 
@@ -128,7 +128,7 @@ class Sources(unittest.TestCase):
     def test_aucun_sondage_ni_component_inline(self):
         fichiers = sorted(f.stem for f in QML.glob("Vpn*.qml"))
         for attendu in ("Vpn", "VpnEtat", "VpnLigne", "VpnProtections", "VpnEntete", "VpnCarte", "VpnStat", "VpnBarre", "VpnPastille",
-                        "VpnFiltres", "VpnListe", "VpnRangee", "VpnCarteFournisseur", "VpnPied", "VpnDebit", "VpnCompteur"):
+                        "VpnFiltres", "VpnListe", "VpnRangee", "VpnCarteFournisseur", "VpnInstaller", "VpnPied", "VpnDebit", "VpnCompteur"):
             self.assertIn(attendu, fichiers)          # chaque composant dans son propre fichier
         for nom in fichiers:
             src = (QML / (nom + ".qml")).read_text()
@@ -206,6 +206,7 @@ class HorsEcran(unittest.TestCase):
                 (ou / nom).write_text(texte)
                 (ou / nom).chmod(0o755)
             H.faux(root, "notify-send")
+            H.faux(root, "xdg-open", 'printf \'["xdg-open", "%s"]\\n\' "$1" >> "' + str(home) + '/appels"')      # jamais le vrai navigateur
             # Écriture du fichier d'état de la barre : chaque contenu posé (mv) est gardé dans « contenus-barre », puis le vrai mv
             H.faux(root, "mv", 'cat "$2" >> "%s/contenus-barre"; exec /usr/bin/mv "$@"' % root)
             H.faux(root, "zenity", "echo /ailleurs/labo.ovpn")
@@ -652,6 +653,73 @@ class HorsEcran(unittest.TestCase):
         ''', etats={0: etat})
         act = [a for a in appels if a[:1] == ["fournisseur"]]
         self.assertEqual(act, [["fournisseur", "proton", "login"]])
+
+    def test_installer_un_client_absent_bouton_etapes_et_lien(self):
+        # Client absent + plan « auto » : « Installer » et la phrase (terminal, sudo) ; le clic ferme la fenêtre et lance installer-client.
+        # Client absent + plan « guide » : « Voir comment installer » déplie les étapes, « Ouvrir la page officielle » lance xdg-open.
+        # Absent sans plan : aucun de ces boutons.
+        fl = [dict(id="proton", nom="Proton VPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False,
+                   installation=dict(mode="auto", lien="https://protonvpn.com/support/linux-vpn-arch", etapes=[])),
+              dict(id="nord", nom="NordVPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False,
+                   installation=dict(mode="guide", lien="https://support.nordvpn.com/hc/en-us/articles/1-x", etapes=["Premiere etape.", "Deuxieme etape."]))]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            function vu(n) { var o = trouver(fen.contentItem, n); return o !== null && o.visible }
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    verifier(vu("nc-vpn-installer-bouton") && !vu("nc-vpn-installer-voir"), "Proton : Installer, pas Voir comment")
+                    var ph = textes(trouver(fen.contentItem, "nc-vpn-installer-phrase")).join("")
+                    verifier(ph.indexOf("sudo") >= 0 && ph.indexOf("terminal") >= 0, "la phrase : " + ph)
+                    fen.fermer.connect(function () { fermee = true })
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-installer-bouton")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return
+                    verifier(fermee, "« Installer » ferme la fenêtre (le terminal prend le clavier)")
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 2) return
+                    verifier(!vu("nc-vpn-installer-bouton") && vu("nc-vpn-installer-voir"), "Nord : Voir comment installer, pas Installer")
+                    verifier(!vu("nc-vpn-installer-etapes") && !vu("nc-vpn-installer-page"), "étapes repliées au départ")
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-installer-voir")); etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 2) return
+                    verifier(vu("nc-vpn-installer-etapes") && vu("nc-vpn-installer-page"), "étapes dépliées")
+                    var tx = textes(trouver(fen.contentItem, "nc-vpn-installer-etapes")).join("|")
+                    verifier(tx.indexOf("1. Premiere etape.") >= 0 && tx.indexOf("2. Deuxieme etape.") >= 0, "étapes : " + tx)
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-installer-page")); etape++; ticks = 0; return }
+                if (etape === 6) { if (ticks < 6) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual([a for a in appels if a[:1] == ["installer-client"]], [["installer-client", "proton"]])
+        self.assertEqual([a for a in appels if a[:1] == ["xdg-open"]], [["xdg-open", "https://support.nordvpn.com/hc/en-us/articles/1-x"]])
+
+    def test_pas_de_bouton_d_installation_si_pas_absent_sans_plan_ou_lien_refuse(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="sans_compte", message="Pas de compte.", pays_actif="", connecte=False, peut_login=True,
+                   installation=dict(mode="auto", lien="https://protonvpn.com/x", etapes=[])),                 # pas absent : ignoré
+              dict(id="nord", nom="NordVPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False,
+                   installation=dict(mode="auto", lien="https://evil.example/x", etapes=[]))]                  # lien hors liste blanche : ignoré
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            function vu(n) { var o = trouver(fen.contentItem, n); return o !== null && o.visible }
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    verifier(!vu("nc-vpn-installer-bouton") && !vu("nc-vpn-installer-voir"), "Proton installé : aucun bouton d'installation")
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    verifier(!vu("nc-vpn-installer-bouton") && !vu("nc-vpn-installer-voir"), "lien non officiel : aucun bouton")
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-mullvad")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 2) return
+                    verifier(!vu("nc-vpn-installer-bouton") && !vu("nc-vpn-installer-voir"), "Mullvad absent sans plan : aucun bouton")
+                    verifier(textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|").indexOf("client absent") >= 0, "le message reste")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual([a for a in appels if a[:1] in (["installer-client"], ["xdg-open"])], [])
 
     def test_proton_cli_pret_liste_changer_et_tout_deconnecter_sans_doublon(self):
         # Proton prêt (CLI officielle) comme Mullvad : Connecté / Changer par pays ; son tunnel NetworkManager n'est pas doublé ;

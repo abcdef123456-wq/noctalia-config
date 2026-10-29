@@ -10,6 +10,8 @@ import QtQuick
 Item {
     id: l
     signal connecterCompte(string id)
+    signal installerClient(string id)
+    signal ouvrirLien(string lien)
     property string filtre: "tous"
     property string recherche: ""
     property real maxHauteur: 300
@@ -64,6 +66,8 @@ Item {
         visible: l.carteEtat
         width: parent.width
         onConnecterCompte: id => l.connecterCompte(id)
+        onInstallerClient: id => l.installerClient(id)
+        onOuvrirLien: lien => l.ouvrirLien(lien)
         modele: l.fiche || ({ fournisseur: "", etat: "absent", bientot: false })
     }
     Texte {

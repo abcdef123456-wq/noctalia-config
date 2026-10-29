@@ -7,6 +7,8 @@ import QtQuick
 
 Rectangle {
     id: k
+    signal installerClient(string id)             // « Installer » (client absent) : la fenêtre se ferme, un terminal s'ouvre (Vpn.qml)
+    signal ouvrirLien(string lien)                // « Ouvrir la page officielle » (parcours guidé)
     signal connecterCompte(string id)             // « Se connecter au compte » / « Ouvrir » : la fenêtre se ferme et lance le login (Vpn.qml)
     property var modele: ({ fournisseur: "", etat: "absent", bientot: false, peutLogin: false, message: "" })
     readonly property string etatTexte: modele.bientot ? "bientot" : modele.etat
@@ -60,6 +62,15 @@ Rectangle {
             }
             Texte { objectName: "nc-vpn-fournisseur-message"; width: parent.width; text: k.message; wrapMode: Text.Wrap; elide: Text.ElideNone
                     secondaire: true; font.pixelSize: 12 }
+            VpnInstaller {
+                objectName: "nc-vpn-fournisseur-installer"
+                visible: k.modele.etat === "absent" && !k.modele.bientot && k.modele.installation !== undefined && k.modele.installation !== null
+                width: parent.width
+                ident: k.modele.id || ""
+                installation: k.modele.installation || null
+                onInstaller: id => k.installerClient(id)
+                onOuvrirLien: lien => k.ouvrirLien(lien)
+            }
             Rectangle {
                 objectName: "nc-vpn-fournisseur-ouvrir"
                 visible: k.modele.peutLogin === true && k.modele.etat === "pilote_appli" && !k.modele.bientot
