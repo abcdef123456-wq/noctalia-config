@@ -28,6 +28,9 @@ class Projection(unittest.TestCase):
         d = tempfile.TemporaryDirectory(prefix="nc-ecrans-proj-")
         self.addCleanup(d.cleanup)
         self.d = Path(d.name)
+        # Après d.cleanup dans la liste, donc avant lui : « externe » lance « confirmer-externe » détaché (setsid -f), qui
+        # appelle encore les faux outils ; le dossier n'est retiré qu'une fois ses processus finis (sinon « Directory not empty »)
+        self.addCleanup(self.attendre_detaches)
         self.home = self.d / "home"
         (self.home / ".config/nc").mkdir(parents=True)
         self.faux = self.d / "faux"
@@ -40,9 +43,29 @@ class Projection(unittest.TestCase):
         self.desc = "Projecteur"
         self.erreurs()
 
+    def attendre_detaches(self):
+        """Attend (15 s au plus) qu'aucun processus des sessions notées par les faux outils ne vive encore. La session de
+        ce test n'y est jamais : seule celle d'un setsid y entre."""
+        try:
+            notees = {int(x) for x in (self.d / "sessions").read_text().split()} - {os.getsid(0)}
+        except (OSError, ValueError):
+            return
+        def vivantes():
+            for st in Path("/proc").glob("[0-9]*/stat"):
+                try:
+                    champs = st.read_text().rsplit(")", 1)[1].split()
+                except (OSError, IndexError):
+                    continue
+                if len(champs) > 3 and int(champs[3]) in notees and champs[0] != "Z":
+                    return True
+            return False
+        self.assertTrue(self.attendre(lambda: not vivantes(), delai=15.0), "processus détaché encore vivant")
+
     def script(self, nom, corps):
         p = self.faux / nom
-        p.write_text("#!/bin/sh\n" + corps + "\n")
+        # Chaque faux outil note sa session (champ 6 de /proc/PID/stat, sans ps : absent des conteneurs minimaux)
+        session = 'read -r _ _ _ _ _ s _ < /proc/$$/stat; echo "$s" >> "$D/sessions"\n'
+        p.write_text("#!/bin/sh\n" + session + corps + "\n")
         p.chmod(0o755)
 
     def erreurs(self, avant="", apres=None):
