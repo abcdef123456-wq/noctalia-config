@@ -83,6 +83,9 @@ for fr, en in pairs(TITRES_EN) do TITRES_FR[string.lower(en)] = fr end
 
 local sections = {}
 local libelles = {}     -- titre français -> titre affiché (label de nc-keys)
+-- Pourquoi rien n'est lu (nc-keys absent, en échec, sortie vide ou illisible) : affiché à la place de la fiche, jamais une
+-- fiche vide ; nil tant que la lecture n'a pas échoué
+local erreur = nil
 local appear = 1
 local ticking = false
 
@@ -178,7 +181,8 @@ function render()
   local ease = 1 - (1 - appear) * (1 - appear)
   local body
   if maxH == 0 then
-    body = ui.label({ text = tr("Lecture des raccourcis…", "Reading shortcuts…"), fontSize = 14, color = "on_surface_variant" })
+    body = ui.label({ text = erreur or tr("Lecture des raccourcis…", "Reading shortcuts…"), fontSize = 14, color = "on_surface_variant",
+                      maxWidth = px(720), maxLines = 4 })
     maxH = 40
   else
     body = ui.row({ gap = px(LARGE and 20 or 24), align = "start", height = maxH }, cols)
@@ -204,19 +208,47 @@ function onFrameTick(deltaMs)
   if appear >= 1 and ticking then ticking = false; panel.setNeedsFrameTick(false) end
 end
 
+local function premiere_ligne(t)
+  if type(t) ~= "string" then return "" end
+  local l = t:match("[^\n]*%S[^\n]*") or ""
+  l = l:gsub("^%s+", ""):gsub("%s+$", "")
+  if #l > 200 then l = l:sub(1, 200) .. "…" end
+  return l
+end
+
 local function load()
+  if not noctalia.fileExists(KEYS_CMD) then
+    sections, erreur = {}, tr("Aucun raccourci lu : nc-keys est absent de ~/.local/bin (relance install.sh).",
+                              "No shortcuts read: nc-keys is missing from ~/.local/bin (run install.sh again).")
+    render()
+    return
+  end
   noctalia.runAsync({ KEYS_CMD, "json" }, function(r)
-    local data = r.exitCode == 0 and noctalia.json.decode(r.stdout)
+    local data = r and r.exitCode == 0 and noctalia.json.decode(r.stdout)
+    local n = 0
     if type(data) == "table" then
       sections, libelles = {}, {}
       for _, s in ipairs(data) do
         local titre = tostring(s.title or "")
         titre = TITRES_FR[string.lower(titre)] or titre
-        sections[titre] = s.rows
+        if type(s.rows) == "table" and #s.rows > 0 then
+          sections[titre] = s.rows
+          n = n + #s.rows
+        end
         if type(s.label) == "string" and s.label ~= "" then libelles[titre] = s.label end
       end
-      render()
     end
+    if n > 0 then
+      erreur = nil
+    else
+      -- nc-keys écrit sa raison sur une ligne (« nc-keys : … ») ; sinon une raison générale, jamais une fiche vide
+      sections = {}
+      local e = premiere_ligne(r and r.stderr)
+      erreur = e ~= "" and (tr("Aucun raccourci lu : ", "No shortcuts read: ") .. e:gsub("^nc%-keys ?: ?", ""))
+               or tr("Aucun raccourci lu : nc-keys n'a rien renvoyé de lisible (essaie « nc-keys » dans un terminal).",
+                     "No shortcuts read: nc-keys returned nothing readable (try \"nc-keys\" in a terminal).")
+    end
+    render()
   end, 5000)
 end
 

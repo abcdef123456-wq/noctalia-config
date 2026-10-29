@@ -163,7 +163,9 @@ def section_label(sec):
 
 
 def parse_binds(text):
-    """Blocs de « hyprctl binds » -> liste de dictionnaires (la sortie JSON ne donne pas les touches par position)."""
+    """Blocs de « hyprctl binds » -> liste de dictionnaires (la sortie JSON ne donne pas les touches par position). Un bloc
+    commence par une ligne non indentée : « bindd » et ses drapeaux (Hyprland 0.56), ou « bind » seul suivi d'une ligne
+    « flags: » (0.57) ; puis des lignes « clé: valeur » indentées (modmask, submap, key, description…), les mêmes partout."""
     binds, cur = [], None
     for line in text.splitlines():
         if line and not line[0].isspace():
@@ -172,6 +174,44 @@ def parse_binds(text):
         elif cur is not None and ":" in line:
             k, _, v = line.strip().partition(":")
             cur[k.strip()] = v[1:] if v.startswith(" ") else v
+    return binds
+
+
+def parse_binds_json(text):
+    """Secours : « hyprctl binds -j » mis sous la même forme que parse_binds. Une touche donnée par son code (0.57 laisse alors
+    « key » vide) devient « code:N », comme dans la sortie texte."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    binds = []
+    for b in data if isinstance(data, list) else []:
+        if not isinstance(b, dict):
+            continue
+        key = str(b.get("key") or "")
+        if not key and isinstance(b.get("keycode"), int) and b["keycode"] > 0:
+            key = f"code:{b['keycode']}"
+        binds.append({"description": str(b.get("description") or ""), "submap": str(b.get("submap") or ""),
+                      "modmask": str(b.get("modmask") or 0), "key": key})
+    return binds
+
+
+def lire_binds():
+    """Les raccourcis de Hyprland : la sortie texte d'abord ; si elle ne donne aucun raccourci décrit (format inconnu d'une
+    autre version), la sortie JSON. Hyprland absent ou en échec : message clair et code 1."""
+    try:
+        out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True, check=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        print(T("nc-keys : Hyprland ne répond pas (hyprctl absent ou en échec) : lance-le depuis une session Hyprland",
+                "nc-keys: Hyprland is not answering (hyprctl missing or failing): run it from a Hyprland session"), file=sys.stderr)
+        sys.exit(1)
+    binds = parse_binds(out)
+    if not any(b.get("description", "").strip() for b in binds):
+        try:
+            j = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            j = ""
+        binds = parse_binds_json(j) or binds
     return binds
 
 
@@ -192,14 +232,16 @@ def key_label(raw):
 
 
 def collect():
-    try:
-        out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True, check=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        print(T("nc-keys : Hyprland ne répond pas (hyprctl absent ou en échec) : lance-le depuis une session Hyprland",
-                "nc-keys: Hyprland is not answering (hyprctl missing or failing): run it from a Hyprland session"), file=sys.stderr)
+    binds = lire_binds()
+    if not any(b.get("description", "").strip() and not b.get("submap", "").strip() for b in binds):
+        # Jamais une fiche vide ou réduite aux lignes ajoutées ici : la fiche dit pourquoi
+        print(T("nc-keys : « hyprctl binds » ne donne aucun raccourci décrit (config de Hyprland en erreur ? "
+                "voir hyprctl configerrors)",
+                "nc-keys: \"hyprctl binds\" gives no described shortcut (Hyprland config error? "
+                "see hyprctl configerrors)"), file=sys.stderr)
         sys.exit(1)
     rows = {}   # (section, texte, mods) -> {keys, order}
-    for n, b in enumerate(parse_binds(out)):
+    for n, b in enumerate(binds):
         desc = b.get("description", "").strip()
         if not desc or b.get("submap", "").strip():
             continue
@@ -251,7 +293,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
         print(T(__doc__.strip(), USAGE_EN))
         sys.exit(0)             # l'aide ne demande pas Hyprland
-    data = collect()
+    try:
+        data = collect()
+    except Exception as e:      # la fiche (plugin nc/keys) affiche la 1re ligne de stderr : une ligne claire, pas une trace
+        print(T(f"nc-keys : erreur inattendue : {type(e).__name__}: {e}", f"nc-keys: unexpected error: {type(e).__name__}: {e}"),
+              file=sys.stderr)
+        sys.exit(1)
     if len(sys.argv) > 1 and sys.argv[1] == "json":
         json.dump(data, sys.stdout, ensure_ascii=False)
     else:

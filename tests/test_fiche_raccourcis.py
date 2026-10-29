@@ -24,7 +24,7 @@ panel = { render = function(n) rendu = n end, setNeedsFrameTick = function() end
 local donnees = ''' + json.dumps(json.dumps(sections)) + r'''
 noctalia = {
   getenv = function() return "fr" end, expandPath = function(p) return p end, readFile = function() return "" end,
-  fileExists = function() return false end, focusedOutputName = function() return "E" end,
+  fileExists = function(p) return p == "~/.local/bin/nc-keys" end, focusedOutputName = function() return "E" end,
   outputs = function() return { { name = "E", focused = true, width = 1600, height = ''' + str(ecran_h) + r''' } } end,
   json = { decode = function(t) return DECODE(t) end },
   runAsync = function(_, cb) if cb then cb({ exitCode = 0, stdout = donnees }) end end,
