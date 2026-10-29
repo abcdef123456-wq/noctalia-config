@@ -122,6 +122,11 @@ lecture refusée, `custom` ou contrôleurs en désaccord : un avertissement qui 
 différent ou instable (un service l'a réécrit, ou le firmware l'a refusé) ; code 5 : le fichier global est juste mais un contrôleur garde un autre profil ; `nc-energie` annule alors le profil entier et le dit. Dans
 `nc-energie appliquer`, le profil du service passe AVANT le profil de la plateforme (le service réécrit souvent ce dernier) ; à la fin, `nc-energie` relit le profil du service, le profil de la plateforme, l'EPP, le boost et la fréquence maximale : un réglage réécrit par un service donne « non confirmé » (code 4), jamais un succès. `revenir` remet d'abord le profil du service, attend qu'il soit stable, remet le profil de la plateforme en dernier et relit tout.
 
+**Limite connue** : « stable » veut dire la bonne valeur sur 2 lectures de suite, soit 0,2 à 0,4 s. Avec tlp-pd, `tlp PROFIL` est lancé
+détaché (sans attendre sa fin) : s'il réécrit le profil de la plateforme, l'EPP ou le boost plus tard que ces deux lectures, `nc-energie`
+peut annoncer un succès que TLP défait ensuite. `nc-diag` (section Énergie) relit l'état réel à tout moment. À mesurer sur un vrai
+portable avec tlp-pd avant d'allonger la fenêtre.
+
 ### Valider sur un Acer Nitro (compatibilité réelle à confirmer)
 
 Tant que ce test n'a pas eu lieu, rien ne prouve que les profils matériels marchent sur un Nitro précis : le pilote peut ne pas
