@@ -25,8 +25,10 @@ DEF="${NC_TLP_DEFAUTS:-/usr/share/tlp/defaults.conf}"
 CH="$S/firmware/acpi/platform_profile_choices"
 
 [ -r "$CH" ] || exit 3
-read -r brut < "$CH" 2>/dev/null || brut=""
-# Seulement des mots de la liste blanche : tout le reste est ignoré
+brut=""
+read -r brut < "$CH" 2>/dev/null || [ -n "$brut" ] || brut=""     # (dernière ligne sans retour à la ligne : lue quand même)
+# Seulement des mots de la liste blanche : tout le reste est ignoré ; pas de développement de motifs (*, ?) dans la liste
+set -f
 choix=""
 for m in $brut; do
   case "$m" in
@@ -49,9 +51,11 @@ if a performance; then prf=performance; elif a balanced-performance; then prf=ba
 a balanced && bal=balanced
 if a low-power; then sav=low-power; elif a quiet; then sav=quiet; elif a cool; then sav=cool; fi
 
+lst="$(echo $choix)"   # mots séparés par un seul espace
+# Commentaires en ASCII simple (lettres, chiffres, espaces et , . : ( ) / ' -) : install.sh refuse toute autre ligne
 printf '# /etc/tlp.d/12-nc-plateforme.conf : profils de la plateforme de CE portable (noctalia-config, TLP %s).\n' "$v"
-printf '# Écrit par install.sh d'"'"'après les choix du noyau (platform_profile_choices :%s). Ne pas modifier à la main :\n' "${choix% }"
-printf '# install.sh le réécrit. Pour l'"'"'enlever : sudo rm /etc/tlp.d/12-nc-plateforme.conf\n'
+printf '# Ecrit par install.sh d'"'"'apres les choix du noyau (%s). Ne pas modifier a la main :\n' "$lst"
+printf '# install.sh le reecrit. Pour l'"'"'enlever : sudo rm /etc/tlp.d/12-nc-plateforme.conf\n'
 [ -n "$prf" ] && printf 'PLATFORM_PROFILE_ON_%s=%s\n' "$sfx_prf" "$prf"
 [ -n "$bal" ] && printf 'PLATFORM_PROFILE_ON_%s=%s\n' "$sfx_bal" "$bal"
 [ -n "$sav" ] && printf 'PLATFORM_PROFILE_ON_SAV=%s\n' "$sav"

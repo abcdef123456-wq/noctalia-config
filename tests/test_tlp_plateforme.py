@@ -3,6 +3,7 @@
 Un portable sans « low-power » (quiet, cool) ou sans « performance » (balanced-performance) garde un profil utile."""
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -126,6 +127,61 @@ class Versions(Base):
         self.assertIn("PLATFORM_PROFILE_ON_AC=performance", r.stdout)
 
 
+class Garde(Base):
+    """Garde finale d'install.sh (plat_valide) avant « sudo install » du fichier de la plateforme."""
+    def valide(self, texte):
+        source = (REPO / "install.sh").read_text()
+        m = re.search(r"(?ms)^  plat_valide\(\) \{.*?^  \}\n", source)
+        self.assertIsNotNone(m)
+        return subprocess.run(["bash", "-c", m.group(0) + "\nplat_valide"], input=texte.encode("utf-8"), capture_output=True,
+                              timeout=30).returncode == 0
+
+    def test_la_sortie_du_generateur_passe_la_garde(self):
+        for choix in ("low-power balanced performance", "quiet balanced balanced-performance", "cool balanced", "balanced",
+                      "low-power quiet cool balanced balanced-performance performance"):
+            for defauts in (DEFAUTS_110, DEFAUTS_111):
+                r, _ = self.lancer(choix, defauts)
+                self.assertEqual(r.returncode, 0)
+                self.assertTrue(self.valide(r.stdout), (choix, r.stdout))
+
+    def test_fichiers_pieges_refuses(self):
+        bon = "# commentaire (ok)\nPLATFORM_PROFILE_ON_AC=performance\nPLATFORM_PROFILE_ON_SAV=quiet\n"
+        self.assertTrue(self.valide(bon))
+        for piege in (bon + "PLATFORM_PROFILE_ON_AC=quiet\n",                      # clé en double
+                      bon + "PLATFORM_PROFILE_ON_BAT=max-power\n",                  # valeur hors liste
+                      bon + "PLATFORM_PROFILE_ON_BAT=balanced; id\n",               # texte collé
+                      bon + "PLATFORM_PROFILE_ON_BAT=balanced\x01\n",              # caractère de contrôle
+                      bon + "PLATFORM_PROFILE_ON_BAT=balanced\r\n",
+                      bon + "\n",                                                   # ligne vide
+                      bon + "TLP_ENABLE=0\n",                                       # autre clé
+                      bon + "PLATFORM_PROFILE_ON_XYZ=quiet\n",
+                      bon + "PLATFORM_PROFILE_ON_BAT=\"balanced\"\n",
+                      "# commentaire é accentué\nPLATFORM_PROFILE_ON_AC=quiet\n",
+                      "# $(id)\nPLATFORM_PROFILE_ON_AC=quiet\n",
+                      "#!/bin/sh\nPLATFORM_PROFILE_ON_AC=quiet\n",
+                      "# seulement un commentaire\n", ""):
+            self.assertFalse(self.valide(piege), repr(piege))
+
+    def test_le_generateur_ignore_l_environnement_d_essai(self):
+        source = (REPO / "install.sh").read_text()
+        self.assertIn('env -u NC_SYSFS -u NC_TLP_DEFAUTS "$REPO/system/nc-tlp-plateforme"', source)
+
+    def test_motifs_non_developpes_et_fichier_sans_retour_a_la_ligne(self):
+        sysfs = self.tmp / "sys"
+        f = sysfs / "firmware/acpi/platform_profile_choices"
+        f.parent.mkdir(parents=True)
+        f.write_text("* quiet ? balanced")                       # pas de retour à la ligne final
+        (self.tmp / "quiet").touch()
+        d = self.tmp / "defaults.conf"
+        d.write_text(DEFAUTS_110)
+        r = subprocess.run([str(SCRIPT)], capture_output=True, text=True, cwd=str(self.tmp),
+                           env={"PATH": "/usr/bin:/bin", "NC_SYSFS": str(sysfs), "NC_TLP_DEFAUTS": str(d)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PLATFORM_PROFILE_ON_SAV=quiet", r.stdout)
+        self.assertIn("PLATFORM_PROFILE_ON_BAT=balanced", r.stdout)
+        self.assertNotIn("PLATFORM_PROFILE_ON_AC", r.stdout)
+
+
 class Depot(unittest.TestCase):
     def test_10_nc_ne_regle_plus_la_plateforme(self):
         conf = (REPO / "system/tlp.d/10-nc.conf").read_text()
@@ -137,7 +193,8 @@ class Depot(unittest.TestCase):
         self.assertIn("system/nc-tlp-plateforme", source)
         self.assertIn("/etc/tlp.d/12-nc-plateforme.conf", source)
         self.assertIn("12-nc-plateforme|", source)                # pas pris pour un réglage perso
-        self.assertIn("PLATFORM_PROFILE_ON_[A-Z]+", source)       # un réglage de l'utilisateur reste
+        self.assertIn("PLATFORM_PROFILE_ON_[A-Z]+", source)
+        self.assertIn("sudo grep -qsE", source)               # un fichier perso en 0600 est lu aussi       # un réglage de l'utilisateur reste
 
     def test_script_executable(self):
         self.assertTrue(os.access(SCRIPT, os.X_OK))

@@ -1971,6 +1971,17 @@ if [ "$MODE" = full ]; then
   fi
   # Réglages TLP faits par toi (autres fichiers de /etc/tlp.d que ceux du dépôt) : gardés tels quels, rien n'est ajouté
   TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|11-nc-frequence|12-nc-plateforme|20-battery-limit)\.conf$' || true)"
+  # Garde finale du fichier de la plateforme (lu sur l'entrée) avant « sudo install » : seulement des commentaires simples et
+  # les clés PLATFORM_PROFILE_ON_(AC|BAT|PRF|BAL|SAV)= avec un profil de la liste, chacune une seule fois ; toute autre ligne
+  # (vide, caractère de contrôle, valeur hors liste, clé en double) = refus, sans rien écrire
+  plat_valide() {
+    LC_ALL=C awk '
+      /^# [A-Za-z0-9 ,.:()\/\047-]*$/ { next }
+      /^PLATFORM_PROFILE_ON_(AC|BAT|PRF|BAL|SAV)=(low-power|quiet|cool|balanced|balanced-performance|performance)$/ {
+        split($0, a, "="); if (a[1] in vu) mauvais = 1; vu[a[1]] = 1; n++; next }
+      { mauvais = 1 }
+      END { exit (mauvais || n == 0) }'
+  }
   tlp_regle() {   # réglages du dépôt dans /etc/tlp.d (et la limite de charge si choisie) ; vrai si quelque chose a changé
     local ch=1
     if [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ] && [ ! -f /etc/tlp.d/10-legion.conf ]; then
@@ -1989,15 +2000,26 @@ if [ "$MODE" = full ]; then
     # portable (quiet ou cool à la place de low-power, balanced-performance à la place de performance). Rien à écrire
     # quand le noyau n'expose pas de profil : un ancien fichier est alors retiré.
     # Si tu as réglé toi-même PLATFORM_PROFILE_ON_* (/etc/tlp.conf ou un de tes fichiers de /etc/tlp.d), ton choix reste.
-    plat="$("$REPO/system/nc-tlp-plateforme" 2>/dev/null)" || plat=""
-    # shellcheck disable=SC2086
-    if grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' /etc/tlp.conf $TLP_PERSO; then
-      plat=""   # (un ancien fichier du dépôt serait aussi retiré ci-dessous : ton réglage prend sa place)
+    plat="$(env -u NC_SYSFS -u NC_TLP_DEFAUTS "$REPO/system/nc-tlp-plateforme" 2>/dev/null)" || plat=""
+    plat_ok=1
+    if [ -n "$plat" ] && ! printf '%s\n' "$plat" | plat_valide; then
+      warn "$(t "Profils de la plateforme : texte inattendu, fichier non écrit." "Platform profiles: unexpected text, file not written.")"
+      plat_ok=0
     fi
-    if [ -n "$plat" ]; then
-      [ "$(cat /etc/tlp.d/12-nc-plateforme.conf 2>/dev/null)" = "$plat" ] || { printf '%s\n' "$plat" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/12-nc-plateforme.conf; ch=0; }
-    elif [ -f /etc/tlp.d/12-nc-plateforme.conf ]; then
-      sudo rm -f /etc/tlp.d/12-nc-plateforme.conf; ch=0
+    plat_perso=0
+    for fp in /etc/tlp.conf; do
+      sudo grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' -- "$fp" && plat_perso=1
+    done
+    while IFS= read -r fp; do
+      [ -n "$fp" ] && sudo grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' -- "$fp" && plat_perso=1
+    done <<< "$TLP_PERSO"
+    [ "$plat_perso" = 1 ] && plat=""   # (un ancien fichier du dépôt est retiré ci-dessous : ton réglage prend sa place)
+    if [ "$plat_ok" = 1 ]; then
+      if [ -n "$plat" ]; then
+        [ "$(cat /etc/tlp.d/12-nc-plateforme.conf 2>/dev/null)" = "$plat" ] || { printf '%s\n' "$plat" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/12-nc-plateforme.conf; ch=0; }
+      elif [ -f /etc/tlp.d/12-nc-plateforme.conf ]; then
+        sudo rm -f /etc/tlp.d/12-nc-plateforme.conf; ch=0
+      fi
     fi
     if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
       info "$(t "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché." "Your battery supports a charge limit (about 80%), which preserves it if the PC is often plugged in.")"
