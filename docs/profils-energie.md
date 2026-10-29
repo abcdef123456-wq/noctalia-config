@@ -63,7 +63,7 @@ maximum hors profil film.
 audio-ps V | kbd V` (et `sudoers COMPTE`, qui n'écrit rien : la ligne sudo exacte). La règle sudo a une commande par
 sous-commande et valeur (`nc-energie-root sudoers COMPTE` la montre) ; `visudo -cf` la vérifie à l'installation. Les chemins de
 `/sys` sont construits dans le script, chaque écriture vérifie que le fichier existe déjà, aucune chaîne libre n'est acceptée.
-Codes : 0 fait, 1 échec, 2 refusé, 3 rien de tel sur ce PC, 4 écrit mais la valeur relue est différente. Rien n'est réappliqué au démarrage.
+Codes : 0 fait, 1 échec, 2 refusé, 3 rien de tel sur ce PC, 4 écrit mais la valeur relue est différente ou instable, 5 contrôleur de la plateforme resté sur un autre profil. Rien n'est réappliqué au démarrage.
 
 ## Profil de la plateforme (ventilateurs, limites du firmware)
 
@@ -101,7 +101,7 @@ Versions de TLP lues (sources `defaults.conf` et `func.d/10-tlp-func-cpu`) :
 Une seule valeur choisie ici donne donc le même résultat avec toutes ces versions. Les anciens suffixes ne sont pas écrits pour
 TLP 1.11 (ils y remplaceraient la liste de TLP par une seule valeur).
 
-À savoir, sans l'avoir confirmé sur un vrai PC : dans le pilote `acer-wmi` du noyau (chemin « Predator V4 »), `performance`
+**Acer : « performance » est le mode Turbo, plus bruyant ; « Équilibré » reste le mode courant** (à confirmer par un essai réel). `nc-diag` le rappelle sur un portable Acer qui propose `performance` et `balanced-performance`. Détail, sans l'avoir confirmé sur un vrai PC : dans le pilote `acer-wmi` du noyau (chemin « Predator V4 »), `performance`
 correspond au mode Turbo d'Acer et `balanced-performance` au mode Performance. TLP 1.11 préfère `balanced-performance` pour
 les portables de jeu (moins de bruit de ventilateur). Ici Performance garde `performance` d'abord ; si l'usage montre trop de
 bruit sur un Nitro, il suffit de mettre `balanced-performance` d'abord dans `system/nc-tlp-plateforme`.
@@ -118,9 +118,9 @@ lecture refusée, `custom` ou contrôleurs en désaccord : un avertissement qui 
 ### Écriture par `nc-energie` (profils avancés)
 
 `nc-energie-root platform V` n'écrit que le fichier global, si `V` est dans `platform_profile_choices`, puis **relit** la valeur
-(après 0,2 s, le temps qu'un service la réécrive) et celle de chaque contrôleur (en lecture seule). Code 4 : écrit mais relu
-différent (un service l'a réécrit, ou le firmware l'a refusé) ; `nc-energie` annule alors le profil entier et le dit. Dans
-`nc-energie appliquer`, le profil du service passe AVANT le profil de la plateforme (le service réécrit souvent ce dernier).
+(toutes les 0,2 s pendant 5 s au plus, jusqu'à la valeur voulue sur 2 lectures de suite) et celle de chaque contrôleur (en lecture seule). Code 4 : écrit mais relu
+différent ou instable (un service l'a réécrit, ou le firmware l'a refusé) ; code 5 : le fichier global est juste mais un contrôleur garde un autre profil ; `nc-energie` annule alors le profil entier et le dit. Dans
+`nc-energie appliquer`, le profil du service passe AVANT le profil de la plateforme (le service réécrit souvent ce dernier) ; à la fin, `nc-energie` relit le profil du service, le profil de la plateforme, l'EPP, le boost et la fréquence maximale : un réglage réécrit par un service donne « non confirmé » (code 4), jamais un succès. `revenir` remet d'abord le profil du service, attend qu'il soit stable, remet le profil de la plateforme en dernier et relit tout.
 
 ### Valider sur un Acer Nitro (compatibilité réelle à confirmer)
 

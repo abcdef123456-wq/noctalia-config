@@ -902,7 +902,7 @@ def _mot(texte):
     return re.sub(r"[^A-Za-z0-9_.-]", "", texte)[:40]
 
 
-def energie_plateforme(b, actif, portable):
+def _energie_plateforme(b, actif, portable):
     """Profil de la plateforme (ventilateurs, limites du firmware) : ce que le NOYAU dit, à côté du profil logiciel.
     Deux choses distinctes : le profil logiciel actif (service de profils) et le mode matériel lu dans /sys. Un mode matériel
     n'est « confirmé » que s'il correspond au profil logiciel ; rien n'est écrit ici, et jamais de succès inventé."""
@@ -975,6 +975,36 @@ def energie_plateforme(b, actif, portable):
                   "matériel, ou ce PC n'a pas l'équivalent : le profil logiciel agit seul.",
                   f"expected: {' or '.join(attendu)} (kernel choices: {choix_txt}). The service has not (yet) set this hardware "
                   "profile, or this PC has no equivalent: the software profile acts alone."), cle="plateforme_difference")
+
+
+def energie_plateforme(b, actif, portable):
+    _energie_plateforme(b, actif, portable)
+    _note_acer(b)
+
+
+def _note_acer(b):
+    """Aide sur un portable Acer qui propose « performance » ET « balanced-performance » : d'après le pilote acer-wmi du noyau,
+    « performance » y est le mode Turbo (plus bruyant) et « balanced-performance » le mode Performance d'Acer. À confirmer par
+    un essai réel sur ce modèle : le diagnostic n'affirme rien de plus que ce que dit le pilote."""
+    try:
+        with open(os.path.join(SYS, "firmware/acpi/platform_profile_choices"), encoding="utf-8", errors="replace") as h:
+            choix = h.read().split()
+    except OSError:
+        return
+    if "performance" not in choix or "balanced-performance" not in choix:
+        return
+    noms = []
+    for d in glob.glob(os.path.join(SYS, "class/platform-profile/*")):
+        try:
+            with open(os.path.join(d, "name"), encoding="utf-8", errors="replace") as h:
+                noms.append(h.read().strip().lower())
+        except OSError:
+            pass
+    if any("acer" in n for n in noms):
+        b.ok(T("Acer : « performance » est le mode Turbo (plus bruyant) ; « Équilibré » reste le mode courant (à confirmer par un essai "
+               "réel sur ce modèle)",
+               "Acer: “performance” is the Turbo mode (louder); “Balanced” stays the everyday mode (to be confirmed by a real test "
+               "on this model)"))
 
 
 def energie_processeur(b, bats):

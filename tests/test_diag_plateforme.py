@@ -135,6 +135,23 @@ class Plateforme(unittest.TestCase):
         b = self.bilan("power-saver")
         self.assertIn("TLP", self.textes(b)[0])
 
+    def test_note_acer_turbo(self):
+        self.pf("balanced", "low-power quiet balanced balanced-performance performance",
+                [("acer-wmi", "balanced", "low-power quiet balanced balanced-performance performance")])
+        self.services.add("tlp-pd.service")
+        b = self.bilan("balanced")
+        self.assertTrue(any("mode Turbo" in t and "à confirmer" in t for t in self.textes(b)), self.textes(b))
+        self.assertEqual(b.attention, 0)
+
+    def test_pas_de_note_acer_ailleurs(self):
+        self.pf("balanced", "low-power balanced balanced-performance performance",
+                [("autre-pilote", "balanced", "low-power balanced balanced-performance performance")])
+        b = self.bilan("balanced")
+        self.assertFalse(any("Turbo" in t for t in self.textes(b)))
+        self.pf("balanced", "quiet balanced balanced-performance", [("acer-wmi", "balanced", "quiet balanced balanced-performance")])
+        b = self.bilan("balanced")
+        self.assertFalse(any("Turbo" in t for t in self.textes(b)))       # pas de « performance » à ce PC
+
     def test_en_anglais(self):
         self.mod.T = lambda fr, en: en
         self.pf("balanced", "quiet balanced performance")
