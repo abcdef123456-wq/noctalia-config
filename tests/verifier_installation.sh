@@ -129,7 +129,8 @@ instantane >"$apres"; nb_apres="$(sauvegardes)"
 if cmp -s "$avant" "$apres"; then ok "mêmes fichiers, même contenu"
 else ko "fichiers changés au 2e passage :"; diff "$avant" "$apres" | head -30; fi
 if [ "$nb_avant" = "$nb_apres" ]; then ok "aucune sauvegarde ajoutée ($nb_apres dans ${STATE/#$HOME/~})"
-else ko "sauvegarde inutile : $nb_avant -> $nb_apres"; ls -1d "$STATE"/backup-* | tail -2; fi
+else ko "sauvegarde inutile : $nb_avant -> $nb_apres"; ls -1d "$STATE"/backup-* | tail -2
+  ( cd "$(ls -1d "$STATE"/backup-* | tail -1)" && find . -mindepth 1 | head -20 ); fi   # ce qu'elle contient : la cause
 rm -f "$avant" "$apres" "$journal"
 
 printf '\n'

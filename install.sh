@@ -949,7 +949,9 @@ sortie_install() {
   trap - INT TERM EXIT
   relancer_noctalia
   rm -f "$tmp"
-  rmdir "$BK" 2>/dev/null || true
+  # Pas de sauvegarde vide : les dossiers laissés vides par les sauvegardes retirées (dossiers utilisateur, signets), puis
+  # $BK lui-même s'il ne garde rien. rmdir ne retire qu'un dossier vide : rien d'autre n'est touché.
+  if [ -n "${BK:-}" ] && [ -d "$BK" ]; then rmdir -- "$BK/.config/gtk-3.0" "$BK/.config" "$BK" 2>/dev/null || true; fi
   exit "$code"
 }
 trap 'sortie_install 130' INT
@@ -1420,8 +1422,12 @@ if os.path.exists(fichier):
             f.write("\n".join(lignes) + "\n")
         os.replace(tmp, fichier)       # d'un seul coup : jamais à moitié écrit
 PYEOF
-if [ -f "$BK/.config/user-dirs.dirs" ] && ! cmp -s "$BK/.config/user-dirs.dirs" "$HOME/.config/user-dirs.dirs"; then
-  noter_silencieux "dossiers utilisateur (~/.config/user-dirs.dirs : dossiers vides inutiles retirés)" "ancienne version : $BK/.config/user-dirs.dirs"
+if [ -f "$BK/.config/user-dirs.dirs" ]; then
+  if cmp -s "$BK/.config/user-dirs.dirs" "$HOME/.config/user-dirs.dirs"; then
+    rm -f -- "$BK/.config/user-dirs.dirs"          # rien n'a changé : pas de sauvegarde inutile
+  else
+    noter_silencieux "dossiers utilisateur (~/.config/user-dirs.dirs : dossiers vides inutiles retirés)" "ancienne version : $BK/.config/user-dirs.dirs"
+  fi
 fi
 [ -e "$HOME/.config/gtk-3.0/bookmarks" ] && backup .config/gtk-3.0/bookmarks || echo ".config/gtk-3.0/bookmarks" >> "$BK/.created"
 python3 -I - "$HOME/.config/gtk-3.0/bookmarks" <<'PYEOF' 2>/dev/null || true
@@ -1449,8 +1455,11 @@ with open(tmp, "w") as f:
 os.replace(tmp, fichier)               # d'un seul coup : jamais à moitié écrit
 PYEOF
 if [ -f "$BK/.config/gtk-3.0/bookmarks" ]; then
-  cmp -s "$BK/.config/gtk-3.0/bookmarks" "$HOME/.config/gtk-3.0/bookmarks" ||
+  if cmp -s "$BK/.config/gtk-3.0/bookmarks" "$HOME/.config/gtk-3.0/bookmarks"; then
+    rm -f -- "$BK/.config/gtk-3.0/bookmarks"       # rien n'a changé : pas de sauvegarde inutile
+  else
     noter_silencieux "signets de Nautilus (~/.config/gtk-3.0/bookmarks : Téléchargements, Documents, Images…)" "ancienne version : $BK/.config/gtk-3.0/bookmarks"
+  fi
 else
   noter_silencieux "signets de Nautilus (~/.config/gtk-3.0/bookmarks, fichier créé)" "pour revenir : supprimer ce fichier (il n'existait pas avant)"
 fi
