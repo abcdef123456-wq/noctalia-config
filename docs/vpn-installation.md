@@ -31,7 +31,7 @@ commande `nc-vpn installer-client ID` refuse un client déjà installé. À la f
 - `gpg` absent : message clair (« gpg absent : installe gnupg »), aucune commande lancée.
 - Environnement : le script fixe lui-même `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` et `umask 022` juste après
   `set -eu` ; `nc-vpn installer-client` n'ouvre le terminal qu'avec une copie de l'environnement de la session SANS `BASH_ENV`, `ENV`, `CDPATH`,
-  `GNUPGHOME`, `LD_*`, `BASH_FUNC_*`, `SSL_CERT_*`, `CURL_*` ni variable de test, et avec ce même PATH fixe.
+  `GNUPGHOME`, `LD_*`, `BASH_FUNC_*`, `SSL_CERT_*`, `CURL_*` (toutes celles qui commencent par CURL_) ni variable de test, et avec ce même PATH fixe.
 - `NC_OS_RELEASE`, `NC_TEST_EMPREINTE`, `NC_TEST_CACHE`, `NC_TEST_APT_DIR` et `NC_TEST_YUM_DIR` n'existent que pour les tests : ils ne sont lus
   que si `NC_INSTALLER_TEST=1` (qui garde aussi le PATH reçu, pour de faux outils). En usage réel `nc-vpn` les retire, et le script les ignore.
 - Les fichiers de dépôt sont écrits par le script lui-même (jamais téléchargés : un fichier reçu pourrait désactiver la vérification des

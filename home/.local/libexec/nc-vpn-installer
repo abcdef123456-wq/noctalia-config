@@ -185,6 +185,8 @@ nettoyer_cache() {
 }
 nettoyer() {
   nettoyer_cache
+  # L'agent lancé par gpg dans le trousseau jetable : arrêté avant de retirer son dossier
+  if [ -n "$TMP" ] && [ -d "$TMP/gh" ] && command -v gpgconf >/dev/null 2>&1; then gpgconf --homedir "$TMP/gh" --kill all >/dev/null 2>&1 || true; fi
   if [ -n "$TMP" ] && [ -d "$TMP" ]; then rm -rf -- "$TMP"; fi
 }
 trap nettoyer EXIT
@@ -203,7 +205,7 @@ etape() { # etape COMMANDE ARGUMENTS… : affiche la commande exacte, puis la la
 arreter() { printf '\n%s\n' "$(t "$1" "$2")" >&2; exit 1; }
 
 telecharger() { # telecharger URL FICHIER : HTTPS seulement, taille bornée ; l'URL est une constante de ce script
-  etape curl --proto '=https' --tlsv1.2 -fsSL --max-time 120 --max-filesize 2097152 -o "$2" "$1"
+  etape curl -q --proto '=https' --tlsv1.2 -fsSL --max-time 120 --max-filesize 2097152 -o "$2" "$1"
 }
 gpg_jetable() { gpg --homedir "$TMP/gh" --batch --no-tty "$@"; }
 controler_cle() { # controler_cle FICHIER EMPREINTE : UNE seule clé publique principale, aucune clé secrète, ni révoquée, expirée ou

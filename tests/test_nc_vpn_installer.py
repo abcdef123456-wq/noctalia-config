@@ -139,7 +139,7 @@ class Base(unittest.TestCase):
         return d
 
 
-CURL = ["curl", "--proto", "=https", "--tlsv1.2", "-fsSL", "--max-time", "120", "--max-filesize", "2097152", "-o"]
+CURL = ["curl", "-q", "--proto", "=https", "--tlsv1.2", "-fsSL", "--max-time", "120", "--max-filesize", "2097152", "-o"]
 GPGA = ["gpg", "--homedir", "<T>/gh", "--batch", "--no-tty"]
 DEB_PROTON = "protonvpn-stable-release_1.0.10_all.deb"
 PRE = lambda url: [CURL + ["<T>/cle-telechargee.asc", url], GPGA + ["--show-keys", "--with-colons", "<T>/cle-telechargee.asc"],
@@ -696,7 +696,10 @@ class AvecNcVpn(BaseVpn):
         k = appels[0]
         self.assertEqual(k[0], "kitty")
         self.assertEqual(k[1:3], ["--hold", "--title"])
-        self.assertEqual(k[4:], [str(self.r / "faux-bin" / "bash"), str(REPO / "home/.local/libexec/nc-vpn-installer"), "proton"])
+        # bash vient du PATH fixe, jamais d'un bash posé plus tôt dans le PATH de la session (ici le faux)
+        fixe = shutil.which("bash", path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        self.assertEqual(k[4:], [fixe, str(REPO / "home/.local/libexec/nc-vpn-installer"), "proton"])
+        self.assertNotEqual(k[4], str(self.r / "faux-bin" / "bash"))
 
     def test_installer_client_refuse_client_deja_la_et_fournisseur_inconnu(self):
         self.poser("nordvpn", {"account": {"out": "Account information\n"}, "countries": {"out": "France\n"}})

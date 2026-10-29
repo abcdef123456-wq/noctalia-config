@@ -2140,7 +2140,7 @@ def installeur_env():
     """Environnement du terminal d'installation : celui de la session, sans BASH_ENV, ENV, LD_*, BASH_FUNC_* ni variables de test,
     avec un PATH fixe et la langue du bureau."""
     env = {k: v for k, v in os.environ.items()
-           if k not in INSTALLEUR_RETIRE and not k.startswith(("LD_", "BASH_FUNC_", "NC_TEST_"))}
+           if k not in INSTALLEUR_RETIRE and not k.startswith(("LD_", "BASH_FUNC_", "NC_TEST_", "CURL_"))}
     env["PATH"] = INSTALLEUR_PATH
     env["NC_LANGUE"] = "en" if EN else "fr"
     return env
@@ -2199,7 +2199,9 @@ def installer_client(fid):
     f = API_FOURNISSEURS[fid]["fiche"]()
     if f.get("etat") != "absent":
         raise Echec(T("Le client est déjà installé.", "The client is already installed."))
-    exe, bash, kitty = installeur_chemin(), shutil.which("bash"), shutil.which("kitty")
+    # bash par le PATH fixe ; kitty par celui de la session, comme partout dans nc-vpn (l'installeur officiel de kitty le pose dans
+    # ~/.local/bin) : le script lancé dedans fixe son PATH lui-même
+    exe, bash, kitty = installeur_chemin(), shutil.which("bash", path=INSTALLEUR_PATH), shutil.which("kitty")
     if not exe or not bash:
         raise Echec(T("Le script d'installation (nc-vpn-installer) est introuvable : relance install.sh.",
                       "The installer script (nc-vpn-installer) was not found: run install.sh again."))
