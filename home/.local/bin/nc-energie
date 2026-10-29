@@ -462,6 +462,12 @@ def appliquer_cle(cle, valeur):
         return None, "la carte refuse sa limite de puissance (souvent le cas sur un portable) : sautée"
     if code == 3:
         return False, f"{cle} : rien de tel sur ce PC en ce moment"
+    if code == 4 and cle == "platform_profile":
+        relu = lire_actuel("platform_profile") or "?"
+        if not re.fullmatch(r"[a-z-]{1,24}", relu):
+            relu = "?"
+        return False, (f"profil matériel « {valeur} » demandé mais « {relu} » relu : un service (TLP, power-profiles-daemon, tuned) "
+                       "l'a réécrit, ou le firmware l'a refusé")
     return code == 0, f"{cle} refusé par l'assistant (code {code})"
 
 
@@ -689,6 +695,18 @@ def montrer(cle, v):
 ORDRE_NIVEAU = {2: 0, 1: 1}                         # le matériel d'abord : s'il échoue, rien d'autre n'a bougé
 
 
+def ordre_cle(cle):
+    """Rang d'application d'une clé : le matériel d'abord, puis le profil du service (power-profiles-daemon, tlp-pd, tuned),
+    puis le profil de la plateforme : le service réécrit souvent ce dernier en changeant de profil, donc il passe APRÈS lui
+    (sinon le profil matériel demandé serait aussitôt remplacé). Ensuite les réglages sans root."""
+    n = L.CLES[cle][0]
+    if cle == "profil":
+        return (1, 0, cle)
+    if cle == "platform_profile":
+        return (1, 1, cle)
+    return (ORDRE_NIVEAU[n] + (1 if n == 1 else 0), 2, cle)
+
+
 def apercu(p, f):
     changements, inchanges, avert = [], 0, []
     for cle, apres in p["reglages"].items():
@@ -705,7 +723,7 @@ def apercu(p, f):
             # ex. platform_profile « custom » ou « max-power » d'une Legion, EPP numérique : l'assistant ne sait pas le remettre
             avert.append(f"{L.CLES[cle][3]} : l'état d'avant (« {avant} ») n'est pas une valeur que l'assistant sait remettre ; "
                          "« revenir » ne pourra pas le rétablir")
-    changements.sort(key=lambda c: (ORDRE_NIVEAU[c["niveau"]], c["cle"]))
+    changements.sort(key=lambda c: ordre_cle(c["cle"]))
     root = [c for c in changements if c["cle"] in SOUS_COMMANDES]
     applicable, raison = True, ""
     if root and not f.get("assistant_root"):
@@ -808,7 +826,7 @@ def revenir():
         # jamais un écran noir au retour : une luminosité d'avant sous 5 % est remise à 5 %
         avant = [(k, "5" if k == "luminosite" and entier(v) is not None and entier(v) < 5 else v) for k, v in avant]
         # Le matériel en dernier à remettre = en premier appliqué : l'ordre inverse de l'application
-        avant.sort(key=lambda kv: (ORDRE_NIVEAU[L.CLES[kv[0]][0]], kv[0]))
+        avant.sort(key=lambda kv: ordre_cle(kv[0]))
         rates = defaire(avant)
         if rates:
             ecrire_json(FICHIER_AVANT, dict(d, avant={k: v for k, v in d["avant"].items() if k in rates}))

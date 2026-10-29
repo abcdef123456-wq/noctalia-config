@@ -242,6 +242,103 @@ class Ecritures(Base):
         self.assertEqual(self.lancer("etat").returncode, 0)
 
 
+class PlateformePortables(Base):
+    """Profil de la plateforme : choix du noyau variés (quiet sans low-power, balanced-performance sans performance),
+    valeur relue après l'écriture, contrôleurs multiples et « custom »."""
+    def choix(self, texte, courant="balanced"):
+        ecrire(self.sys / "firmware/acpi/platform_profile_choices", texte)
+        ecrire(self.sys / "firmware/acpi/platform_profile", courant)
+
+    def controleur(self, n, nom, profil, choix="quiet balanced balanced-performance"):
+        d = self.sys / f"class/platform-profile/platform-profile-{n}"
+        ecrire(d / "name", nom)
+        ecrire(d / "profile", profil)
+        ecrire(d / "choices", choix)
+
+    def test_quiet_sans_low_power(self):
+        self.choix("quiet balanced balanced-performance")
+        self.assertEqual(self.lancer("platform", "low-power").returncode, 3)       # ce PC ne l'a pas : rien n'est écrit
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+        self.assertEqual(self.lancer("platform", "quiet").returncode, 0)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "quiet")
+
+    def test_balanced_performance_sans_performance(self):
+        self.choix("quiet balanced balanced-performance")
+        r = self.lancer("platform", "performance")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("choix du noyau", r.stderr)
+        self.assertEqual(self.lancer("platform", "balanced-performance").returncode, 0)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced-performance")
+
+    def test_aucun_profil_compatible(self):
+        self.choix("custom", "custom")
+        for v in ("low-power", "quiet", "cool", "balanced", "balanced-performance", "performance"):
+            self.assertEqual(self.lancer("platform", v).returncode, 3, v)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "custom")
+
+    def test_ecriture_refusee(self):
+        self.choix("quiet balanced performance")
+        f = self.sys / "firmware/acpi/platform_profile"
+        f.chmod(0o444)
+        r = self.lancer("platform", "quiet")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("refusée", r.stderr)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+
+    def test_valeur_relue_differente_jamais_un_faux_succes(self):
+        self.choix("quiet balanced performance")
+        # un service réécrit le profil juste après l'écriture (le faux « sleep » est appelé entre l'écriture et la relecture)
+        self.faux("sleep", f'echo balanced > "{self.sys}/firmware/acpi/platform_profile"')
+        r = self.lancer("platform", "performance")
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertIn("relu", r.stderr)
+        self.assertIn("balanced", r.stderr)
+
+    def test_relecture_identique_est_un_succes(self):
+        self.choix("quiet balanced performance")
+        self.faux("sleep", "exit 0")
+        self.assertEqual(self.lancer("platform", "performance").returncode, 0)
+
+    def test_controleurs_qui_suivent(self):
+        self.choix("quiet balanced balanced-performance")
+        self.controleur(0, "acer-wmi", "balanced")
+        # le noyau aligne les contrôleurs : ici le faux service le fait après l'écriture
+        self.faux("sleep", f'echo quiet > "{self.sys}/class/platform-profile/platform-profile-0/profile"')
+        self.assertEqual(self.lancer("platform", "quiet").returncode, 0)
+
+    def test_controleur_en_retard_code_4(self):
+        self.choix("quiet balanced balanced-performance")
+        self.controleur(0, "acer-wmi", "balanced")
+        self.controleur(1, "autre-pilote", "balanced")
+        r = self.lancer("platform", "quiet")
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertIn("acer-wmi=balanced", r.stderr)
+        self.assertEqual(self.lire("class/platform-profile/platform-profile-0/profile"), "balanced", "contrôleurs jamais écrits ici")
+
+    def test_custom_remplace_par_un_profil_commun(self):
+        self.choix("quiet balanced", "custom")
+        self.assertEqual(self.lancer("platform", "balanced").returncode, 0)
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "balanced")
+        self.assertEqual(self.lancer("platform", "custom").returncode, 2)
+
+    def test_etat_decrit_les_controleurs(self):
+        self.choix("quiet balanced balanced-performance")
+        self.controleur(0, "acer-wmi", "quiet")
+        self.controleur(1, "mauvais nom; $(id)", "balanced")
+        r = self.lancer("etat")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("platform_choices=quiet balanced balanced-performance", r.stdout)
+        self.assertIn("platform_ctl=acer-wmi|quiet|quiet balanced balanced-performance", r.stdout)
+        self.assertNotIn("$(", r.stdout)
+        self.assertNotIn(";", r.stdout)
+
+    def test_pas_de_regression_hors_acer(self):
+        self.machine()                                  # profils standard : low-power balanced performance
+        for v in ("low-power", "balanced", "performance"):
+            self.assertEqual(self.lancer("platform", v).returncode, 0, v)
+            self.assertEqual(self.lire("firmware/acpi/platform_profile"), v)
+
+
 class Sudoers(Base):
     def test_compte_strict(self):
         """Relecture : jamais ALL, un %groupe, des majuscules ou un tiret en tête dans la règle sudo."""

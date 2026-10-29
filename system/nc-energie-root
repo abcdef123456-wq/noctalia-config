@@ -8,7 +8,9 @@
 #   nc-energie-root boost on|off
 #   nc-energie-root freqmax 100|80|60         fréquence maximale du processeur, en % de cpuinfo_max_freq
 #   nc-energie-root platform low-power|quiet|cool|balanced|balanced-performance|performance
-#                                             (seulement si le noyau le propose : platform_profile_choices)
+#                                             (seulement si le noyau le propose : platform_profile_choices ; la valeur est
+#                                             relue après l'écriture, et les contrôleurs de /sys/class/platform-profile
+#                                             aussi, en lecture seule : un autre résultat = code 4, jamais un faux succès)
 #   nc-energie-root nvidia-pm auto|on         gestion d'énergie de la carte NVIDIA (power/control)
 #   nc-energie-root nvidia-pl 0|1|2|3         limite de puissance NVIDIA : 0 = minimum, 3 = maximum, entre les deux en
 #                                             paliers égaux ; seulement si la carte est ACTIVE (jamais réveillée pour ça)
@@ -21,7 +23,8 @@
 # Garanties : les chemins de /sys sont construits ICI, jamais reçus ; chaque écriture vérifie que le fichier existe ;
 # aucune chaîne libre n'est acceptée (sous-commande et valeur sont comparées à une liste) ; ni ventilateurs, ni
 # undervolt, ni TDP brut, ni écriture libre. Rien n'est réappliqué tout seul au démarrage.
-# Codes de sortie : 0 fait, 1 échec ou pas root, 2 sous-commande ou valeur refusée, 3 rien de tel sur ce PC.
+# Codes de sortie : 0 fait, 1 échec ou pas root, 2 sous-commande ou valeur refusée, 3 rien de tel sur ce PC,
+# 4 écrit mais la valeur relue est différente (réécrite par un service, ou refusée en silence par le firmware).
 # Essais : NC_ENERGIE_RACINE (faux /sys) et NC_ENERGIE_BIN (faux outils) ne sont lus QUE hors root (sudo les efface de
 # toute façon) : lancé en root, cet assistant ne regarde que le vrai /sys et le PATH système.
 set -u
@@ -135,11 +138,44 @@ do_freqmax() {
   done
   [ "$n" -gt 0 ] || absent "pas de fréquence maximale réglable sur ce PC"
 }
+# Contrôleurs de profil du noyau (/sys/class/platform-profile/*) : le nom du dossier est un mot simple, jamais écrit ici
+controleurs() {
+  local d n
+  for d in "$S"/class/platform-profile/platform-profile-*; do
+    [ -d "$d" ] || continue
+    n="${d##*/}"
+    case "$n" in *[!a-zA-Z0-9_.-]*|''|-*) continue ;; esac
+    printf '%s\n' "$d"
+  done
+}
+# Texte lu dans /sys pour un message : lettres, chiffres, espaces et « _ . - » seulement, court
+propre() { printf '%s' "$1" | tr -cd 'a-zA-Z0-9 _.-' | cut -c1-80; }
 do_platform() {
   local f="$S/firmware/acpi/platform_profile" c="$S/firmware/acpi/platform_profile_choices"
+  local choix apres d bad="" p
   [ -f "$f" ] && [ -r "$c" ] || absent "pas de profil de plateforme sur ce PC"
-  dans_mots "$1" "$(lire "$c")" || absent "ce PC ne propose pas ce profil de plateforme"
-  ecrire "$1" "$f" || echec "écriture impossible (platform)"
+  choix="$(lire "$c")"
+  # Le profil demandé doit être l'un des choix COMMUNS à tous les contrôleurs (c'est ce que le noyau annonce ici)
+  dans_mots "$1" "$choix" || absent "ce PC ne propose pas le profil de plateforme « $1 » (choix du noyau : $(propre "$choix"))"
+  # Valeur « custom » : des contrôleurs ont des profils différents ; écrire un profil commun ici les remet tous au même
+  ecrire "$1" "$f" || echec "écriture du profil de plateforme refusée par le noyau ou le firmware"
+  # Un service (TLP, power-profiles-daemon, tuned) peut le réécrire aussitôt : relire après un court instant
+  sleep 0.2
+  apres="$(lire "$f")"
+  if [ "$apres" != "$1" ]; then
+    echo "nc-energie-root: profil de plateforme demandé « $1 », relu « $(propre "$apres") » : un autre service l'a réécrit ou le firmware l'a refusé" >&2
+    exit 4
+  fi
+  # Chaque contrôleur doit avoir suivi (le noyau les met tous au même profil quand le choix est commun)
+  for d in $(controleurs); do
+    [ -r "$d/profile" ] || continue
+    p="$(lire "$d/profile")"
+    [ "$p" = "$1" ] || bad="$bad $(propre "$(lire "$d/name")")=$(propre "$p")"
+  done
+  if [ -n "$bad" ]; then
+    echo "nc-energie-root: profil de plateforme « $1 » écrit, mais des contrôleurs ont un autre profil :$bad" >&2
+    exit 4
+  fi
 }
 do_nvidia_pm() {
   local d n=0
@@ -213,6 +249,10 @@ etat() {
   [ -f "$S/devices/system/cpu/cpufreq/boost" ] && echo "boost=$(lire "$S/devices/system/cpu/cpufreq/boost")"
   [ -f "$S/devices/system/cpu/intel_pstate/no_turbo" ] && echo "no_turbo=$(lire "$S/devices/system/cpu/intel_pstate/no_turbo")"
   [ -f "$S/firmware/acpi/platform_profile" ] && echo "platform=$(lire "$S/firmware/acpi/platform_profile")"
+  [ -f "$S/firmware/acpi/platform_profile_choices" ] && echo "platform_choices=$(propre "$(lire "$S/firmware/acpi/platform_profile_choices")")"
+  for d in $(controleurs); do
+    echo "platform_ctl=$(propre "$(lire "$d/name")")|$(propre "$(lire "$d/profile")")|$(propre "$(lire "$d/choices")")"
+  done
   for d in $(nvidia); do
     [ -f "$d/power/control" ] && echo "nvidia_pm=$(lire "$d/power/control") $(lire "$d/power/runtime_status")"
   done

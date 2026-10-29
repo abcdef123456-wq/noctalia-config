@@ -488,6 +488,45 @@ class Appliquer(Energie):
         self.assertEqual(retour["wifi"], "off")
         self.assertFalse((self.tmp / "state/nc/energie-avant.json").exists())
 
+    def test_le_profil_logiciel_passe_avant_le_profil_de_la_plateforme(self):
+        """Un service (tlp-pd, power-profiles-daemon) réécrit le profil de la plateforme en changeant de profil : celui-ci
+        est donc posé APRÈS le profil du service, sinon il serait aussitôt remplacé."""
+        j, e = self.journal, self.etat
+        pf = self.sys / "firmware/acpi/platform_profile"
+        self.outil("powerprofilesctl", f'''echo "powerprofilesctl $*" >> "{j}"
+case "$1" in
+  list) printf '* balanced:\\n    Driver: x\\n\\n  power-saver:\\n    Driver: x\\n\\n  performance:\\n    Driver: x\\n' ;;
+  get) cat "{e}/profil" 2>/dev/null || echo balanced ;;
+  set) echo "$2" > "{e}/profil"; echo balanced > "{pf}" ;;
+esac
+''')
+        self.sauver_profils([dict(self.profil, reglages={"profil": "power-saver", "platform_profile": "low-power"})])
+        r = self.json("appliquer", "cours-bureautique", "--oui")
+        self.assertTrue(r["applique"])
+        self.assertEqual(self.lire("firmware/acpi/platform_profile"), "low-power")
+        ap = self.json("apercu", "cours-bureautique")
+        self.assertEqual([c["cle"] for c in ap["changements"]], [])          # déjà comme voulu : plus rien à changer
+
+    def test_ordre_des_changements_de_l_apercu(self):
+        ap = self.json("apercu", "cours-bureautique")
+        cles = [c["cle"] for c in ap["changements"]]
+        self.assertLess(cles.index("profil"), cles.index("platform_profile"))
+        self.assertLess(cles.index("cpu_epp"), cles.index("profil"))             # le matériel sans service d'abord
+        self.assertLess(cles.index("platform_profile"), cles.index("luminosite"))
+
+    def test_profil_materiel_reecrit_par_un_service_pas_de_faux_succes(self):
+        pf = self.sys / "firmware/acpi/platform_profile"
+        (self.bin / "sleep").write_text(f'#!/bin/sh\necho balanced > "{pf}"\n')
+        (self.bin / "sleep").chmod(0o755)
+        avant = self.etat_materiel()
+        r = self.nc("appliquer", "cours-bureautique", "--oui", "--json")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        msg = json.loads(r.stdout)["erreur"]
+        self.assertIn("profil matériel « low-power » demandé", msg)
+        self.assertIn("« balanced » relu", msg)
+        self.assertIn("Tout a été remis comme avant", msg)
+        self.assertEqual({k: v for k, v in self.etat_materiel().items() if k != "wifi"}, {k: v for k, v in avant.items() if k != "wifi"})
+
     def test_echec_du_materiel_rien_d_autre_n_a_bouge(self):
         avant = self.etat_materiel()
         # Le noyau ne propose plus « low-power » : l'assistant répond « rien de tel » (3) et tout s'arrête là
