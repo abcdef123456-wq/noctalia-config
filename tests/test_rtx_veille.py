@@ -450,8 +450,11 @@ class Relance(Base):
     def test_appelant_tue_la_relance_va_au_bout(self):
         """L'île arrêtée ou tuée entre la fermeture et la réouverture : l'appli n'est jamais fermée sans être rouverte
         (fermer et rouvrir se font dans un fils détaché que le parent attend)."""
-        # Une appli qui ignore SIGTERM pendant qu'on la ferme : on a le temps de tuer le parent avant qu'elle ne parte
-        r = subprocess.run(["sh", "-c", "(trap '' TERM; exec sleep 300) >/dev/null 2>&1 & echo $!"], capture_output=True, text=True)
+        # Une appli qui ne part pas sur SIGTERM pendant qu'on la ferme : on a le temps de tuer le parent avant qu'elle ne parte.
+        # Elle note le SIGTERM reçu dans un témoin : on attend ce témoin (le fils a bien commencé la fermeture), pas un délai fixe.
+        temoin = self.home / "sigterm-recu"
+        r = subprocess.run(["sh", "-c", f"(trap 'touch \"{temoin}\"' TERM; while :; do sleep 0.1; done) >/dev/null 2>&1 & echo $!"],
+                           capture_output=True, text=True)
         pid = int(r.stdout)
         def tuer():
             try:
@@ -466,7 +469,10 @@ class Relance(Base):
         parent = subprocess.Popen([str(VEILLE), "relancer", str(pid), "999", "--oui"], env=self.env(NC_RTX_ATTENTE="20"),
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         self.addCleanup(lambda: parent.poll() is None and parent.kill())
-        time.sleep(1.0)                                          # le SIGTERM est parti, l'appli ne s'est pas fermée
+        fin = time.monotonic() + 20                              # le SIGTERM est parti, l'appli ne s'est pas fermée
+        while not temoin.exists() and time.monotonic() < fin:
+            time.sleep(0.1)
+        self.assertTrue(temoin.exists(), "le fils n'a jamais envoyé SIGTERM")
         self.assertTrue(self.vivant(pid))
         parent.kill()                                            # SIGKILL du parent : rien ne peut s'y accrocher
         parent.wait(timeout=10)
