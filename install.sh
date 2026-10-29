@@ -2007,9 +2007,7 @@ if [ "$MODE" = full ]; then
       plat_ok=0
     fi
     plat_perso=0
-    for fp in /etc/tlp.conf; do
-      sudo grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' -- "$fp" && plat_perso=1
-    done
+    sudo grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' -- /etc/tlp.conf && plat_perso=1
     while IFS= read -r fp; do
       [ -n "$fp" ] && sudo grep -qsE '^[[:space:]]*PLATFORM_PROFILE_ON_[A-Z]+[[:space:]]*=' -- "$fp" && plat_perso=1
     done <<< "$TLP_PERSO"
