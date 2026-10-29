@@ -12,7 +12,7 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude hook        appelé par Claude Code à chaque événement (lit le JSON de l'événement sur l'entrée standard)
   nc-claude installer IA | retirer IA
                         la même chose pour les autres IA : antigravity, opencode, codex, gemini, cursor, copilot, qwen,
-                        kiro, amp (ou « tout » : celles qui sont installées) ; ce qu'elles font, quand elles ont fini,
+                        kiro, amp, omp (ou « tout » : celles qui sont installées) ; ce qu'elles font, quand elles ont fini,
                         quand elles t'attendent ; leurs demandes restent dans leur terminal
   nc-claude ia IA EVENEMENT   appelé par leurs hooks ou leur extension ; nc-claude agy EVENEMENT : par Antigravity
   nc-claude detecter | actualiser   IA présentes pas encore branchées / remettre celles branchées au format du jour
@@ -84,7 +84,7 @@ done, and its requests (allow a command, answer a question) from the island.
   nc-agents hook        called by Claude Code on every event (reads the event JSON on standard input)
   nc-agents install AI | remove AI
                         the same for the other AIs: antigravity, opencode, codex, gemini, cursor, copilot, qwen,
-                        kiro, amp (or “all”: the installed ones); what they are doing, when they are done,
+                        kiro, amp, omp (or “all”: the installed ones); what they are doing, when they are done,
                         when they are waiting for you; their requests stay in their terminal
   nc-agents ia AI EVENT        called by their hooks or extension; nc-agents agy EVENT: by Antigravity
   nc-agents detect | refresh   AIs present but not hooked up yet / bring the hooked-up ones to the current format
@@ -943,13 +943,14 @@ IAS = {
     "qwen": ("Qwen Code", ("qwen",), ("~/.qwen",)),
     "kiro": ("Kiro", ("kiro-cli", "kiro"), ("~/.kiro",)),
     "amp": ("Amp", ("amp",), ("~/.config/amp",)),
+    "omp": ("Oh My Pi", ("omp",), ("~/.omp",)),
 }
 NOMS.update({k: v[0] for k, v in IAS.items()})
 FICHIERS = {
     "antigravity": "~/.gemini/config/hooks.json", "opencode": "~/.config/opencode/plugins/nc-ile.js",
     "codex": "~/.codex/hooks.json", "gemini": "~/.gemini/settings.json", "cursor": "~/.cursor/hooks.json",
     "copilot": "~/.copilot/hooks/nc-ile.json", "qwen": "~/.qwen/settings.json", "kiro": "~/.kiro/hooks/nc-ile.json",
-    "amp": "~/.config/amp/plugins/nc-ile.js",
+    "amp": "~/.config/amp/plugins/nc-ile.js", "omp": "~/.omp/agent/extensions/nc-ile.js",
 }
 # Événements écoutés, par IA (rien qui décide : seulement observer ; PostToolUse là où un hook avant l'outil pourrait
 # le bloquer en cas d'erreur)
@@ -1166,6 +1167,32 @@ export default function (amp) {
 '''
 
 
+PLUGIN_OMP = r'''// nc-ile : Oh My Pi (omp) dans l'île dynamique de noctalia-config (écrit par « nc-claude installer omp » ;
+// « nc-claude retirer omp » l'enlève). Ne décide de rien : il regarde seulement.
+import { spawn } from "node:child_process"
+const envoyer = (ev, o) => {
+  try {
+    const p = spawn(@PY@, [@NC@, "ia", "omp", ev], { stdio: ["pipe", "ignore", "ignore"], detached: true })
+    p.on("error", () => {})
+    p.stdin.on("error", () => {})
+    p.stdin.end(JSON.stringify(o))
+    p.unref()
+  } catch {}
+}
+const sid = (c) => { try { return String(c.sessionManager.getSessionId()) } catch { return "omp" } }
+const dossier = (c) => (c && c.cwd) || process.cwd()
+export default function (pi) {
+  const sur = (nom, f) => { try { pi.on(nom, async (e, c) => { try { f(e || {}, c || {}) } catch {} }) } catch {} }
+  sur("agent_start", (e, c) => envoyer("prompt", { session_id: sid(c), cwd: dossier(c) }))
+  sur("tool_execution_end", (e, c) => envoyer("tool", { session_id: sid(c), cwd: dossier(c), tool: e.toolName || e.tool, args: e.args || e.input, erreur: e.isError === true }))
+  sur("tool_approval_requested", (e, c) => envoyer("permission", { session_id: sid(c), cwd: dossier(c) }))
+  sur("tool_approval_resolved", (e, c) => envoyer("reprise", { session_id: sid(c), cwd: dossier(c) }))
+  sur("agent_end", (e, c) => envoyer("stop", { session_id: sid(c), cwd: dossier(c) }))
+  sur("session_shutdown", (e, c) => envoyer("fin", { session_id: sid(c), cwd: dossier(c) }))
+}
+'''
+
+
 def installer_ia(ia, bavard=True):
     f = chemin(ia)
     if ia == "antigravity":
@@ -1175,9 +1202,9 @@ def installer_ia(ia, bavard=True):
         cfg[AGY_GROUPE] = {"enabled": True, "PreInvocation": [h("PreInvocation")],
                            "PostToolUse": [{"matcher": "*", "hooks": [h("PostToolUse")]}], "Stop": [h("Stop")]}
         ecrire_json(f, cfg)
-    elif ia in ("opencode", "amp"):
+    elif ia in ("opencode", "amp", "omp"):
         os.makedirs(os.path.dirname(f), exist_ok=True)
-        js = (PLUGIN_OPENCODE if ia == "opencode" else PLUGIN_AMP).replace("@PY@", json.dumps(sys.executable))
+        js = {"opencode": PLUGIN_OPENCODE, "amp": PLUGIN_AMP, "omp": PLUGIN_OMP}[ia].replace("@PY@", json.dumps(sys.executable))
         contenu = js.replace("@NC@", json.dumps(os.path.realpath(__file__)))
         try:
             with open(f, encoding="utf-8") as x:
@@ -1248,7 +1275,7 @@ def retirer_ia(ia):
             cfg = lire_json(f)
             if cfg.pop(AGY_GROUPE, None) is not None:
                 ecrire_json(f, cfg)
-        elif ia in ("opencode", "amp", "copilot", "kiro"):
+        elif ia in ("opencode", "amp", "omp", "copilot", "kiro"):
             os.remove(f)                       # fichier à nous
         else:
             ecrire_json(f, nettoyer(lire_json(f), f" ia {ia} "))
@@ -1488,7 +1515,7 @@ def montrer():
 # interpréteur suivi du script). Comparaison EXACTE d'un nom ou d'un composant du chemin du script, jamais une sous-chaîne.
 PROCESSUS_AGENT = {"claude": ("claude", "claude-code"), "codex": ("codex",), "gemini": ("gemini", "gemini-cli"),
                    "opencode": ("opencode",), "antigravity": ("agy", "antigravity"), "cursor": ("cursor-agent",),
-                   "copilot": ("copilot",), "qwen": ("qwen", "qwen-code"), "kiro": ("kiro", "kiro-cli"), "amp": ("amp",)}
+                   "copilot": ("copilot",), "qwen": ("qwen", "qwen-code"), "kiro": ("kiro", "kiro-cli"), "amp": ("amp",), "omp": ("omp",)}
 INTERPRETES = ("node", "nodejs", "bun", "deno", "python", "python3")
 # Quels agents SIGNALENT une autorisation (ou une question à choix) par un événement de hook DÉDIÉ, vérifié dans leur doc officielle
 # (jamais de lecture de l'écran ni d'heuristique sur le texte). Pendant ces moments, un texte + Entrée validerait le choix surligné :
@@ -1508,7 +1535,11 @@ INTERPRETES = ("node", "nodejs", "bun", "deno", "python", "python3")
 #   opencode événements de plugin permission.asked (https://opencode.ai/docs/plugins/) et question.asked / form.created (extension
 #            ci-dessous) ; session.idle = « fini »
 # REPLI (aucun événement d'autorisation dans leurs hooks) : antigravity (comment hook_agy : « ni de demande d'autorisation »), cursor,
-# kiro, amp (hooks installés ici : prompt, outil, stop, fin seulement).
+# kiro, amp (hooks installés ici : prompt, outil, stop, fin seulement), omp (Oh My Pi : son extension transmet bien
+# tool_approval_requested, mais la doc dit « only when a tool requires approval and an approval handler is registered » :
+# pas la certitude d'un événement à chaque autorisation, donc repli).
+#   omp      extensions : docs/extensions.md et docs/extension-loading.md du dépôt can1357/oh-my-pi (événements agent_start,
+#            tool_execution_end, agent_end, session_shutdown ; dossier ~/.omp/agent/extensions)
 SIGNALENT_AUTORISATION = ("claude", "codex", "gemini", "qwen", "copilot", "opencode")
 SORTIE_AGENT_ABSENT = 3                    # nc-claude ecrire --distant : l'agent ne tourne plus dans ce terminal
 SORTIE_AUTORISATION = 4                    # … ou une autorisation attend (n'importe quel texte + Entrée la validerait)

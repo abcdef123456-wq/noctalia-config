@@ -918,9 +918,27 @@ TEXTE` envoie un message libre. Rien n’est envoyé sans le réglage ni sans co
 ## Suivre et répondre aux agents de code depuis Telegram
 
 Les agents de code que `nc-claude` suit (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity, Cursor, Copilot, Qwen
-Code, Kiro, Amp) se suivent et se répondent depuis le bot JARVIS : `/agents` les liste, `/repondre N texte` leur écrit.
+Code, Kiro, Amp, Oh My Pi) se suivent et se répondent depuis le bot JARVIS : `/agents` les liste, `/repondre N texte` leur écrit.
 **Seulement en déploiement local** (`DEPLOY_MODE=local`) : `nc-claude ecrire` tape dans le terminal (kitty) de CE PC. En
-mode serveur la fonction est absente et le dit. Oh My Pi (`omp`) n'est pas suivi par `nc-claude` : il n'apparaît pas.
+mode serveur la fonction est absente et le dit.
+Oh My Pi (`omp`) est suivi par une petite extension que `nc-claude installer omp` écrit dans `~/.omp/agent/extensions/nc-ile.js`
+(sauvegarde `.avant-nc-claude` si un fichier du même nom existait ; `nc-claude retirer omp` l'enlève). Sources d'omp
+(dépôt can1357/oh-my-pi) : `docs/extensions.md` (événements `agent_start`, `agent_end`, `tool_execution_end`,
+`tool_approval_requested`, `tool_approval_resolved`, `session_shutdown`) et `docs/extension-loading.md` (dossier
+`~/.omp/agent/extensions`, fichiers `.ts` ou `.js`). `tool_approval_requested` n'est émis que « quand un outil demande une
+approbation et qu'un gestionnaire d'approbation est enregistré » : omp reste donc en repli pour la réponse à distance.
+
+| Agent | Suivi | Alerte « t'attend » | Réponse à distance |
+|---|---|---|---|
+| Claude Code, Codex, OpenCode, Qwen Code | hooks ou extension | oui | oui, sauf pendant une autorisation |
+| Gemini CLI, Copilot | hooks | non : l'agent prévient lui-même | oui, sauf pendant une autorisation |
+| Antigravity (`agy`) | hooks (`~/.gemini/config/hooks.json`) | non (aucun événement d'attente) | seulement « fini » ou « prêt » ; les hooks peuvent ne pas tourner avec `--dangerously-skip-permissions` |
+| Oh My Pi (`omp`) | extension | oui, si l'extension signale une approbation | seulement « fini » ou « prêt » |
+| Cursor, Kiro, Amp | hooks ou extension | non | seulement « fini » ou « prêt » |
+
+Dans tous les cas la réponse demande un terminal kitty à socket (`ecrire`) ; l'agent doit être au premier plan de ce terminal
+(reconnu par le nom exact de son processus). Gemini CLI et Antigravity sont dans cette liste et branchés par
+`nc-claude installer gemini` / `installer antigravity`.
 Le code est dans la surcouche (`server/nc_agents.py`, branché par `nc_telegram.py` ; JARVIS-BIS n'est pas modifié) et dans
 `nc-claude`, `nc-noeud`, `nc-alertes` et `nc-reglages` côté PC.
 
@@ -952,7 +970,7 @@ modifié ne lance rien ; un ordre reçu pendant que le PC était éteint n'est p
   Seuls les agents dont les hooks ont un événement dédié aux autorisations le signalent (Claude Code : `PermissionRequest` et
   `Notification` `permission_prompt`/`elicitation_dialog` ; Codex : `PermissionRequest` ; Gemini CLI : `Notification`
   `ToolPermission` ; Qwen Code : `PermissionRequest` ; Copilot : `notification` `permission_prompt`/`elicitation_dialog` ;
-  OpenCode : `permission.asked`, `question.asked`, `form.created`). Pour les autres (Antigravity, Cursor, Kiro, Amp), l'état
+  OpenCode : `permission.asked`, `question.asked`, `form.created`). Pour les autres (Antigravity, Cursor, Kiro, Amp, Oh My Pi), l'état
   « travaille » peut cacher une autorisation qui attend : la ligne dit « réponse à distance impossible : <agent> ne signale pas
   s'il attend une autorisation » et `/repondre` n'est permis que quand l'agent est « fini » ou « prêt ». Les sources sont en
   commentaire dans `nc-claude` (`SIGNALENT_AUTORISATION`). Une seconde confirmation ne remplacerait pas cette règle : elle ne protège
