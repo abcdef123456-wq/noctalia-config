@@ -184,6 +184,17 @@ class Sources(unittest.TestCase):
         self.assertIn("onOuvrirPanneau", self.shell)
         self.assertEqual(lua.count('SUPER .. " + ALT + code:55"'), 1)
 
+    def test_fenetre_sans_contour_ni_arrondi_qml(self):
+        # Vraie fenêtre : Hyprland dessine l'unique bordure et les coins ; un contour ou un arrondi QML ferait des coins doubles
+        # (les cartes intérieures, plus bas, gardent leurs arrondis)
+        fond = self.vpn[self.vpn.index("FloatingWindow {"):self.vpn.index("// Le focus clavier de départ")]
+        self.assertNotRegex(fond, r"\bradius\s*:", "aucun arrondi sur le fond de la fenêtre")
+        self.assertNotRegex(fond, r"\bborder\.", "aucun contour sur le fond de la fenêtre")
+        self.assertNotRegex(self.vpn, r"anchors\.margins:\s*-", "rien ne déborde du fond")
+        self.assertEqual(fond.count("Rectangle {"), 1, "un seul fond")
+        self.assertNotIn("Couleurs.aContour", self.vpn)
+        self.assertRegex(self.vpn, r"id: fondVerre\s*anchors\.fill: parent\s*color: Qt\.alpha\(Couleurs\.fond, vpn\.verre \? 0\.62 : 0\.92\)\s*\}")
+
     def test_aucune_ligne_de_shell_construite_avec_un_nom(self):
         # deux seulement : l'enveloppe de zenity (texte fixe, fichier choisi jamais dedans) et l'écriture du fichier d'état de la barre
         # (texte fixe aussi : le JSON arrive en $1, jamais collé dans la ligne)
@@ -619,6 +630,36 @@ class HorsEcran(unittest.TestCase):
         act = [a for a in appels if a[:1] == ["fournisseur"] or a[:1] == ["tout-deconnecter"]]
         self.assertEqual(act, [["fournisseur", "proton", "login"], ["fournisseur", "nord", "connecter", "DE"],
                                ["fournisseur", "nord", "deconnecter"]])
+
+    def test_nord_abonnement_inactif_puis_inconnu_ni_pays_ni_bouton_de_compte(self):
+        # (le cas « inconnu » : même carte, probleme changé sur place) ; peut_login vrai exprès : même s'il arrivait, aucun bouton « Se connecter au compte » pour un abonnement inactif
+        def nord(probleme):
+            return dict(disponible=True, connexions=[], actives=[], fournisseurs=[
+                dict(id="nord", nom="NordVPN", etat="sans_compte", message="(message de nc-vpn)", pays_actif="", connecte=False,
+                     peut_login=True, probleme=probleme)])
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var carte = trouver(fen.contentItem, "nc-vpn-carte-fournisseur")
+                    var tx = textes(carte).join("|")
+                    verifier(tx.indexOf("NordVPN · abonnement inactif") >= 0 && tx.indexOf("abonnement VPN est inactif ou expiré") >= 0, "inactif : " + tx)
+                    verifier(tx.indexOf("sans compte") < 0, "jamais « sans compte » pour un abonnement : " + tx)
+                    verifier(!trouver(carte, "nc-vpn-fournisseur-login").visible, "pas de bouton de connexion au compte")
+                    verifier(tous(fen.contentItem, "nc-vpn-pays").length === 0 && tous(fen.contentItem, "nc-vpn-rangee-bouton").length === 0, "ni pays ni Connecter")
+                    verifier(trouver(fen.contentItem, "nc-vpn-un-indicateur").visible, "« Un seul indicateur » proposé (réglages par défaut)")
+                    var m = {}; for (var c in carte.modele) m[c] = carte.modele[c]
+                    m.probleme = "abonnement_inconnu"; carte.modele = m; etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    var tu = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
+                    verifier(tu.indexOf("NordVPN · abonnement à vérifier") >= 0 && tu.indexOf("n'a pas pu être confirmé") >= 0, "inconnu : " + tu)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: nord("abonnement_inactif")})
+        self.assertEqual([a for a in appels if a[:1] == ["fournisseur"]], [], "aucune action lancée")
 
     def test_proton_pilote_appli_bouton_ouvrir_et_absent(self):
         fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", message="Proton VPN se pilote dans son application.", pays_actif="",

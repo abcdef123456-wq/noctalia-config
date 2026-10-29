@@ -13,7 +13,8 @@
 // la fenêtre n'est créée qu'ouverte (shell.qml, LazyLoader) ; les débits (VpnDebit.qml) ne sont relevés que fenêtre ouverte et
 // écran allumé. Échap ferme. Noms en texte brut (Texte.qml) ; pendant un partage d'écran (Partage.qml) les noms, pays, serveurs,
 // interfaces et IP sont masqués ou remplacés par « Tunnel N ».
-// Verre : fenêtre transparente, flou de Hyprland derrière, fond de la palette à 62 % (92 % sans flou).
+// Verre : fenêtre transparente, flou de Hyprland derrière, fond de la palette à 62 % (92 % sans flou) ; bordure et coins : ceux de
+// Hyprland seulement.
 import QtQuick
 import Quickshell
 
@@ -32,7 +33,6 @@ FloatingWindow {
     readonly property real largeurEcran: vpn.screen ? vpn.screen.width : 1600
     readonly property real hauteurEcran: vpn.screen ? vpn.screen.height : 1000
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
-    readonly property int rayon: 26
     readonly property int largeurCarte: Math.min(880, Math.round(largeurEcran * 0.92))
     property bool ksDetail: false                 // le détail du kill switch (VpnProtections.qml) est déplié
 
@@ -51,30 +51,13 @@ FloatingWindow {
         id: carte
         anchors.fill: parent
         Keys.onEscapePressed: vpn.quitter()                                // Échap, d'où que vienne le focus (champ de recherche compris)
-        Rectangle {
-            anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
-            visible: Couleurs.aContour
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
-                GradientStop { position: 0.5; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1] }
-                GradientStop { position: 1; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2] }
-            }
-        }
+        // Un seul fond, plein sur toute la surface, sans arrondi ni contour : c'est une vraie fenêtre, Hyprland dessine déjà
+        // l'unique bordure et découpe les coins (general:border_size, decoration:rounding). Un contour ou un arrondi ici
+        // ferait des coins doubles, comme dans les autres FloatingWindow (Parametres.qml, Jarvis.qml…), qui n'en ont pas
         Rectangle {
             id: fondVerre
-            anchors.fill: parent; radius: vpn.rayon
+            anchors.fill: parent
             color: Qt.alpha(Couleurs.fond, vpn.verre ? 0.62 : 0.92)
-            border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)          // contour fin tout autour : la carte tient sans flou
-            Rectangle {
-                x: 32; width: parent.width - 64; height: 1; y: 1
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0) }
-                    GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.16) }
-                    GradientStop { position: 1; color: Qt.rgba(1, 1, 1, 0) }
-                }
-            }
         }
 
         // Le focus clavier de départ (quand le champ de recherche ne l'a pas)
