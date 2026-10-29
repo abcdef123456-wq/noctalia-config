@@ -342,9 +342,11 @@ if saisie == "souris" or saisie == "les-deux" then
         end
     end
     -- Raccourci « au clic » ou « après un glisser » : gardé seulement si ce Hyprland connaît l'option (sinon il partirait
-    -- dès l'appui, en même temps que le déplacement)
+    -- dès l'appui, en même temps que le déplacement). Jamais avec mouse = true : Hyprland 0.56 l'ignore en Lua, 0.57 le
+    -- refuse avec click / drag (« hl.bind: mouse is exclusive », signalé même sous pcall) ; mouse reste aux vrais
+    -- déplacements et redimensionnements
     local function si_compris(drapeau, touches, action)
-        local ok, b = pcall(touche, touches, action, nil, { mouse = drapeau == "click", [drapeau] = true })
+        local ok, b = pcall(touche, touches, action, nil, { [drapeau] = true })
         if ok and b and b[drapeau] ~= true and b.remove then pcall(b.remove, b) end
     end
     touche("mouse:275", hl.dsp.window.drag(), trad("Souris|Bouton latéral arrière maintenu : déplacer", "Hold back side button: move"), { mouse = true })

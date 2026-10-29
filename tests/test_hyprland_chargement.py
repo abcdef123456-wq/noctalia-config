@@ -201,3 +201,63 @@ print("reste", nc.places_plein_ecran["0xabc"] == nil)
         lignes = r.stdout.strip().splitlines()
         self.assertEqual(lignes[-5:], ["plein toggle", "plein toggle", "taille 800 500", "place 300 200", "reste\ttrue"])
         self.assertIn("allow_pin_fullscreen = true", (HYPR / "nc/apparence.lua").read_text())
+
+
+@unittest.skipUnless(shutil.which("lua"), "Lua requis")
+class BindsSouris(unittest.TestCase):
+    """Forme des raccourcis souris : jamais mouse = true avec click, drag, release, repeating ou locked. Hyprland 0.57 le
+    refuse (« hl.bind: mouse is exclusive », signalé dans le bandeau d'erreurs même sous pcall), 0.56 l'ignore en Lua.
+    Le faux hl.bind refuse comme 0.57 ; les vrais déplacements et redimensionnements gardent mouse = true."""
+    APRES = r'''
+for _, b in ipairs(vus) do print(b) end
+for _, r in ipairs(refus) do print("REFUS " .. r) end
+'''
+
+    def lancer(self, saisie):
+        entete = ENTETE.replace("last, handlers, notifs, execs, nbinds = {}, {}, {}, {}, 0",
+                                "last, handlers, notifs, execs, nbinds, vus, refus = {}, {}, {}, {}, 0, {}, {}").replace(
+            "  bind = function(k)\n",
+            "  bind = function(k, f, o)\n"
+            "    o = o or {}\n"
+            "    if o.mouse and (o.click or o.drag or o.release or o.repeating or o.locked) then\n"
+            "      refus[#refus + 1] = tostring(k); error('hl.bind: mouse is exclusive')\n"
+            "    end\n"
+            "    local d = {}\n"
+            "    for _, n in ipairs({ 'mouse', 'click', 'drag' }) do if o[n] then d[#d + 1] = n end end\n"
+            "    if tostring(k):find('mouse:27[2-6]') then vus[#vus + 1] = tostring(k) .. ' ' .. table.concat(d, ',') end\n").replace(
+            "    return {}\n  end,", "    return { click = o.click == true, drag = o.drag == true, remove = function() end }\n  end,")
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            cfg = home / ".config/hypr"
+            cfg.mkdir(parents=True)
+            (cfg / "hyprland.lua").symlink_to(HYPR / "hyprland.lua")
+            (cfg / "nc").symlink_to(HYPR / "nc")
+            (home / ".config/nc").mkdir(parents=True)
+            (home / ".config/nc/reglages.conf").write_text(f"SAISIE={saisie}\n")
+            e = dict(os.environ, HOME=str(home), CFG=str(cfg), XDG_CONFIG_HOME=str(home / ".config"), NC_LANGUE="fr")
+            r = subprocess.run(["lua", "-"], input=entete + f'dofile("{cfg}/hyprland.lua")\n' + self.APRES, text=True,
+                               capture_output=True, timeout=30, env=e)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout.strip().splitlines()
+
+    def test_aucun_refus_quelle_que_soit_la_saisie(self):
+        for saisie in ("clavier", "souris", "les-deux"):
+            with self.subTest(saisie=saisie):
+                lignes = self.lancer(saisie)
+                self.assertEqual([l for l in lignes if l.startswith("REFUS")], [])
+                self.assertIn("SUPER + mouse:272 mouse", lignes, "le vrai déplacement garde mouse = true")
+
+    def test_boutons_lateraux_clic_et_glisser_sans_mouse(self):
+        lignes = self.lancer("les-deux")
+        for attendu in ("mouse:275 mouse", "mouse:276 mouse", "mouse:275 click", "mouse:276 click", "mouse:275 drag",
+                        "SUPER + mouse:272 drag"):
+            self.assertIn(attendu, lignes)
+
+    def test_statique_mouse_toujours_litteral_et_seul(self):
+        # Une table d'options qui pose mouse ne pose ni click, ni drag, ni release, ni repeating, ni locked, et mouse
+        # vaut toujours le littéral true (« mouse = drapeau == "click" » a causé l'erreur en 0.57)
+        for f in sorted((HYPR / "nc").glob("*.lua")) + [HYPR / "hyprland.lua"]:
+            for t in re.findall(r"\{[^{}]*\bmouse\s*=[^{}]*\}", f.read_text(encoding="utf-8")):
+                with self.subTest(fichier=f.name, table=t):
+                    self.assertRegex(t, r"\bmouse\s*=\s*true\s*[,}]")
+                    self.assertNotRegex(t, r"\b(click|drag|release|repeating|locked)\s*=")
