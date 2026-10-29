@@ -42,6 +42,9 @@ elif a[-2:] == ["connection", "show"]:
     for c in etat:
         print(":".join([c["uuid"], c["type"], "yes" if c["active"] else "no", c["dev"] if c["active"] else "--", esc(c["nom"])]))
 elif "STATE,NAME" in a:
+    if os.environ.get("NM_ECHEC_STATE") == "1":
+        print("Error: boom.", file=sys.stderr); sys.exit(1)
+    if os.environ.get("NM_ETAT_EXTRA"): print(os.environ["NM_ETAT_EXTRA"])
     for c in etat:
         if c["active"]: print(c.get("etat", "activated") + ":" + esc(c["nom"]))
 elif a[-1:] == ["general"]:
@@ -205,6 +208,9 @@ class BaseVpn(unittest.TestCase):
                    TMPDIR=str(self.r / "tmp"), XDG_STATE_HOME=str(self.r / "etat"), XDG_CACHE_HOME=str(self.r / "etat"),
                    XDG_DATA_HOME=str(self.r / "etat"), FAUX_DIR=str(self.r))
         env.update(plus)
+        env.setdefault("NC_VPN_SYSFS", str(self.r / "sys-vide"))               # jamais le vrai /sys (une machine où Nord est connecté)
+        env.setdefault("NC_VPN_FLATPAK_USER", str(self.r / "fp-user"))         # jamais les vrais dossiers Flatpak
+        env.setdefault("NC_VPN_FLATPAK_SYSTEM", str(self.r / "fp-system"))
         env.setdefault("NC_LANGUE", "fr")
         if "PATH" not in plus:
             env["PATH"] = str(self.r / "faux-bin") + ":" + os.environ.get("PATH", "/usr/bin:/bin")

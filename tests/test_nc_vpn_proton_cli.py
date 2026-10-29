@@ -268,6 +268,50 @@ class ProtonCli(BaseVpn):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.appels_de("protonvpn"), [["disconnect"]])
 
+    def test_deconnexion_code_non_nul_confirmee_par_networkmanager(self):
+        """« Disconnected. » avec un code non nul : succès seulement si NetworkManager confirme qu'aucun tunnel Proton n'est actif."""
+        proton = dict(uuid=UP, type="wireguard", active=True, dev="proton0", nom="ProtonVPN FR#12")
+        self.cli(disconnect={"out": "Disconnected.\n", "code": 3})
+        # 1. NetworkManager confirme : aucun tunnel Proton actif (les autres tunnels ne comptent pas) -> succès
+        r = self.seul("fournisseur", "proton", "deconnecter")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # 2. un tunnel Proton est encore actif -> échec
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [proton]))
+        r = self.seul("fournisseur", "proton", "deconnecter")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusé", r.stderr)
+        # 2 bis. un tunnel Proton en montée -> échec aussi
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(proton, etat="activating")]))
+        self.assertEqual(self.seul("fournisseur", "proton", "deconnecter").returncode, 1)
+        # 3. NetworkManager muet ou en erreur -> échec, jamais un succès
+        (self.r / "etat.json").write_text(json.dumps(connexions()))
+        r = self.seul("fournisseur", "proton", "deconnecter", NM_ARRETE="1")
+        self.assertEqual(r.returncode, 1)
+        # 3 bis. nmcli absent du PATH -> échec
+        sans_nmcli = self.r / "bin-sans-nmcli"
+        sans_nmcli.mkdir()
+        (sans_nmcli / "protonvpn").symlink_to(self.r / "faux-bin" / "protonvpn")
+        (sans_nmcli / "python3").symlink_to(sys.executable)
+        self.assertEqual(self.vpn("fournisseur", "proton", "deconnecter", PATH=str(sans_nmcli)).returncode, 1)
+        # 4. code 0 : succès comme avant, sans dépendre de NetworkManager
+        self.cli()
+        self.assertEqual(self.seul("fournisseur", "proton", "deconnecter", NM_ARRETE="1").returncode, 0)
+        # code non nul SANS le message de succès : jamais un succès, même si NetworkManager ne voit plus de tunnel
+        self.cli(disconnect={"out": "Error: boom\n", "code": 3})
+        self.assertEqual(self.seul("fournisseur", "proton", "deconnecter").returncode, 1)
+
+    def test_deconnexion_second_appel_nmcli_en_erreur_ou_en_montee_seule_est_un_echec(self):
+        self.cli(disconnect={"out": "Disconnected.\n", "code": 3})
+        # 1er appel : aucun Proton actif ; 2e appel (STATE,NAME) en erreur -> pas confirmé -> échec
+        r = self.seul("fournisseur", "proton", "deconnecter", NM_ECHEC_STATE="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusé", r.stderr)
+        # seule la branche « en montée » : rien d'actif au 1er appel, mais le 2e appel voit une connexion Proton en montée -> échec
+        r = self.seul("fournisseur", "proton", "deconnecter", NM_ETAT_EXTRA="activating:ProtonVPN FR#12")
+        self.assertEqual(r.returncode, 1)
+        # contrôle : sans ces anomalies, le même cas réussit
+        self.assertEqual(self.seul("fournisseur", "proton", "deconnecter").returncode, 0)
+
     def test_verrou_un_changement_a_la_fois(self):
         self.cli(connect={"dormir": 3, "out": CONNECTE_OK})
         env = self.env(PATH=str(self.r / "faux-bin"))

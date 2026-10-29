@@ -67,6 +67,21 @@ reconnecter à distance.
 Après la mise à jour du dépôt, relance `nc-jarvis deployer` pour que le serveur de JARVIS reçoive cette nouvelle action
 (c'est toi qui le fais, la mise à jour ne le lance jamais).
 
+
+## Indicateur de la pilule (`nc-vpn indicateur --json`) : plusieurs tunnels
+
+`{"disponible", "actif", "fournisseur", "pays", "nom", "nombre", "mullvad"}`, un seul appel `nmcli`, aucun réseau. Quand plusieurs tunnels sont montés,
+un **fournisseur reconnu** passe avant un profil perso (« nc-vpn-labo ») même s'il n'est pas le premier de NetworkManager ; `nombre` compte tous les
+tunnels. Le client NordVPN natif (hors NetworkManager) se lit par la seule présence de `/sys/class/net/nordlynx` (`NC_VPN_SYSFS` pour les tests) :
+`fournisseur` = `NordVPN`, `nom` = `NordVPN`, `pays` vide (aucune commande `nordvpn`, aucun appel réseau) ; il passe avant un profil perso mais après un
+fournisseur reconnu de NetworkManager, et n'est pas compté deux fois si NetworkManager porte déjà l'interface `nordlynx`.
+**Limites de `nordlynx`, à vérifier sur une vraie machine (rien n'est deviné ici)** : (1) le Meshnet de NordVPN pourrait laisser l'interface `nordlynx` présente sans
+tunnel VPN ; lire `/sys/class/net/nordlynx/operstate` ne prouve pas qu'il n'y a pas de Meshnet, donc on ne s'en sert pas ; (2) NordVPN en protocole OpenVPN
+passe par une autre interface (`nordtun`), que l'indicateur ne voit pas. Le pays se déduit du nom de la
+connexion après retrait du préfixe `nc-vpn-` (sans tenir compte des majuscules) : « nc-vpn-labo » ne donne aucun pays (et non NC), « nc-vpn-FR#12 » donne FR. Pour nos
+profils, un premier mot de deux lettres en minuscules sans chiffres (« nc-vpn-my-lab », « nc-vpn-de-maison ») n'est un pays que dans la forme fournisseur
+(`fr-par-wg-001`) ; les majuscules et les mots à chiffres (« FR#12 », « fr1 ») restent lus.
+
 ## Contrat des fournisseurs VPN (`nc-vpn`)
 
 Ce que la fenêtre VPN lit et lance pour NordVPN, Proton VPN et Mullvad. Tout est en arguments (jamais une ligne de shell).
@@ -159,6 +174,9 @@ Les messages d'erreur passent par un filtre (URL, e-mail, longues suites de chif
     deux caractères = code) ; nous donnons toujours le code ISO MAJUSCULE, validé avant tout appel. Sur le palier gratuit, choisir un pays est refusé par
     la CLI (« not available on the free plan ») : message prévu, jamais la sortie brute. Un compte payant dont la requête n'aboutit pas peut recevoir un
     code 0 sans « Connected to » : c'est traité comme un refus. `disconnect` écrit `Disconnected.`.
+  - **Déconnexion** : `Disconnected.` avec un code de sortie NON nul n'est un succès que si NetworkManager confirme ensuite (`nmcli` en argv, 3 lectures
+    à une seconde d'écart) qu'AUCUNE connexion « ProtonVPN … » n'est active ni en montée ; NetworkManager muet, absent ou en erreur, ou un tunnel encore là :
+    échec (« Proton VPN a refusé la demande »). Un code non nul sans ce message reste un échec. Code 0 : succès comme avant.
   - Aucune question interactive en dehors de `signin` (mot de passe `getpass`, code `click.prompt`, clé de sécurité) : stdin est fermé et chaque lecture a
     un délai. `signin` demande un NOM D'UTILISATEUR en argument obligatoire : la fenêtre `kitty` le lit dans le terminal.
   - Conflit avec l'application graphique (`proton/vpn/cli/__init__.py`, `_vpn_gui_running`) : si le nom `proton.vpn.app.gtk` est sur le bus de session, la
@@ -168,6 +186,23 @@ Les messages d'erreur passent par un filtre (URL, e-mail, longues suites de chif
   - CLI absente mais application `protonvpn-app` présente : l'ancien état `pilote_appli` (jamais `sans_compte` : le compte est celui de l'appli, qu'on ne
     lit pas ; sa connexion NetworkManager « ProtonVPN SERVEUR » n'existe que pendant la connexion). Ni l'une ni l'autre : `absent`. Dans la fenêtre, le tunnel
     NetworkManager « ProtonVPN … » est la ligne de la carte principale ; l'état du fournisseur ne la double pas.
+  - **Proton en Flatpak** (`com.protonvpn.www`, Flathub, installation `--user` ou système). Ordre de détection : CLI native `protonvpn`, puis
+    `flatpak info --user com.protonvpn.www`, puis `--system` (code 0 = installé, sortie jetée, aucun réseau ;
+    `flatpak` absent : silence, état `absent`). Avant tout `flatpak info`, on regarde si le dossier d'installation existe (`os.path.isdir`, aucun processus) :
+    `$XDG_DATA_HOME/flatpak/app/com.protonvpn.www` (défaut `~/.local/share`) pour `--user`, `/var/lib/flatpak/app/com.protonvpn.www` pour `--system` ;
+    aucun des deux : `absent`, flatpak n'est pas lancé (une installation système ailleurs, `/etc/flatpak/installations.d`, n'est pas vue). Le chemin de
+    `flatpak` trouvé est gardé tel quel. La CLI passe alors par `flatpak run [--user|--system] --command=protonvpn com.protonvpn.www ARGS` (argv,
+    stdin fermé, mêmes filtres de sortie, aucun identifiant gardé) et l'appli par `flatpak run com.protonvpn.www` (détachée). Sources : manifeste
+    github.com/flathub/com.protonvpn.www (`command: protonvpn-app`, module `proton-vpn-cli` tag v1.0.5 installé par `pip3 install --prefix=/app`) et
+    `setup.py` du tag v1.0.5 de ProtonVPN/proton-vpn-cli (`protonvpn=proton.vpn.cli:main`) : la commande `protonvpn` est donc dans le Flatpak ; le
+    manifeste ne la montre pas en toutes lettres et **aucun essai réel n'a été fait** (si elle manque, `flatpak run` échoue : `probleme` = `illisible`).
+    Toutes les gardes restent : `info` et `countries list` seulement avec `--verifier-proton`, verrou, jamais pendant « activating », jamais `status`.
+    Appli Flatpak ouverte, AVANT chaque commande de la CLI : d'abord le nom D-Bus `proton.vpn.app.gtk` (le manifeste donne `--own-name=` à l'appli ;
+    `gdbus call --session --timeout 3 … NameHasOwner`, argv, borné ; un propriétaire = ouverte, aucun propriétaire = fermée) ; si gdbus est absent ou en
+    erreur, repli sur `flatpak ps --columns=application` (une ligne contenant exactement `com.protonvpn.www` ; ne distingue pas l'appli d'une CLI du
+    même Flatpak, donc prudent). Les deux en échec : la CLI dit elle-même si l'appli est ouverte. La connexion au compte garde la fenêtre `kitty` quand la CLI
+    NATIVE est présente (sa session n'est pas forcément celle du Flatpak) ; l'appli Flatpak ne s'ouvre que si la CLI vient du Flatpak ou si seule elle existe.
+    Le message d'aide propose alors `flatpak run --command=protonvpn com.protonvpn.www info`. Rien de `/proc`. Délais : ceux de la CLI plus 15 s (démarrage du bac à sable) ; `info` et `ps` : 8 s.
 - **Mullvad** (mullvad/mullvadvpn-app, `mullvad-cli/src/cmds/account.rs`) : `status` n'affiche PAS d'avertissement de compte quand il est déconnecté.
   `account get` écrit « Not logged in on any account », « The current device has been revoked » ou « Mullvad account: <numéro> » (code 0 dans les
   trois cas) : seul le oui/non en est tiré, le numéro est lu mais jamais gardé ; `relay list` écrit « Nom (code) » par pays, les villes et relais en retrait.
