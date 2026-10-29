@@ -2,16 +2,15 @@
 et, pour `run --command=protonvpn`, rejoue les réponses de protonvpn.json comme le faux protonvpn des autres tests. Ordre : CLI native
 d'abord ; toutes les gardes restent (aucune lecture automatique, jamais `status`) ; l'appli Flatpak ouverte se voit par `flatpak ps`.
 PATH = faux-bin seul : jamais le vrai flatpak, ni protonvpn, ni kitty."""
+import fcntl
 import json
 import os
-import stat
-import subprocess
 import sys
 import time
 import unittest
 from unittest import mock
 
-from tests._vpn_faux import BaseVpn, BIN
+from tests._vpn_faux import BaseVpn, connexions
 from tests.test_nc_vpn_indicateur import charger
 from tests.test_nc_vpn_proton_cli import APPLI, COMPTE, CONNECTE_OK, EMAIL, INFO_OK, INFO_SANS, IP, JETON, PAYS, SECRETS, lire
 
@@ -46,8 +45,30 @@ sys.exit(1)
 '''
 
 
+# Faux gdbus : NameHasOwner du nom proton.vpn.app.gtk ; la réponse vient de flatpak.json ("bus": "true", "false" ou "erreur").
+FAUX_GDBUS = r'''#!@PYTHON@
+import json, os, sys
+from pathlib import Path
+R = Path(os.environ["FAUX_DIR"])
+with (R / "appels-gdbus.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
+b = json.loads((R / "flatpak.json").read_text()).get("bus", "erreur")
+if b == "erreur": sys.stderr.write("Error: no bus\n"); sys.exit(1)
+print("(%s,)" % b)
+'''
+
+
 class ProtonFlatpak(BaseVpn):
-    def flatpak(self, installe=("--user",), ps="Application\n", cli=None, **conf):
+    def flatpak(self, installe=("--user",), ps="Application\n", cli=None, bus=None, **conf):
+        for portee, nom in (("--user", "fp-user"), ("--system", "fp-system")):
+            if portee in installe:
+                (self.r / nom).mkdir(exist_ok=True)
+        g = self.r / "faux-bin" / "gdbus"
+        if bus is None:
+            g.unlink(missing_ok=True)                                              # pas de gdbus : repli sur flatpak ps
+        else:
+            g.write_text(FAUX_GDBUS.replace("@PYTHON@", sys.executable))
+            g.chmod(0o755)
+        conf["bus"] = bus
         f = self.r / "faux-bin" / "flatpak"
         f.write_text(FAUX_FLATPAK.replace("@PYTHON@", sys.executable))
         f.chmod(0o755)
@@ -74,7 +95,7 @@ class ProtonFlatpak(BaseVpn):
         self.flatpak(installe=("--system",))
         f = self.fiche()
         self.assertEqual((f["etat"], f["pilotage"]), ("pret", "direct"))
-        self.assertEqual(self.appels_flatpak()[:2], [["info", "--user", APP], ["info", "--system", APP]])
+        self.assertEqual(self.appels_flatpak()[:1], [["info", "--system", APP]])               # pas de dossier utilisateur : pas de `info --user`
         self.assertEqual(self.runs(), [["run", "--system", "--command=protonvpn", APP, "info"],
                                        ["run", "--system", "--command=protonvpn", APP, "countries", "list"]])
         self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"]])
@@ -84,7 +105,7 @@ class ProtonFlatpak(BaseVpn):
         self.flatpak(installe=("--user",))
         self.assertEqual(self.fiche()["etat"], "pret")
         self.assertEqual(self.appels_flatpak()[0], ["info", "--user", APP])
-        self.assertNotIn(["info", "--system", APP], self.appels_flatpak())          # trouvé au premier essai
+        self.assertNotIn(["info", "--system", APP], self.appels_flatpak())          # pas de dossier système, et trouvé au premier essai
         self.assertTrue(all(a[1] == "--user" for a in self.runs()))
 
     def test_sans_compte_dans_le_flatpak(self):
@@ -98,7 +119,19 @@ class ProtonFlatpak(BaseVpn):
         self.flatpak(installe=())
         f = self.fiche()
         self.assertEqual(f["etat"], "absent")
+        self.assertEqual(self.appels_flatpak(), [])                                 # aucun dossier d'installation : flatpak n'est jamais lancé
+        (self.r / "fp-user").mkdir()                                                # dossier présent mais `flatpak info` refuse : absent
+        self.assertEqual(self.fiche()["etat"], "absent")
+        self.assertEqual(self.appels_flatpak(), [["info", "--user", APP]])
         self.assertEqual(self.runs(), [])
+
+    def test_dossiers_flatpak_par_defaut(self):
+        mod = charger()
+        with mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/x/data"}, clear=False):
+            os.environ.pop("NC_VPN_FLATPAK_USER", None)
+            os.environ.pop("NC_VPN_FLATPAK_SYSTEM", None)
+            d = mod.flatpak_dossiers()
+        self.assertEqual(d, {"--user": "/x/data/flatpak/app/" + APP, "--system": "/var/lib/flatpak/app/" + APP})
 
     def test_cli_native_prime_sur_le_flatpak(self):
         self.flatpak()
@@ -145,6 +178,47 @@ class ProtonFlatpak(BaseVpn):
         self.flatpak(ps="Application\norg.example.Autre\ncom.protonvpn.www.Extra\n")
         self.assertEqual(self.fiche()["etat"], "pret")
 
+    def test_nom_dbus_de_l_appli_prime_sur_flatpak_ps(self):
+        # le nom a un propriétaire : ouverte, sans même interroger `flatpak ps`
+        self.flatpak(bus="true")
+        f = self.fiche()
+        self.assertEqual((f["etat"], f["probleme"]), ("pilote_appli", "appli_ouverte"))
+        self.assertEqual(self.appels_de("gdbus")[0][:9], ["call", "--session", "--timeout", "3", "--dest", "org.freedesktop.DBus",
+                                                          "--object-path", "/org/freedesktop/DBus", "--method"])
+        self.assertEqual(self.appels_de("gdbus")[0][9:], ["org.freedesktop.DBus.NameHasOwner", "proton.vpn.app.gtk"])
+        self.assertNotIn(["ps", "--columns=application"], self.appels_flatpak())
+        self.assertEqual(self.appels_de("protonvpn"), [])
+        # personne sur le nom : pas ouverte, même si `flatpak ps` listerait une CLI du même Flatpak
+        self.flatpak(bus="false", ps="Application\n%s\n" % APP)
+        self.assertEqual(self.fiche()["etat"], "pret")
+        self.assertNotIn(["ps", "--columns=application"], self.appels_flatpak())
+
+    def test_gdbus_absent_ou_en_erreur_repli_sur_flatpak_ps(self):
+        self.flatpak(bus="erreur", ps="Application\n%s\n" % APP)
+        self.assertEqual(self.fiche()["probleme"], "appli_ouverte")
+        self.assertIn(["ps", "--columns=application"], self.appels_flatpak())
+        self.flatpak(bus=None, ps="Application\n%s\n" % APP)                         # gdbus absent
+        self.assertEqual(self.fiche()["probleme"], "appli_ouverte")
+
+    def test_message_illisible_propose_la_commande_du_flatpak(self):
+        mod = charger()
+        mod.EN = True
+        with mock.patch.object(mod, "proton_cli_argv", lambda: ["/x/flatpak", "run", "--user", "--command=protonvpn", APP]):
+            self.assertIn("\"flatpak run --command=protonvpn com.protonvpn.www info\"", mod.proton_msg_probleme("illisible"))
+            self.assertIn("\"flatpak run --command=protonvpn com.protonvpn.www info\"", mod.proton_msg_probleme("delai"))
+        with mock.patch.object(mod, "proton_cli_argv", lambda: ["/x/protonvpn"]):
+            self.assertIn("\"protonvpn info\"", mod.proton_msg_probleme("illisible"))
+            self.assertNotIn("flatpak", mod.proton_msg_probleme("delai"))
+
+    def test_login_avec_cli_native_garde_kitty_meme_si_le_flatpak_existe(self):
+        self.flatpak()
+        self.poser("protonvpn", {})
+        self.poser("kitty", {})
+        r = self.seul("fournisseur", "proton", "login")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.appels_de("kitty")), 1)
+        self.assertEqual(self.runs(), [])                                           # l'appli Flatpak n'est pas ouverte
+
     def test_ps_en_echec_la_cli_decide(self):
         self.flatpak(ps="", ps_code=1, cli={"info": {"out": APPLI}})
         f = self.fiche()
@@ -180,12 +254,22 @@ class ProtonFlatpak(BaseVpn):
 
     def test_verrou_et_montee_gardes_comme_pour_la_cli_native(self):
         self.flatpak()
-        from tests._vpn_faux import connexions
         (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid="55555555-5555-4555-8555-555555555555", type="wireguard",
                                                                            active=True, dev="proton0", nom="ProtonVPN FR#12", etat="activating")]))
         f = self.fiche()
         self.assertEqual(f["probleme"], "non_verifie")
         self.assertEqual(self.runs(), [])
+        # le verrou des changements tenu par un autre : aucun appel à la CLI Flatpak
+        (self.r / "etat.json").write_text(json.dumps(connexions()))
+        verrou = os.open(str(self.r / "run" / "nc-vpn.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, verrou)
+        fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        f = self.fiche()
+        self.assertEqual(f["probleme"], "non_verifie")
+        self.assertEqual(self.runs(), [])
+        fcntl.flock(verrou, fcntl.LOCK_UN)
+        self.assertEqual(self.fiche()["etat"], "pret")                              # verrou rendu : la vérification a lieu
+        self.assertEqual(len(self.runs()), 2)
 
     def test_delais_plus_longs_et_bornes_pour_le_flatpak(self):
         mod = charger()
@@ -198,6 +282,18 @@ class ProtonFlatpak(BaseVpn):
                 mock.patch.object(mod, "proton_flatpak_ouvert", lambda: False):
             mod.proton_cli(["info"], 10)
         self.assertEqual(vus[0][1], 10 + mod.DELAI_FLATPAK)
+        # `flatpak info` et `flatpak ps` : 8 s
+        vus.clear()
+        with mock.patch.object(mod, "lancer_borne", faux), mock.patch.object(mod, "proton_nom_bus", lambda: None), \
+                mock.patch.object(mod.shutil, "which", lambda n: "/x/" + n):
+            mod.proton_flatpak_ouvert()
+            d = self.r / "fpdir"
+            d.mkdir()
+            with mock.patch.dict(os.environ, {"NC_VPN_FLATPAK_USER": str(d), "NC_VPN_FLATPAK_SYSTEM": str(self.r / "rien")}):
+                mod._FLATPAK_PORTEE.clear()
+                mod.flatpak_proton()
+        self.assertEqual([(a[1], d_) for a, d_ in vus], [("ps", 8), ("info", 8)])
+        mod._FLATPAK_PORTEE.clear()
         vus.clear()
         with mock.patch.object(mod, "lancer_borne", faux), mock.patch.object(mod, "proton_cli_argv", lambda: ["/x/protonvpn"]):
             mod.proton_cli(["info"], 10)

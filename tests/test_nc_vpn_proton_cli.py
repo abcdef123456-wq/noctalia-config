@@ -300,6 +300,18 @@ class ProtonCli(BaseVpn):
         self.cli(disconnect={"out": "Error: boom\n", "code": 3})
         self.assertEqual(self.seul("fournisseur", "proton", "deconnecter").returncode, 1)
 
+    def test_deconnexion_second_appel_nmcli_en_erreur_ou_en_montee_seule_est_un_echec(self):
+        self.cli(disconnect={"out": "Disconnected.\n", "code": 3})
+        # 1er appel : aucun Proton actif ; 2e appel (STATE,NAME) en erreur -> pas confirmé -> échec
+        r = self.seul("fournisseur", "proton", "deconnecter", NM_ECHEC_STATE="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusé", r.stderr)
+        # seule la branche « en montée » : rien d'actif au 1er appel, mais le 2e appel voit une connexion Proton en montée -> échec
+        r = self.seul("fournisseur", "proton", "deconnecter", NM_ETAT_EXTRA="activating:ProtonVPN FR#12")
+        self.assertEqual(r.returncode, 1)
+        # contrôle : sans ces anomalies, le même cas réussit
+        self.assertEqual(self.seul("fournisseur", "proton", "deconnecter").returncode, 0)
+
     def test_verrou_un_changement_a_la_fois(self):
         self.cli(connect={"dormir": 3, "out": CONNECTE_OK})
         env = self.env(PATH=str(self.r / "faux-bin"))

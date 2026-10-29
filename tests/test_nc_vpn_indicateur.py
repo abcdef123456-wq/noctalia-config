@@ -57,6 +57,12 @@ class Motifs(unittest.TestCase):
         self.assertEqual(p("  nc-vpn-fr-par-wg-001"), "FR")
         self.assertEqual(p("nc-vpn-"), "")
         self.assertEqual(p("nc-vpn-nc1"), "NC")                              # un vrai « nc1 » après le préfixe reste lu
+        for perso in ("nc-vpn-my-lab", "nc-vpn-in-office", "nc-vpn-no-log", "nc-vpn-it-dept", "nc-vpn-to-home", "nc-vpn-de-maison"):
+            self.assertEqual(p(perso), "", perso)                            # mot ordinaire de deux lettres dans nos profils : pas un pays
+        self.assertEqual(p("nc-vpn-FR-12"), "FR")
+        self.assertEqual(p("nc-vpn-fr-par-wg-001"), "FR")                    # forme fournisseur
+        self.assertEqual(p("nc-vpn-de3"), "DE")                              # mot à chiffres
+        self.assertEqual(p("de-maison"), "DE")                               # sans préfixe : règle d'avant (premier mot)
         self.assertEqual(p("mullvad-nc-vpn-fr1"), "FR")                      # le préfixe n'est retiré qu'au début ; « fr1 » compte
 
     def test_nom_borne_et_sans_controle(self):
