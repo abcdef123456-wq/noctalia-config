@@ -861,9 +861,9 @@ def appliquer(nom, oui=False, oui_hz=False, interactif=False):
                         os.unlink(FICHIER_AVANT)
                     except OSError:
                         pass
-                msg = f"échec à « {c['libelle']} » : {raison}. Tout a été remis comme avant."
-                if rates:
-                    msg += " Mais n'ont pas pu être remis : " + ", ".join(rates) + "."
+                msg = f"échec à « {c['libelle']} » : {raison}. " + (
+                    "Tout a été remis comme avant." if not rates
+                    else "Tout a été remis comme avant, sauf : " + ", ".join(rates) + ".")
                 raise Erreur(msg, 1)
         # Un service peut avoir réécrit un réglage après coup : relire, jamais un succès non confirmé
         ecarts = verifier_final({c["cle"]: c["_apres"] for c in ap["changements"]})
