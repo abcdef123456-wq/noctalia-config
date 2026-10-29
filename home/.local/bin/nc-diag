@@ -450,8 +450,10 @@ def verifier(b):
     prof, code = sortie(["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
                          "/net/hadess/PowerProfiles", "--method", "org.freedesktop.DBus.Properties.Get",
                          "net.hadess.PowerProfiles", "ActiveProfile"])
+    actif = None
     if code == 0:
         p = re.findall(r"'([a-z-]+)'", prof)
+        actif = p[0] if p else None
         b.ok(T(f"profils d'énergie disponibles (actif : {p[0] if p else '?'})",
                f"power profiles available (active: {p[0] if p else '?'})"))
     else:
@@ -460,6 +462,7 @@ def verifier(b):
                 T("relance install.sh (TLP + tlp-pd, ou power-profiles-daemon / tuned-ppd)",
                   "run install.sh again (TLP + tlp-pd, or power-profiles-daemon / tuned-ppd)"), cle="profils_energie")
     bats = [d for d in os.listdir("/sys/class/power_supply") if d.startswith("BAT")] if os.path.isdir("/sys/class/power_supply") else []
+    energie_plateforme(b, actif, bool(bats))
     if bats:
         v, _ = sortie([os.path.join(BIN, "nc-sysinfo"), "sante"])
         if v:
@@ -883,6 +886,95 @@ def npm_node(b):
                   f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh le propose)",
                   f"npm config set prefix ~/.local; npm install -g {paquet}; then, whenever you like: "
                   f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh offers it)"), cle="npm_bloque:" + paquet)
+
+
+# Profil logiciel (power-profiles-daemon, tlp-pd, tuned-ppd) -> profils de la plateforme attendus. « max-power » n'y est
+# jamais : il dépasse les limites du constructeur et n'est pas choisi par les profils du dépôt.
+PLATEFORME_ATTENDUE = {"power-saver": ("low-power", "quiet", "cool"), "balanced": ("balanced",),
+                       "performance": ("performance", "balanced-performance")}
+# Services qui peuvent écrire le profil de la plateforme (le premier actif est celui qui pilote)
+SERVICES_PROFILS = (("tlp-pd.service", "TLP (tlp-pd)"), ("power-profiles-daemon.service", "power-profiles-daemon"),
+                    ("tuned-ppd.service", "tuned-ppd"), ("tuned.service", "tuned"))
+
+
+def _mot(texte):
+    """Un texte lu dans /sys, pour l'afficher : lettres, chiffres et « _ . - » seulement, court (jamais de mise en forme)."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "", texte)[:40]
+
+
+def energie_plateforme(b, actif, portable):
+    """Profil de la plateforme (ventilateurs, limites du firmware) : ce que le NOYAU dit, à côté du profil logiciel.
+    Deux choses distinctes : le profil logiciel actif (service de profils) et le mode matériel lu dans /sys. Un mode matériel
+    n'est « confirmé » que s'il correspond au profil logiciel ; rien n'est écrit ici, et jamais de succès inventé."""
+    glob_f = os.path.join(SYS, "firmware/acpi/platform_profile")
+
+    def lire(f):
+        """(texte, None) ; ('', 'absent' | 'permission' | 'erreur')"""
+        try:
+            with open(f, encoding="utf-8", errors="replace") as h:
+                return h.read().strip(), None
+        except FileNotFoundError:
+            return "", "absent"
+        except PermissionError:
+            return "", "permission"
+        except OSError:
+            return "", "erreur"
+    valeur, err = lire(glob_f)
+    choix = [_mot(x) for x in lire(glob_f + "_choices")[0].split()]
+    ctrls = []
+    for d in sorted(glob.glob(os.path.join(SYS, "class/platform-profile/*"))):
+        nom, _ = lire(os.path.join(d, "name"))
+        prof, e2 = lire(os.path.join(d, "profile"))
+        ch, _ = lire(os.path.join(d, "choices"))
+        ctrls.append((_mot(nom) or _mot(os.path.basename(d)), _mot(prof), [_mot(x) for x in ch.split()], e2))
+    if err == "absent" and not ctrls:
+        if portable:
+            b.ok(T("profil matériel : le noyau n'en propose aucun sur ce PC (seuls les profils logiciels agissent)",
+                   "hardware profile: the kernel offers none on this PC (only the software profiles act)"))
+        return
+    if err in ("permission", "erreur") or any(c[3] in ("permission", "erreur") for c in ctrls):
+        b.avert(T("profil matériel : lecture refusée par le système (permission insuffisante)",
+                  "hardware profile: reading refused by the system (insufficient permission)"),
+                T("le profil de la plateforme n'a pas pu être lu : le mode matériel n'est pas confirmé",
+                  "the platform profile could not be read: the hardware mode is not confirmed"), cle="plateforme_illisible")
+        return
+    service = ""
+    for u, nom in SERVICES_PROFILS:
+        if sortie(["systemctl", "is-active", u])[0].strip() == "active":
+            service = nom
+            break
+    valeur = _mot(valeur)
+    detail_ctrl = "; ".join(f"{n} : {p or '?'} ({' '.join(c) or '?'})" for n, p, c, _e in ctrls)
+    choix_txt = " ".join(choix) or "?"
+    base = T(f"profil matériel lu : {valeur or '?'} (choix du noyau : {choix_txt})",
+             f"hardware profile read: {valeur or '?'} (kernel choices: {choix_txt})")
+    ctl_txt = (T(" ; contrôleurs : ", " ; controllers: ") + detail_ctrl) if len(ctrls) > 1 else \
+              ((T(" ; contrôleur : ", " ; controller: ") + detail_ctrl) if ctrls else "")
+    base += ctl_txt
+    differents = sorted({p for _n, p, _c, _e in ctrls if p}) if len(ctrls) > 1 else []
+    if valeur == "custom" or (len(differents) > 1):
+        b.avert(base, T("« custom » : les contrôleurs n'ont pas tous le même profil, le mode matériel n'est pas un des profils "
+                        "standard. Choisis un profil dans la barre (Super + Alt + P) puis relance nc-diag.",
+                        "“custom”: the controllers do not all have the same profile, so the hardware mode is not a standard one. "
+                        "Pick a profile in the bar (Super + Alt + P), then run nc-diag again."), cle="plateforme_custom")
+        return
+    if not service or actif is None:
+        # Pas de service qui pilote : le profil matériel est une simple lecture, rien ne le confirme ni ne l'impose
+        b.ok(base + T(" (aucun service de profils actif : rien ne le pilote)", " (no profile service active: nothing drives it)"))
+        return
+    attendu = PLATEFORME_ATTENDUE.get(actif)
+    if attendu is None or not valeur:
+        b.ok(base + T(f" ; profil logiciel : {actif}, service : {service}", f"; software profile: {actif}, service: {service}"))
+    elif valeur in attendu:
+        b.ok(T(f"profil logiciel {actif} ({service}) et mode matériel confirmé : {valeur}",
+               f"software profile {actif} ({service}) and hardware mode confirmed: {valeur}") + ctl_txt)
+    else:
+        b.avert(T(f"profil logiciel {actif} ({service}), mais mode matériel lu : {valeur} (non confirmé)",
+                  f"software profile {actif} ({service}), but hardware mode read: {valeur} (not confirmed)") + ctl_txt,
+                T(f"attendu : {' ou '.join(attendu)} (choix du noyau : {choix_txt}). Le service n'a pas (encore) posé ce profil "
+                  "matériel, ou ce PC n'a pas l'équivalent : le profil logiciel agit seul.",
+                  f"expected: {' or '.join(attendu)} (kernel choices: {choix_txt}). The service has not (yet) set this hardware "
+                  "profile, or this PC has no equivalent: the software profile acts alone."), cle="plateforme_difference")
 
 
 def energie_processeur(b, bats):
