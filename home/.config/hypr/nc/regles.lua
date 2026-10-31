@@ -131,6 +131,10 @@ hl.layer_rule({
 -- (layersIn) à chaque changement de taille de la surface (Spotlight, ouverture, fermeture) : l'île glissait de côté,
 -- étirée, pendant environ 270 ms (vu image par image : à droite puis à gauche, retour lent au centre)
 hl.layer_rule({ name = "nc-ile-sans-anim", match = { namespace = "^nc-ile$" }, no_anim = true })
+-- Aperçu d'aimantation de l'île (AimantApercu.qml) : le cadre bouge par lui-même (ressort) ; Hyprland n'anime pas en plus
+-- la place ni la taille de ce calque ; verre : flou derrière le cadre (comme nc-fiche-verre)
+hl.layer_rule({ name = "nc-aimant-verre", match = { namespace = "^nc-aimant$" }, blur = true, ignore_alpha = 0.1 })
+hl.layer_rule({ name = "nc-aimant-sans-anim", match = { namespace = "^nc-aimant$" }, no_anim = true })
 -- Dock en verre dépoli : flouté même là où il est très transparent
 hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-dock$" }, ignore_alpha = 0.2 })
 -- Fiche des raccourcis de l'île (Super + /) : verre, le bureau flouté derrière la carte seulement (le reste est transparent)

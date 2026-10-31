@@ -12,6 +12,7 @@
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
+//   qs -c nc-ile ipc call ile aimant ZONE X Y W H   aperçu d'aimantation pendant un glisser (nc/raccourcis.lua) ; ZONE "" l'efface
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
 import Quickshell
@@ -86,6 +87,38 @@ ShellRoot {
     LazyLoader {
         active: Etat.projection
         Projection {}
+    }
+    // Aperçu d'aimantation (nc/raccourcis.lua, pendant le glisser d'une fenêtre vers un bord ou un coin) : le cadre est
+    // créé seulement tant qu'une zone est annoncée, puis 300 ms de plus pour son fondu ; rien en mémoire sinon. Zones
+    // reconnues : la liste fixe ci-dessous, toute autre est ignorée ; réglage AIMANT_APERCU=non : tout est ignoré.
+    readonly property var aimantZones: ["haut", "gauche", "droite", "haut-gauche", "haut-droite", "bas-gauche", "bas-droite"]
+    property string aimantZone: ""
+    property int aimantX: 0
+    property int aimantY: 0
+    property int aimantW: 0
+    property int aimantH: 0
+    property bool aimantCharge: false
+    // L'écran qui contient le centre du rectangle (coordonnées logiques globales), sinon le premier
+    readonly property var aimantEcran: Quickshell.screens.find(s => racine.aimantX + racine.aimantW / 2 >= s.x
+                                                                  && racine.aimantX + racine.aimantW / 2 < s.x + s.width
+                                                                  && racine.aimantY + racine.aimantH / 2 >= s.y
+                                                                  && racine.aimantY + racine.aimantH / 2 < s.y + s.height) || Quickshell.screens[0]
+    Timer {
+        id: aimantFin
+        interval: 300
+        onTriggered: racine.aimantCharge = false
+    }
+    LazyLoader {
+        id: aimantChargeur
+        active: racine.aimantCharge
+        AimantApercu {
+            screen: racine.aimantEcran
+            montre: racine.aimantZone !== ""
+            rx: racine.aimantX
+            ry: racine.aimantY
+            rw: racine.aimantW
+            rh: racine.aimantH
+        }
     }
     // Fiche des raccourcis (Super + /), éditable : créée à l'ouverture, sur l'écran actif ; sans l'île Quickshell,
     // Super + / ouvre la fiche de Noctalia
@@ -208,6 +241,20 @@ ShellRoot {
         // JARVIS veut agir sur ce PC (nc-noeud) : la demande est relue, la carte de confirmation s'ouvre (ou se ferme si
         // la demande est partie) ; « oui » dit à nc-noeud que l'île est là pour répondre
         function noeud(): string { Noeud.relire(); return "oui" }
+        // Aperçu d'aimantation : ZONE de la liste fixe (aimantZones) ou "" pour l'effacer ; le rectangle est en pixels logiques
+        function aimant(zone: string, x: int, y: int, w: int, h: int): void {
+            if (Reglages.val("AIMANT_APERCU", "oui") === "non") return
+            if (zone === "") {
+                racine.aimantZone = ""
+                if (racine.aimantCharge) aimantFin.restart()
+                return
+            }
+            if (racine.aimantZones.indexOf(zone) < 0 || w <= 0 || h <= 0 || Math.abs(x) > 100000 || Math.abs(y) > 100000 || w > 100000 || h > 100000) return
+            racine.aimantX = x; racine.aimantY = y; racine.aimantW = w; racine.aimantH = h
+            racine.aimantZone = zone
+            aimantFin.stop()
+            racine.aimantCharge = true
+        }
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}
