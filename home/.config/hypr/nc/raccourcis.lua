@@ -74,6 +74,8 @@ local function cmd(c) return hl.dsp.exec_cmd(c) end
 local function taille_ecran(m)
     m = m or hl.get_active_monitor()
     if not m then return nil end
+    -- Écran tourné d'un quart de tour (transform impair) : largeur et hauteur sont données avant la rotation
+    if (tonumber(m.transform) or 0) % 2 == 1 then return m.height / m.scale, m.width / m.scale end
     return m.width / m.scale, m.height / m.scale
 end
 

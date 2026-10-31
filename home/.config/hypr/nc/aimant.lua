@@ -80,7 +80,10 @@ local function ecrans_logiques()
     local liste = {}
     for _, m in ipairs(hl.get_monitors() or {}) do
         local s = (m.scale and m.scale > 0) and m.scale or 1
-        liste[#liste + 1] = { x = m.x, y = m.y, w = m.width / s, h = m.height / s, reserve = nc.reserve(m) }
+        -- Écran tourné d'un quart de tour (transform impair) : largeur et hauteur sont données avant la rotation
+        local w, h = m.width, m.height
+        if (tonumber(m.transform) or 0) % 2 == 1 then w, h = h, w end
+        liste[#liste + 1] = { x = m.x, y = m.y, w = w / s, h = h / s, reserve = nc.reserve(m) }
     end
     return liste
 end

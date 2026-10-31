@@ -103,6 +103,20 @@ end
         self.assertEqual(sorties[0].split("\t")[1], "taille 945 1180|place 10 10")
         self.assertEqual(sorties[1].split("\t")[1], "")
 
+    def test_ecran_tourne_en_portrait(self):
+        # 1920 x 1080 tourné d'un quart de tour (transform 1 ou 3) : 1080 de large, 1920 de haut ; transform 2 : inchangé
+        sorties = lua('''
+for _, t in ipairs({ 1, 3, 2 }) do
+  MONS = { { name = "A", x = 0, y = 0, width = 1920, height = 1080, scale = 1, transform = t, reserved = {} } }
+  CURSEUR = { x = 500, y = 900 }; WIN = { floating = true, address = "0xab" }
+  AIMANT.presse(); CURSEUR = { x = 1060, y = 900 }
+  trace = {}; AIMANT.relache()
+  dire(t, table.concat(trace, "|"))
+end
+''', 'REG.AIMANT_APERCU = false\n')
+        self.assertEqual([l.split("\t")[1] for l in sorties],
+                         ["taille 525 1900|place 545 10", "taille 525 1900|place 545 10", ""])
+
     def test_deux_ecrans_cote_a_cote(self):
         s = 'local E = { ecran(0, 0, 1920, 1080), ecran(1920, 0, 1920, 1080) }\n'
         sorties = lua(s + '''
