@@ -318,29 +318,12 @@ touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), trad("Souris|Red
 
 -- Souris sans clavier (nc-reglages → Clavier et souris, SAISIE = souris ou les-deux) : boutons latéraux maintenus pour
 -- déplacer (arrière) ou redimensionner (avant) ; un simple clic garde Précédent / Suivant (Alt + ←/→, navigateurs et
--- fichiers). Lâchée en haut de l'écran, une fenêtre libre s'agrandit ; sur le bord gauche ou droit, elle en prend la
--- moitié (comme Windows). Super + clic molette : libre ↔ rangée.
+-- fichiers). Lâchée en haut de l'écran, une fenêtre s'agrandit ; sur le bord gauche ou droit, elle en prend la
+-- moitié, dans un coin le quart (comme Windows ; nc/aimant.lua). Super + clic molette : libre ↔ rangée.
 local saisie = nc.reglage("SAISIE", "clavier")
 if saisie == "souris" or saisie == "les-deux" then
     pcall(hl.config, { binds = { drag_threshold = 8 } })
-    local function aimanter()
-        local w, p = hl.get_active_window(), hl.get_cursor_pos()
-        local m = w and w.monitor
-        if not (w and p and m) or not w.floating then return end
-        local px, py = xy(p)
-        local lw, lh = taille_ecran(m)
-        local r = nc.reserve(m)          -- place de la barre (lue autrement sous Hyprland 0.55)
-        local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
-        local g = 10
-        local ax, ay, aw, ah = m.x + rg + g, m.y + rh + g, lw - rg - rd - 2 * g, lh - rh - rb - 2 * g
-        if py <= m.y + rh + 4 then
-            hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set" }))
-        elseif px <= m.x + 4 or px >= m.x + lw - 4 then
-            local demi = math.floor((aw - g) / 2)
-            hl.dispatch(hl.dsp.window.resize({ window = w, x = demi, y = math.floor(ah) }))
-            hl.dispatch(hl.dsp.window.move({ window = w, x = math.floor(px <= m.x + 4 and ax or ax + demi + g), y = math.floor(ay) }))
-        end
-    end
+    local aimant = nc.charger("nc.aimant")         -- zones, aperçu et rangement (nc/aimant.lua)
     -- Raccourci « au clic » ou « après un glisser » : gardé seulement si ce Hyprland connaît l'option (sinon il partirait
     -- dès l'appui, en même temps que le déplacement). Jamais avec mouse = true : Hyprland 0.56 l'ignore en Lua, 0.57 le
     -- refuse avec click / drag (« hl.bind: mouse is exclusive », signalé même sous pcall) ; mouse reste aux vrais
@@ -355,8 +338,15 @@ if saisie == "souris" or saisie == "les-deux" then
         si_compris("click", "mouse:275", hl.dsp.send_shortcut({ mods = "ALT", key = "Left" }))
         si_compris("click", "mouse:276", hl.dsp.send_shortcut({ mods = "ALT", key = "Right" }))
     end
-    si_compris("drag", "mouse:275", aimanter)
-    si_compris("drag", SUPER .. " + mouse:272", aimanter)
+    -- Aimantation : un raccourci à l'appui arme le suivi, un autre au relâchement le coupe et range la fenêtre
+    -- (déclarés après les déplacements : Hyprland les joue dans cet ordre, le glisser est fini quand on range). Pas de mouse.
+    if aimant then
+        for _, combinaison in ipairs({ "mouse:275", SUPER .. " + mouse:272" }) do
+            local avec_super = combinaison:find("SUPER", 1, true) ~= nil      -- Super lâché avant le bouton : voir aimant.lua
+            pcall(touche, combinaison, function() aimant.presse(avec_super) end)
+            si_compris("release", combinaison, aimant.relache)
+        end
+    end
     touche(SUPER .. " + mouse:274", hl.dsp.window.float({ action = "toggle" }), trad("Souris|Fenêtre libre ↔ rangée", "Floating ↔ tiled window"))
 end
 

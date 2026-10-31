@@ -249,8 +249,9 @@ for _, r in ipairs(refus) do print("REFUS " .. r) end
 
     def test_boutons_lateraux_clic_et_glisser_sans_mouse(self):
         lignes = self.lancer("les-deux")
-        for attendu in ("mouse:275 mouse", "mouse:276 mouse", "mouse:275 click", "mouse:276 click", "mouse:275 drag",
-                        "SUPER + mouse:272 drag"):
+        # l'aimantation (nc/aimant.lua) : un raccourci à l'appui et un au relâchement (tests/test_aimant.py), sans drag
+        for attendu in ("mouse:275 mouse", "mouse:276 mouse", "mouse:275 click", "mouse:276 click", "mouse:275 ",
+                        "SUPER + mouse:272 "):
             self.assertIn(attendu, lignes)
 
     def test_statique_mouse_toujours_litteral_et_seul(self):

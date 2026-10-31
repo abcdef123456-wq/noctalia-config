@@ -852,6 +852,26 @@ REGLAGES = [
         "account; the notification says how to undo it (systemctl --user unmask …, file in ~/.config/autostart).")),
     R("FENETRES_MARGE", "Fenêtres", L("Marge au bord de l'écran", "Margin at the screen edge"), "entier", "10",
       mini=0, maxi=60, unite="px", groupe="hypr"),
+    R("AIMANT_BORD", "Fenêtres", L("Aimantation : distance du bord de l'écran", "Snapping: distance from the screen edge"),
+      "entier", "40",
+      L("Une fenêtre lâchée à cette distance d'un bord de l'écran se range (en haut : agrandie, sur un côté : la moitié). "
+        "Seuls les bords du bout comptent : entre deux écrans, la fenêtre passe. Marche avec la souris (Souris ou Les deux).",
+        "A window dropped this close to a screen edge snaps (top: maximized, side: half). Only the outer edges count: "
+        "between two screens the window goes through. Works with the mouse (Mouse or Both)."),
+      mini=8, maxi=120, unite="px", groupe="hypr"),
+    R("AIMANT_COIN", "Fenêtres", L("Aimantation : taille des coins", "Snapping: corner size"), "entier", "110",
+      L("Lâchée dans un coin de l'écran (à cette distance des deux bords), la fenêtre prend un quart de l'écran.",
+        "Dropped in a screen corner (this close to both edges), the window takes a quarter of the screen."),
+      mini=40, maxi=300, unite="px", groupe="hypr"),
+    R("AIMANT_APERCU", "Fenêtres", L("Aimantation : cadre d'aperçu", "Snapping: preview frame"), "ouinon", "oui",
+      L("Pendant le glisser, un cadre montre la place que prendra la fenêtre.",
+        "While dragging, a frame shows the place the window will take."), groupe="hypr"),
+    R("AIMANT_PLEIN_MASQUE", "Fenêtres", L("Aimantation : masquer les autres fenêtres en plein écran", "Snapping: hide other windows when full screen"),
+      "ouinon", "non",
+      L("Une fenêtre lâchée en haut de l'écran s'agrandit et les autres fenêtres du bureau sont masquées ; elles reviennent "
+        "quand elle quitte le plein écran.",
+        "A window dropped at the top of the screen maximizes and the other windows of the desktop are hidden; they come back "
+        "when it leaves full screen."), groupe="hypr"),
     R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",
       mini=0, maxi=8, unite="px", groupe="hypr"),
     R("FENETRES_ARRONDI", "Fenêtres", L("Arrondi des coins", "Corner rounding"), "entier", "14",
@@ -1082,10 +1102,10 @@ REGLAGES = [
     R("SAISIE", "Clavier et souris", L("Clavier, souris ou les deux", "Keyboard, mouse or both"), "choix", "clavier",
       L("Souris et Les deux : bouton latéral arrière maintenu = déplacer la fenêtre, avant maintenu = la redimensionner "
         "(un simple clic garde Précédent / Suivant) ; lâchée en haut de l'écran elle s'agrandit, sur un bord elle prend la "
-        "moitié ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
+        "moitié, dans un coin le quart (distances, cadre d'aperçu et masquage : section Fenêtres) ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
         "Mouse and Both: hold the back side button = move the window, hold the forward one = resize it "
         "(a simple click still means Back / Forward); dropped at the top of the screen it maximizes, on an edge it takes "
-        "half; Super + middle click: floating ↔ tiled. Mouse: windows open floating and centered, like on Windows."),
+        "half, in a corner a quarter (distances, preview frame and hiding: Windows section); Super + middle click: floating ↔ tiled. Mouse: windows open floating and centered, like on Windows."),
       [("clavier", L("Clavier (fenêtres rangées, raccourcis)", "Keyboard (tiled windows, shortcuts)")),
        ("souris", L("Souris (fenêtres libres, comme Windows)", "Mouse (floating windows, like Windows)")),
        ("les-deux", L("Les deux (rangées, plus les gestes souris)", "Both (tiled, plus mouse gestures)"))], groupe="hypr"),
@@ -1666,7 +1686,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_LANCEUR_FONDU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
+                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la

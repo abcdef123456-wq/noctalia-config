@@ -386,6 +386,7 @@ l'île Quickshell.
 | **Mode jeu automatique** | Un jeu s'ouvre (Steam, Proton, gamescope, `.exe`) : profil Performance et mode jeu. Le dernier jeu fermé : retour au profil d'avant, effets et notifications rétablis. |
 | **Marque-pages de fenêtres** | **Super + Ctrl + 1…4** : le premier appui attache la fenêtre active à la touche ; ensuite, la touche t'amène à elle depuis n'importe quel bureau, et depuis elle te ramène à la fenêtre d'avant. **Super + Ctrl + Maj + 1…4** pour en attacher une autre. |
 | **Fenêtres flottantes** | Chaque appli flottante (calculatrice, réglages, lecteur…) se rouvre à la taille et à la place où tu l'as fermée, en proportion de l'écran. |
+| **Aimantation des fenêtres** | Avec la souris (nc-reglages → Clavier et souris : Souris ou Les deux), une fenêtre glissée (Super + glisser, ou bouton latéral arrière maintenu) et lâchée près d'un bord se range : en haut elle s'agrandit, sur un côté elle prend la moitié, dans un coin le quart. Seuls les bords du bout des écrans comptent : entre deux écrans, la fenêtre passe. Un cadre d'aperçu de l'île montre la place pendant le glisser (rien ne tourne hors d'un glisser). Réglages (Fenêtres) : distance du bord, taille des coins, cadre d'aperçu, et masquer les autres fenêtres quand on agrandit par le haut (elles reviennent à la sortie du plein écran). |
 
 ### Tes raccourcis
 
