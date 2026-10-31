@@ -44,28 +44,27 @@ class Projection(unittest.TestCase):
         self.erreurs()
 
     def attendre_detaches(self):
-        """Attend (15 s au plus) qu'aucun processus des sessions notées par les faux outils ne vive encore. La session de
-        ce test n'y est jamais : seule celle d'un setsid y entre."""
-        try:
-            notees = {int(x) for x in (self.d / "sessions").read_text().split()} - {os.getsid(0)}
-        except (OSError, ValueError):
-            return
-        def vivantes():
-            for st in Path("/proc").glob("[0-9]*/stat"):
+        """Attend (15 s au plus) qu'aucun processus lancé par ce test ne vive encore : tous héritent de D=<dossier>
+        (lu dans /proc/PID/environ, sans ps : absent des conteneurs minimaux). Un détaché qui n'a encore appelé aucun
+        faux outil est attendu lui aussi : il écrit lui-même dans le dossier (TMPDIR, XDG_RUNTIME_DIR)."""
+        marque = f"D={self.d}".encode()
+        moi = os.getpid()
+        def vivants():
+            for env in Path("/proc").glob("[0-9]*/environ"):
                 try:
-                    champs = st.read_text().rsplit(")", 1)[1].split()
-                except (OSError, IndexError):
+                    if int(env.parent.name) == moi or marque not in env.read_bytes().split(b"\0"):
+                        continue
+                    etat = (env.parent / "stat").read_text().rsplit(")", 1)[1].split()[0]
+                except (OSError, IndexError, ValueError):
                     continue
-                if len(champs) > 3 and int(champs[3]) in notees and champs[0] != "Z":
+                if etat != "Z":
                     return True
             return False
-        self.assertTrue(self.attendre(lambda: not vivantes(), delai=15.0), "processus détaché encore vivant")
+        self.assertTrue(self.attendre(lambda: not vivants(), delai=15.0), "processus détaché encore vivant")
 
     def script(self, nom, corps):
         p = self.faux / nom
-        # Chaque faux outil note sa session (champ 6 de /proc/PID/stat, sans ps : absent des conteneurs minimaux)
-        session = 'read -r _ _ _ _ _ s _ < /proc/$$/stat; echo "$s" >> "$D/sessions"\n'
-        p.write_text("#!/bin/sh\n" + session + corps + "\n")
+        p.write_text("#!/bin/sh\n" + corps + "\n")
         p.chmod(0o755)
 
     def erreurs(self, avant="", apres=None):
