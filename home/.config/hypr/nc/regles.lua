@@ -127,6 +127,10 @@ hl.layer_rule({
     blur         = true,
     blur_popups  = true,
 })
+-- Île (nc-ile) : elle anime elle-même ses ressorts. Sans cette règle, Hyprland animait la place et la taille du calque
+-- (layersIn) à chaque changement de taille de la surface (Spotlight, ouverture, fermeture) : l'île glissait de côté,
+-- étirée, pendant environ 270 ms (vu image par image : à droite puis à gauche, retour lent au centre)
+hl.layer_rule({ name = "nc-ile-sans-anim", match = { namespace = "^nc-ile$" }, no_anim = true })
 -- Dock en verre dépoli : flouté même là où il est très transparent
 hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-dock$" }, ignore_alpha = 0.2 })
 -- Fiche des raccourcis de l'île (Super + /) : verre, le bureau flouté derrière la carte seulement (le reste est transparent)

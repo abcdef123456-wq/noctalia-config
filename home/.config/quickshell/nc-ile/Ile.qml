@@ -29,6 +29,7 @@ PanelWindow {
     // 200 x 30 coûtait les trois quarts de l'iGPU dès que quelque chose bougeait dans l'île (étincelle, onde, minuteur).
     // Largeur fixe de 800 (le coût est par image, pas par pixel) : une couche centrée en haut qui change de largeur est
     // recentrée par Hyprland avec une image de retard, et l'île faisait un saut de côté en se refermant (issue #13).
+    // Hyprland animait aussi la place et la taille du calque à chaque changement : règle no_anim dans hypr/nc/regles.lua.
     // Seule la hauteur change (56 pour la pilule, 700 ouverte, en bannière ou en demande) : le bord haut reste fixe.
     // À l'ouverture, la surface grandit dans le même tour ; à la fermeture, elle ne rapetisse qu'une fois les ressorts au
     // repos (taille voulue à 0,5 près pendant 120 ms, 900 ms au plus), sinon l'île serait coupée pendant son rebond
