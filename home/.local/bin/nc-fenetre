@@ -13,14 +13,21 @@
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
 #   nc-fenetre reduire-lot JSON      masque un lot avec ses géométries prises avant tout déplacement (vue)
 #   nc-fenetre tout-afficher         ramène toutes les fenêtres masquées sur le bureau affiché
+#   nc-fenetre plein-masquer ADRESSE masque les autres fenêtres du bureau de celle-là (pas les épinglées), pour un plein
+#                                    écran qui masque ; la liste est notée dans $XDG_RUNTIME_DIR/nc-reduites-plein
+#   nc-fenetre plein-rendre ADRESSE  ramène sur leur bureau d'origine les fenêtres masquées par celle-là
 #   nc-fenetre etat                  chaque écran, son bureau et ses fenêtres, et les masquées, en JSON (barre : nc/fenetres)
 #   nc-fenetre suivre                le même état, réécrit à chaque changement (une ligne de JSON ; barre : nc/fenetres)
 # Une fenêtre réduite qu'on active autrement (dock, Alt + Tab) revient aussi d'elle-même (nc/automatismes.lua).
+# Une fenêtre masquée par un plein écran qui masque, rappelée (aller), fait quitter le maximisé à son propriétaire :
+# toutes ses masquées reviennent.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 # Dans le dossier de la session (privé, 0700), jamais dans /tmp : un autre utilisateur y poserait un lien ou un fichier
 # à ce nom. Sans XDG_RUNTIME_DIR, les actions qui en ont besoin s'arrêtent (voir plus bas) ; l'aide reste possible
 pile="${XDG_RUNTIME_DIR:-}/nc-reduites"
+# Une ligne par propriétaire d'un plein écran qui masque : « ADRESSE BUREAU a1 a2 … »
+plein="${XDG_RUNTIME_DIR:-}/nc-reduites-plein"
 CACHE="special:reduites"
 
 clients() { hyprctl clients -j 2>/dev/null; }
@@ -31,11 +38,12 @@ action="${1:-}"
 # Noms anglais des actions (nc-window minimize | restore | goto)
 case "$action" in minimize|hide) action=reduire ;; restore|show) action=restaurer ;; goto|go) action=aller ;; toggle) action=basculer ;;
   close) action=fermer ;; tool) action=outil ;; hide-all) action=tout-masquer ;; show-all) action=tout-afficher ;; state) action=etat ;; watch) action=suivre ;; esac
+case "$action" in fullscreen-hide) action="plein-masquer" ;; fullscreen-restore) action="plein-rendre" ;; esac
 # La fermeture de la vue lance plusieurs masquages en parallèle. Ils partageaient le même fichier .tmp : une
 # écriture pouvait effacer la géométrie d'une autre fenêtre, qui réapparaissait mal placée à la prochaine ouverture.
 # Même verrou à la restauration, qui retire une entrée des mêmes fichiers.
 case "$action" in
-  reduire|reduire-lot|tout-masquer|restaurer|aller)
+  reduire|reduire-lot|tout-masquer|restaurer|aller|plein-masquer|plein-rendre)
     if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
       echo "nc-fenetre: $(t "XDG_RUNTIME_DIR n'est pas défini (pas de session ouverte ?)" "XDG_RUNTIME_DIR is not set (no login session?)")" >&2
       exit 1
@@ -92,6 +100,71 @@ reduire_lot() {
   return "$statut"
 }
 
+# Sort une fenêtre du bureau caché et la remet sur le bureau $2 (fondu, sans glisser) ; efface ses entrées de pile.
+# $3 = true : le bureau affiché suit la fenêtre (rappel à la main) ; false : elle revient sans qu'on la suive
+sortir_du_cache() {
+  local a="$1" ws="$2" suivre="${3:-true}"
+  prop "$a" opacity 0; prop "$a" no_anim 1
+  if ! eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = $suivre, window = 'address:$a' })" ||
+      [ "$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.id')" != "$ws" ]; then
+    prop "$a" no_anim 0; prop "$a" opacity 1
+    return 1
+  fi
+  grep -v "^$a " "$pile-tailles" > "$pile-tailles.tmp" 2>/dev/null; mv -f "$pile-tailles.tmp" "$pile-tailles" 2>/dev/null
+  prop "$a" no_anim 0; prop "$a" opacity 1
+  grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
+  return 0
+}
+
+# Plein écran qui masque : masque les autres fenêtres du bureau de $1 (sauf les épinglées) et note la liste.
+plein_masquer() {
+  local p="$1" ws instantane lot cibles a notees=""
+  plein_rendre "$p"                                     # reste d'un masquage précédent : d'abord tout remis
+  ws="$(clients | jq -r --arg a "$p" '.[] | select(.address == $a and .workspace.id > 0) | .workspace.id' | head -1)"
+  [[ "$ws" =~ ^[1-9][0-9]*$ ]] || return 0              # absente ou déjà masquée : rien à faire
+  cibles="$(clients | jq -r --arg a "$p" --argjson w "$ws" \
+    '.[] | select(.workspace.id == $w and .address != $a and (.pinned | not)) | .address')" || return 1
+  [ -n "$cibles" ] || return 0
+  instantane="$(geometries)" || return 1
+  lot="$(jq --argjson w "$ws" --arg a "$p" --arg c "$cibles" \
+    '($c | split("\n")) as $l | map(select(.ws == $w and (.address as $x | $l | index($x))))' <<< "$instantane")" || return 1
+  [ "$lot" != '[]' ] || return 0
+  reduire_lot "$lot"; local statut=$?
+  # Seules celles qui sont vraiment dans le bureau caché sont notées (une fermée entre-temps ne l'est pas)
+  while read -r a; do
+    [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || continue
+    [ "$(bureau_de "$a")" = "$CACHE" ] && notees="$notees $a"
+  done <<< "$cibles"
+  if [ -n "$notees" ]; then
+    { grep -v "^$p " "$plein" 2>/dev/null; echo "$p $ws$notees"; } > "$plein.tmp" && mv -f "$plein.tmp" "$plein" || return 1
+  fi
+  return "$statut"
+}
+
+# Plein écran qui masque : remet sur leur bureau d'origine les fenêtres de $1 encore masquées ; retire sa ligne.
+plein_rendre() {
+  local p="$1" ligne ws a statut=0 reste
+  [ -s "$plein" ] || return 0
+  ligne="$(grep -m1 "^$p " "$plein")" || return 0
+  { grep -v "^$p " "$plein"; true; } > "$plein.tmp" 2>/dev/null && mv -f "$plein.tmp" "$plein"
+  [ -s "$plein" ] || rm -f "$plein"
+  read -r _ ws reste <<< "$ligne"
+  [[ "$ws" =~ ^[1-9][0-9]*$ ]] || return 1
+  for a in $reste; do
+    [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || continue          # une valeur lue n'est jamais collée sans contrôle
+    # Fermée pendant le masquage, ou déjà rappelée à la main : rien à faire, sans erreur
+    [ "$(bureau_de "$a")" = "$CACHE" ] || continue
+    sortir_du_cache "$a" "$ws" false || statut=1
+  done
+  return "$statut"
+}
+
+# Le propriétaire (adresse) dont la ligne de plein écran qui masque contient $1, s'il y en a un
+proprietaire_de() {
+  [ -s "$plein" ] || return 1
+  awk -v a="$1" '{ for (i = 3; i <= NF; i++) if ($i == a) { print $1; exit } }' "$plein" | grep -m1 -E '^0x[0-9a-fA-F]+$'
+}
+
 case "$action" in
   reduire)
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
@@ -115,6 +188,10 @@ case "$action" in
     lot="$(jq --argjson w "${ws:-0}" 'map(select(.ws == $w))' <<< "$instantane")" || exit 1
     [ "$lot" != '[]' ] || exit 0
     reduire_lot "$lot" ;;
+  plein-masquer|plein-rendre)
+    a="${2:-}"
+    [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || exit 2
+    if [ "$action" = plein-masquer ]; then plein_masquer "$a"; else plein_rendre "$a"; fi ;;
   tout-afficher)
     clients | jq -r --arg c "$CACHE" '.[] | select(.workspace.name == $c) | .address' | while read -r a; do "$0" aller "$a"; done ;;
   etat|suivre)
@@ -218,6 +295,13 @@ PY
       [ -n "$a" ] || exit 0
     fi
     [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || exit 1
+    # Masquée par un plein écran qui masque : son propriétaire quitte le maximisé, toutes ses masquées reviennent
+    # (leur bureau d'origine, qui est aussi celui du propriétaire, prend alors la main avec le focus plus bas)
+    if prop_a="$(proprietaire_de "$a")"; then
+      eval_lua "hl.dsp.window.fullscreen({ action = 'unset', mode = 'maximized', window = 'address:$prop_a' })"
+      eval_lua "hl.dsp.window.fullscreen({ action = 'unset', mode = 'fullscreen', window = 'address:$prop_a' })"
+      plein_rendre "$prop_a"
+    fi
     if [ "$(bureau_de "$a")" = "$CACHE" ]; then
       # Bureau affiché sur l'écran actif (pas le bureau caché, s'il est ouvert)
       ws="${3:-$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)}"
@@ -225,15 +309,7 @@ PY
       ouvert="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .specialWorkspace.name' | head -1)"
       [ "$ouvert" = "$CACHE" ] && eval_lua "hl.dsp.workspace.toggle_special('reduites')"
       # Elle revient en fondu, à sa place, sans glisser
-      prop "$a" opacity 0; prop "$a" no_anim 1
-      if ! eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })" ||
-          [ "$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.id')" != "$ws" ]; then
-        prop "$a" no_anim 0; prop "$a" opacity 1
-        exit 1
-      fi
-      grep -v "^$a " "$pile-tailles" > "$pile-tailles.tmp" 2>/dev/null; mv -f "$pile-tailles.tmp" "$pile-tailles" 2>/dev/null
-      prop "$a" no_anim 0; prop "$a" opacity 1
-      grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
+      sortir_du_cache "$a" "$ws" true || exit 1
     fi
     # Le focus sans déplacer le pointeur : Hyprland le met au milieu de la fenêtre, on le remet où il était
     # (clic dans la barre ou dans la vue des fenêtres)
@@ -257,9 +333,14 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
   nc-window close ADDRESS        closes it
   nc-window hide-all             hides every window of the visible workspace
   nc-window show-all             brings every hidden window back to the visible workspace
+  nc-window fullscreen-hide ADDRESS     hides the other windows of that window's workspace (not pinned ones), for a
+                                        fullscreen that hides; the list is kept in $XDG_RUNTIME_DIR/nc-reduites-plein
+  nc-window fullscreen-restore ADDRESS  brings back, on their original workspace, the windows hidden by that one
   nc-window state                each display, its workspace and windows, and the hidden ones, as JSON (bar: nc/fenetres)
   nc-window watch                the same state, written again on each change (one JSON line; bar: nc/fenetres)
 A minimized window activated another way (dock, Alt + Tab) also comes back on its own (nc/automatismes.lua).
+A window hidden by a fullscreen that hides, brought back (goto), makes its owner leave maximized: all its hidden
+windows come back.
 FIN
     else
       # L'en-tête : les lignes de commentaire après le « #! », jusqu'à la première ligne qui n'en est pas une

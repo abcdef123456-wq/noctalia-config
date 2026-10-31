@@ -362,12 +362,32 @@ hl.on("window.open", function(w)
 end)
 
 -- Fenêtre réduite (nc-fenetre : bureau caché « special:reduites ») activée par le dock, Alt + Tab ou une notification :
--- elle revient sur le bureau affiché au lieu d'ouvrir le bureau caché par-dessus
+-- elle revient sur le bureau affiché au lieu d'ouvrir le bureau caché par-dessus. Masquée par un plein écran qui masque
+-- (voir plus bas), « aller » fait aussi quitter le maximisé à son propriétaire et rend toutes ses masquées
 hl.on("window.active", function(w)
     if w and w.workspace and w.workspace.name == "special:reduites" then
         hl.exec_cmd("~/.local/bin/nc-fenetre aller " .. w.address)
     end
 end)
+
+-- ── Plein écran qui masque (nc-fenetre plein-masquer, réglage AIMANT_PLEIN_MASQUE) ────────────────────────────────────
+-- Le propriétaire quitte le maximisé ou se ferme : ses fenêtres masquées reviennent. Aucun travail, aucun processus tant
+-- que le fichier des propriétaires est absent ou vide ; ni boucle ni minuteur.
+local PLEIN = RUN .. "nc-reduites-plein"
+local function est_proprietaire(adresse)
+    if type(adresse) ~= "string" or not adresse:match("^0x%x+$") then return false end
+    local t = lire(PLEIN)
+    if not t or t == "" then return false end
+    return t:find("^" .. adresse .. " ") ~= nil or t:find("\n" .. adresse .. " ") ~= nil
+end
+local function plein_rendre(w)
+    if w and est_proprietaire(w.address) then hl.exec_cmd("~/.local/bin/nc-fenetre plein-rendre " .. w.address) end
+end
+-- Plus du tout maximisée ni en plein écran (0 ; maximisée = 1, plein écran = 2)
+hl.on("window.fullscreen", function(w)
+    if w and (tonumber(w.fullscreen) or 0) == 0 then plein_rendre(w) end
+end)
+hl.on("window.close", plein_rendre)
 
 -- ── Tes dispositions ────────────────────────────────────────────────────────
 -- Un rangement en zones gardé est mémorisé pour l'ensemble des applis de son bureau (nc-ia) ; quand ces mêmes applis
