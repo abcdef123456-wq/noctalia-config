@@ -106,7 +106,8 @@ class HorsEcran(unittest.TestCase):
                 attente.start() } }
             Timer { id: attente; interval: 800; onTriggered: { console.log("FINI"); Qt.exit(0) } }
         ''')
-        self.assertEqual([l for l in j if "nc-reglages" in l], ["nc-reglages fenetre Terminal", "nc-reglages fenetre"], j)
+        # Deux processus détachés : leur ordre d'arrivée dans le journal n'est pas garanti
+        self.assertCountEqual([l for l in j if "nc-reglages" in l], ["nc-reglages fenetre Terminal", "nc-reglages fenetre"], j)
 
     def test_ile_choisit_la_section_de_la_page(self):
         j = self.lancer('''
@@ -117,7 +118,7 @@ class HorsEcran(unittest.TestCase):
                 attente.start() } }
             Timer { id: attente; interval: 1200; onTriggered: { console.log("FINI"); Qt.exit(0) } }
         ''')
-        self.assertEqual([l for l in j if "nc-reglages" in l], [
+        self.assertCountEqual([l for l in j if "nc-reglages" in l], [
             "nc-reglages fenetre Énergie", "nc-reglages fenetre Son et luminosité", "nc-reglages fenetre Agents IA (coucou)",
             "nc-reglages fenetre Mises à jour", "nc-reglages fenetre Île", "nc-reglages fenetre Île"], j)
 
