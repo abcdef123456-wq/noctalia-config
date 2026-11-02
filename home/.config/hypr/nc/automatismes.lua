@@ -383,9 +383,20 @@ end
 local function plein_rendre(w)
     if w and est_proprietaire(w.address) then hl.exec_cmd("~/.local/bin/nc-fenetre plein-rendre " .. w.address) end
 end
--- Plus du tout maximisée ni en plein écran (0 ; maximisée = 1, plein écran = 2)
+-- Plus du tout maximisée ni en plein écran (0 ; maximisée = 1, plein écran = 2). Seulement une sortie DURABLE, relue
+-- après 150 ms : Super + V sur une fenêtre maximisée la fait sortir puis rentrer aussitôt (changeFloatingMode de
+-- Hyprland), et les masquées revenaient sous une fenêtre toujours maximisée. Rien n'est armé pour une non-propriétaire
 hl.on("window.fullscreen", function(w)
-    if w and (tonumber(w.fullscreen) or 0) == 0 then plein_rendre(w) end
+    if not (w and (tonumber(w.fullscreen) or 0) == 0 and est_proprietaire(w.address)) then return end
+    local a = w.address
+    hl.timer(function()
+        for _, v in ipairs(hl.get_windows() or {}) do
+            if v.address == a then
+                if (tonumber(v.fullscreen) or 0) == 0 then plein_rendre(v) end
+                return        -- encore maximisée : rien ; fermée entre-temps : window.close s'en est chargé
+            end
+        end
+    end, { timeout = 150, type = "oneshot" })
 end)
 hl.on("window.close", plein_rendre)
 

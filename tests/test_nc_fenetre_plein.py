@@ -165,12 +165,13 @@ class PleinMasque(unittest.TestCase):
 LUA = REPO / "home/.config/hypr/nc/automatismes.lua"
 ENTETE_LUA = r'''
 local proxy; proxy = setmetatable({}, { __index = function() return proxy end, __call = function() return proxy end })
-handlers, cmds = {}, {}
+handlers, cmds, timers, WINS = {}, {}, {}, nil
 hl = {
   on = function(e, f) handlers[e] = handlers[e] or {}; table.insert(handlers[e], f) end,
   exec_cmd = function(c) cmds[#cmds + 1] = c end,
-  get_config = function() return nil end, bind = function() end, timer = function() end,
-  get_windows = function() return {} end, get_active_window = function() end,
+  get_config = function() return nil end, bind = function() end,
+  timer = function(f, o) timers[#timers + 1] = { f = f, o = o } end,
+  get_windows = function() return WINS or {} end, get_active_window = function() end,
   get_active_monitor = function() return { x = 0, y = 0, width = 2000, height = 1000, scale = 1 } end,
   dsp = proxy, dispatch = function() end,
 }
@@ -197,15 +198,35 @@ class AutomatismesPlein(unittest.TestCase):
 
     COMMANDES = 'for _, c in ipairs(cmds) do if c:find("plein", 1, true) then print(c) end end'
 
+    # La sortie du maximisé est relue après 150 ms (minuteur à un coup) : rien n'est rendu avant
+    RELECTURE = ('print("avant", #cmds, #timers, timers[1] and timers[1].o.timeout, timers[1] and timers[1].o.type)\n'
+                 'timers[1].f()\n')
+
     def test_sortie_du_maximise_rend(self):
-        out = self.lancer('emettre("window.fullscreen", { address = "0x1a", fullscreen = 0 })\n' + self.COMMANDES,
+        out = self.lancer('emettre("window.fullscreen", { address = "0x1a", fullscreen = 0 })\n' + self.RELECTURE
+                          + 'WINS = { { address = "0x1a", fullscreen = 0 } }\ntimers[1].f()\n' + self.COMMANDES,
                           plein="0x1a 1 0x2 0x3\n0xb 2 0xc\n")
-        self.assertEqual(out, "~/.local/bin/nc-fenetre plein-rendre 0x1a")
+        # première relecture : fenêtre absente de la liste (fermée entre-temps) → rien ; deuxième : sortie durable
+        self.assertEqual(out, "avant\t0\t1\t150\toneshot\n~/.local/bin/nc-fenetre plein-rendre 0x1a")
+
+    def test_sortie_passagere_ne_rend_pas(self):
+        # Super + V sur une fenêtre maximisée : fullscreen passe par 0 puis revient à 1 avant la relecture
+        out = self.lancer('emettre("window.fullscreen", { address = "0x1a", fullscreen = 0 })\n'
+                          'emettre("window.fullscreen", { address = "0x1a", fullscreen = 1 })\n'
+                          'WINS = { { address = "0x1a", fullscreen = 1 } }\nfor _, t in ipairs(timers) do t.f() end\n'
+                          'print(#timers)\n' + self.COMMANDES, plein="0x1a 1 0x2\n")
+        self.assertEqual(out, "1")
 
     def test_encore_maximise_ne_rend_pas(self):
-        out = self.lancer('emettre("window.fullscreen", { address = "0x1a", fullscreen = 1 })\n' + self.COMMANDES,
-                          plein="0x1a 1 0x2\n")
-        self.assertEqual(out, "")
+        out = self.lancer('emettre("window.fullscreen", { address = "0x1a", fullscreen = 1 })\nprint(#timers)\n'
+                          + self.COMMANDES, plein="0x1a 1 0x2\n")
+        self.assertEqual(out, "0")
+
+    def test_non_proprietaire_aucun_minuteur(self):
+        out = self.lancer('emettre("window.fullscreen", { address = "0x2", fullscreen = 0 })\n'
+                          'emettre("window.fullscreen", { address = "0x9", fullscreen = 0 })\nprint(#timers)\n'
+                          + self.COMMANDES, plein="0x1a 1 0x2\n")
+        self.assertEqual(out, "0")
 
     def test_fermeture_du_proprietaire_rend(self):
         out = self.lancer('emettre("window.close", { address = "0xb", class = "x" })\n' + self.COMMANDES,
