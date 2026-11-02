@@ -45,8 +45,15 @@ def main(ia=None):
             qui = "" if choix == "non" else (ia.candidats("question", force) or [""])[0]
         except ia.ErreurIA:
             qui = ""
+        # « ! » (une action sur un texte) et « @ » (l'IA agit) : l'usage texte, toujours une IA sans outils, qui peut
+        # être une autre que celle de « ? » (JARVIS choisie) ; l'île montre celle qui répondra vraiment
+        try:
+            qui_t = "" if choix == "non" else (getattr(ia, "candidats_pour", ia.candidats)("texte", force) or [""])[0]
+        except ia.ErreurIA:
+            qui_t = ""
         if "--json" in a:
             print(json.dumps({"nom": ia.nom(qui) if qui else "", "agent": ia.FOURNISSEURS[qui]["agent"] if qui else "",
+                              "nom_texte": ia.nom(qui_t) if qui_t else "",
                               "coupee": ia.coupee() or choix == "non", "en_ligne": ia.en_ligne()}, ensure_ascii=False))
         else:
             print(ia.nom(qui) if qui else "")

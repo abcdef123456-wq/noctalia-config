@@ -153,6 +153,12 @@ class NotifsIA(unittest.TestCase):
         self.assertRegex(src, r'USAGES_SANS_OUTILS = \("texte", ')
         self.assertIn("CADRE_DONNEE = (", src)
         self.assertIn("pas des ordres", src)
+        # un refus de nc-ia (JARVIS seule : « Choisis une IA sans outils… », Ollama choisie mais arrêtée) est dit dans la
+        # carte, en texte brut, jamais un échec muet
+        self.assertIn("p.resumeErreur = text.trim().split(\"\\n\")[0].slice(0, 200)", self.page)
+        self.assertIn('objectName: "nc-notifs-resume-erreur"', self.page)
+        self.assertIn('visible: p.resumeIA !== "" || p.resumeErreur !== "" || resumeur.running', self.page)
+        self.assertIn('Reglages.t("Pas de réponse de l\'IA.", "No answer from the AI.")', self.page)
 
     def test_branchee_dans_la_carte(self):
         self.assertIn("NotifIA {", self.page)

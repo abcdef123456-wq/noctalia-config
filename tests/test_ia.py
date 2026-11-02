@@ -2004,8 +2004,19 @@ echo "Unknown option: standalone"; exit 1''')
         self.reglages("SPOTLIGHT_IA=anthropic\n")
         d = json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)
         self.assertEqual((d["nom"], d["agent"], d["coupee"]), ("Claude (API Anthropic)", "claude", False))
+        self.assertEqual(d["nom_texte"], "Claude (API Anthropic)")
         self.reglages("SPOTLIGHT_IA=assistant\n")       # ancienne valeur : JARVIS, pas configuré ici
         self.assertEqual(json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)["nom"], "")
+        # JARVIS choisie : « ? » lui va, mais « ! » et « @ » (usage texte, sans outils) vont à la première IA sans outils ;
+        # l'île montre celle qui répondra vraiment
+        faux = self.home / ".local/bin/nc-assistant"
+        faux.unlink()
+        faux.write_text("print('{\"t\": \"JARVIS\"}')\n")
+        (self.home / ".config/nc/assistant.conf").write_text("URL=https://exemple.invalid\n")
+        (self.home / ".config/nc/assistant.conf").chmod(0o600)
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=jarvis\n")
+        d = json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)
+        self.assertEqual((d["nom"], d["nom_texte"]), ("JARVIS", "Claude (API Anthropic)"))
 
     # ── Raccourci décrit en mots (« + Ajouter » de la fiche Super + /) ──
     def preparer_raccourci(self):

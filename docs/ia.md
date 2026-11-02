@@ -157,7 +157,10 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   API, ou un programme lancé dans le bac sans outils), jamais à JARVIS. JARVIS choisie dans les réglages : la première
   IA sans outils disponible répond à sa place (peut-être une API en ligne) ; une IA sans outils choisie mais
   indisponible : l'action le dit, rien ne part ailleurs. Le message d'un commit (`gcia`, Neovim) et une image reçue
-  suivent la même règle. Le texte est encadré et annoncé à l'IA comme une donnée à traiter, jamais comme des ordres.
+  suivent la même règle, comme « Que se passe-t-il ? », les pannes, le rangement des fenêtres, « @ » et les rapports
+  de mises à jour (journaux, titres de fenêtres, paquets). Avec JARVIS pour seule IA, ces actions le disent
+  (« JARVIS n'est pas permis pour ce texte ») ou se passent d'IA, jamais un échec muet. Le texte est encadré et annoncé
+  à l'IA comme une donnée à traiter, jamais comme des ordres.
 - **Captures** : la notification d'une capture a un bouton « Demander à l'IA ».
 - **Fichiers** : clic droit → Scripts → IA (Nautilus), le sous-menu IA de Dolphin ou les actions de Nemo : résumer,
   expliquer, traduire, corriger un texte, du code, un PDF (avec pdftotext) ou une image ; `nc-ia fichier CHEMIN`.

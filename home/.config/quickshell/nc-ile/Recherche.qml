@@ -43,6 +43,8 @@ Item {
     // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
     property var execs: ({})                 // programmes du PATH (saisie qui commence par une commande)
     property string nomIA: ""
+    // L'IA de « ! » et « @ » (usage texte de nc-ia : toujours sans outils, jamais JARVIS) : peut différer de celle de « ? »
+    property string nomIATexte: ""
     property string agentIA: "claude"        // logo (Etincelle) de l'IA qui répondrait à la prochaine question
     property string iaReponse: ""            // l'IA qui a vraiment répondu (repli compris) et son logo
     property string agentReponse: "claude"
@@ -89,7 +91,7 @@ Item {
     function lancerAgent(demande) {
         if (demande === "" || agent.running) return
         questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = false; modeAgent = true; plan = null
-        iaReponse = nomIA; agentReponse = agentIA
+        iaReponse = nomIATexte; agentReponse = agentIA
         agent.command = [Etat.bin + "nc-ia", "agir", "--json"].concat(porteeAgent !== "" ? ["--bureau", porteeAgent] : []).concat([demande])
         agent.running = true
         chercher()
@@ -135,7 +137,7 @@ Item {
     // « ! » : une action (ou une consigne libre) sur le texte sélectionné, sinon copié ; le résultat se copie avec Entrée
     function demanderTexte(action) {
         if (action === "" || demandeur.running) return
-        questionPosee = q; reponse = ""; commandeIA = ""; erreurIA = ""; choixIA = []; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = q; reponse = ""; commandeIA = ""; erreurIA = ""; choixIA = []; modeTexte = true; modeAgent = false; iaReponse = nomIATexte; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"].concat(texteSource !== "" ? ["--stdin"] : [])
         texteEnvoi = texteSource
         demandeur.stdinEnabled = texteSource !== ""
@@ -340,8 +342,8 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 // Ancien nc-demander (pendant une mise à jour) : le nom seul, en texte
-                try { let d = JSON.parse(text); r.nomIA = d.nom || "-"; r.agentIA = d.agent || "claude"; r.iaCoupee = !!d.coupee }
-                catch (e) { r.nomIA = text.trim() || "-" }
+                try { let d = JSON.parse(text); r.nomIA = d.nom || "-"; r.nomIATexte = d.nom_texte || "-"; r.agentIA = d.agent || "claude"; r.iaCoupee = !!d.coupee }
+                catch (e) { r.nomIA = text.trim() || "-"; r.nomIATexte = r.nomIA }
             }
         }
     }
@@ -823,7 +825,7 @@ Item {
             let lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
                 let id = a.id
                 return { titre: a.t, sous: (texteSource !== "" ? Reglages.t("Texte du presse-papiers · ", "Clipboard text · ") : Reglages.t("Texte sélectionné ou copié · ", "Selected or copied text · "))
-                                           + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
+                                           + (nomIATexte === "-" ? Reglages.t("aucune IA sans outils", "no AI without tools") : nomIATexte),
                          glyphe: a.g, garder: true, f: () => r.demanderTexte(id) }
             })
             // Une consigne qui n'est pas une action connue : appliquée telle quelle (« ! en liste à puces »)
@@ -867,7 +869,7 @@ Item {
                 return
             }
             resultats = [{ titre: demandeA || Reglages.t("Dis ce que l'IA doit faire", "Say what the AI should do"),
-                           sous: Reglages.t("Elle propose, tu confirmes · ", "It proposes, you confirm · ") + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
+                           sous: Reglages.t("Elle propose, tu confirmes · ", "It proposes, you confirm · ") + (nomIATexte === "-" ? Reglages.t("aucune IA sans outils", "no AI without tools") : nomIATexte),
                            glyphe: "smart_toy", garder: true, f: () => r.lancerAgent(demandeA) }]
             return
         }

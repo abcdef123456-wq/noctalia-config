@@ -48,13 +48,14 @@ Item {
     IaPrete { id: iaPrete }
     property string resumeIA: ""
     property string resumeQui: ""
+    property string resumeErreur: ""        // nc-ia a refusé ou n'a rien répondu : dit dans la carte, jamais un échec muet
     function texteNotifs() {
         return Notifs.liste.slice(0, 40).map(x => (x.appName || x.app || "?") + " : " + (x.summary || "")
             + (x.body ? " — " + String(x.body).replace(/<[^>]+>/g, "").slice(0, 400) : "")).join("\n")
     }
     function resumer() {
         if (resumeur.running) return
-        resumeIA = ""; resumeQui = ""
+        resumeIA = ""; resumeQui = ""; resumeErreur = ""
         resumeur.stdinEnabled = true; resumeur.running = true
     }
     Process {
@@ -64,7 +65,11 @@ Item {
         stdout: SplitParser {
             onRead: l => { try { let d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
         }
-        stderr: StdioCollector {}
+        // La première ligne d'erreur de nc-ia (« Choisis une IA sans outils… », « Ollama n'est pas disponible »), en texte brut
+        stderr: StdioCollector {
+            onStreamFinished: if (p.resumeIA === "" && p.resumeErreur === "" && text.trim() !== "") p.resumeErreur = text.trim().split("\n")[0].slice(0, 200)
+        }
+        onExited: if (p.resumeIA.trim() === "" && p.resumeErreur === "") p.resumeErreur = Reglages.t("Pas de réponse de l'IA.", "No answer from the AI.")
     }
 
     Item {
@@ -218,20 +223,23 @@ Item {
             // ── Résumé par l'IA ──
             Rectangle {
                 objectName: "nc-notifs-resume"
-                visible: p.resumeIA !== "" || resumeur.running
+                visible: p.resumeIA !== "" || p.resumeErreur !== "" || resumeur.running
                 width: parent.width; height: visible ? colResume.implicitHeight + 24 : 0; radius: 16; color: Couleurs.carte
                 Column {
                     id: colResume
                     x: 14; y: 12; width: parent.width - 28 - 24; spacing: 4
                     Texte { secondaire: true; font.pixelSize: 12
                             text: resumeur.running && p.resumeIA === "" ? (p.resumeQui || Reglages.t("L'IA", "The AI")) + Reglages.t(" résume…", " is summarizing…")
-                                                                        : Reglages.t("Résumé · ", "Summary · ") + p.resumeQui }
+                                  : p.resumeErreur !== "" && p.resumeIA === "" ? Reglages.t("Résumé impossible", "Summary unavailable")
+                                  : Reglages.t("Résumé · ", "Summary · ") + p.resumeQui }
                     Text { width: parent.width; text: p.resumeIA; textFormat: Text.MarkdownText; wrapMode: Text.Wrap
                            color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13; visible: p.resumeIA !== "" }
+                    Texte { objectName: "nc-notifs-resume-erreur"; width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone
+                            font.pixelSize: 12; text: p.resumeErreur; visible: p.resumeErreur !== "" && p.resumeIA === "" }
                 }
                 Ico {
                     anchors.right: parent.right; anchors.rightMargin: 12; y: 12; nom: "close"; taille: 16; color: Couleurs.texteSec
-                    MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: { resumeur.running = false; p.resumeIA = "" } }
+                    MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: { resumeur.running = false; p.resumeIA = ""; p.resumeErreur = "" } }
                 }
             }
 

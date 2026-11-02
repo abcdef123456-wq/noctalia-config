@@ -510,6 +510,17 @@ class SpotlightSource(unittest.TestCase):
             self.assertIn("textFormat: Text.PlainText", bloc, champ)
         self.assertIn("textFormat: r.reponseAide !== \"\" || zoneReponse.enDiag ? Text.PlainText", src)
 
+    def test_ia_affichee_sous_point_d_exclamation_et_arobase_est_celle_sans_outils(self):
+        """« ! » et « @ » passent par l'usage texte de nc-ia (jamais une IA avec outils) : l'île montre celle qui répondra
+        vraiment (nom_texte de nc-demander --ia --json), pas celle de « ? » (JARVIS si elle est choisie)."""
+        src = (QML / "Recherche.qml").read_text()
+        self.assertIn('r.nomIATexte = d.nom_texte || "-"', src)
+        self.assertIn('catch (e) { r.nomIA = text.trim() || "-"; r.nomIATexte = r.nomIA }', src, "ancien nc-demander : le même nom")
+        self.assertEqual(src.count('(nomIATexte === "-" ? Reglages.t("aucune IA sans outils", "no AI without tools") : nomIATexte)'), 2)
+        for ligne in ("modeTexte = true; modeAgent = false; iaReponse = nomIATexte",):
+            self.assertIn(ligne, src)
+        self.assertNotIn('modeTexte = true; modeAgent = false; iaReponse = nomIA;', src)
+
     def test_icone_du_bilan_est_celle_du_bilan(self):
         src = (QML / "Recherche.qml").read_text()
         self.assertIn("agent: zoneReponse.enDiag ? diag.agent : r.agentReponse", src)
