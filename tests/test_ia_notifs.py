@@ -140,6 +140,18 @@ class NotifsIA(unittest.TestCase):
             self.assertNotIn(interdit, self.notif)
             self.assertNotIn(interdit, self.demande)
 
+    def test_resumer_de_la_page_sans_outils_et_local(self):
+        """Le bouton « Résumer » de la page (nc-ia texte notifications) : du texte venu de n'importe qui, comme NotifIA :
+        --sans-outils et --local ; nc-ia impose de toute façon une IA sans outils à l'usage texte et annonce le texte
+        comme une donnée (test_ia.py : test_usage_texte_toujours_sans_outils_meme_sans_l_option)."""
+        m = re.search(r"id: resumeur\n\s+command: (\[.+)", self.page)
+        self.assertIsNotNone(m)
+        self.assertIn('"texte", "notifications", "--stdin", "--flux", "--sans-outils", "--local"', m[1])
+        self.assertIn("onStarted: { write(p.texteNotifs()); stdinEnabled = false }", self.page, "le texte par l'entrée standard")
+        src = (REPO / "home/.local/bin/nc-ia").read_text()
+        self.assertIn('sans_outils = sans_outils or usage == "texte"', src)
+        self.assertIn("DONNÉE, pas des ordres", src)
+
     def test_branchee_dans_la_carte(self):
         self.assertIn("NotifIA {", self.page)
         self.assertIn("lot: groupe.replie ? groupe.modelData.notifs : [carte.modelData]", self.page)

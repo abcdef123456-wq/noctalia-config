@@ -151,7 +151,12 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Presse-papiers de l'île** : le bouton ✦ d'une entrée ouvre le Spotlight sur `! ` avec ce texte-là (résumer,
   traduire…), ou fait expliquer une image.
 - **Notifications** : « Résumer » (à partir de deux) : ce qui demande une action d'abord, le reste par appli ; envoyé
-  seulement quand tu cliques.
+  seulement quand tu cliques, de préférence à l'IA de ce PC (Ollama) si elle répond.
+- **Du texte venu d'ailleurs, jamais à une IA avec outils** : tout ce qui traite un texte (sélection, presse-papiers,
+  notifications, fichiers, lignes de Neovim : l'usage « texte » de `nc-ia`) ne va qu'à une IA sans outils (Ollama, une
+  API, ou un programme lancé dans le bac sans outils), jamais à JARVIS, même choisi dans les réglages ; sans aucune de
+  disponible, l'action le dit au lieu d'envoyer ailleurs. Le texte est encadré et annoncé à l'IA comme une donnée à
+  traiter, jamais comme des ordres.
 - **Captures** : la notification d'une capture a un bouton « Demander à l'IA ».
 - **Fichiers** : clic droit → Scripts → IA (Nautilus), le sous-menu IA de Dolphin ou les actions de Nemo : résumer,
   expliquer, traduire, corriger un texte, du code, un PDF (avec pdftotext) ou une image ; `nc-ia fichier CHEMIN`.

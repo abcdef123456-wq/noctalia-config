@@ -40,7 +40,9 @@ Item {
     // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
     // Inconnue (pas de NetworkManager) : considérée comme là.
     readonly property bool enLigne: Connexion.enLigne
-    // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard
+    // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard.
+    // Ce texte vient de n'importe qui : toujours --sans-outils (jamais JARVIS ni un moteur avec outils ; l'usage texte de
+    // nc-ia l'impose de toute façon) et --local (l'IA de ce PC si elle répond) ; nc-ia l'annonce comme une donnée.
     // IA sur une notification (NotifIA.qml, réglage NOTIFS_IA) : prête ou non, et la carte dont l'appel est en cours (un seul à la fois)
     property string iaOccupee: ""
     IaPrete { id: iaPrete }
@@ -57,7 +59,7 @@ Item {
     }
     Process {
         id: resumeur
-        command: [Quickshell.env("HOME") + "/.local/bin/nc-ia", "texte", "notifications", "--stdin", "--flux"]
+        command: [Quickshell.env("HOME") + "/.local/bin/nc-ia", "texte", "notifications", "--stdin", "--flux", "--sans-outils", "--local"]
         onStarted: { write(p.texteNotifs()); stdinEnabled = false }
         stdout: SplitParser {
             onRead: l => { try { let d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
