@@ -181,7 +181,12 @@ touche(SUPER .. " + SHIFT + code:24", function()
     end
 end, trad("Fenêtres|Fermer (et le programme si dernière)", "Close (and the app if it was the last window)"))
 
-touche(SUPER .. " + code:55", hl.dsp.window.float({ action = "toggle" }), trad("Fenêtres|Fenêtre libre ↔ rangée", "Floating ↔ tiled window"))
+-- Une fenêtre rangée par l'aimant (nc/aimant.lua, chargé plus bas en mode souris) est d'abord remise comme avant
+touche(SUPER .. " + code:55", function()
+    local w = hl.get_active_window()
+    if w and nc.aimant and nc.aimant.remettre(w) then return end
+    hl.dispatch(hl.dsp.window.float({ action = "toggle" }))
+end, trad("Fenêtres|Fenêtre libre ↔ rangée", "Floating ↔ tiled window"))
 -- Réduire (comme le « _ » de Windows) : la fenêtre part dans un bureau caché ; elle revient par la vue des fenêtres,
 -- Spotlight, le dock, Alt + Tab ou Super + Ctrl + M (nc-fenetre)
 touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fenêtres|Masquer la fenêtre", "Hide the window"))
@@ -326,6 +331,7 @@ local saisie = nc.reglage("SAISIE", "clavier")
 if saisie == "souris" or saisie == "les-deux" then
     pcall(hl.config, { binds = { drag_threshold = 8 } })
     local aimant = nc.charger("nc.aimant")         -- zones, aperçu et rangement (nc/aimant.lua)
+    nc.aimant = aimant                             -- Super + V (plus haut) remet une fenêtre rangée comme avant
     -- Raccourci « au clic » ou « après un glisser » : gardé seulement si ce Hyprland connaît l'option (sinon il partirait
     -- dès l'appui, en même temps que le déplacement). Jamais avec mouse = true : Hyprland 0.56 l'ignore en Lua, 0.57 le
     -- refuse avec click / drag (« hl.bind: mouse is exclusive », signalé même sous pcall) ; mouse reste aux vrais

@@ -15,12 +15,15 @@ MODULE = HYPR / "nc/aimant.lua"
 
 # Faux hl et nc pour le module seul : tout ce qu'il fait est noté dans `trace` ; l'heure est fausse (TEMPS)
 HARNAIS = r'''
-trace, TEMPS, REG, MONS, CURSEUR, WIN = {}, 0, {}, {}, { x = 0, y = 0 }, nil
+trace, TEMPS, REG, MONS, CURSEUR, WIN, WINS, handlers = {}, 0, {}, {}, { x = 0, y = 0 }, nil, nil, {}
+-- grille sans bordure, 5 d'espace : les nombres ronds de ces tests ; la vraie grille (bordure 2, espace 4) est dans Grille
+REG.FENETRES_BORDURE, REG.FENETRES_ESPACE = 0, 5
 os.time = function() return TEMPS end
 local function noter(s) trace[#trace + 1] = s end
 local function plan(nom) return function(t)
   local p = { nom }
   if t.mode then p[#p + 1] = t.mode elseif t.action then p[#p + 1] = t.action end
+  if t.mode and t.action == "unset" then p[#p + 1] = "unset" end
   if t.x then p[#p + 1] = t.x; p[#p + 1] = t.y end
   return table.concat(p, " ")
 end end
@@ -28,15 +31,18 @@ hl = {
   get_monitors = function() return MONS end,
   get_cursor_pos = function() return { x = CURSEUR.x, y = CURSEUR.y } end,
   get_active_window = function() return WIN end,
+  get_windows = function() return WINS or { WIN } end,
+  on = function(e, f) handlers[e] = handlers[e] or {}; table.insert(handlers[e], f) end,
   exec_cmd = function(c) noter("exec " .. c) end,
   dispatch = function(d) noter(d) end,
   timer = function(f, o)
     noter("timer-cree " .. o.timeout .. " " .. o.type)
-    PAS = f
+    if o.type == "repeat" then PAS = f else DIFFERE = f end
     return { set_enabled = function(self, b) noter("actif " .. tostring(b)) end }
   end,
   dsp = { window = { float = plan("float"), fullscreen = plan("plein"), resize = plan("taille"), move = plan("place") } },
 }
+function emettre(e, w) for _, f in ipairs(handlers[e] or {}) do f(w) end end
 nc = { reglage = function(c, d) if REG[c] ~= nil then return REG[c] end return d end,
        reserve = function(m) return m.reserved or {} end }
 AIMANT = dofile(MODULE)
@@ -283,7 +289,8 @@ AIMANT.presse(); CURSEUR = { x = 900, y = 0 }; trace = {}
 AIMANT.relache()
 dire(table.concat(trace, "|"))
 ''', 'REG.AIMANT_APERCU = false\nREG.AIMANT_PLEIN_MASQUE = true\n')
-        self.assertEqual(sorties[0], "float set|exec ~/.local/bin/nc-fenetre plein-masquer 0xab12|plein maximized")
+        # une tuile n'est pas passée en libre : à la sortie du maximisé elle reprend sa place dans la disposition
+        self.assertEqual(sorties[0], "exec ~/.local/bin/nc-fenetre plein-masquer 0xab12|plein maximized")
 
     def test_adresse_invalide_jamais_passee_au_shell(self):
         for adr in ("0xab; rm -rf ~", "$(id)", "", "0x"):
@@ -304,6 +311,210 @@ AIMANT.relache()
 dire(#trace)
 ''', 'REG.AIMANT_APERCU = false\n')
         self.assertEqual(sorties, ["0"])
+
+
+@unittest.skipUnless(shutil.which("lua"), "Lua requis")
+class Grille(unittest.TestCase):
+    """Même grille que les tuiles : bordure dessinée autour de la surface, 2·espace entre deux voisines."""
+    # L'écran de l'essai réel : 1600 × 1000 points, barre de 42 en haut, marge 10, bordure 2, espace 4 ; une tuile de
+    # demi-écran y est à (12, 54) en 782 × 934 (hyprctl clients), son cadre bordure comprise à (10, 52) en 786 × 938
+    ECRAN = 'MONS = { { name = "A", x = 0, y = 0, width = 1600, height = 1000, scale = 1, reserved = { top = 42 } } }\n'
+    REG = "REG.FENETRES_BORDURE = 2\nREG.FENETRES_ESPACE = 4\n"
+
+    def test_surface_et_cadre(self):
+        sorties = lua('''
+local E = { ecran(0, 0, 1600, 1000, 42) }
+for _, p in ipairs({ {0,500}, {1599,500}, {800,0}, {0,0}, {1599,999} }) do
+  local nom, r, c = AIMANT.zone(p[1], p[2], E, 40, 110, 10, { bordure = 2, espace = 4 })
+  dire(nom, r.x, r.y, r.w, r.h, c.x, c.y, c.w, c.h)
+end
+''')
+        self.assertEqual(sorties, [
+            "gauche\t12\t54\t782\t934\t10\t52\t786\t938",
+            "droite\t806\t54\t782\t934\t804\t52\t786\t938",
+            "haut\t12\t54\t1576\t934\t10\t52\t1580\t938",
+            "haut-gauche\t12\t54\t782\t461\t10\t52\t786\t465",
+            "bas-droite\t806\t527\t782\t461\t804\t525\t786\t465",
+        ])
+
+    def test_sans_grille_les_anciens_nombres(self):
+        # sans bordure ni espace donnés : bordure 0, espace = marge / 2, donc le même écart entre deux moitiés qu'au bord
+        sorties = lua('''
+local E = { ecran(0, 0, 1920, 1080, 40) }
+local nom, r, c = AIMANT.zone(1919, 500, E, 40, 110, 10)
+dire(nom, r.x, r.y, r.w, r.h, c.x, c.y, c.w, c.h)
+''')
+        self.assertEqual(sorties, ["droite\t965\t50\t945\t1020\t965\t50\t945\t1020"])
+
+    def test_moitie_rangee_egale_une_tuile_et_apercu_bordure_comprise(self):
+        sorties = lua(self.ECRAN + '''
+CURSEUR = { x = 900, y = 500 }; WIN = { floating = false, address = "0xab" }
+AIMANT.presse(); CURSEUR = { x = 0, y = 500 }; PAS(); dire("apercu", trace[#trace])
+trace = {}; AIMANT.relache(); dire("range", table.concat(trace, "|"))
+''', self.REG)
+        self.assertEqual(sorties[0], "apercu\texec qs -c nc-ile ipc call ile aimant gauche 10 52 786 938")
+        self.assertEqual(sorties[1], 'range\tactif false|exec qs -c nc-ile ipc call ile aimant "" 0 0 0 0'
+                         "|float set|taille 782 934|place 12 54")
+
+
+@unittest.skipUnless(shutil.which("lua"), "Lua requis")
+class Remise(unittest.TestCase):
+    """L'état d'avant le rangement est gardé par adresse et rendu par M.remettre (Super + V), à la sortie durable du
+    maximisé, ou quand la fenêtre est lâchée loin des bords."""
+    ECRAN = Suivi.ECRAN
+    SANS_APERCU = "REG.AIMANT_APERCU = false\n"
+    LIBRE = 'WIN = { floating = true, address = "0xab", at = { x = 300, y = 200 }, size = { x = 600, y = 400 } }\n'
+    TUILE = 'WIN = { floating = false, address = "0xab", at = { x = 12, y = 54 }, size = { x = 940, y = 1016 } }\n'
+    A_DROITE = "CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 1919, y = 500 }; trace = {}; AIMANT.relache()\n"
+
+    def test_libre_rangee_puis_remise_a_sa_place(self):
+        sorties = lua(self.ECRAN + self.LIBRE + self.A_DROITE + '''
+dire("range", table.concat(trace, "|"))
+WIN.at, WIN.size = { x = 965, y = 10 }, { x = 945, y = 1060 }     -- comme Hyprland l'a placée
+trace = {}; dire("remise", tostring(AIMANT.remettre(WIN)), table.concat(trace, "|"))
+trace = {}; dire("encore", tostring(AIMANT.remettre(WIN)), #trace)
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["range\ttaille 945 1060|place 965 10",
+                                   "remise\ttrue\ttaille 600 400|place 300 200",
+                                   "encore\tfalse\t0"])
+
+    def test_tuile_rangee_puis_remise_en_tuile(self):
+        sorties = lua(self.ECRAN + self.TUILE + self.A_DROITE + '''
+dire("range", table.concat(trace, "|"))
+WIN.floating = true
+trace = {}; dire("remise", tostring(AIMANT.remettre(WIN)), table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["range\tfloat set|taille 945 1060|place 965 10", "remise\ttrue\tfloat unset"])
+
+    def test_sans_etat_davant_rien(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+dire(tostring(AIMANT.remettre(WIN)), #trace)
+dire(tostring(AIMANT.remettre(nil)), tostring(AIMANT.remettre({})), #trace)
+''')
+        self.assertEqual(sorties, ["false\t0", "false\tfalse\t0"])
+
+    def test_haut_libre_sort_du_maximise_puis_sa_place(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 900, y = 0 }; trace = {}; AIMANT.relache()
+dire("range", table.concat(trace, "|"))
+WIN.fullscreen = 1; WIN.at = { x = 2, y = 44 }
+trace = {}; dire("remise", table.concat(trace, "|"))
+AIMANT.remettre(WIN); dire("remise", table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties[0], "range\tplein maximized")
+        self.assertEqual(sorties[2], "remise\tplein maximized unset|taille 600 400|place 300 200")
+
+    def test_haut_tuile_reste_tuile(self):
+        sorties = lua(self.ECRAN + self.TUILE + '''
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 900, y = 0 }; trace = {}; AIMANT.relache()
+dire("range", table.concat(trace, "|"))
+WIN.fullscreen = 1
+trace = {}; AIMANT.remettre(WIN); dire("remise", table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["range\tplein maximized", "remise\tplein maximized unset"])
+
+    def test_dun_bord_a_lautre_le_premier_etat_est_garde(self):
+        sorties = lua(self.ECRAN + self.LIBRE + self.A_DROITE + '''
+WIN.at, WIN.size = { x = 965, y = 10 }, { x = 945, y = 1060 }
+CURSEUR = { x = 1400, y = 500 }; AIMANT.presse(); CURSEUR = { x = 0, y = 500 }; trace = {}; AIMANT.relache()
+dire("gauche", table.concat(trace, "|"))
+WIN.at = { x = 10, y = 10 }
+trace = {}; AIMANT.remettre(WIN); dire("remise", table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["gauche\ttaille 945 1060|place 10 10", "remise\ttaille 600 400|place 300 200"])
+
+    def test_lachee_loin_des_bords_reprend_sa_taille_sous_le_curseur(self):
+        sorties = lua(self.ECRAN + self.LIBRE + self.A_DROITE + '''
+WIN.at, WIN.size = { x = 965, y = 10 }, { x = 945, y = 1060 }
+-- saisie à 46 % de la largeur et de la hauteur de la fenêtre rangée : la taille d'avant garde la même proportion
+-- (Hyprland a déplacé la fenêtre avec le curseur : at suit le glisser de -500, +100)
+CURSEUR = { x = 1400, y = 500 }; AIMANT.presse(); CURSEUR = { x = 900, y = 600 }; WIN.at = { x = 465, y = 110 }
+trace = {}; AIMANT.relache()
+dire("milieu", table.concat(trace, "|"))
+trace = {}; dire("apres", tostring(AIMANT.remettre(WIN)), #trace)
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["milieu\ttaille 600 400|place 623 415", "apres\tfalse\t0"])
+
+    def test_lachee_loin_des_bords_sans_etat_rien(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 700, y = 600 }; trace = {}; AIMANT.relache()
+dire(#trace)
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["0"])
+
+    def test_fenetre_glissee_pas_forcement_l_active_a_l_appui(self):
+        # follow_mouse : à l'appui, l'active peut être une autre fenêtre ; l'état d'avant est celui de la fenêtre glissée
+        sorties = lua(self.ECRAN + '''
+local autre = { floating = true, address = "0xcc", at = { x = 1, y = 1 }, size = { x = 50, y = 50 } }
+local glissee = { floating = true, address = "0xab", at = { x = 300, y = 200 }, size = { x = 600, y = 400 } }
+WINS = { autre, glissee }
+WIN = autre; CURSEUR = { x = 900, y = 500 }; AIMANT.presse()
+WIN = glissee; CURSEUR = { x = 1919, y = 500 }; trace = {}; AIMANT.relache()
+glissee.at, glissee.size = { x = 965, y = 10 }, { x = 945, y = 1060 }
+trace = {}; AIMANT.remettre(glissee); dire(table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["taille 600 400|place 300 200"])
+
+    def test_deja_maximisee_a_l_appui_pas_d_etat(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+WIN.fullscreen = 1
+''' + self.A_DROITE + '''
+WIN.fullscreen = 0
+trace = {}; dire(tostring(AIMANT.remettre(WIN)), #trace)
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["false\t0"])
+
+    def test_sortie_durable_du_maximise(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 900, y = 0 }; AIMANT.relache()
+WIN.fullscreen = 1; WIN.at = { x = 395, y = -170 }
+trace = {}; emettre("window.fullscreen", { address = "0xab", fullscreen = 1 }); dire("encore", #trace)
+emettre("window.fullscreen", { address = "0xab", fullscreen = 0 }); dire("sortie", table.concat(trace, "|"))
+-- Super + V de Hyprland : sortie puis retour aussitôt ; à la relecture elle est encore maximisée, rien
+trace = {}; DIFFERE(); dire("relue-max", #trace)
+emettre("window.fullscreen", { address = "0xab", fullscreen = 0 })
+WIN.fullscreen = 0
+trace = {}; DIFFERE(); dire("relue-sortie", table.concat(trace, "|"))
+trace = {}; dire("apres", tostring(AIMANT.remettre(WIN)))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["encore\t0", "sortie\ttimer-cree 150 oneshot", "relue-max\t0",
+                                   "relue-sortie\ttaille 600 400|place 300 200", "apres\tfalse"])
+
+    def test_sortie_pendant_un_glisser_attend_le_relachement(self):
+        sorties = lua(self.ECRAN + self.LIBRE + '''
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 900, y = 0 }; AIMANT.relache()
+WIN.fullscreen = 1; WIN.at = { x = 2, y = 44 }; WIN.size = { x = 1916, y = 1034 }
+CURSEUR = { x = 900, y = 300 }; AIMANT.presse()
+trace = {}; emettre("window.fullscreen", { address = "0xab", fullscreen = 0 }); dire("glisser", #trace)
+WIN.fullscreen = 0
+CURSEUR = { x = 900, y = 600 }; WIN.at = { x = 2, y = 344 }          -- la fenêtre a suivi le curseur (+300 en y)
+trace = {}; AIMANT.relache(); dire("milieu", table.concat(trace, "|"))
+''', self.SANS_APERCU)
+        self.assertEqual(sorties[0], "glisser\t0", "aucun minuteur pendant le glisser")
+        # lâchée au milieu : sa taille d'avant, sous le curseur à la même proportion (47 % de 1916, 25 % de 1034)
+        self.assertEqual(sorties[1], "milieu\ttaille 600 400|place 618 500")
+
+    def test_fermeture_oublie_l_etat(self):
+        sorties = lua(self.ECRAN + self.LIBRE + self.A_DROITE + '''
+emettre("window.close", { address = "0xab" })
+dire(tostring(AIMANT.remettre(WIN)))
+emettre("window.close", nil); emettre("window.close", {}); dire("ok")
+''', self.SANS_APERCU)
+        self.assertEqual(sorties, ["false", "ok"])
+
+    def test_recadrer(self):
+        sorties = lua('''
+local E = { ecran(0, 0, 1920, 1080, 40), ecran(1920, 0, 1920, 1080) }
+for _, r in ipairs({ { x = -100, y = -50, w = 600, h = 400 }, { x = 1800, y = 1000, w = 600, h = 400 },
+                     { x = 0, y = 0, w = 3000, h = 2000 }, { x = 2500, y = 900, w = 600, h = 400 }, { x = 100, y = 100, w = 600, h = 400 } }) do
+  local c = AIMANT.recadrer(r, E)
+  dire(c.x, c.y, c.w, c.h)
+end
+local r = { x = 5, y = 5, w = 10, h = 10 }
+dire(AIMANT.recadrer(r, {}) == r, AIMANT.recadrer(nil, E) == nil)
+''')
+        self.assertEqual(sorties, ["0\t40\t600\t400", "1320\t680\t600\t400", "0\t40\t1920\t1040",
+                                   "2500\t680\t600\t400", "100\t100\t600\t400", "true\ttrue"])
 
 
 # Chargement complet de hyprland.lua avec un faux hl.bind qui REFUSE comme Hyprland 0.57
@@ -379,6 +590,21 @@ r()
 print("apres relache", table.concat((function() local t = {} for _, e in ipairs(timers[1].etats) do t[#t+1] = tostring(e) end return t end)(), ","))
 '''
 
+    # Super + V : une fenêtre rangée par l'aimant est remise comme avant (2 dispatchs : taille et place), sinon libre ↔ rangée
+    SUPER_V = r'''
+local p, r, sv
+for _, b in ipairs(binds) do
+  if b.k == "SUPER + mouse:272" and not b.o.mouse and not b.o.click and not b.o.drag then
+    if b.o.release then r = b.f else p = b.f end
+  elseif b.k == "SUPER + code:55" then sv = b.f end
+end
+hl.get_active_window = function() return { floating = true, address = "0xab", at = { x = 300, y = 200 }, size = { x = 600, y = 400 }, monitor = mons[1] } end
+local n = #dispatches; sv(); print("sans etat", #dispatches - n)
+if p then p(); curseur = { x = 1919, y = 500 }; r() end
+n = #dispatches; sv(); print("rangee", #dispatches - n, tostring(nc.aimant ~= nil))
+n = #dispatches; sv(); print("apres", #dispatches - n)
+'''
+
     def test_chargement_sans_refus_et_flux_complet(self):
         for saisie in ("souris", "les-deux"):
             with self.subTest(saisie=saisie):
@@ -389,19 +615,31 @@ print("apres relache", table.concat((function() local t = {} for _, e in ipairs(
                 self.assertIn("bind\tSUPER + mouse:272\tpress", l)
                 self.assertIn("bind\tSUPER + mouse:272\trelease", l)
                 self.assertEqual(l[-3].split("\t")[:4], ["apres appui", "1", "50", "repeat"])
-                self.assertEqual(l[-2], "exec\tqs -c nc-ile ipc call ile aimant droite 965 10 945 1060")
+                # le cadre d'aperçu, bordure comprise, avec les vrais réglages (bordure 2, espace 4)
+                self.assertEqual(l[-2], "exec\tqs -c nc-ile ipc call ile aimant droite 964 10 946 1060")
                 self.assertEqual(l[-1], "apres relache\ttrue,false")
 
     def test_clavier_seul_aucune_aimantation(self):
         l = self.lancer("clavier", self.FLUX.split("local p, r")[0])
         self.assertEqual(l, ["refus\t0\techecs\t0\tminuteurs\t0"])
 
+    def test_super_v_remet_une_fenetre_rangee(self):
+        l = self.lancer("les-deux", self.SUPER_V)
+        self.assertEqual(l, ["sans etat\t1", "rangee\t2\ttrue", "apres\t1"])
+
+    def test_super_v_au_clavier_reste_le_basculement(self):
+        l = self.lancer("clavier", self.SUPER_V)
+        self.assertEqual(l, ["sans etat\t1", "rangee\t1\tfalse", "apres\t1"])
+
     def test_statique_jamais_mouse_avec_release(self):
         src = (HYPR / "nc/raccourcis.lua").read_text(encoding="utf-8")
         self.assertIn('si_compris("release", combinaison, aimant.relache)', src)
         self.assertNotIn("aimanter", src)
         self.assertNotRegex(src, r"mouse\s*=\s*true[^}]*release")
-        self.assertEqual(len(re.findall(r"hl\.timer", (HYPR / "nc/aimant.lua").read_text())), 1, "un seul minuteur créé")
+        aimant = (HYPR / "nc/aimant.lua").read_text()
+        # un seul minuteur qui se répète (pendant un glisser) ; l'autre est à un coup, après une sortie du maximisé
+        self.assertEqual(len(re.findall(r'type = "repeat"', aimant)), 1, "un seul minuteur répété")
+        self.assertEqual(len(re.findall(r"hl\.timer", aimant)), 2)
 
 
 class Reglages(unittest.TestCase):

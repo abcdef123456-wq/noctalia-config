@@ -4,6 +4,9 @@
 -- Pendant le glisser, l'île montre un cadre d'aperçu (nc/ile, AimantApercu.qml) : un minuteur de 50 ms, armé à l'appui
 -- et arrêté au relâchement, lit la place du curseur. Aucun minuteur ne tourne hors d'un glisser.
 -- Hyprland n'a aucun événement « début / fin de glisser » : ce sont deux raccourcis (appui, relâchement) qui encadrent.
+-- L'état d'AVANT le rangement (rangée ou libre, place et taille) est gardé par adresse : Super + V, la sortie du
+-- maximisé ou un nouveau glisser loin des bords remettent la fenêtre comme elle était (Hyprland, lui, ne connaît que
+-- l'endroit où elle a été lâchée, parfois à moitié hors de l'écran).
 
 local M = {}
 
@@ -25,18 +28,29 @@ end
 
 -- Fonction PURE. px, py : curseur (points logiques, global). ecrans : liste de { x, y, w, h, reserve = { gauche, haut,
 -- droite, bas } } en points logiques (largeur déjà divisée par l'échelle). bord, coin : seuils en points logiques.
--- marge : FENETRES_MARGE. Renvoie nil, ou la zone (chaîne de ZONES) et le rectangle cible { x, y, w, h } en entiers.
-function M.zone(px, py, ecrans, bord, coin, marge)
-    if type(px) ~= "number" or type(py) ~= "number" or type(ecrans) ~= "table" then return nil end
-    local m
-    -- l'écran dont le curseur est dans [x, x + w[ ; sinon (dernier point de la dernière colonne) bord compris
+-- marge : FENETRES_MARGE. grille (facultatif) : { bordure = FENETRES_BORDURE, espace = FENETRES_ESPACE }.
+-- Renvoie nil, ou la zone (chaîne de ZONES), le rectangle cible { x, y, w, h } de la SURFACE (ce que move et resize
+-- placent ; Hyprland dessine la bordure autour) et le cadre bordure comprise (pour l'aperçu), en entiers.
+-- Même grille que les tuiles : une moitié rangée a exactement la place et la taille d'une tuile de demi-écran.
+-- L'écran dont le point est dans [x, x + w[ ; sinon (dernier point de la dernière colonne) bord compris
+local function ecran_de(px, py, ecrans)
     for _, large in ipairs({ false, true }) do
         for _, e in ipairs(ecrans) do
             local fin_x, fin_y = e.x + e.w, e.y + e.h
-            if px >= e.x and py >= e.y and (large and px <= fin_x and py <= fin_y or px < fin_x and py < fin_y) then m = e; break end
+            if px >= e.x and py >= e.y and (large and px <= fin_x and py <= fin_y or px < fin_x and py < fin_y) then return e end
         end
-        if m then break end
     end
+    return nil
+end
+
+local function reserve_de(m)
+    local r = m.reserve or {}
+    return r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
+end
+
+function M.zone(px, py, ecrans, bord, coin, marge, grille)
+    if type(px) ~= "number" or type(py) ~= "number" or type(ecrans) ~= "table" then return nil end
+    local m = ecran_de(px, py, ecrans)
     if not m then return nil end
     local cercle = math.max(coin or 0, bord or 0)       -- un coin ne peut pas être plus petit qu'un bord
     local gauche = not voisin(ecrans, m, "gauche", px, py)
@@ -60,19 +74,37 @@ function M.zone(px, py, ecrans, bord, coin, marge)
     end
     if not z then return nil end
 
-    local r = m.reserve or {}
-    local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
+    local rg, rh, rd, rb = reserve_de(m)
     local g = marge or 10
+    local b = math.max(0, tonumber(type(grille) == "table" and grille.bordure) or 0)
+    local e = math.max(0, tonumber(type(grille) == "table" and grille.espace) or g / 2)
+    -- Cadres bordure comprise : marge g au bord de l'écran, 2·espace entre deux voisines (gaps_in de chacune)
     local ax, ay = m.x + rg + g, m.y + rh + g
     local aw, ah = m.w - rg - rd - 2 * g, m.h - rh - rb - 2 * g
-    local demi, demih = math.floor((aw - g) / 2), math.floor((ah - g) / 2)
+    local demi, demih = math.floor((aw - 2 * e) / 2), math.floor((ah - 2 * e) / 2)
     local x, y, w, h = ax, ay, aw, ah
     if z == "gauche" or z == "droite" then w = demi
     elseif z ~= "haut" then w, h = demi, demih end
-    if z == "droite" or z == "haut-droite" or z == "bas-droite" then x = ax + demi + g end
-    if z == "bas-gauche" or z == "bas-droite" then y = ay + demih + g end
-    if z == "bas-gauche" or z == "bas-droite" then h = ah - demih - g end
-    return z, { x = math.floor(x), y = math.floor(y), w = math.floor(w), h = math.floor(h) }
+    if z == "droite" or z == "haut-droite" or z == "bas-droite" then x = ax + demi + 2 * e end
+    if z == "bas-gauche" or z == "bas-droite" then y = ay + demih + 2 * e end
+    if z == "bas-gauche" or z == "bas-droite" then h = ah - demih - 2 * e end
+    local cadre = { x = math.floor(x), y = math.floor(y), w = math.floor(w), h = math.floor(h) }
+    -- la surface est le cadre moins la bordure, dessinée autour par Hyprland
+    return z, { x = cadre.x + b, y = cadre.y + b, w = math.max(1, cadre.w - 2 * b), h = math.max(1, cadre.h - 2 * b) }, cadre
+end
+
+-- Fonction PURE. Ramène le rectangle { x, y, w, h } dans la zone utile (hors réserves) de son écran : jamais hors de
+-- l'écran, jamais plus grand que lui. Sans écran connu, inchangé.
+function M.recadrer(r, ecrans)
+    if type(r) ~= "table" or type(ecrans) ~= "table" then return r end
+    local m = ecran_de(r.x + r.w / 2, r.y + r.h / 2, ecrans) or ecran_de(r.x, r.y, ecrans) or ecrans[1]
+    if not m then return r end
+    local rg, rh, rd, rb = reserve_de(m)
+    local ax, ay, aw, ah = m.x + rg, m.y + rh, m.w - rg - rd, m.h - rh - rb
+    local w, h = math.min(r.w, aw), math.min(r.h, ah)
+    local x = math.max(ax, math.min(r.x, ax + aw - w))
+    local y = math.max(ay, math.min(r.y, ay + ah - h))
+    return { x = math.floor(x), y = math.floor(y), w = math.floor(w), h = math.floor(h) }
 end
 
 -- Les écrans de Hyprland, en points logiques
@@ -97,16 +129,21 @@ local function zone_au_curseur()
     local px, py = xy(hl.get_cursor_pos())
     if not px then return nil end
     return M.zone(px, py, ecrans_logiques(), nc.reglage("AIMANT_BORD", 40), nc.reglage("AIMANT_COIN", 110),
-        nc.reglage("FENETRES_MARGE", 10))
+        nc.reglage("FENETRES_MARGE", 10),
+        { bordure = nc.reglage("FENETRES_BORDURE", 2), espace = nc.reglage("FENETRES_ESPACE", 4) })
 end
 
--- Prévient l'île : zone de la liste fixe et quatre entiers, rien d'autre dans la commande
-local function prevenir(z, r)
-    if z and r then
-        hl.exec_cmd(string.format("qs -c nc-ile ipc call ile aimant %s %d %d %d %d", z, r.x, r.y, r.w, r.h))
+-- Prévient l'île : zone de la liste fixe et quatre entiers (le cadre, bordure comprise), rien d'autre dans la commande
+local function prevenir(z, cadre)
+    if z and cadre then
+        hl.exec_cmd(string.format("qs -c nc-ile ipc call ile aimant %s %d %d %d %d", z, cadre.x, cadre.y, cadre.w, cadre.h))
     else
         hl.exec_cmd('qs -c nc-ile ipc call ile aimant "" 0 0 0 0')
     end
+end
+
+local function adresse_valide(a)
+    return type(a) == "string" and a:match("^0x[0-9a-fA-F]+$") ~= nil
 end
 
 local GARDE_FOU = 10          -- secondes : un glisser n'est jamais suivi plus longtemps (relâchement manqué)
@@ -115,6 +152,23 @@ local suivi = false           -- un glisser est en cours
 local derniere                -- dernière zone annoncée à l'île
 local debut, depart = 0, nil
 local avec_super = false     -- le glisser a commencé avec Super maintenu
+local avant = {}              -- par adresse : l'état d'avant le rangement { libre, x, y, w, h } (voir M.remettre)
+local instantane = {}         -- à l'appui : l'état de chaque fenêtre (la glissée est celle sous le curseur, pas forcément l'active)
+
+-- L'état à garder d'une fenêtre, ou nil (maximisée : sa place n'est pas la vraie)
+local function etat_de(w)
+    if type(w) ~= "table" or not adresse_valide(w.address) or (tonumber(w.fullscreen) or 0) ~= 0 then return nil end
+    local x, y = xy(w.at)
+    local l, h = xy(w.size)
+    if not (x and y and l and h) then return nil end
+    return { libre = w.floating == true, x = x, y = y, w = l, h = h }
+end
+
+local function fenetres()
+    local ok, liste = pcall(hl.get_windows)
+    if ok and type(liste) == "table" then return liste end
+    return { hl.get_active_window() }
+end
 
 local function arreter_minuteur()
     if minuteur then pcall(minuteur.set_enabled, minuteur, false) end
@@ -138,10 +192,10 @@ local function pas()
     -- d'à présent) ; on arrête ici, aperçu effacé, sans ranger la fenêtre
     if avec_super and not super_tenu() then suivi = false; arreter_minuteur(); return end
     if os.time() - debut >= GARDE_FOU then suivi = false; arreter_minuteur(); return end
-    local z, r = zone_au_curseur()
+    local z, _, cadre = zone_au_curseur()
     if z ~= derniere then
         derniere = z
-        prevenir(z, r)
+        prevenir(z, cadre)
     end
 end
 
@@ -150,6 +204,14 @@ function M.presse(super)
     suivi, derniere, debut, avec_super = true, nil, os.time(), super == true
 
     depart = { xy(hl.get_cursor_pos()) }
+    instantane = {}
+    for _, w in ipairs(fenetres()) do
+        if type(w) == "table" and w.address then instantane[w.address] = etat_de(w) end
+    end
+    local active = hl.get_active_window()
+    if type(active) == "table" and active.address and instantane[active.address] == nil then
+        instantane[active.address] = etat_de(active)
+    end
     if not nc.reglage("AIMANT_APERCU", true) then return end        -- sans aperçu, rien à suivre
     if not minuteur then
         local ok, t = pcall(hl.timer, pas, { timeout = 50, type = "repeat" })
@@ -159,23 +221,53 @@ function M.presse(super)
     pcall(minuteur.set_enabled, minuteur, true)
 end
 
-local function adresse_valide(a)
-    return type(a) == "string" and a:match("^0x[0-9a-fA-F]+$") ~= nil
-end
-
 -- Applique la zone à la fenêtre active
 function M.appliquer(w, z, r)
     if not (w and z and r) then return end
-    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set", window = w })) end
     if z == "haut" then
+        -- une tuile reste une tuile (elle retrouve sa place à la sortie du maximisé) ; une libre est maximisée telle quelle
         if nc.reglage("AIMANT_PLEIN_MASQUE", false) and adresse_valide(w.address) then
             hl.exec_cmd("~/.local/bin/nc-fenetre plein-masquer " .. w.address)
         end
         hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set" }))
     else
+        if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set", window = w })) end
         hl.dispatch(hl.dsp.window.resize({ window = w, x = r.w, y = r.h }))
         hl.dispatch(hl.dsp.window.move({ window = w, x = r.x, y = r.y }))
     end
+end
+
+-- Remet la fenêtre comme avant son rangement par l'aimant, puis l'oublie. Renvoie true si elle avait un état d'avant,
+-- false sinon (rien n'est fait). Rangée d'origine : de retour en tuile. Libre d'origine : sa taille et sa place d'avant,
+-- recadrées dans l'écran ; avec le curseur (px, py), lâchée loin des bords, elle reprend sa taille sous le curseur, à la
+-- même proportion (comme Windows). Le maximisé est retiré dans les deux cas.
+function M.remettre(w, px, py)
+    local a = type(w) == "table" and w.address
+    local e = a and avant[a]
+    if not e then return false end
+    avant[a] = nil
+    if (tonumber(w.fullscreen) or 0) ~= 0 then
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "unset" }))
+    end
+    if not e.libre then
+        if w.floating then hl.dispatch(hl.dsp.window.float({ action = "unset", window = w })) end
+        return true
+    end
+    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set", window = w })) end
+    local x, y = e.x, e.y
+    if px and py then
+        local cx, cy = xy(w.at)
+        local cw, ch = xy(w.size)
+        if cx and cy and cw and ch and cw > 0 and ch > 0 then
+            local fx = math.max(0, math.min(1, (px - cx) / cw))
+            local fy = math.max(0, math.min(1, (py - cy) / ch))
+            x, y = px - fx * e.w, py - fy * e.h
+        end
+    end
+    local r = M.recadrer({ x = x, y = y, w = e.w, h = e.h }, ecrans_logiques())
+    hl.dispatch(hl.dsp.window.resize({ window = w, x = r.w, y = r.h }))
+    hl.dispatch(hl.dsp.window.move({ window = w, x = r.x, y = r.y }))
+    return true
 end
 
 -- Relâchement : arrête le suivi, efface l'aperçu et range la fenêtre si elle a vraiment été glissée
@@ -185,11 +277,43 @@ function M.relache()
     arreter_minuteur()
     local w = hl.get_active_window()
     local px, py = xy(hl.get_cursor_pos())
+    local photo = instantane
+    instantane = {}
     if not (w and px and depart and depart[1]) then return end
     -- un simple clic (bouton latéral Précédent) ne range rien : le curseur doit avoir bougé de plus que le seuil
     if (px - depart[1]) ^ 2 + (py - depart[2]) ^ 2 <= 64 then return end
     local z, r = zone_au_curseur()
-    M.appliquer(w, z, r)
+    local a = w.address
+    if z then
+        -- l'état d'avant le PREMIER rangement est gardé : passer d'un bord à l'autre ne l'oublie pas
+        if a and not avant[a] then avant[a] = photo[a] end
+        M.appliquer(w, z, r)
+    elseif a and avant[a] then
+        M.remettre(w, px, py)           -- lâchée loin des bords : sa taille d'avant (libre) ou sa rangée (tuile)
+    end
 end
+
+-- Sortie du maximisé par un autre chemin (Super + F, « aller » de nc-fenetre, fermeture d'une masquée…) : la fenêtre
+-- retrouve sa place d'avant. Seulement une sortie DURABLE, relue après un court délai : Super + V sur une fenêtre
+-- maximisée la fait sortir puis rentrer aussitôt (changeFloatingMode de Hyprland), et le glisser d'une fenêtre
+-- maximisée commence par en sortir (c'est le relâchement qui décide alors)
+local function sortie_du_maximise(w)
+    if not (type(w) == "table" and w.address and avant[w.address]) then return end
+    if (tonumber(w.fullscreen) or 0) ~= 0 or suivi then return end
+    local a = w.address
+    pcall(hl.timer, function()
+        if suivi or not avant[a] then return end
+        for _, v in ipairs(fenetres()) do
+            if type(v) == "table" and v.address == a then
+                if (tonumber(v.fullscreen) or 0) == 0 then M.remettre(v) end
+                return
+            end
+        end
+    end, { timeout = 150, type = "oneshot" })
+end
+pcall(hl.on, "window.fullscreen", sortie_du_maximise)
+pcall(hl.on, "window.close", function(w)
+    if type(w) == "table" and w.address then avant[w.address] = nil end
+end)
 
 return M

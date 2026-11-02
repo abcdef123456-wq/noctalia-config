@@ -855,9 +855,11 @@ REGLAGES = [
     R("AIMANT_BORD", "Fenêtres", L("Aimantation : distance du bord de l'écran", "Snapping: distance from the screen edge"),
       "entier", "40",
       L("Une fenêtre lâchée à cette distance d'un bord de l'écran se range (en haut : agrandie, sur un côté : la moitié). "
-        "Seuls les bords du bout comptent : entre deux écrans, la fenêtre passe. Marche avec la souris (Souris ou Les deux).",
+        "Seuls les bords du bout comptent : entre deux écrans, la fenêtre passe. Marche avec la souris (Souris ou Les deux). "
+        "Super + V, un glisser loin des bords ou la sortie du plein écran la remettent comme avant.",
         "A window dropped this close to a screen edge snaps (top: maximized, side: half). Only the outer edges count: "
-        "between two screens the window goes through. Works with the mouse (Mouse or Both)."),
+        "between two screens the window goes through. Works with the mouse (Mouse or Both). "
+        "Super + V, dragging it away from the edges or leaving full screen puts it back as it was."),
       mini=8, maxi=120, unite="px", groupe="hypr"),
     R("AIMANT_COIN", "Fenêtres", L("Aimantation : taille des coins", "Snapping: corner size"), "entier", "110",
       L("Lâchée dans un coin de l'écran (à cette distance des deux bords), la fenêtre prend un quart de l'écran.",
