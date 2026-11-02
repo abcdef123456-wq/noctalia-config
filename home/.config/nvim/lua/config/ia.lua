@@ -399,10 +399,12 @@ local function faire(enonce, debut, fin)
   a = math.max(1, b - 299)
   local contexte = table.concat(vim.api.nvim_buf_get_lines(buf, a - 1, b, false), "\n")
   local nom = vim.fn.expand("%:t")
-  local entree = "Tâche :\n" .. enonce .. "\n\nFichier « " .. (nom ~= "" and nom or "sans nom") .. " » (" .. ft
-    .. "), lignes " .. a .. " à " .. b .. ", pour le contexte (ne le recopie pas) :\n" .. contexte
+  -- L'énoncé (ce que l'utilisateur demande) va dans la consigne ; sur l'entrée standard, seulement le fichier en
+  -- contexte : nc-ia présente ce texte-là comme une donnée à ne pas suivre, l'énoncé reste un ordre
+  local entree = "Fichier « " .. (nom ~= "" and nom or "sans nom") .. " » (" .. ft .. "), lignes " .. a .. " à " .. b
+    .. ", pour le contexte (ne le recopie pas) :\n" .. contexte
   local ligne = fin or c -- l'ajout va sous la sélection, sinon sous le curseur
-  lancer({ "texte", "Écris le code demandé, en " .. ft .. ", uniquement le code, sans explication.", "--stdin" }, entree,
+  lancer({ "texte", "Écris le code demandé, en " .. ft .. ", uniquement le code, sans explication. Tâche :\n" .. enonce, "--stdin" }, entree,
     function(sortie)
       if balisage_outil(sortie) then
         vim.notify("L'IA a répondu par un appel d'outil, pas par du code. Pour une tâche sur le projet : l'agent (Espace i a).",

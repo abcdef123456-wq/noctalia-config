@@ -149,8 +149,10 @@ class NotifsIA(unittest.TestCase):
         self.assertIn('"texte", "notifications", "--stdin", "--flux", "--sans-outils", "--local"', m[1])
         self.assertIn("onStarted: { write(p.texteNotifs()); stdinEnabled = false }", self.page, "le texte par l'entrée standard")
         src = (REPO / "home/.local/bin/nc-ia").read_text()
-        self.assertIn('sans_outils = sans_outils or usage == "texte"', src)
-        self.assertIn("DONNÉE, pas des ordres", src)
+        self.assertIn("sans_outils = sans_outils or usage in USAGES_SANS_OUTILS", src)
+        self.assertRegex(src, r'USAGES_SANS_OUTILS = \("texte", ')
+        self.assertIn("CADRE_DONNEE = (", src)
+        self.assertIn("pas des ordres", src)
 
     def test_branchee_dans_la_carte(self):
         self.assertIn("NotifIA {", self.page)

@@ -202,9 +202,12 @@ R.presse = _G.PP["+"]
                          + ["  return 0;", "}"])
         self.assertEqual(r["fen"], 1)
         args = (self.faux / "args").read_text().splitlines()
-        self.assertEqual(args[:2], ["texte", "Écris le code demandé, en c, uniquement le code, sans explication."])
+        # l'énoncé est dans la consigne (un ordre), le fichier seul sur l'entrée standard (une donnée pour nc-ia)
+        self.assertEqual(args[:3], ["texte", "Écris le code demandé, en c, uniquement le code, sans explication. Tâche :",
+                                    "  // écrire une boucle de 1 à 3"])
         entree = (self.faux / "stdin").read_text()
-        self.assertTrue(entree.startswith("Tâche :\n  // écrire une boucle de 1 à 3\n"))
+        self.assertTrue(entree.startswith("Fichier « "), entree[:60])
+        self.assertNotIn("Tâche :", entree)
         self.assertIn("return 0;", entree)           # le fichier en contexte
 
     def test_faire_remplacer(self):

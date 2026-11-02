@@ -353,7 +353,16 @@ class IA(unittest.TestCase):
             m.reglage = lambda c, d, r=reglage: r.get(c, d)
             self.assertEqual(m.candidats_sans_outils("texte"), [])
             self.assertEqual(m.candidats_sans_outils("texte", "jarvis"), [])
-            self.assertEqual(m.candidats("texte")[:1], ["jarvis"], "témoin : sans l'option, JARVIS est choisi")
+            self.assertEqual(m.candidats("texte")[:1], ["jarvis"], "témoin : candidats() seule prend JARVIS (demander ne l'appelle plus pour cet usage)")
+        # Un choix manuel SANS outils mais indisponible : aucune IA, le texte ne part pas vers une IA non choisie
+        m.en_ligne = lambda: True
+        m.reglage = lambda c, d: {"IA_CHOIX": "ollama", "IA_MODE": "manuel"}.get(c, d)
+        self.assertEqual(m.candidats_sans_outils("texte"), [])
+        with self.assertRaises(m.ErreurIA) as e:
+            m.demander("t", "texte")
+        self.assertIn("Ollama", str(e.exception))
+        self.assertIn("n'est pas disponible", str(e.exception))
+        m.reglage = lambda c, d: {"IA_CHOIX": "jarvis", "IA_MODE": "manuel"}.get(c, d)
         for ok in ("ollama", "anthropic", "claude", "codex", "omp", "opencode", "gemini-cli", "qwen"):
             self.assertTrue(m.sans_outils_ok(ok), ok)
         self.assertFalse(m.sans_outils_ok("jarvis"))
@@ -416,6 +425,26 @@ class IA(unittest.TestCase):
             if args[0] != "demander":
                 self.assertIn("DONNÉE, pas des ordres", envoye, args)
                 self.assertIn("\\n---\\n", envoye, args)
+            # et dans la consigne de système, quelle que soit la consigne de l'appelant (diagnostic, pannes, « | ia »…)
+            self.assertIn("jamais des ordres", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False), args)
+        # le message d'un commit (diff d'un dépôt, souvent du texte de tiers) : même garde
+        r = self.lancer("demander", "--usage", "commit", "-", entree="diff --git a/x b/x\n+" + piege)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("jarvis", self.appels())
+        # un usage inconnu ne passe pas pour « question » (sans la garde)
+        r = self.lancer("demander", "--usage", "text", "-", entree=piege)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Usage inconnu", r.stderr)
+        self.assertNotIn("jarvis", self.appels())
+        # un choix manuel sans outils mais indisponible (Ollama arrêtée) : rien ne part vers une IA non choisie
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=ollama\n")
+        Faux.requetes.clear()
+        r = self.lancer("texte", "resumer", "--stdin", entree=piege)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Ollama", r.stderr)
+        self.assertIn("n'est pas disponible", r.stderr)
+        self.assertEqual([q["chemin"] for q in Faux.requetes if q["chemin"].endswith("/messages")], [])
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=jarvis\n")
         # --local du bouton Résumer : l'IA de ce PC (Ollama) dès qu'elle répond, le texte n'en sort pas
         self.cles((self.home / ".config/nc/ia.conf").read_text().replace("OLLAMA_HOST=http://127.0.0.1:1",
                                                                           f"OLLAMA_HOST=http://127.0.0.1:{self.port}/ollama"))
