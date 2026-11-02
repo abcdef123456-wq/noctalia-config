@@ -243,7 +243,7 @@ touche(SUPER .. " + CTRL + code:33", function()
     local w = hl.get_active_window()
     if not w then return end
     if not w.pinned and not w.floating then
-        hl.dispatch(hl.dsp.window.float({ action = "set" }))
+        hl.dispatch(hl.dsp.window.float({ action = "enable" }))
     end
     hl.dispatch(hl.dsp.window.pin({ action = "toggle" }))
 end, trad("Fenêtres|Épingler sur tous les bureaux", "Pin on all desktops"))
@@ -253,7 +253,7 @@ touche(SUPER .. " + CTRL + code:39", function()
     local w = hl.get_active_window()
     local lw, lh = taille_ecran(w and w.monitor)
     if not w or not lw then return end
-    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set" })) end
+    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "enable" })) end
     local pct = math.floor(xy(w.size) * 100 / lw + 0.5)
     local n = pct < 60 and 0.7 or (pct < 80 and 0.9 or 0.5)
     hl.dispatch(hl.dsp.window.resize({ x = math.floor(lw * n), y = math.floor(lh * n) }))
@@ -301,7 +301,7 @@ local function vers_cache(nom)
         hl.dispatch(hl.dsp.window.move({ workspace = "special:" .. nom, follow = false, window = w }))
         if nom == "term" then
             local lw, lh = taille_ecran(w.monitor)
-            hl.dispatch(hl.dsp.window.float({ action = "set", window = w }))
+            hl.dispatch(hl.dsp.window.float({ action = "enable", window = w }))
             if lw then hl.dispatch(hl.dsp.window.resize({ x = math.floor(lw * 0.72), y = math.floor(lh * 0.62), window = w })) end
             hl.dispatch(hl.dsp.window.center({ window = w }))
         end
@@ -315,12 +315,12 @@ touche(SUPER .. " + SHIFT + code:49", vers_cache("term"),  trad("Bureaux|Fenêtr
 touche(SUPER .. " + mouse:272", hl.dsp.window.drag(),   trad("Souris|Déplacer la fenêtre", "Move the window"),       { mouse = true })
 touche(SUPER .. " + mouse:273", hl.dsp.window.resize(), trad("Souris|Redimensionner la fenêtre", "Resize the window"), { mouse = true })
 -- Super + Alt : détacher la fenêtre et la poser ou la redimensionner librement (Super + V la remet dans le pavage)
-touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.float({ action = "set" }))
+touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.float({ action = "enable" }))
 touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.drag(),   trad("Souris|Détacher et placer librement", "Detach and place freely"), { mouse = true })
-touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.float({ action = "set" }))
+touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.float({ action = "enable" }))
 touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.resize(), trad("Souris|Détacher et redimensionner librement", "Detach and resize freely"), { mouse = true })
 -- Pavé tactile : Super + Maj + appuyer-glisser (un doigt)
-touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.float({ action = "set" }))
+touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.float({ action = "enable" }))
 touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), trad("Souris|Redimensionner (pavé tactile)", "Resize (touchpad)"), { mouse = true })
 
 -- Souris sans clavier (nc-reglages → Clavier et souris, SAISIE = souris ou les-deux) : boutons latéraux maintenus pour

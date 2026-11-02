@@ -267,7 +267,7 @@ AIMANT.presse(); CURSEUR = { x = 1919, y = 500 }; trace = {}
 AIMANT.relache()
 dire(table.concat(trace, "|"))
 ''', 'REG.AIMANT_APERCU = false\n')
-        self.assertEqual(sorties[0], "float set|taille 945 1060|place 965 10")
+        self.assertEqual(sorties[0], "float enable|taille 945 1060|place 965 10")
 
     def test_haut_sans_masquage(self):
         for valeur in (False, None):
@@ -354,7 +354,7 @@ trace = {}; AIMANT.relache(); dire("range", table.concat(trace, "|"))
 ''', self.REG)
         self.assertEqual(sorties[0], "apercu\texec qs -c nc-ile ipc call ile aimant gauche 10 52 786 938")
         self.assertEqual(sorties[1], 'range\tactif false|exec qs -c nc-ile ipc call ile aimant "" 0 0 0 0'
-                         "|float set|taille 782 934|place 12 54")
+                         "|float enable|taille 782 934|place 12 54")
 
 
 @unittest.skipUnless(shutil.which("lua"), "Lua requis")
@@ -384,7 +384,7 @@ dire("range", table.concat(trace, "|"))
 WIN.floating = true
 trace = {}; dire("remise", tostring(AIMANT.remettre(WIN)), table.concat(trace, "|"))
 ''', self.SANS_APERCU)
-        self.assertEqual(sorties, ["range\tfloat set|taille 945 1060|place 965 10", "remise\ttrue\tfloat unset"])
+        self.assertEqual(sorties, ["range\tfloat enable|taille 945 1060|place 965 10", "remise\ttrue\tfloat disable"])
 
     def test_sans_etat_davant_rien(self):
         sorties = lua(self.ECRAN + self.LIBRE + '''

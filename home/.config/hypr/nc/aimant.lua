@@ -231,7 +231,7 @@ function M.appliquer(w, z, r)
         end
         hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set" }))
     else
-        if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set", window = w })) end
+        if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "enable", window = w })) end
         hl.dispatch(hl.dsp.window.resize({ window = w, x = r.w, y = r.h }))
         hl.dispatch(hl.dsp.window.move({ window = w, x = r.x, y = r.y }))
     end
@@ -250,10 +250,10 @@ function M.remettre(w, px, py)
         hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "unset" }))
     end
     if not e.libre then
-        if w.floating then hl.dispatch(hl.dsp.window.float({ action = "unset", window = w })) end
+        if w.floating then hl.dispatch(hl.dsp.window.float({ action = "disable", window = w })) end
         return true
     end
-    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "set", window = w })) end
+    if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "enable", window = w })) end
     local x, y = e.x, e.y
     if px and py then
         local cx, cy = xy(w.at)
