@@ -56,8 +56,10 @@ Item {
                 } catch (e) {}
             }
         }
+        // Le vrai message de nc-ia remplace le générique d'onExited (l'ordre entre la fin du flux et la sortie n'est pas
+        // garanti) ; « Délai dépassé. » (tempo) reste : le processus a été arrêté, son flux peut être vide ou tronqué
         stderr: StdioCollector {
-            onStreamFinished: if (d.reponse === "" && d.erreur === "" && text.trim() !== "") d.erreur = text.trim().split("\n")[0].slice(0, 200)
+            onStreamFinished: if (d.reponse === "" && text.trim() !== "" && d.erreur !== Reglages.t("Délai dépassé.", "Timed out.")) d.erreur = text.trim().split("\n")[0].slice(0, 200)
         }
         onExited: { tempo.stop(); d.envoi = ""; if (d.reponse.trim() === "" && d.erreur === "") d.erreur = Reglages.t("Pas de réponse de l'IA.", "No answer from the AI.") }
     }

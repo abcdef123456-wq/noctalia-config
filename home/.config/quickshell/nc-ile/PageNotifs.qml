@@ -65,9 +65,10 @@ Item {
         stdout: SplitParser {
             onRead: l => { try { let d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
         }
-        // La première ligne d'erreur de nc-ia (« Choisis une IA sans outils… », « Ollama n'est pas disponible »), en texte brut
+        // La première ligne d'erreur de nc-ia (« Choisis une IA sans outils… », « Ollama n'est pas disponible »), en texte brut.
+        // Elle remplace le message générique d'onExited : l'ordre entre la fin du flux et la sortie n'est pas garanti
         stderr: StdioCollector {
-            onStreamFinished: if (p.resumeIA === "" && p.resumeErreur === "" && text.trim() !== "") p.resumeErreur = text.trim().split("\n")[0].slice(0, 200)
+            onStreamFinished: if (p.resumeIA === "" && text.trim() !== "") p.resumeErreur = text.trim().split("\n")[0].slice(0, 200)
         }
         onExited: if (p.resumeIA.trim() === "" && p.resumeErreur === "") p.resumeErreur = Reglages.t("Pas de réponse de l'IA.", "No answer from the AI.")
     }

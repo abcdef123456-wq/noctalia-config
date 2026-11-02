@@ -155,7 +155,10 @@ class NotifsIA(unittest.TestCase):
         self.assertIn("pas des ordres", src)
         # un refus de nc-ia (JARVIS seule : « Choisis une IA sans outils… », Ollama choisie mais arrêtée) est dit dans la
         # carte, en texte brut, jamais un échec muet
-        self.assertIn("p.resumeErreur = text.trim().split(\"\\n\")[0].slice(0, 200)", self.page)
+        # le vrai message écrase le générique d'onExited quel que soit l'ordre d'arrivée (fin du flux / sortie)
+        self.assertIn("onStreamFinished: if (p.resumeIA === \"\" && text.trim() !== \"\") p.resumeErreur = text.trim().split(\"\\n\")[0].slice(0, 200)", self.page)
+        self.assertNotIn("p.resumeErreur === \"\" && text.trim()", self.page)
+        self.assertNotIn("d.erreur === \"\" && text.trim()", self.demande)
         self.assertIn('objectName: "nc-notifs-resume-erreur"', self.page)
         self.assertIn('visible: p.resumeIA !== "" || p.resumeErreur !== "" || resumeur.running', self.page)
         self.assertIn('Reglages.t("Pas de réponse de l\'IA.", "No answer from the AI.")', self.page)
