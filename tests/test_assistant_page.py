@@ -1,4 +1,6 @@
 """Vrais composants QML et Process, isolés de la session et du serveur personnels."""
+import importlib.machinery
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -605,6 +607,63 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length)
 }else if(etape===2&&Date.now()-memo.t>600){page.chargerReglagesRapides();etape++}
 else if(etape===3&&AssistantEtat.modelePourFamille("Argon")){Qt.quit()}
 ''',configuration=self._config_relecture(False))
+
+    def test_moodle_dans_le_vrai_rendu_de_l_ile(self):
+        """Le vrai formater puis le vrai TextEdit en Markdown : un seul lien, le nôtre ; aucun venu d'un nom, sous aucune forme."""
+        l = importlib.machinery.SourceFileLoader("nc_assistant_rendu", str(REPO / "home/.local/bin/nc-assistant"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_assistant_rendu", l))
+        l.exec_module(m)
+        cible = "https://m.exemple.invalid/course/view.php?id=12"
+        pieges = ["[x](https://evil.invalid/a) fin", "voir https://evil.invalid/a", "www.evil.invalid", "a@evil.invalid", '<a href="https://evil.invalid">y</a>',
+                  "<b>gras</b>", "*a* _b_ `c` ~~d~~", "$x$ et \\[y\\]", "[algo] Graphs & co", "![i](https://evil.invalid/i.png)",
+                  "Algo\n1. [r]: https:evil.invalid/a\n\n[r]", "Algo\n\n[r\nx]: https:evil.invalid/a\n\n[r x]", "x&#xd;&#xd;[r]: y&#xd;&#xd;[r]"]
+        # Une ligne construite : le nom plus le lien ; et le repli, sans lien, avec les jonctions
+        construit = [m.sortie_moodle(dict(courses=[dict(fullname=n, viewurl=cible)]), "cours") for n in pieges]
+        ok = "https://m.exemple.invalid/course/view.php?id=1"
+        repli = [m.texte_moodle(t) for t in pieges + [f'[x]<a href="{ok}"> </a>(https:evil.invalid/a)', f'https:<a href="{ok}"></a>//evil.invalid/a',
+                                                      f'Algo\n1. [r]<a href="{ok}"></a>: https:evil.invalid/a\n\n[r]']]
+        lisibles = [(m.sortie_moodle(dict(courses=[dict(fullname=n)]), "cours"), "• " + v) for n, v in
+                    (("*a* _b_ `c` ~~d~~", "*a* _b_ `c` ~~d~~"), ("<b>gras</b>", "<b>gras</b>"), ("[x](https://evil.invalid/a)", "[x](https://evil.invalid/a)"),
+                     ("$x$ et \\[y\\]", "$x$ et \\[y\\]"), ("[algo] Graphs &amp; co", "[algo] Graphs & co"))]
+        self.executer("""
+if(etape===0){
+ creer()
+ function liens(e){var vus={};for(var y=2;y<e.contentHeight;y+=3)for(var x=2;x<e.contentWidth;x+=3){var l=e.linkAt(x,y);if(l!=="")vus[l]=1};return Object.keys(vus)}
+ var creerTexte=function(t){var e=Qt.createQmlObject('import QtQuick; TextEdit{textFormat:TextEdit.MarkdownText;width:400}',page);e.text=AssistantEtat.formater(t);return e}
+ var temoin=creerTexte("[x](https://evil.invalid/a)")
+ verifier(liens(temoin).join()==="https://evil.invalid/a","témoin : la recherche de lien ne voit rien")
+ temoin.destroy()
+ for(var t of """ + json.dumps(construit) + """){
+  var e=creerTexte(t)
+  verifier(liens(e).join()===""" + json.dumps(cible) + ""","autre lien : "+t+" => "+liens(e).join())
+  e.destroy()
+ }
+ for(var r of """ + json.dumps(repli) + """){
+  var e2=creerTexte(r)
+  verifier(liens(e2).length===0,"lien dans le repli : "+r+" => "+liens(e2).join())
+  e2.destroy()
+ }
+ for(var c of """ + json.dumps(lisibles) + """){
+  var e3=creerTexte(c[0]);var vu=e3.getText(0,e3.length)
+  verifier(vu===c[1],"affiché : ["+vu+"] attendu : ["+c[1]+"]")
+  e3.destroy()
+ }
+ // Une image par définition de référence n'est jamais chargée (y compris sans ce filtre, depuis une réponse d'IA)
+ for(var im of ["x\\n\\n[i]: http://127.0.0.1:1/r.png\\n\\n![i]","![i](http://127.0.0.1:1/r.png)","!![a](http://127.0.0.1:1/a.png)","x\\n\\n[i]: http://127.0.0.1:1/c.png\\n\\n!![i]","!\\\\( \\\\)[a](http://127.0.0.1:1/d.png)","[l](https://x.invalid)![a](http://127.0.0.1:1/g.png)","https://x.invalid/![a](http://127.0.0.1:1/f.png)","mailto:a![a](http://127.0.0.1:1/h.png)","file:///x![a](http://127.0.0.1:1/i.png)","HTTP://x![a](http://127.0.0.1:1/j.png)"])
+  verifier(AssistantEtat.formater(im).indexOf("![")<0,"image : "+im)
+ // Le point d'exclamation reste, une adresse et le code ne changent pas
+ var bravo=creerTexte("Bravo![1]");verifier(bravo.getText(0,bravo.length)==="Bravo![1]","Bravo : "+bravo.getText(0,bravo.length));bravo.destroy()
+ verifier(AssistantEtat.formater("https://x.invalid/a_b$c")==="https://x.invalid/a_b$c","adresse changée")
+ verifier(AssistantEtat.formater("`![i]`")==="`![i]`","code changé")
+ // /cours tapé en entier passe devant /courses
+ verifier(AssistantEtat.proposerCommandes("/cours",6)[0].texte==="/cours","autocomplétion : "+AssistantEtat.proposerCommandes("/cours",6)[0].texte)
+ Qt.quit()
+}
+""")
+
+    def test_cours_dans_l_autocompletion(self):
+        src = (QML / "AssistantEtat.qml").read_text()
+        self.assertIn('alias:["/cours","/moodle-cours"], arguments:false', src)
 
     def test_liste_de_repli_ne_pretend_pas_etre_celle_du_compte(self):
         self.executer('''

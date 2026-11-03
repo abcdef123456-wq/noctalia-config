@@ -46,12 +46,15 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # au service (PrivateTmp) que nc_runner vide de ce qui a plus d'une heure ; --dangerously-skip-permissions remis pour agy,
 # retiré par nc_runner sauf NC_AGY_SANS_CONFIRMATION=oui écrit à la main. Le patch 0003 et sa fiche, dans le dépôt
 # amont, ne sont pas appliqués (#31 est écrit d'après la fiche, avec ses propres protections)
-REVISION='17525afe78e11d4c509daac8bcf4cbb00673cd4a'
+# e1448c8 (issue #38) : action « cours » de Moodle, sesskey retiré des erreurs, cookie de session limité au domaine de MOODLE_URL,
+# plus d'adresse par défaut (MOODLE_URL est requis), rien de touché au runner. Le patch d'amont pour noctalia-config n'est pas appliqué.
+REVISION='e1448c824b49e2e291be7c8a8cd2acbacf3f3006'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
                      '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
                      '64523e57c958f23af459c8069d1a6985bf349640','aae5b9b3e6da13cfb78c2da33b5584c854f5139a',
                      'f522291ca02af08903cbebd32203e14013dc80a6','4ecc57a8351fee610185b699b12c4b15092fe5ff',
-                     '94a3a930efae59dbfd7758be5af6f883ab34b9df','ffb19b94f9c98ed98723500efbaa5c2c7f832821',REVISION)
+                     '94a3a930efae59dbfd7758be5af6f883ab34b9df','ffb19b94f9c98ed98723500efbaa5c2c7f832821',
+                     '17525afe78e11d4c509daac8bcf4cbb00673cd4a',REVISION)
 
 
 def ask(message, default=False):

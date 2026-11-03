@@ -131,6 +131,159 @@ class Assistant(unittest.TestCase):
         src = (BIN / "nc-assistant").read_text()
         self.assertIn('{"echec_serveur": True} if isinstance(e, ErreurServeur)', src)
 
+    COURS = "https://m.exemple.invalid/course/view.php?id=12"
+
+    def cours(self, *noms, url=None):
+        return dict(success=True, output="<b>ignoré</b>", courses=[dict(fullname=n, viewurl=url or self.COURS) for n in noms])
+
+    def test_cours_et_devoirs_appellent_moodle_avec_les_champs(self):
+        reponses = {"cours": self.cours("[algo] Graphs & co"),
+                    "devoirs": dict(success=True, assignments=[dict(title="TP_1", course="Algo", due_date="03/11/2026 à 14:00",
+                                                                    url="https://m.exemple.invalid/mod/assign/view.php?id=7")])}
+        attendus = {"cours": "• [algo] Graphs & co — [", "devoirs": "• TP_1 · Algo · 03/11/2026 à 14:00 — ["}
+        cibles = {"cours": self.COURS, "devoirs": "https://m.exemple.invalid/mod/assign/view.php?id=7"}
+        for commande, action in (("/cours", "cours"), ("/moodle-cours", "cours"), ("/devoirs", "devoirs"), ("/moodle", "devoirs")):
+            with patch.object(self.m, "api", return_value=reponses[action]) as api:
+                texte = self.m.executer_commande({}, "s", commande)
+            self.assertEqual(api.call_args[0][1:], ("/api/action", {"tool": "moodle", "action": action, "params": {}, "platform": "desktop"}), commande)
+            self.assertIn(attendus[action], texte, commande)
+            self.assertIn(f"]({cibles[action]})", texte, commande)
+            self.assertNotIn("ignoré", texte)
+
+    def test_devoirs_a_la_revision_precedente_sans_output(self):
+        """17525af renvoie message et assignments, sans output : /devoirs répond quand même."""
+        res = dict(success=True, message="<b>x</b>", assignments=[dict(title="TP", course="Algo", due_date="d", url="x")])
+        self.assertEqual(self.m.sortie_moodle(res, "devoirs"), "• TP · Algo · d")
+
+    def test_repli_sur_le_texte_sans_champs_ou_de_forme_inattendue(self):
+        html_ = '<a href="https://evil.invalid/course/view.php?id=1">Algo</a> &amp; co'
+        for res, action in ((dict(output=html_), "cours"), (dict(output=html_, courses=[]), "cours"), (dict(output=html_, courses="x"), "cours"),
+                            (dict(output=html_, courses=[1]), "cours"), (dict(output=html_, courses=[dict(id=1)]), "cours"),
+                            (dict(output=html_, courses=[dict(fullname=3)]), "cours"), (dict(message=html_), "cours"),
+                            (dict(output=html_, courses=[dict(fullname="z")]), "autre")):
+            self.assertEqual(self.m.sortie_moodle(res, action), "Algo & co", res)
+        with self.assertRaises(self.m.Erreur):
+            self.m.sortie_moodle(dict(success=True), "cours")
+
+    def test_cours_erreur_du_serveur_message_propre_sans_le_corps(self):
+        """success=False : api() n'affiche jamais le corps, qui peut contenir une adresse avec un jeton."""
+        corps = json.dumps(dict(success=False, output="erreur https://exemple.invalid/service.php?sesskey=abc"))
+        self.server.reponse = (200, corps.encode())
+        c = dict(URL=f"http://127.0.0.1:{self.server.server_address[1]}", SECRET_KEY="k" * 32, USER_ID="u", TIMEOUT=5)
+        texte = self.m.executer_commande(c, "s", "/cours")
+        self.assertNotIn("sesskey", texte)
+        self.assertNotIn("exemple.invalid", texte)
+
+    def test_nom_ordinaire_intact_et_decode_une_seule_fois(self):
+        n = lambda nom: self.m.sortie_moodle(dict(courses=[dict(fullname=nom)]), "cours")
+        for ordinaire in ("[algo] Graphs", "TP_1 (cours)", "R&D", "Q&A", "AT&T", "été_2024", "C++", "Intro (S1)", "100%", "L1/L2", "Maths & Info", "5!"):
+            self.assertEqual(n(ordinaire), "• " + ordinaire)
+        self.assertEqual(n("Maths &amp; Info"), "• Maths & Info")
+        self.assertEqual(n("&amp;lt;b&amp;gt;"), "• &amp;lt;b&amp;gt;", "décodé une fois, puis neutralisé : s'affiche &lt;b&gt;")
+
+    def test_un_nom_ne_fabrique_ni_lien_ni_mise_en_forme_ni_saut_de_ligne(self):
+        pieges = (("[x](https://evil.invalid)", "]("), ("![x](https://evil.invalid/i.png)", "]("), ("[x][y]", "]["), ("[r]: https:evil.invalid", "]:"),
+                  ("voir https://evil.invalid", "://"), ("HTTP://evil.invalid", "://"), ("file:///etc/passwd", "://"), ("www.evil.invalid", "www."),
+                  ("WWW.evil.invalid", "WWW."), ("a@evil.invalid", "@"), ("mailto:a@evil.invalid", "mailto:"), ("&lt;a href=x&gt;y&lt;/a&gt;", "<"),
+                  ("<b>gras</b>", ">"), ("*gras*", "*"), ("`code`", "`"), ("$x$", "$"), ("\\[x\\]", "\\"), ("~~barré~~", "~~"), ("_souligné_", "_"),
+                  ("![x", "!["), ("Algo\n1. [r]: https:evil.invalid\n\n[r]", "\n"), ("# Titre\n> c", "\n"))
+        for piege, interdit in pieges:
+            sortie = self.m.sortie_moodle(self.cours(piege), "cours")
+            self.assertNotIn(interdit, sortie.split(" — [")[0], piege)
+            self.assertEqual(sortie.count("]("), 1, piege)
+            self.assertTrue(sortie.endswith(f"]({self.COURS})"), piege)
+            self.assertTrue(sortie.startswith("• "), piege)
+        self.assertLess(len(self.m.sortie_moodle(self.cours("x" * 5000), "cours")), 300, "borné")
+
+    def test_entite_sans_fin_et_surrogate_ne_font_pas_perdre_la_liste(self):
+        immense = "&#" + "9" * 5000 + ";"
+        sortie = self.m.sortie_moodle(dict(courses=[dict(fullname=immense), dict(fullname="Algo", course=immense)]), "cours")
+        self.assertIn("Algo", sortie)
+        self.assertNotIn("9999", sortie)
+        self.assertIn("é", self.m.sortie_moodle(dict(courses=[dict(fullname="&#233;")]), "cours"))
+        self.assertEqual(self.m.sortie_moodle(dict(courses=[dict(fullname="a\ud800b")]), "cours"), "• ab")
+        self.assertNotIn("9999", self.m.texte_moodle(immense))
+        self.assertEqual(json.dumps(self.m.texte_moodle("a\ud800b"), ensure_ascii=False).encode(), b'"ab"', "encodable")
+
+    def test_decodage_ne_recree_pas_de_controles(self):
+        for entree in ("a&#13;b", "&#12;", "a&#x9d;52;c;QQ==&#x9c;b", "&#x90;", "&#x81;", "&#x1b;[31m", "&#0;", "a\u202eb\ufeffc"):
+            for sortie in (self.m.sortie_moodle(dict(courses=[dict(fullname=entree)]), "cours"), self.m.texte_moodle(entree)):
+                self.assertEqual([c for c in sortie if ord(c) < 32 and c != "\n" or 127 <= ord(c) <= 159 or c in "\u202e\ufeff"], [], entree)
+
+    def test_lien_seulement_sous_une_forme_exacte_et_reecrit(self):
+        lien = lambda url, action="cours": self.m._lien_moodle(url, self.m.MOODLE[action][3])
+        self.assertEqual(lien(self.COURS), ("m.exemple.invalid", self.COURS))
+        self.assertEqual(lien("https://M.Exemple.invalid/course/view.php?id=12"), ("m.exemple.invalid", self.COURS), "réécrit")
+        self.assertIsNotNone(lien("https://m.exemple.invalid/mod/assign/view.php?id=7", "devoirs"))
+        self.assertEqual(lien("https://m.exemple.invalid/calendar/view.php", "devoirs")[1], "https://m.exemple.invalid/calendar/view.php")
+        for hors in ("http://m.exemple.invalid/course/view.php?id=1", "https://m.exemple.invalid:8443/course/view.php?id=1",
+                     "https://moi:secret@m.exemple.invalid/course/view.php?id=1", "https://m.exemple.invalid/moodle/course/view.php?id=1",
+                     "https://m.exemple.invalid/course/view.php?id=1&x=2", "https://m.exemple.invalid/course/view.php?id=1#a",
+                     "https://m.exemple.invalid/course/view.php?id=abc", "https://m.exemple.invalid/course/view.php",
+                     "https://m.exemple.invalid/course/view.php/x?id=1", "https://m.exemple.invalid/login/logout.php?id=1",
+                     "https://m.exemple.invalid/../course/view.php?id=1", "javascript:alert(1)", "file:///etc/passwd",
+                     "//m.exemple.invalid/course/view.php?id=1", "", None, 3, "https://m.exemple.invalid/calendar/view.php",
+                     "https://m.exemple.invalid/course/view.php?id=1\n", "https://m.exemple.invalid/course/view.php?id=1)"):
+            self.assertIsNone(lien(hors), hors)
+        self.assertIsNone(lien("https://m.exemple.invalid/calendar/view.php?id=1", "devoirs"))
+        self.assertIsNone(lien(self.COURS, "devoirs"), "liste de l'action")
+
+    def test_adresse_hors_liste_ou_deux_hotes_aucun_lien(self):
+        s = self.m.sortie_moodle
+        self.assertEqual(s(self.cours("Algo", url="http://m.exemple.invalid/course/view.php?id=1"), "cours"), "• Algo")
+        deux = dict(courses=[dict(fullname="Un", viewurl="https://a.exemple.invalid/course/view.php?id=1"),
+                             dict(fullname="Deux", viewurl="https://b.exemple.invalid/course/view.php?id=2")])
+        self.assertEqual(s(deux, "cours"), "• Un\n\n• Deux")
+
+    def test_au_dela_du_maximum_le_nombre_restant_seulement(self):
+        sortie = self.m.sortie_moodle(self.cours(*[f"C{i}" for i in range(20)]), "cours")
+        self.assertEqual(sortie.count("• "), 15)
+        self.assertIn("5", sortie.rsplit("\n", 1)[1])
+
+    def test_repli_filtre_sans_aucun_lien(self):
+        n = self.m.texte_moodle
+        ok = "https://m.exemple.invalid/course/view.php?id=1"
+        for texte, interdit in ((f'[x]<a href="{ok}"> </a>(https:evil.invalid/a)', "]("), (f'Algo\n1. [r]<b></b>: https:evil.invalid/a\n\n[r]', "]:"),
+                                (f'https:<a href="{ok}"></a>//evil.invalid/a', "://"), (f'www<a href="{ok}"></a>.evil.invalid', "www."),
+                                (f'<a href="{ok}">Algo</a>', "]("), ("a\ue0000\ue001b", "]("), ("&#xe000;0&#xe001;", "](")):
+            self.assertNotIn(interdit, n(texte), texte)
+        for debut in ("# Titre", "> cite", "- liste", "+ liste", ":-|:-"):
+            self.assertTrue(n("ok\n" + debut).split("\n")[1].startswith("&#"), debut)
+
+    def jarvis(self, reponse, action="cours"):
+        """Le vrai request de nc-jarvis (le cockpit de l'île), seul api bouchonné."""
+        j = charger("nc-jarvis")
+        m = j.client()
+        m.configuration = lambda *a, **k: dict(SECRET_KEY="k" * 32, URL="http://127.0.0.1:1", USER_ID="u", TIMEOUT=5)
+        m.api = lambda *a, **k: dict(reponse)
+        with patch.object(j, "client", return_value=m):
+            return j.request(dict(op="action", confirmed=True, params=dict(tool="moodle", action=action, params={})))
+
+    def test_le_cockpit_ne_montre_que_le_texte_construit(self):
+        piege = '<a href="https://evil.invalid">[x](https://evil.invalid)</a>'
+        d = self.jarvis(dict(success=True, output=piege, message=piege, text=piege, courses=[dict(fullname=piege, viewurl=self.COURS)]))
+        for champ in ("output", "message", "text"):
+            self.assertTrue(d[champ].startswith("• "), d[champ])
+            self.assertEqual(d[champ].count("]("), 1, d[champ])
+            self.assertTrue(d[champ].endswith(f"]({self.COURS})"), d[champ])
+        d = self.jarvis(dict(success=True, message=piege, text=piege), "autre")
+        self.assertEqual(d["message"].count("]("), 0, d["message"])
+        self.assertEqual(d["text"], d["message"])
+        for vide in (dict(success=True, text=piege), dict(success=True, output="<b></b>")):
+            d = self.jarvis(vide)
+            self.assertNotIn("evil", d["text"], "ni output ni message : rien de brut")
+            self.assertTrue(d["text"] and d["text"] == d["message"] == d["output"], "pas de carte vide")
+        d = self.jarvis(dict(success=True, courses=[dict(fullname="&#" + "9" * 5000 + ";")]))
+        self.assertTrue(d["text"].startswith("• "), "pas de ValueError jusqu'au cockpit")
+
+    def test_syntaxe_lisible_par_un_python_ancien(self):
+        """install.sh annonce Python 3.8 : pas de guillemets doubles dans un f-string à guillemets doubles (3.12 et plus)."""
+        import re
+        src = (BIN / "nc-assistant").read_text()
+        d, f = src.index("_MD_ACTIF = "), src.index("_CHOIX = []")
+        self.assertNotIn('sortie_moodle(res, "', src)
+        self.assertEqual(re.findall(r"""f"[^"\n]*\{[^}"\n]*"[^}\n]*\}""", src[d:f]), [])
+
     def test_cle_de_session_acceptee_par_4ecc57a(self):
         # Le repli sur USER_ID (espaces, « : », accents, trop long) est ramené à desktop:[\w.@-]{1,180} ; rien : pas de clé
         import re as _re

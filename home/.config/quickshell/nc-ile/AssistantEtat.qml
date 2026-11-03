@@ -41,6 +41,7 @@ Singleton {
         {nom:Reglages.t("/courses","/shopping"), alias:["/courses","/shopping"], arguments:true, description:Reglages.t("Voir les courses ou ajouter des articles", "View groceries or add items")},
         {nom:Reglages.t("/depenses","/expenses"), alias:["/depenses","/expenses"], arguments:true, description:Reglages.t("Bilan ou ajout d’une dépense", "Summary or add an expense")},
         {nom:Reglages.t("/devoirs","/moodle"), alias:["/devoirs","/moodle"], arguments:false, description:Reglages.t("Consulter les devoirs", "View homework")},
+        {nom:Reglages.t("/cours","/moodle-cours"), alias:["/cours","/moodle-cours"], arguments:false, description:Reglages.t("Mes cours (Moodle)", "My courses (Moodle)")},
         {nom:Reglages.t("/rappel","/remind"), alias:["/rappel","/remind"], arguments:true, description:Reglages.t("Rappel : /rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures] <délai ou heure> <message>", "Reminder: /remind [desktop|telegram|discord] [every day|every saturday|every 3 hours] <delay or time> <message>")},
         {nom:Reglages.t("/rappels","/reminders"), alias:["/rappels","/reminders"], arguments:false, description:Reglages.t("Rappels en attente sur le serveur", "Pending reminders on the server")},
         {nom:"/supprimer", alias:["/supprimer","/delrappel"], arguments:true, description:Reglages.t("Supprimer un rappel : /supprimer <numéro>", "Delete a reminder: /supprimer <number>")},
@@ -52,8 +53,11 @@ Singleton {
         var prefixe = m[1].slice(0, position).toLowerCase()
         return commandes.map((c, ordre) => {
             var nom = [c.nom].concat(c.alias).find(n => n.indexOf(prefixe) === 0)
-            return nom ? {texte:nom, description:c.description, arguments:c.arguments, fin:m[1].length, principal:nom === c.nom, ordre:ordre} : null
-        }).filter(c => c !== null).sort((x,y) => Number(y.principal) - Number(x.principal) || x.ordre - y.ordre)
+            // Une commande tapée en entier passe devant les plus longues (/cours avant /courses)
+            var exact = [c.nom].concat(c.alias).find(n => n === prefixe)
+            if (exact) nom = exact
+            return nom ? {texte:nom, description:c.description, arguments:c.arguments, fin:m[1].length, principal:nom === c.nom, exact:!!exact, ordre:ordre} : null
+        }).filter(c => c !== null).sort((x,y) => Number(y.exact) - Number(x.exact) || Number(y.principal) - Number(x.principal) || x.ordre - y.ordre)
     }
     function commandeComplete(texte) {
         var nom = texte.trim().split(/\s+/)[0].toLowerCase()
@@ -310,10 +314,9 @@ Singleton {
         t = t.replace(/<(?:b|strong)>([\s\S]*?)<\/(?:b|strong)>/gi, "**$1**")
         t = t.replace(/<(?:i|em)>([\s\S]*?)<\/(?:i|em)>/gi, "*$1*")
         t = t.replace(/<s>([\s\S]*?)<\/s>/gi, "~~$1~~")
-        // Pas de chargement d'image externe en Markdown
-        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "[$1]($2)")
         // Les caractères LaTeX d'une URL (notamment $, _ et \\) font partie du lien.
-        t = t.replace(/(?:https?:\/\/|file:\/\/\/|mailto:)[^\s<>"`]+/gi, m => garder(m))
+        // S'arrête avant « ![ » : l'image qui suit ne se cache pas derrière l'adresse, elle passe par le remplacement du « ! »
+        t = t.replace(/(?:https?:\/\/|file:\/\/\/|mailto:)(?:(?!!\[)[^\s<>"`])+/gi, m => garder(m))
         // Blocs LaTeX ($$...$$, \[...\], \begin{equation|align|gather|math|displaymath}...\end{...})
         t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => a.formaterLatex(m, true))
         t = t.replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => a.formaterLatex(m, true))
@@ -328,6 +331,9 @@ Singleton {
         if (/\\(?:frac|dfrac|tfrac|sqrt|binom|mathbb|mathcal|text|vec|hat|bar|overline|sum|prod|int|infty|partial|nabla|pm|mp|times|cdot|leq|geq|neq|approx|equiv|to|rightarrow|Rightarrow|iff|implies|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|tau|phi|omega|Delta|Sigma|Omega)(?![a-zA-Z])/.test(t)) {
             t = a.formaterCommandesLatex(t)
         }
+        // Pas de chargement d'image externe en Markdown : ni en ligne, ni par une définition de référence (« ![i] »). En dernier,
+        // après le LaTeX qui pourrait en faire apparaître, et avant de rendre le code, qui ne change pas
+        t = t.replace(/!(?=\[)/g, "&#33;")
         return t.replace(/\u0000BLOC(\d+)\u0000/g, (_, idx) => blocs[Number(idx)] || "")
     }
     function apercu(texte) {

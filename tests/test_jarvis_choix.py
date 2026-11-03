@@ -424,6 +424,31 @@ class DocAlignee(unittest.TestCase):
         self.assertIn("origin " + rev, doc)
         self.assertIn("`" + rev[:7] + "`", doc)
 
+    def test_revision_precedente_toujours_acceptee(self):
+        import re
+        racine = Path(__file__).resolve().parents[1]
+        deployeur = (racine / "home/.local/share/nc-jarvis/deployer.py").read_text()
+        rev = re.search(r"(?m)^REVISION='([0-9a-f]{40})'", deployeur)[1]
+        validees = deployeur[deployeur.index("VALIDATED_REVISIONS=("):]
+        validees = validees[:validees.index(")")]
+        self.assertIn("'17525afe78e11d4c509daac8bcf4cbb00673cd4a'", validees)
+        self.assertIn("REVISION", validees)
+        self.assertNotEqual(rev, "17525afe78e11d4c509daac8bcf4cbb00673cd4a")
+
+    def test_le_cockpit_nettoie_aussi_moodle(self):
+        racine = Path(__file__).resolve().parents[1]
+        src = (racine / "home/.local/bin/nc-jarvis").read_text()
+        self.assertIn("if p['tool']=='moodle' and isinstance(data,dict):", src)
+        self.assertIn("data.update(output=texte,message=texte,text=texte)", src)
+
+    def test_action_cours_de_moodle_en_lecture_seule(self):
+        import json
+        racine = Path(__file__).resolve().parents[1]
+        moodle = {a["id"]: a for a in json.loads((racine / "home/.local/share/nc-jarvis/actions.json").read_text())["moodle"]}
+        self.assertEqual(sorted(moodle), ["cours", "devoirs"])
+        self.assertIs(moodle["cours"]["readonly"], True)
+        self.assertEqual(moodle["cours"]["fields"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,12 @@
       "label": "Voir les devoirs",
       "fields": [],
       "readonly": true
+    },
+    {
+      "id": "cours",
+      "label": "Voir les cours",
+      "fields": [],
+      "readonly": true
     }
   ],
   "expenses": [

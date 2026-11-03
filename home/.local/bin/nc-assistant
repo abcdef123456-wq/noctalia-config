@@ -491,7 +491,83 @@ def texte_sortie(resultat):
     # Réponses distantes affichées en texte : aucun contrôle du terminal (OSC, CSI, BEL…).
     t = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", t)
     t = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", t)
+    return sans_controles(t)
+
+
+# Ce qui ferait un lien ou une mise en forme une fois affiché en Markdown dans l'île (formater puis TextEdit) : remplacé par son
+# entité, que Markdown affiche telle quelle. Pas de barre oblique inverse : formater lirait « \[ … \] » comme du LaTeX. Les noms
+# ordinaires ([algo] Graphs, R&D, TP_1) ne changent pas, y compris dans un terminal.
+_MD_ACTIF = re.compile(r"""[<>\\`*~$@]|!(?=\[)|&(?=#|[0-9A-Za-z]+;)|:(?=//)|(?<=mailto):|(?<=www)\.|(?<![^\W_])_|_(?![^\W_])""", re.I)
+# « ]: » partout : une définition de référence ferait un lien caché, y compris dans une liste ou sur deux lignes
+_MD_CROCHET = re.compile(r"\]([(\[:])")
+_MD_DEBUT = re.compile(r"(?m)^([ \t]*)([#>\-+=|:])")
+_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069\ufeff\ud800-\udfff]")
+_LIEN = re.compile(r"https://([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)((?:/[A-Za-z0-9._-]+)+)(?:\?id=([0-9]{1,12}))?")
+# Par action : le champ de la liste, le nom, l'adresse, les seuls chemins qui font un lien, et combien de lignes au plus
+MOODLE = {
+    "cours": ("courses", "fullname", "viewurl", re.compile(r"/course/view\.php"), 15),
+    "devoirs": ("assignments", "title", "url", re.compile(r"/mod/[a-z]{1,30}/view\.php|/calendar/view\.php"), 8),
+}
+
+
+def _entite(c):
+    return "&#%d;" % ord(c)
+
+
+def sans_controles(t):
     return "".join(x for x in t if x in "\n\t" or (ord(x) >= 32 and not 127 <= ord(x) <= 159))
+
+
+def _moodle_decode(t):
+    """Entités décodées une seule fois, sans ce que ce décodage recrée : contrôles, inversions du sens d'écriture. Une entité aux
+    chiffres sans fin, que html.unescape refuse (limite de int), ne fait pas perdre toute la liste."""
+    return _BIDI.sub("", sans_controles(html.unescape(re.sub(r"&#[0-9]{8,};?", "\ufffd", t))))
+
+
+def _moodle_inerte(t):
+    return _MD_CROCHET.sub(lambda m: "]" + _entite(m[1]), _MD_ACTIF.sub(lambda m: "&amp;" if m[0] == "&" else _entite(m[0]), t))
+
+
+def _moodle_champ(v):
+    """Un champ de Moodle sur une ligne, borné, sans effet Markdown ; "" si ce n'est pas un texte."""
+    return _moodle_inerte(" ".join(_moodle_decode(v).split())[:120]) if isinstance(v, str) else ""
+
+
+def _lien_moodle(adresse, chemins):
+    """(hôte, adresse) si l'adresse a exactement une forme permise, sinon None : https, sans identifiants ni port, en http ou dans
+    un sous-dossier elle ne fait pas de lien. Réécrite à partir de ce qui a été validé : rien qui ait un effet en Markdown."""
+    m = _LIEN.fullmatch(adresse) if isinstance(adresse, str) else None
+    if not m or not chemins.fullmatch(m[2]) or (m[3] is None) != (m[2] == "/calendar/view.php"):
+        return None
+    hote = m[1].lower()
+    return hote, f"https://{hote}{m[2]}" + (f"?id={m[3]}" if m[3] else "")
+
+
+def texte_moodle(t):
+    """Repli quand la réponse n'a pas les champs attendus : le texte du serveur, sans balise, sans aucun lien ni mise en forme."""
+    t = _moodle_inerte(_moodle_decode(re.sub(r"<[^<>]*>", "", t)))
+    return _MD_DEBUT.sub(lambda m: m[1] + _entite(m[2]), t).strip()
+
+
+def sortie_moodle(res, action):
+    """/devoirs et /cours : une ligne par élément, construite ici à partir des champs de la réponse. Le HTML de « output » (fait pour
+    Telegram) n'est jamais analysé ; le lien porte un mot fixe, un nom ne peut donc ni le fermer ni le changer. Le bureau ne connaît
+    pas MOODLE_URL : l'hôte n'est pas comparé à la configuration, il doit seulement être le même pour toute la réponse."""
+    champ, nom, adresse, chemins, maximum = MOODLE.get(action) or (None, "", "", None, 0)
+    elements = res.get(champ) if champ else None
+    if not (isinstance(elements, list) and elements and all(isinstance(e, dict) and isinstance(e.get(nom), str) for e in elements)):
+        return texte_moodle(texte_sortie(dict(output=res.get("output") or res.get("message"))))
+    montres = elements[:maximum]
+    liens = [_lien_moodle(e.get(adresse), chemins) for e in montres]
+    hotes = {l[0] for l in liens if l}
+    lignes = []
+    for e, lien in zip(montres, liens):
+        morceaux = [_moodle_champ(e.get(nom)) or "?"] + [x for x in (_moodle_champ(e.get(c)) for c in ("course", "due_date")) if x]
+        fin = f" — [{T('ouvrir', 'open')}]({lien[1]})" if lien and len(hotes) == 1 else ""
+        lignes.append("• " + " · ".join(morceaux) + fin)
+    if len(elements) > maximum:
+        lignes.append(T(f"… et {len(elements) - maximum} de plus.", f"… and {len(elements) - maximum} more."))
+    return "\n\n".join(lignes)
 
 
 _CHOIX = []
@@ -887,6 +963,7 @@ def executer_commande(c, sid, cmd_brute):
             "• `/courses` [ajouter <articles>] — Consulter ou ajouter des courses\n"
             "• `/depenses` [montant desc] — Bilan mensuel ou ajout d'une dépense\n"
             "• `/devoirs` — Consulter les devoirs (Moodle)\n"
+            "• `/cours` — Mes cours (Moodle)\n"
             "• `/rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures] <délai ou heure> <message>` — Rappel (bureau par défaut ; récurrent : telegram ou discord)\n"
             "• `/rappels` — Rappels en attente sur le serveur ; `/supprimer <numéro>` en retire un\n"
             "• `/memoire` [texte] — Consulter ou enregistrer un fait en mémoire",
@@ -901,6 +978,7 @@ def executer_commande(c, sid, cmd_brute):
             "• `/shopping` [add <text>] — View or add grocery items\n"
             "• `/expenses` [amount desc] — Monthly summary or add an expense\n"
             "• `/moodle` — View homework\n"
+            "• `/moodle-cours` — My courses (Moodle)\n"
             "• `/remind [desktop|telegram|discord] [every day|every saturday|every 3 hours] <delay or time> <message>` — Reminder (desktop by default; recurring: telegram or discord)\n"
             "• `/rappels` — Pending reminders on the server; `/supprimer <number>` removes one\n"
             "• `/memory` [text] — View or record a fact in memory"
@@ -1021,9 +1099,16 @@ def executer_commande(c, sid, cmd_brute):
     if nom_cmd in ("/devoirs", "/moodle"):
         try:
             res = api(c, "/api/action", {"tool": "moodle", "action": "devoirs", "params": {}, "platform": "desktop"})
-            return f"📚 **{T('Devoirs à rendre', 'Homework')} :**\n\n{texte_sortie(res)}"
+            return f"📚 **{T('Devoirs à rendre', 'Homework')} :**\n\n{sortie_moodle(res, 'devoirs')}"
         except Exception as e:
             return T(f"Erreur consultation devoirs : {e}", f"Error viewing homework: {e}")
+
+    if nom_cmd in ("/cours", "/moodle-cours"):
+        try:
+            res = api(c, "/api/action", {"tool": "moodle", "action": "cours", "params": {}, "platform": "desktop"})
+            return f"📚 **{T('Mes cours', 'My courses')} :**\n\n{sortie_moodle(res, 'cours')}"
+        except Exception as e:
+            return T(f"Erreur consultation des cours : {e}", f"Error viewing courses: {e}")
 
     if nom_cmd in ("/rappel", "/remind"):
         plateformes, recurrence, delai, echeance, msg = lire_rappel(arg)

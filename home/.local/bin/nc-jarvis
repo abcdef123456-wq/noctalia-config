@@ -109,7 +109,14 @@ def request(body):
             if not isinstance(p.get('tool'),str) or not isinstance(p.get('action'),str) or not isinstance(p.get('params',{}),dict):raise ValueError(T('Action invalide','Invalid action'))
             # Les réglages du PC (catalogue noctalia) passent par l'adaptateur de gestion, pas par les outils upstream
             if p['tool']=='noctalia':data=m.api(c,'/api/nc/manage',dict(op='noctalia',params=dict(action=p['action'],params=p.get('params',{})),confirmed=confirmed))
-            else:data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
+            else:
+                data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
+                # Le cockpit de l'île affiche aussi ce texte en Markdown : le même nettoyage que /devoirs et /cours
+                if p['tool']=='moodle' and isinstance(data,dict):
+                    try:texte=m.sortie_moodle(data,p['action'])
+                    except m.Erreur:texte=''
+                    texte=texte or T('Aucun résultat.','No results.')
+                    data.update(output=texte,message=texte,text=texte)
         elif op=='briefing':data=m.api(c,'/api/briefing',dict(force_refresh=False))
         elif op=='reminders':data=m.api(c,'/api/reminders')
         elif op=='reminder.create':
