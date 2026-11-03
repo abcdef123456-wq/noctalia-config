@@ -110,20 +110,14 @@ hl.on("window.open", function(w)
     if par_ici then nc.mode_jeu() end
 end)
 
+-- Toute fenêtre qui se ferme, pas seulement un jeu : une note sans aucun jeu ouvert ne se refermerait jamais (fenêtre qui
+-- n'est plus reconnue comme un jeu, jeu disparu sans window.close). Elle garderait le profil Performance, et empêcherait
+-- le prochain jeu de se déclarer.
 hl.on("window.close", function(w)
-    if not est_jeu(w) then return end
     local note = lire(JEU_AUTO)
-    if not note or un_jeu_ouvert(w.address) then return end   -- un autre jeu tourne encore
+    if not note or un_jeu_ouvert(w and w.address) then return end   -- un autre jeu tourne encore
     revenir(note)
 end)
-
--- Au chargement, une fois tous les modules lus : une note sans aucun jeu ouvert ne se refermerait jamais (fenêtre qui
--- n'est plus reconnue comme un jeu, jeu disparu sans window.close). Elle garderait le profil Performance, et
--- empêcherait le prochain jeu de se déclarer.
-pcall(hl.timer, function()
-    local note = lire(JEU_AUTO)
-    if note and not un_jeu_ouvert() then revenir(note) end
-end, { timeout = 2000, type = "oneshot" })
 
 -- ── Marque-pages de fenêtres ────────────────────────────────────────────────
 -- Super + Ctrl + N : 1er appui, la fenêtre active est attachée à N ; ensuite, N amène à elle (son bureau compris) ;

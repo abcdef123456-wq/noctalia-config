@@ -13,11 +13,11 @@ LUA = REPO / "home/.config/hypr/nc/automatismes.lua"
 
 ENTETE = r'''
 local proxy; proxy = setmetatable({}, { __index = function() return proxy end, __call = function() return proxy end })
-handlers, cmds, bascules, fenetres, minuteurs = {}, {}, 0, {}, {}
+handlers, cmds, bascules, fenetres = {}, {}, 0, {}
 hl = {
   on = function(e, f) handlers[e] = handlers[e] or {}; table.insert(handlers[e], f) end,
   exec_cmd = function(c) cmds[#cmds + 1] = c end,
-  get_config = function() return nil end, bind = function() end, timer = function(f) minuteurs[#minuteurs + 1] = f end,
+  get_config = function() return nil end, bind = function() end, timer = function() end,
   get_windows = function() return fenetres end, get_active_window = function() end,
   get_active_monitor = function() return { x = 0, y = 0, width = 2000, height = 1000, scale = 1 } end,
   dsp = proxy, dispatch = function() end,
@@ -28,7 +28,6 @@ nc = { profil = { profil = PROFIL }, jeu = JEU, hypr_min = function() return tru
 function nc.mode_jeu() bascules = bascules + 1 end
 dofile(FICHIER)
 function emettre(e, w) for _, f in ipairs(handlers[e] or {}) do f(w) end end
-function minuteurs_ecoules() local m = minuteurs; minuteurs = {}; for _, f in ipairs(m) do f() end end
 '''
 
 
@@ -105,44 +104,50 @@ emettre("window.close", jeu)
 print(bascules, cmds[#cmds], io.open(os.getenv("XDG_RUNTIME_DIR") .. "/nc-jeu-auto") ~= nil)''', d)
             self.assertEqual(out.splitlines(), ["1\t1\ttrue", "2\tnoctalia msg power-set balanced\tfalse"])
 
-    def test_fenetre_qui_n_est_pas_un_jeu_ne_sort_de_rien(self):
-        """Studio se ferme, aucun jeu ouvert, une note en place : seul le chargement la reprend, pas cette fermeture."""
-        with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "nc-jeu-auto").write_text("balanced\njeu")
-            out = self.lancer('''
-emettre("window.close", { class = "robloxstudiobeta.exe", address = "0x2" })
-print(bascules, #cmds)''', d)
-            self.assertEqual(out, "0\t0")
-            self.assertTrue((Path(d) / "nc-jeu-auto").exists())
-
-    def chargement_avec_note(self, note, fenetres, mode_jeu=False):
+    def fermeture_avec_note(self, note, classe, fenetres, mode_jeu=False):
+        """Une note déjà là, une fenêtre qui se ferme ; rend (bascules, dernière commande), et si la note reste."""
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "nc-jeu-auto").write_text(note)
             if mode_jeu:
                 (Path(d) / "nc-mode-jeu").write_text("")
-            out = self.lancer('''
+            out = self.lancer("""
+local ferme = { class = %s, address = "0x9" }
 fenetres = %s
-print(bascules, #cmds)   -- rien tant que les modules ne sont pas tous lus
-minuteurs_ecoules()
-print(bascules, cmds[#cmds])''' % fenetres, d, jeu=mode_jeu)
-            return out.splitlines(), (Path(d) / "nc-jeu-auto").exists()
+table.insert(fenetres, ferme)
+emettre("window.close", ferme)
+print(bascules, cmds[#cmds])""" % (json.dumps(classe), fenetres), d, jeu=mode_jeu)
+            return out, (Path(d) / "nc-jeu-auto").exists()
 
-    def test_note_sans_jeu_ouvert_ne_reste_pas_au_chargement(self):
-        """Posée par Studio avant ce changement, Studio encore ouvert : le profil d'avant revient, le prochain jeu pourra se déclarer."""
+    def test_note_sans_jeu_ouvert_reprise_a_toute_fermeture(self):
+        """Posée par Studio avant ce changement : une fenêtre ordinaire qui se ferme, ou Studio, ramène le profil d'avant."""
         studio = '{ { class = "robloxstudiobeta.exe", address = "0x2" } }'
         # Mode jeu déjà coupé à la main : il n'est pas touché
-        self.assertEqual(self.chargement_avec_note("balanced\njeu", studio), (["0\t0", "0\tnoctalia msg power-set balanced"], False))
+        self.assertEqual(self.fermeture_avec_note("balanced\njeu", "kitty", studio), ("0\tnoctalia msg power-set balanced", False))
+        self.assertEqual(self.fermeture_avec_note("balanced\njeu", "robloxstudiobeta.exe", "{}"), ("0\tnoctalia msg power-set balanced", False))
         # Mis par l'automatisme et toujours là : coupé
-        self.assertEqual(self.chargement_avec_note("power-saver\njeu", studio, mode_jeu=True), (["0\t0", "1\tnoctalia msg power-set power-saver"], False))
+        self.assertEqual(self.fermeture_avec_note("power-saver\njeu", "kitty", studio, mode_jeu=True), ("1\tnoctalia msg power-set power-saver", False))
         # Mis à la main : gardé
-        self.assertEqual(self.chargement_avec_note("balanced", "{}", mode_jeu=True), (["0\t0", "0\tnoctalia msg power-set balanced"], False))
+        self.assertEqual(self.fermeture_avec_note("balanced", "kitty", "{}", mode_jeu=True), ("0\tnoctalia msg power-set balanced", False))
 
-    def test_note_gardee_au_chargement_si_un_jeu_tourne(self):
-        self.assertEqual(self.chargement_avec_note("balanced\njeu", '{ { class = "steam_app_1", address = "0x1" } }', mode_jeu=True), (["0\t0", "0\tnil"], True))
+    def test_note_gardee_tant_qu_un_jeu_tourne(self):
+        jeu = '{ { class = "steam_app_1", address = "0x1" } }'
+        for classe in ("kitty", "robloxstudiobeta.exe", "autre.exe"):
+            with self.subTest(classe):
+                self.assertEqual(self.fermeture_avec_note("balanced\njeu", classe, jeu, mode_jeu=True), ("0\tnil", True))
 
-    def test_chargement_sans_note_ne_touche_a_rien(self):
+    def test_fermeture_sans_note_ne_touche_a_rien(self):
         with tempfile.TemporaryDirectory() as d:
-            self.assertEqual(self.lancer('minuteurs_ecoules(); print(bascules, #cmds)', d), "0\t0")
+            out = self.lancer("""
+emettre("window.close", { class = "kitty", address = "0x1" })
+emettre("window.close", { class = "steam_app_1", address = "0x2" })
+print(bascules, #cmds)""", d)
+            self.assertEqual(out, "0\t0")
+
+    def test_aucun_minuteur_pour_le_mode_jeu(self):
+        """Rien ne tourne hors d'une action : la reprise de la note passe par la fermeture d'une fenêtre."""
+        lua = LUA.read_text()
+        section = lua[lua.index("-- ── Mode jeu automatique"):lua.index("-- ── Marque-pages de fenêtres")]
+        self.assertNotIn("hl.timer", section)
 
     def test_fenetre_windows_de_studio_toujours_hors_memoire(self):
         """Sortir de la liste des jeux ne change pas la mémoire des fenêtres flottantes."""
