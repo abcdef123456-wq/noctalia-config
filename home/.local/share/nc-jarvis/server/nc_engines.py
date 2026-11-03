@@ -8,15 +8,18 @@ import functools
 import inspect
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
+import select
 import shutil
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -44,6 +47,135 @@ def agy_accepte_permission_mode():
                 trouve = False
         _PERMISSION_MODE_AGY = trouve
     return _PERMISSION_MODE_AGY
+
+
+# Le catalogue des modèles d'agy vient du compte (`agy models`, 5 à 10 s) : gardé en mémoire et sur disque, relu en fond
+# seulement quand on le demande et qu'il est trop vieux. C'est la sortie d'un programme externe, dont les identifiants repartent
+# après --model : liste blanche, et la moindre ligne hors format rejette tout le résultat (la dernière bonne liste reste).
+AGY_CATALOGUE_TTL = 6*3600
+AGY_CATALOGUE_REESSAI = 15*60           # après un essai raté (pas connecté, hors ligne) : pas de nouveau processus avant
+AGY_CATALOGUE_DELAI = 20
+AGY_CATALOGUE_SORTIE_MAX = 64*1024
+AGY_CATALOGUE_DISQUE_MAX = 256*1024
+AGY_CATALOGUE_MAX = 50
+# Pas de tiret de tête : l'identifiant part après --model. 55 au plus : au-delà, le callback de Telegram (64 octets) casse tout le clavier /models
+AGY_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,54}')
+AGY_SUFFIXE = re.compile(r'(.+)-(low|medium|high)')
+# Ce qu'agy peut lire pour sa session en plus de ENV_COMMUN ; rien des jetons du serveur
+AGY_ENV_CATALOGUE = ('DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
+                     'GOOGLE_CLOUD_PROJECT', 'CLOUDSDK_CORE_PROJECT')
+_AGY_CITE_MODELS = None
+
+
+def env_catalogue_agy():
+    env = env_moteur('agy')
+    env.update({k: os.environ[k] for k in AGY_ENV_CATALOGUE if k in os.environ})
+    return env
+
+
+def agy_cite_models(chemin):
+    """Vrai si `agy --help` cite la sous-commande models : un ancien agy pourrait lire « models » comme un message à envoyer
+    au modèle. Seule la réponse d'un --help allé au bout est gardée pour ce processus : un --help lent ou impossible répond
+    non cette fois-ci, sans couper le catalogue jusqu'au redémarrage (AGY_CATALOGUE_REESSAI limite les essais)."""
+    global _AGY_CITE_MODELS
+    if _AGY_CITE_MODELS is None:
+        try:
+            r = subprocess.run([chemin, '--help'], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, text=True,
+                               errors='replace', env=env_catalogue_agy())
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        aide = (r.stdout or '') + '\n' + (r.stderr or '')
+        _AGY_CITE_MODELS = r.returncode == 0 and bool(re.search(r'^\s*models\s', aide, re.M))
+    return _AGY_CITE_MODELS
+
+
+def nom_propre(texte):
+    """Un nom de modèle affiché partout (île, Telegram, Discord) : lettres, chiffres, espace et .()+/_:- seulement, 80 au plus.
+    Rien d'autre : ni échappement, ni saut de ligne, ni inversion de sens d'écriture, ni @ ou * pour les messageries."""
+    return ''.join(c for c in texte if c.isalnum() or c in ' .()+/_:-')[:80].strip()
+
+
+def lire_catalogue_agy(sortie):
+    """La liste [{id, name}] de la sortie de `agy models` (lignes « id<TAB>nom »), ou None : une seule ligne hors format, ou
+    aucun modèle, et tout est rejeté (une colonne de plus aussi : ce n'est plus le format attendu). Un nom vide après
+    nettoyage : l'identifiant."""
+    modeles, vus = [], set()
+    for ligne in sortie.split('\n'):
+        ligne = ligne.rstrip('\r')
+        if not ligne.strip(): continue
+        ident, tab, nom = ligne.partition('\t')
+        if not tab or '\t' in nom or not AGY_ID.fullmatch(ident): return None
+        if ident in vus: continue
+        vus.add(ident)
+        modeles.append(dict(id=ident, name=nom_propre(nom) or ident))
+    return modeles[:AGY_CATALOGUE_MAX] or None
+
+
+def lancer_catalogue_agy(chemin):
+    """La sortie de `agy models`, ou None : code non nul, délai, sortie trop longue ou illisible. Sans shell, entrée et erreurs
+    fermées, dans son propre groupe, tué au délai ; lecture bornée, jamais d'attente au-delà de AGY_CATALOGUE_DELAI."""
+    try:
+        p = subprocess.Popen([chemin, 'models'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=env_catalogue_agy())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    fin, morceaux, taille, termine = time.monotonic() + AGY_CATALOGUE_DELAI, [], 0, False
+    try:
+        fd = p.stdout.fileno()
+        attente = select.poll()                 # poll : pas de limite sur le numéro du descripteur, contrairement à select.select
+        attente.register(fd, select.POLLIN | select.POLLHUP)
+        while True:
+            reste = fin - time.monotonic()
+            if reste <= 0 or not attente.poll(reste * 1000): return None
+            bloc = os.read(fd, 8192)
+            if not bloc: break
+            taille += len(bloc)
+            if taille > AGY_CATALOGUE_SORTIE_MAX: return None
+            morceaux.append(bloc)
+        p.wait(timeout=max(0.1, fin - time.monotonic()))
+        termine = True
+        return b''.join(morceaux).decode('utf-8') if p.returncode == 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    finally:
+        if not termine:                 # le chef du groupe n'est pas encore relevé : son numéro n'a pas pu être repris
+            try: os.killpg(p.pid, signal.SIGKILL)
+            except OSError: pass
+            try: p.wait(timeout=5)
+            except subprocess.SubprocessError: pass
+        p.stdout.close()
+
+
+def lire_cache_agy(path):
+    """(modèles, date) du cache disque, ou None : absent, lien symbolique, droits trop ouverts, trop gros, ou de forme
+    inattendue, entrée par entrée (ces identifiants repartent vers --model : mêmes règles que la sortie d'agy)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_mode & 0o077 or st.st_size > AGY_CATALOGUE_DISQUE_MAX: return None
+        data = json.loads(os.read(fd, AGY_CATALOGUE_DISQUE_MAX + 1).decode('utf-8'))
+    except (OSError, ValueError, RecursionError):
+        return None
+    finally:
+        os.close(fd)
+    if not isinstance(data, dict) or isinstance(data.get('t'), bool) or not isinstance(data.get('t'), (int, float)): return None
+    try:
+        date = float(data['t'])               # un nombre de 400 chiffres : OverflowError, le runner ne démarrerait plus
+    except OverflowError:
+        return None
+    if not math.isfinite(date): return None
+    modeles = data.get('modeles')
+    if not isinstance(modeles, list) or not 0 < len(modeles) <= AGY_CATALOGUE_MAX: return None
+    propres = []
+    for m in modeles:
+        if not isinstance(m, dict) or not isinstance(m.get('id'), str) or not AGY_ID.fullmatch(m['id']): return None
+        nom = m.get('name')
+        if not isinstance(nom, str) or not nom or nom_propre(nom) != nom: return None
+        propres.append(dict(id=m['id'], name=nom))
+    return propres, date
 
 
 def modes_permis(engine):
@@ -703,6 +835,13 @@ class Engines:
         self.should_inject = upstream._should_inject_memory
         self.agy_models = list(upstream.KNOWN_MODELS)
         self.path = Path(upstream.__file__).resolve().parent/'.nc-jarvis-engines.json'
+        # Catalogue d'agy : le cache s'il est bon, sinon la liste de l'amont ; agy_lu : date de la liste du compte (0 : aucune)
+        self.agy_catalogue = self.path.with_name('.nc-jarvis-agy-models.json')
+        self.agy_lu = 0.0
+        self.agy_essai = None
+        self.agy_verrou = threading.Lock()
+        cache = lire_cache_agy(self.agy_catalogue)
+        if cache: self.agy_models, self.agy_lu = cache
         self.lock = asyncio.Lock()
         self.agy_en_cours = 0  # requêtes AGY en vol : chaque PC a sa session, l'upstream a ses propres verrous
         initial=os.getenv('NC_JARVIS_ENGINE','agy')
@@ -731,6 +870,12 @@ class Engines:
         écrit par 4ecc57a) est ignoré avec une ligne de journal, sans valeur : jamais d'exception au démarrage."""
         agy = self.state['settings']['agy']
         if not isinstance(agy, dict): return
+        # Un état ancien, ou écrit depuis un autre PC, peut se contredire (argon-low et effort high) : aligné avant d'être appliqué
+        try:
+            couple = {k: agy[k] for k in ('model', 'effort') if isinstance(agy.get(k), str) and agy[k]}
+            if couple: agy.update(self.aligner_agy(couple))
+        except (ValueError, TypeError, KeyError, AttributeError):
+            logging.getLogger('nc_engines').warning('Réglages AGY enregistrés non alignés : appliqués tels quels.')
         for cle in ('model','effort','mode','permission_mode'):
             if not isinstance(agy.get(cle), str) or not agy[cle]: continue
             if cle == 'permission_mode' and agy[cle] not in MODES_PERMIS:
@@ -795,9 +940,66 @@ class Engines:
                 except (ValueError, KeyError, TypeError, OSError): pass
         return []  # Ne pas présenter une liste inventée comme celle du compte distant.
 
+    def rafraichir_agy(self):
+        """Relit le catalogue du compte en fond si la liste a plus de AGY_CATALOGUE_TTL : ne bloque jamais, un seul fil à la
+        fois, aucun processus sans besoin (liste fraîche, essai raté récent, IA coupée, agy absent). Vrai si un fil part."""
+        if 0 <= time.time() - self.agy_lu < AGY_CATALOGUE_TTL: return False
+        if self.agy_essai is not None and time.monotonic() - self.agy_essai < AGY_CATALOGUE_REESSAI: return False
+        if ia_coupee(): return False
+        chemin = executable('agy')
+        if not chemin or not self.agy_verrou.acquire(blocking=False): return False
+        self.agy_essai = time.monotonic()
+        try:
+            threading.Thread(target=self._rafraichir_agy, args=(chemin,), name='nc-agy-modeles', daemon=True).start()
+        except RuntimeError:
+            self.agy_verrou.release()
+            return False
+        return True
+
+    def catalogue_au_demarrage(self):
+        """Une fois au démarrage, seulement sans aucune liste du compte ; ensuite, quand le catalogue est demandé."""
+        return False if self.agy_lu else self.rafraichir_agy()
+
+    def _rafraichir_agy(self, chemin):
+        try:
+            if not agy_cite_models(chemin) or ia_coupee(): return    # IA coupée depuis la décision : rien ne part
+            sortie = lancer_catalogue_agy(chemin)
+            modeles = lire_catalogue_agy(sortie) if sortie else None
+            if not modeles: return             # pas connecté, hors ligne, format inattendu : la dernière bonne liste reste
+            self.agy_models, self.agy_lu = modeles, time.time()
+            # Le catalogue du moteur courant seulement : un rafraîchissement en fond n'écrase pas celui de codex
+            if self.state['engine'] == 'agy': self.up.KNOWN_MODELS = modeles
+            atomique(self.agy_catalogue, dict(t=self.agy_lu, modeles=modeles))
+        except Exception as e:
+            logging.getLogger('nc_engines').warning('Catalogue agy non relu (%s).', type(e).__name__)
+        finally:
+            self.agy_verrou.release()
+
+    def aligner_agy(self, donnes, session_key=None):
+        """Un identifiant qui finit par -low, -medium ou -high encode déjà l'effort, et agy refuse un couple contradictoire
+        (--model x-low --effort high). Modèle donné sans effort : l'effort du suffixe. Effort donné : la variante du catalogue
+        si elle existe, sinon le modèle reste et l'effort suit son suffixe (comme un effort inconnu) ; xhigh et max valent high.
+        Sans suffixe : rien."""
+        modele = (donnes.get('model') or '').strip()
+        effort = (donnes.get('effort') or '').strip().lower()
+        if not effort:
+            trouve = AGY_SUFFIXE.fullmatch(modele)
+            if trouve: donnes['effort'] = trouve[2]
+            return donnes
+        courant = modele or str(self.appel('get_session_info', session_key=session_key).get('model') or '')
+        trouve = AGY_SUFFIXE.fullmatch(courant)
+        niveau = 'high' if effort in ('xhigh', 'max') else effort
+        if not trouve: return donnes
+        candidat = f'{trouve[1]}-{niveau}'
+        if niveau in ('low', 'medium', 'high') and niveau != trouve[2] and any(isinstance(m, dict) and m.get('id') == candidat for m in self.models('agy')):
+            donnes['model'], donnes['effort'] = candidat, niveau
+        else:
+            donnes['effort'] = trouve[2]
+        return donnes
+
     def snapshot(self, session_key=None):
         return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
-            permission_modes=modes_permis(k),
+            permission_modes=modes_permis(k),catalogue_compte=k=='agy' and bool(self.agy_lu),
             efforts=(['low','medium','high'] if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
             shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
@@ -812,7 +1014,7 @@ class Engines:
         if engine == 'agy' and values.get('permission_mode') not in (None,'','default') and not agy_accepte_permission_mode():
             raise ValueError('Cette version d\'agy n\'a qu\'un mode de permission (par défaut).')
         if engine == 'agy':
-            donnes = {k:v for k,v in values.items() if k!='engine'}
+            donnes = self.aligner_agy({k:v for k,v in values.items() if k!='engine'}, session_key)
             self.appel('update_session', session_key=session_key, **donnes)
             # Seulement ce que l'utilisateur a donné, fusionné aux anciens réglages : jamais le dict de session du serveur
             # (permission_mode par défaut, session_token), que 94a3a93 refuserait ou qui n'a rien à faire dans ce fichier

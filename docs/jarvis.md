@@ -663,6 +663,12 @@ Les boutons utilisent uniquement les identifiants annoncés pour le moteur coura
 absentes sont grisées. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
 présumé actif avant lecture de la session du serveur. Le catalogue est lu une fois à l’ouverture d’un accueil
 sans saisie en cours ; le bouton réglages permet de le charger ou de l’actualiser explicitement.
+Pour agy, le catalogue vient du compte (`agy models`) : le runner le relit en fond au démarrage s’il n’en a aucun, puis quand
+il est demandé (île, `/models`) et a plus de 6 h, et le garde sur disque (`.nc-jarvis-agy-models.json`). Il ne lance rien si
+l’IA est coupée. agy pas connecté, hors ligne ou sortie inattendue : la dernière bonne liste reste, sinon celle du runner, et un
+nouvel essai au plus toutes les 15 min. « Actualiser » lit le catalogue du runner sans forcer `agy models` : pour le relire tout
+de suite après un `agy login`, efface ce fichier et redémarre le runner. Un modèle enregistré qui n’est plus au catalogue du compte
+n’est jamais changé en silence : les réglages le signalent, et une erreur de réponse le rappelle.
 Un clic prépare le choix ; seule l’action **Appliquer** change la session. Les identifiants qui encodent
 l’effort sont alignés sur la variante annoncée correspondante. Fermer les réglages abandonne les choix non
 appliqués. Les autres modèles et la saisie d’un identifiant restent accessibles dans les réglages.

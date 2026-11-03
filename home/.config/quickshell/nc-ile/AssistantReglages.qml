@@ -35,12 +35,18 @@ Item {
                 texte:AssistantEtat.modele; enabled:AssistantEtat.reglagesDisponibles && !AssistantEtat.reglagesEnCours && !AssistantEtat.enCours
                 onChange: (valeur) => { AssistantEtat.modele = valeur; AssistantEtat.effort = "" }
             }
+            Texte {
+                objectName:"nc-jarvis-modele-hors-catalogue"
+                width:parent.width; secondaire:true; wrapMode:Text.Wrap; font.pixelSize:11
+                visible:AssistantEtat.modeleHorsCatalogue
+                text:Reglages.t("Ce modèle n’est pas dans le catalogue de ce compte : agy peut le refuser.", "This model is not in this account’s catalog: agy may refuse it.")
+            }
             JarvisBouton { texte:Reglages.t("Choisir un modèle…", "Choose a model…"); visible:AssistantEtat.modeles.length>0; onClic:reglages.modelesOuverts=!reglages.modelesOuverts }
             Flow {
                 visible:reglages.modelesOuverts; height:visible?implicitHeight:0
                 width:parent.width; spacing:6
                 Repeater {
-                    model:AssistantEtat.modeles.slice(0,12)
+                    model:AssistantEtat.modeles.slice(0,50)
                     JarvisBouton {
                         required property var modelData
                         texte:modelData.name || modelData.id; primaire:AssistantEtat.modele===modelData.id

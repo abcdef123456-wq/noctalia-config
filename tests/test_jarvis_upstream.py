@@ -39,6 +39,8 @@ prompt=sys.stdin.read()
 with Path(__file__).with_suffix('.prompts').open('a') as f:f.write(json.dumps(prompt)+'\\n')
 print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text='vraie route, faux modèle'))))
 ''');cli.chmod(0o755)
+            # Le runner relit le catalogue d'agy au chargement : jamais le vrai agy ici, même installé sur la machine
+            faux_agy=bin/'agy';faux_agy.write_text('#!/bin/sh\nexit 1\n');faux_agy.chmod(0o755)
             env=dict(HOME=d,SECRET_KEY='isolated-test-secret',HOME_SERVER_URL='http://runner.test',MEMORY_FILE=str(root/'memory.json'),
                      PATH=str(bin)+os.pathsep+os.environ['PATH'])
             def load(path,name):

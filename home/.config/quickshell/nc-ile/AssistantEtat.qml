@@ -84,6 +84,9 @@ Singleton {
     readonly property bool permissionUnique: moteur === "agy" && modesPermis.length === 1
     readonly property var modeles: moteurCourant.models || []
     readonly property var modeleCourant: modeles.find(m => m.id === modele) || ({})
+    // Le modèle appliqué n'est plus dans la liste du compte (pas celle de repli, pas pendant une saisie) : dit, jamais changé en silence
+    readonly property bool modeleHorsCatalogue: moteur === "agy" && moteurCourant.catalogue_compte === true && modele !== ""
+        && modele === sessionReglages.model && !modeleCourant.id
     // Niveaux de réflexion proposés : ceux du modèle s'il en annonce (un tableau, même vide), sinon ceux du moteur ; aucun
     // pour un modèle à réflexion fixe (Claude Opus « thinking » : agy refuse --effort, JARVIS-BIS l'ignore)
     function reflexionFixe(id) { return id === "claude-opus-4-6-thinking" || /opus.*thinking/i.test(id || "") }
@@ -487,6 +490,8 @@ Singleton {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
                     : Reglages.t("Impossible de recevoir la réponse. Vérifie la connexion et la configuration.",
                                  "Unable to receive the answer. Check the connection and configuration.")
+            if (modeleHorsCatalogue) erreur += Reglages.t(" Ce modèle n’est peut-être plus disponible : choisis-en un autre dans les réglages.",
+                                                           " This model may no longer be available: choose another one in the settings.")
             // Permet de corriger ou renvoyer manuellement ; aucune répétition automatique.
             if (!brouillon && !questionAuto) brouillon = question
             // Les fichiers reviennent en attente : on renvoie sans les rechoisir

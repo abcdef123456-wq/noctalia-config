@@ -970,8 +970,11 @@ def executer_commande(c, sid, cmd_brute):
         if not arg:
             return T("Niveaux d'effort acceptés : `low`, `medium`, `high`, `xhigh`, `max`.", "Supported effort levels: `low`, `medium`, `high`, `xhigh`, `max`.")
         try:
-            api(c, "/api/nc/manage", {"op": "session.update", "params": {"effort": arg.lower()}, "confirmed": True})
-            return T(f"✅ Niveau de réflexion réglé sur : **{arg.lower()}**", f"✅ Reasoning effort set to: **{arg.lower()}**")
+            r = api(c, "/api/nc/manage", {"op": "session.update", "params": {"effort": arg.lower()}, "confirmed": True})
+            # Ce que le serveur a vraiment gardé : un modèle qui encode son effort peut ne pas avoir la variante demandée
+            session = (r.get("session") or (r.get("data") or {}).get("session") or r.get("data") or {}) if isinstance(r, dict) else {}
+            garde = session.get("effort") if isinstance(session, dict) and isinstance(session.get("effort"), str) and session.get("effort") else arg.lower()
+            return T(f"✅ Niveau de réflexion réglé sur : **{garde}**", f"✅ Reasoning effort set to: **{garde}**")
         except Exception as e:
             return T(f"Erreur réglage effort : {e}", f"Error setting effort: {e}")
 

@@ -23,6 +23,8 @@ if "__file__" in globals():
         if _o and _P(_o).resolve().parent != _P(__file__).resolve().parent:
             raise RuntimeError(f"{_m} ne vient pas de l'overlay noctalia-config ({_o}) : relance le déployeur "
                                "(nc-jarvis), qui place l'overlay en tête (--app-dir)")
+import functools
+import inspect
 import main as upstream
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -160,6 +162,15 @@ _purger_pieces_jointes()
 engines=getattr(upstream.run_agy,'__self__',None)
 if not all(callable(getattr(engines,name,None)) for name in ('snapshot','choose','session')):
     engines=install(upstream)
+
+
+def _catalogue_agy(nom):
+    """Relit le catalogue d'agy en fond si besoin (ne bloque jamais) ; un backend sans cette méthode : rien."""
+    fn=getattr(engines,nom,None)
+    if callable(fn): fn()
+
+
+_catalogue_agy('catalogue_au_demarrage')
 app=upstream.app
 app.add_middleware(_MenagePieces)
 native_health=upstream.health
@@ -173,7 +184,22 @@ async def settings(request: Request, session_key: str | None = None):
     upstream._check_secret(request)
     # Avec AGY récent, la session montrée est celle du PC qui demande (session_key) ; nos CLI : la session commune
     if session_key is not None and len(session_key)>200: raise HTTPException(400)
+    _catalogue_agy('rafraichir_agy')
     return engines.snapshot(session_key)
+
+
+# /models (Telegram, Discord, nc-jarvis) relit aussi le catalogue, comme /nc/engines : la réponse reste celle de l'amont
+for _route in list(app.routes):
+    if getattr(_route,'path',None)=='/models' and 'GET' in (getattr(_route,'methods',None) or ()):
+        _lister=_route.endpoint
+        @functools.wraps(_lister)
+        async def _models_du_compte(*a,_lister=_lister,**kw):
+            _catalogue_agy('rafraichir_agy')
+            return await _lister(*a,**kw)
+        _models_du_compte.__signature__=inspect.signature(_lister)
+        app.routes.remove(_route)
+        app.add_api_route('/models',_models_du_compte,methods=['GET'])
+        break
 
 
 @app.post('/nc/engine')

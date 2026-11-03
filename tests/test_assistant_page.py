@@ -460,6 +460,60 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
 }
 ''',configuration=config)
 
+    def test_catalogue_du_compte_argon_actif_et_efforts_de_claude_5_5(self):
+        """Issue #37 : les vrais identifiants d'agy. Argon s'active, les Claude 5.5 ont leurs efforts (pas « à réflexion fixe »),
+        et les 13 modèles passent dans « Choisir un modèle… » (la coupe à 12 cachait le dernier)."""
+        familles=('gemini-4-argon','gemini-3.8-flash','claude-opus-5-5','claude-sonnet-5-5')
+        models=[dict(id=f+'-'+e,name=f+' ('+e+')') for f in familles for e in ('low','medium','high')]+[dict(id='gpt-oss-120b-medium',name='GPT-OSS 120B (Medium)')]
+        self.assertEqual(len(models),13)
+        config=dict(session=dict(engine='agy',model='gemini-3.8-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.toLowerCase()).enabled,"famille absente : "+nom)
+ AssistantEtat.choisirFamille("Argon")
+ verifier(AssistantEtat.modele==="gemini-4-argon-low"&&AssistantEtat.effort==="low","Argon : "+AssistantEtat.modele)
+ AssistantEtat.choisirFamille("Opus")
+ verifier(!AssistantEtat.reflexionFixe(AssistantEtat.modele),"Claude 5.5 pris pour un modèle à réflexion fixe")
+ verifier(AssistantEtat.efforts.length===3,"efforts : "+AssistantEtat.efforts.length)
+ AssistantEtat.choisirEffort("high")
+ verifier(AssistantEtat.modele==="claude-opus-5-5-high"&&AssistantEtat.effort==="high","variante : "+AssistantEtat.modele)
+ Qt.quit()
+}
+''',configuration=config)
+        src=(QML/'AssistantReglages.qml').read_text()
+        self.assertIn('model:AssistantEtat.modeles.slice(0,50)',src)
+        self.assertNotIn('slice(0,12)',src)
+        self.assertIn('objectName:"nc-jarvis-modele-hors-catalogue"',src)
+        self.assertIn('visible:AssistantEtat.modeleHorsCatalogue',src)
+
+    def _config_modele_sorti(self,compte):
+        models=[dict(id='gemini-4-argon-'+e,name='Argon '+e) for e in ('low','medium','high')]
+        return dict(session=dict(engine='agy',model='claude-sonnet-4-6',effort='high'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,catalogue_compte=compte,efforts=['low','medium','high'])])
+
+    def test_modele_sorti_du_catalogue_signale_jamais_change(self):
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ verifier(AssistantEtat.modele==="claude-sonnet-4-6","jamais changé en silence : "+AssistantEtat.modele)
+ verifier(AssistantEtat.modeleHorsCatalogue,"modèle sorti non signalé")
+ AssistantEtat.modele="g"
+ verifier(!AssistantEtat.modeleHorsCatalogue,"signalé pendant la saisie")
+ AssistantEtat.modele="gemini-4-argon-low"
+ verifier(!AssistantEtat.modeleHorsCatalogue,"signalé sur un modèle du catalogue")
+ Qt.quit()
+}
+''',configuration=self._config_modele_sorti(True))
+
+    def test_liste_de_repli_ne_pretend_pas_etre_celle_du_compte(self):
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ verifier(!AssistantEtat.modeleHorsCatalogue,"liste de repli présentée comme celle du compte")
+ Qt.quit()
+}
+''',configuration=self._config_modele_sorti(False))
+
     def test_home_shows_short_status_while_history_keeps_complete_output(self):
         self.executer('''
 if(etape===0){
