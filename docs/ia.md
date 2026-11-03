@@ -132,7 +132,7 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Aucune requête réseau depuis un texte affiché** : une réponse d'IA, un résumé ou un rapport s'affichent sans charger d'image ni de feuille de
   style, quoi que dise le texte. Du HTML écrit par une IA (`<a>`, `<ul>`, tableaux HTML) se voit en texte ; `<https://…>` n'est plus un lien ; une image
   Markdown devient un lien à cliquer. Un caractère invisible suit chaque `<` qui pourrait ouvrir une balise, et coupe `![`, y compris dans le code ; ce qui est
-  conservé, envoyé à l'IA, copié par « Entrée » ou exécuté vient du texte d'origine, sans ce caractère. Ctrl + C dans le chat et le cockpit le retire ; une sélection
+  conservé, envoyé à l'IA, copié par « Entrée » ou exécuté vient du texte d'origine, sans ce caractère. Ctrl + C dans le chat et le cockpit le retire ; le texte copié ainsi reste collable une fois l'île refermée, mais se perd si l'île redémarre. Une sélection
   à la souris collée au clic molette le garde : `cat <fichier` collé ainsi échoue, recopie-le au clavier. Seule exception voulue : la pochette d'un lecteur de
   musique reste chargée telle qu'il la donne, en https aussi ; le serveur est choisi par le lecteur ou la page déjà ouverts, et aucun texte de conversation ne peut y entrer.
 - **Spotlight (Super + R)** : `? ta question` — d'abord les réponses de la config (instantanées, sans IA), puis l'IA ;
