@@ -23,8 +23,6 @@ if "__file__" in globals():
         if _o and _P(_o).resolve().parent != _P(__file__).resolve().parent:
             raise RuntimeError(f"{_m} ne vient pas de l'overlay noctalia-config ({_o}) : relance le déployeur "
                                "(nc-jarvis), qui place l'overlay en tête (--app-dir)")
-import functools
-import inspect
 import main as upstream
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -170,9 +168,28 @@ def _catalogue_agy(nom):
     if callable(fn): fn()
 
 
+class _CatalogueAuxModels:
+    """Middleware ASGI pur : /models (Telegram, Discord, nc-jarvis) relit aussi le catalogue, mais seulement après une réponse
+    200, donc après le contrôle du secret de l'amont ; sa route, synchrone ou non, n'est jamais touchée."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'http' or scope.get('method') != 'GET' or scope.get('path') != '/models':
+            return await self.app(scope, receive, send)
+        statuts = []
+
+        async def envoyer(message):
+            if message.get('type') == 'http.response.start': statuts.append(message.get('status'))
+            await send(message)
+        await self.app(scope, receive, envoyer)
+        if statuts == [200]: _catalogue_agy('rafraichir_agy')
+
+
 _catalogue_agy('catalogue_au_demarrage')
 app=upstream.app
 app.add_middleware(_MenagePieces)
+app.add_middleware(_CatalogueAuxModels)
 native_health=upstream.health
 for _route in list(app.routes):
     if getattr(_route,'path',None) in ('/nc/engines','/nc/engine'):
@@ -186,20 +203,6 @@ async def settings(request: Request, session_key: str | None = None):
     if session_key is not None and len(session_key)>200: raise HTTPException(400)
     _catalogue_agy('rafraichir_agy')
     return engines.snapshot(session_key)
-
-
-# /models (Telegram, Discord, nc-jarvis) relit aussi le catalogue, comme /nc/engines : la réponse reste celle de l'amont
-for _route in list(app.routes):
-    if getattr(_route,'path',None)=='/models' and 'GET' in (getattr(_route,'methods',None) or ()):
-        _lister=_route.endpoint
-        @functools.wraps(_lister)
-        async def _models_du_compte(*a,_lister=_lister,**kw):
-            _catalogue_agy('rafraichir_agy')
-            return await _lister(*a,**kw)
-        _models_du_compte.__signature__=inspect.signature(_lister)
-        app.routes.remove(_route)
-        app.add_api_route('/models',_models_du_compte,methods=['GET'])
-        break
 
 
 @app.post('/nc/engine')

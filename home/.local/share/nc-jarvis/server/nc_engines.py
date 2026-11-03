@@ -92,7 +92,7 @@ def agy_cite_models(chemin):
 def nom_propre(texte):
     """Un nom de modèle affiché partout (île, Telegram, Discord) : lettres, chiffres, espace et .()+/_:- seulement, 80 au plus.
     Rien d'autre : ni échappement, ni saut de ligne, ni inversion de sens d'écriture, ni @ ou * pour les messageries."""
-    return ''.join(c for c in texte if c.isalnum() or c in ' .()+/_:-')[:80].strip()
+    return ' '.join(''.join(c for c in texte if c.isalnum() or c in ' .()+/_:-').split())[:80].strip()
 
 
 def lire_catalogue_agy(sortie):

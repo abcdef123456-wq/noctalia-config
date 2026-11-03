@@ -87,6 +87,10 @@ class Erreur(Exception):
     pass
 
 
+class ErreurServeur(Erreur):
+    """Le serveur a répondu que la demande a échoué (pas un souci de réseau, de clé ou de fichier)."""
+
+
 def ia_coupee():
     """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune), ou en pause (Économie sur batterie, vu
     par nc-ia) : JARVIS ne répond plus nulle part."""
@@ -475,8 +479,8 @@ def api(c, endpoint, payload=None, sans_proxy=False):
         raise Erreur(T("Format de réponse inattendu.", "Unexpected response format."))
     if resultat.get("success") is False or resultat.get("error"):
         # Ne pas afficher le corps d'une erreur : il peut contenir des données privées du serveur.
-        raise Erreur(T("Le serveur a signalé un échec. Consulte ses journaux.",
-                       "The server reported a failure. Check its logs."))
+        raise ErreurServeur(T("Le serveur a signalé un échec. Consulte ses journaux.",
+                              "The server reported a failure. Check its logs."))
     return resultat
 
 
@@ -971,9 +975,12 @@ def executer_commande(c, sid, cmd_brute):
             return T("Niveaux d'effort acceptés : `low`, `medium`, `high`, `xhigh`, `max`.", "Supported effort levels: `low`, `medium`, `high`, `xhigh`, `max`.")
         try:
             r = api(c, "/api/nc/manage", {"op": "session.update", "params": {"effort": arg.lower()}, "confirmed": True})
-            # Ce que le serveur a vraiment gardé : un modèle qui encode son effort peut ne pas avoir la variante demandée
-            session = (r.get("session") or (r.get("data") or {}).get("session") or r.get("data") or {}) if isinstance(r, dict) else {}
-            garde = session.get("effort") if isinstance(session, dict) and isinstance(session.get("effort"), str) and session.get("effort") else arg.lower()
+            # Ce que le serveur a vraiment gardé : un modèle qui encode son effort peut ne pas avoir la variante demandée, et un
+            # modèle « thinking » n'en a aucun
+            session = r.get("session") if isinstance(r, dict) else None
+            if isinstance(session, dict) and "effort" in session and not session["effort"]:
+                return T("Ce modèle a sa propre réflexion : aucun niveau à régler.", "This model has its own reasoning: no level to set.")
+            garde = session["effort"] if isinstance(session, dict) and isinstance(session.get("effort"), str) else arg.lower()
             return T(f"✅ Niveau de réflexion réglé sur : **{garde}**", f"✅ Reasoning effort set to: **{garde}**")
         except Exception as e:
             return T(f"Erreur réglage effort : {e}", f"Error setting effort: {e}")
@@ -1699,7 +1706,8 @@ def main():
         message = str(e) if isinstance(e, Erreur) else T("Erreur locale : vérifie les droits et l'espace disque.",
                                                                       "Local error: check permissions and disk space.")
         if commande in ("requete-ile", "selectionner-fichiers"):
-            print(json.dumps({"ok": False, "error": message}, ensure_ascii=False), flush=True)
+            print(json.dumps({"ok": False, "error": message, **({"echec_serveur": True} if isinstance(e, ErreurServeur) else {})},
+                             ensure_ascii=False), flush=True)
         elif commande in ("etat", "status"):
             resultat = {"online": False, "error": message}
             try:

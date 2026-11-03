@@ -116,6 +116,21 @@ class Assistant(unittest.TestCase):
     def settings(self, texte):
         (self.m.CONF.parent / "reglages.conf").write_text(texte)
 
+    def test_effort_annonce_ce_que_le_serveur_a_garde(self):
+        """Un modèle qui encode son effort peut ne pas avoir la variante demandée : /effort dit ce qui est réglé pour de vrai."""
+        for reponse, attendu in ((dict(status="updated", session=dict(model="gpt-oss-120b-medium", effort="medium")), "**medium**"),
+                                 (dict(status="updated"), "**xhigh**")):
+            with patch.object(self.m, "api", return_value=reponse):
+                self.assertIn(attendu, self.m.executer_commande({}, "s", "/effort xhigh"), reponse)
+        # Un modèle « thinking » n'a aucun effort : ne pas annoncer un réglage qui n'existe pas
+        with patch.object(self.m, "api", return_value=dict(status="updated", session=dict(model="claude-opus-4-6-thinking", effort=None))):
+            self.assertNotIn("xhigh", self.m.executer_commande({}, "s", "/effort xhigh"))
+
+    def test_seul_un_echec_du_serveur_est_marque_pour_l_ile(self):
+        self.assertTrue(issubclass(self.m.ErreurServeur, self.m.Erreur), "attrapée comme avant partout ailleurs")
+        src = (BIN / "nc-assistant").read_text()
+        self.assertIn('{"echec_serveur": True} if isinstance(e, ErreurServeur)', src)
+
     def test_cle_de_session_acceptee_par_4ecc57a(self):
         # Le repli sur USER_ID (espaces, « : », accents, trop long) est ramené à desktop:[\w.@-]{1,180} ; rien : pas de clé
         import re as _re

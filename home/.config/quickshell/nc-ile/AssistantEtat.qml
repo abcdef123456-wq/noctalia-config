@@ -490,7 +490,8 @@ Singleton {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
                     : Reglages.t("Impossible de recevoir la réponse. Vérifie la connexion et la configuration.",
                                  "Unable to receive the answer. Check the connection and configuration.")
-            if (modeleHorsCatalogue) erreur += Reglages.t(" Ce modèle n’est peut-être plus disponible : choisis-en un autre dans les réglages.",
+            // Seulement un échec signalé par le serveur : ni le réseau, ni une clé, ni un fichier refusé
+            if (modeleHorsCatalogue && r && r.echec_serveur === true) erreur += Reglages.t(" Ce modèle n’est peut-être plus disponible : choisis-en un autre dans les réglages.",
                                                            " This model may no longer be available: choose another one in the settings.")
             // Permet de corriger ou renvoyer manuellement ; aucune répétition automatique.
             if (!brouillon && !questionAuto) brouillon = question

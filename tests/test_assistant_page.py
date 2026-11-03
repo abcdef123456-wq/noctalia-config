@@ -54,6 +54,7 @@ from pathlib import Path
 r=json.loads(sys.stdin.readline())
 with Path(os.environ["HOME"],"recus").open("a") as f:f.write(json.dumps(dict(argv=sys.argv[1:],payload=r))+"\\n")
 time.sleep(.2)
+if r["question"]=="refus serveur":print(json.dumps(dict(ok=False,error="Le serveur a signalé un échec.",echec_serveur=True)),flush=True);sys.exit(0)
 if r["question"] in ("erreur","Option C"):
  print(json.dumps(dict(ok=False,error="Échec simulé")),flush=True);sys.exit(1)
 if r["question"]=="invalide":print("not json",flush=True);sys.exit(0)
@@ -504,6 +505,19 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
  Qt.quit()
 }
 ''',configuration=self._config_modele_sorti(True))
+
+    def test_modele_sorti_rappele_seulement_sur_un_echec_du_serveur(self):
+        self.executer("""
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){verifier(AssistantEtat.modeleHorsCatalogue,"modèle sorti non vu");AssistantEtat.brouillon="refus serveur";AssistantEtat.envoyer();etape++}
+else if(etape===2&&!AssistantEtat.enCours){
+ verifier(AssistantEtat.erreur.indexOf("Le serveur a signalé un échec. ")===0&&AssistantEtat.erreur.length>40,"échec du serveur sans le rappel : "+AssistantEtat.erreur)
+ AssistantEtat.brouillon="erreur";AssistantEtat.envoyer();etape++
+}else if(etape===3&&!AssistantEtat.enCours){
+ verifier(AssistantEtat.erreur==="Échec simulé","autre erreur avec le rappel : "+AssistantEtat.erreur)
+ Qt.quit()
+}
+""",configuration=self._config_modele_sorti(True))
 
     def test_liste_de_repli_ne_pretend_pas_etre_celle_du_compte(self):
         self.executer('''

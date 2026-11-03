@@ -110,6 +110,7 @@ class Parseur(unittest.TestCase):
         self.assertEqual(liste[4], dict(id="e", name="everyone gras bfin"), "ni @ ni * pour les messageries, ni saut de ligne")
         self.assertEqual(liste[5]["name"], "n" * 79, "pas d'espace final après la coupe : le cache le relit")
         self.assertEqual(liste[6], dict(id="g", name="Gemini 4 (Low) é/x+1"))
+        self.assertEqual(self.m.lire_catalogue_agy("h\tLlama 3.1  70B\n")[0]["name"], "Llama 3.1 70B", "espaces doublés réduits")
 
     def test_doublons_retires_cinquante_au_plus_retour_chariot_tolere(self):
         self.assertEqual([x["id"] for x in self.m.lire_catalogue_agy("a\tA\r\nb\tB\r\na\tAutre\r\n")], ["a", "b"])
@@ -563,7 +564,7 @@ class RunnerDeBoutEnBout(unittest.TestCase):
         self.d = Path(d.name)
         (self.d / "home-runner").mkdir()
         self.agy = faux_agy(self.d)
-        env = patch.dict(os.environ, HOME=str(self.d), XDG_CONFIG_HOME=str(self.d / ".config"),
+        env = patch.dict(os.environ, HOME=str(self.d), XDG_CONFIG_HOME=str(self.d / ".config"), NC_PIECES_JOINTES=str(self.d / "pieces"),
                          PATH=str(self.d) + os.pathsep + os.environ.get("PATH", ""))
         env.start()
         self.addCleanup(env.stop)
@@ -573,9 +574,12 @@ class RunnerDeBoutEnBout(unittest.TestCase):
             if nom not in ("__file__",):
                 setattr(self.up, nom, valeur)
 
+        self.secret_refuse = False
+
         @self.up.app.get("/models")
-        async def lister(request: fastapi.Request):
-            self.up._check_secret(request)
+        def lister(request: fastapi.Request):                 # synchrone exprès : la route de l'amont n'est jamais enveloppée
+            if self.secret_refuse:
+                raise fastapi.HTTPException(401)
             return {"models": self.up.KNOWN_MODELS}
         self.addCleanup(self.attendre)
 
@@ -607,6 +611,18 @@ class RunnerDeBoutEnBout(unittest.TestCase):
         self.attendre()
         # /nc/engines lit aussi son --help pour les modes de permission : seul compte le nombre de relectures
         self.assertEqual(appels(self.agy).count("models"), 1, chemin)
+
+    def test_models_sans_le_secret_ne_lance_rien(self):
+        """Une requête refusée (401) ne fait partir aucun processus : la relecture vient après la réponse de l'amont."""
+        runner = self.charger()
+        self.attendre()
+        os.unlink(self.agy.with_suffix(".appels"))
+        runner.engines.agy_lu = time.time() - 7 * 3600
+        runner.engines.agy_essai = None
+        self.secret_refuse = True
+        self.assertEqual(appeler(runner.app, "/models", methode="GET"), 401)
+        self.attendre()
+        self.assertEqual(appels(self.agy), [])
 
     def test_nc_engines_relit_une_liste_trop_vieille(self):
         self.relecture_par("/nc/engines")
