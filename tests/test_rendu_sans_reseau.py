@@ -89,6 +89,7 @@ class Serveur(http.server.BaseHTTPRequestHandler):
         pass
 
 
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class RenduSansReseau(unittest.TestCase):
     def setUp(self):
         self.serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
@@ -315,29 +316,6 @@ if(etape===0){
  Qt.quit()
 }
 """)
-        # Tous les appels du filtre sont des liaisons d'affichage, et ce qui se copie ou s'exécute dans le Spotlight vient de r.brut
-        attendu = {"Assistant.qml": 1, "JarvisResultat.qml": 5, "PageNotifs.qml": 1, "Parametres.qml": 1, "Recherche.qml": 1}
-        vus = {}
-        for f in sorted(QML.glob("*.qml")):
-            if f.name == "AssistantEtat.qml":
-                continue
-            for ligne in f.read_text().splitlines():
-                ligne = ligne.strip()
-                if ligne.startswith("//") or not re.search(r"AssistantEtat\.(formater|sansReseau)\(", ligne):
-                    continue
-                vus[f.name] = vus.get(f.name, 0) + 1
-                # La liaison text: d'un texte affiché, ou la suite de celle à plusieurs lignes de JarvisResultat.qml
-                self.assertTrue(re.search(r"\btext:", ligne) or ligne.startswith(('carte.kind==="value"', "AssistantEtat.sansReseau([carte")), f"{f.name} : un appel hors d'une liaison d'affichage : {ligne}")
-        self.assertEqual(vus, attendu)
-        # Dans AssistantEtat.qml : le dernier passage de formater, et apercu(), qui n'a aucun appelant aujourd'hui
-        internes = [ligne.strip() for ligne in (QML / "AssistantEtat.qml").read_text().splitlines() if re.search(r"\b(formater|sansReseau)\(", ligne) and not ligne.strip().startswith(("function", "//"))]
-        self.assertEqual(len(internes), 2, internes)
-        self.assertTrue(internes[0].startswith("return sansReseau(") and internes[1] == "var t = formater(texte)", internes)
-        recherche = (QML / "Recherche.qml").read_text()
-        self.assertIn("let resultat = r.reponse", recherche)
-        self.assertIn("r.reponse = r.brut", recherche)
-        self.assertNotIn("r.reponse = AssistantEtat", recherche)
-        self.assertNotIn("r.brut = AssistantEtat", recherche)
 
     INVISIBLES = "[0x200b,0x2028,0x2029,0xfdd0,0xfdd1,0xa0]"
 
@@ -403,6 +381,36 @@ if(etape===0){
  Qt.quit()
 }
 """, evenements=True)
+
+
+class SourcesDuRendu(unittest.TestCase):
+    """Lecture des sources seulement : se joue aussi sans Quickshell, donc en CI. Le rendu lui-même n'y est pas essayé."""
+
+    def test_le_filtre_n_est_appele_qu_a_l_affichage(self):
+        """Ce qui se copie ou s'exécute vient de la source : tous les appels du filtre sont des liaisons d'affichage."""
+        # Tous les appels du filtre sont des liaisons d'affichage, et ce qui se copie ou s'exécute dans le Spotlight vient de r.brut
+        attendu = {"Assistant.qml": 1, "JarvisResultat.qml": 5, "PageNotifs.qml": 1, "Parametres.qml": 1, "Recherche.qml": 1}
+        vus = {}
+        for f in sorted(QML.glob("*.qml")):
+            if f.name == "AssistantEtat.qml":
+                continue
+            for ligne in f.read_text().splitlines():
+                ligne = ligne.strip()
+                if ligne.startswith("//") or not re.search(r"AssistantEtat\.(formater|sansReseau)\(", ligne):
+                    continue
+                vus[f.name] = vus.get(f.name, 0) + 1
+                # La liaison text: d'un texte affiché, ou la suite de celle à plusieurs lignes de JarvisResultat.qml
+                self.assertTrue(re.search(r"\btext:", ligne) or ligne.startswith(('carte.kind==="value"', "AssistantEtat.sansReseau([carte")), f"{f.name} : un appel hors d'une liaison d'affichage : {ligne}")
+        self.assertEqual(vus, attendu)
+        # Dans AssistantEtat.qml : le dernier passage de formater, et apercu(), qui n'a aucun appelant aujourd'hui
+        internes = [ligne.strip() for ligne in (QML / "AssistantEtat.qml").read_text().splitlines() if re.search(r"\b(formater|sansReseau)\(", ligne) and not ligne.strip().startswith(("function", "//"))]
+        self.assertEqual(len(internes), 2, internes)
+        self.assertTrue(internes[0].startswith("return sansReseau(") and internes[1] == "var t = formater(texte)", internes)
+        recherche = (QML / "Recherche.qml").read_text()
+        self.assertIn("let resultat = r.reponse", recherche)
+        self.assertIn("r.reponse = r.brut", recherche)
+        self.assertNotIn("r.reponse = AssistantEtat", recherche)
+        self.assertNotIn("r.brut = AssistantEtat", recherche)
 
     def test_chaque_surface_passe_par_la_meme_fonction(self):
         """Tout ce qui lit du Markdown passe par formater ou sansReseau : une surface ajoutée sans cela fait échouer ce test."""
