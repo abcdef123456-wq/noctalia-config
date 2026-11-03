@@ -61,6 +61,23 @@ Singleton {
     }
     property bool reglagesDisponibles: false
     property bool reglagesDemandes: false
+    // Le catalogue d'agy se relit en fond sur le runner (5 à 10 s) : la première lecture répond avec l'ancienne liste. Quand elle le
+    // dit (catalogue_en_cours), une seule relecture plus tard ; le runner n'en relance pas d'autre avant 15 min, donc pas de boucle.
+    // Jamais par-dessus des réglages ouverts ou un choix non appliqué : finirReglages les écraserait, elle attend leur fermeture.
+    property int delaiCatalogue: 30000
+    property bool catalogueARelire: false
+    property double derniereLectureReglages: 0
+    property double ageMaxReglages: 6 * 3600 * 1000
+    // Une fonction, pas une propriété liée : Date.now() ne réveille aucune liaison, l'âge doit se calculer à chaque ouverture
+    function relectureAttendue() {
+        return !reglagesDemandes || ((catalogueARelire || Date.now() - derniereLectureReglages > ageMaxReglages)
+            && !reglagesOuverts && !reglagesModifies)
+    }
+    Timer { id: relectureCatalogue; interval: a.delaiCatalogue; onTriggered: a.relireCatalogue() }
+    function relireCatalogue() {
+        if (enCours || reglagesEnCours || reglagesOuverts || reglagesModifies) { catalogueARelire = true; return }
+        lireReglages()
+    }
     property var moteurs: [
         {id:"agy", name:"Antigravity", installed:false}, {id:"codex", name:"Codex", installed:false},
         {id:"claude", name:"Claude Code", installed:false}, {id:"opencode", name:"OpenCode", installed:false}
@@ -133,6 +150,7 @@ Singleton {
         if (reglagesOuverts) lireReglages()
         else if (!reglagesEnCours) {
             moteur = sessionReglages.engine; modele = sessionReglages.model; effort = sessionReglages.effort
+            if (catalogueARelire) relireCatalogue()
         }
     }
     function choisirMoteur(id) { moteur = id; modele = ""; effort = "" }
@@ -153,9 +171,12 @@ Singleton {
         var r = null
         try { r = JSON.parse(sortieReglages) } catch (_) {}
         var ok = codeReglages === 0 && r && r.ok === true && r.data && !r.data.error
+        if (operationReglages === "quick-settings") derniereLectureReglages = Date.now()
         if (ok && operationReglages === "quick-settings") {
             reglagesDisponibles = !!r.data.session && Array.isArray(r.data.engines)
             if (reglagesDisponibles) {
+                catalogueARelire = false
+                if (r.data.engines.some(m => m.catalogue_en_cours === true)) relectureCatalogue.restart()
                 moteurs = r.data.engines; moteur = r.data.session.engine || "agy"
                 modele = r.data.session.model || ""; effort = r.data.session.effort || ""
                 sessionReglages = {engine:moteur, model:modele, effort:effort}

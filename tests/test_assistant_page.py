@@ -74,6 +74,8 @@ if catalogue.exists():
  data=json.loads(catalogue.read_text())
  if r['op']=='session.update':
   data['session'].update(r['params']);catalogue.write_text(json.dumps(data))
+ suite=data.pop('apres_lecture',None)
+ if suite:catalogue.write_text(json.dumps(suite))
  print(json.dumps(dict(ok=True,data=data)),flush=True);sys.exit()
 print(json.dumps(dict(ok=True,data=dict(session=session,engines=[dict(id='codex',name='Codex',installed=True,models=[dict(id='requested-model',name='Requested',efforts=['high','xhigh'])])]))),flush=True)
 ''')
@@ -518,6 +520,91 @@ else if(etape===2&&!AssistantEtat.enCours){
  Qt.quit()
 }
 """,configuration=self._config_modele_sorti(True))
+
+    def _config_relecture(self,en_cours):
+        session=dict(engine='agy',model='gemini-3.8-flash-low',effort='low')
+        moteur=lambda models,**plus:dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'],**plus)
+        flash=[dict(id='gemini-3.8-flash-low',name='Flash')]
+        argon=flash+[dict(id='gemini-4-argon-low',name='Argon')]
+        return dict(session=session,engines=[moteur(flash,catalogue_en_cours=en_cours)],
+                    apres_lecture=dict(session=session,engines=[moteur(argon,catalogue_en_cours=False)]))
+
+    def test_relecture_du_catalogue_argon_s_active_sur_l_accueil(self):
+        """Le symptôme de l'issue #37 : la première lecture répond avec l'ancienne liste pendant que le runner relit le compte."""
+        self.executer('''
+if(etape===0){AssistantEtat.delaiCatalogue=150;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){
+ verifier(!trouver(page,"nc-jarvis-model-argon").enabled,"Argon avant la relecture");etape++
+}else if(etape===2&&AssistantEtat.modelePourFamille("Argon")){
+ verifier(trouver(page,"nc-jarvis-model-argon").enabled,"Argon grisé après la relecture")
+ Qt.quit()
+}
+''',configuration=self._config_relecture(True))
+
+    def test_relecture_attend_la_fermeture_des_reglages(self):
+        self.executer('''
+if(etape===0){AssistantEtat.delaiCatalogue=150;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){AssistantEtat.reglagesOuverts=true;AssistantEtat.modele="saisie";memo.t=Date.now();etape++}
+else if(etape===2&&Date.now()-memo.t>600){
+ verifier(AssistantEtat.modele==="saisie","saisie écrasée par la relecture : "+AssistantEtat.modele)
+ verifier(!AssistantEtat.modelePourFamille("Argon"),"relu par-dessus des réglages ouverts")
+ verifier(AssistantEtat.catalogueARelire,"relecture oubliée")
+ AssistantEtat.ouvrirReglages();etape++
+}else if(etape===3&&AssistantEtat.modelePourFamille("Argon")){
+ verifier(!AssistantEtat.catalogueARelire,"relecture encore attendue")
+ Qt.quit()
+}
+''',configuration=self._config_relecture(True))
+
+    def test_relecture_garde_un_choix_non_applique_sur_l_accueil(self):
+        self.executer('''
+if(etape===0){AssistantEtat.delaiCatalogue=150;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){AssistantEtat.modele="choisi";memo.t=Date.now();etape++}
+else if(etape===2&&Date.now()-memo.t>600){
+ verifier(AssistantEtat.modele==="choisi","choix non appliqué écrasé : "+AssistantEtat.modele)
+ verifier(AssistantEtat.catalogueARelire,"relecture oubliée")
+ verifier(!AssistantEtat.relectureAttendue(),"l'accueil relirait par-dessus le choix")
+ AssistantEtat.modele=AssistantEtat.sessionReglages.model
+ verifier(AssistantEtat.relectureAttendue(),"plus rien n'empêche la relecture à l'ouverture")
+ page.chargerReglagesRapides();etape++
+}else if(etape===3&&AssistantEtat.modelePourFamille("Argon")){Qt.quit()}
+''',configuration=self._config_relecture(True))
+
+    def test_sans_relecture_en_cours_aucune_lecture_de_plus(self):
+        self.executer('''
+if(etape===0){AssistantEtat.delaiCatalogue=100;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){memo.t=Date.now();etape++}
+else if(etape===2&&Date.now()-memo.t>500){
+ verifier(!AssistantEtat.modelePourFamille("Argon"),"une lecture de plus sans raison")
+ verifier(!AssistantEtat.relectureAttendue(),"l'accueil relirait une lecture toute récente")
+ Qt.quit()
+}
+''',configuration=self._config_relecture(False))
+
+    def test_accueil_relit_une_lecture_de_plus_de_six_heures(self):
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){
+ page.chargerReglagesRapides()
+ verifier(!AssistantEtat.reglagesEnCours,"relu sans raison")
+ AssistantEtat.derniereLectureReglages=Date.now()-7*3600*1000
+ AssistantEtat.reglagesOuverts=true
+ verifier(!AssistantEtat.relectureAttendue(),"relirait par-dessus les réglages ouverts")
+ AssistantEtat.reglagesOuverts=false
+ verifier(AssistantEtat.relectureAttendue(),"lecture trop vieille non vue")
+ page.chargerReglagesRapides();etape++
+}else if(etape===2&&AssistantEtat.modelePourFamille("Argon")){Qt.quit()}
+''',configuration=self._config_relecture(False))
+
+    def test_l_age_de_la_lecture_se_calcule_a_l_ouverture_sans_rien_d_autre_qui_change(self):
+        """Date.now() ne réveille aucune liaison QML : le temps qui passe seul doit suffire."""
+        self.executer('''
+if(etape===0){AssistantEtat.ageMaxReglages=400;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){
+ verifier(!AssistantEtat.relectureAttendue(),"lecture toute récente");memo.t=Date.now();etape++
+}else if(etape===2&&Date.now()-memo.t>600){page.chargerReglagesRapides();etape++}
+else if(etape===3&&AssistantEtat.modelePourFamille("Argon")){Qt.quit()}
+''',configuration=self._config_relecture(False))
 
     def test_liste_de_repli_ne_pretend_pas_etre_celle_du_compte(self):
         self.executer('''

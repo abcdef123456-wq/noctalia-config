@@ -666,9 +666,12 @@ sans saisie en cours ; le bouton réglages permet de le charger ou de l’actual
 Pour agy, le catalogue vient du compte (`agy models`) : le runner le relit en fond au démarrage s’il n’en a aucun, puis quand
 il est demandé (île, `/models`) et a plus de 6 h, et le garde sur disque (`.nc-jarvis-agy-models.json`). Il ne lance rien si
 l’IA est coupée. agy pas connecté, hors ligne ou sortie inattendue : la dernière bonne liste reste, sinon celle du runner, et un
-nouvel essai au plus toutes les 15 min. « Actualiser » lit le catalogue du runner sans forcer `agy models` : pour le relire tout
-de suite après un `agy login`, efface ce fichier et redémarre le runner. Un modèle enregistré qui n’est plus au catalogue du compte
-n’est jamais changé en silence : les réglages le signalent, et une erreur de réponse le rappelle.
+nouvel essai au plus toutes les 15 min. Une sortie au format inattendu laisse une ligne dans le journal du runner (« Sortie de agy
+models au format inattendu »), sans son contenu. Pendant une relecture, l’île relit une seule fois 30 s plus tard, jamais par-dessus
+des réglages ouverts ou un choix non appliqué, et l’accueil relit à son ouverture si sa dernière lecture a plus de 6 h. « Actualiser »
+lit le catalogue du runner sans forcer `agy models` : pour le relire tout de suite après un `agy login`, efface ce fichier et
+redémarre le runner. Un modèle enregistré qui n’est plus au catalogue du compte n’est jamais changé en silence : les réglages le
+signalent, et une erreur de réponse le rappelle.
 Un clic prépare le choix ; seule l’action **Appliquer** change la session. Les identifiants qui encodent
 l’effort sont alignés sur la variante annoncée correspondante. Fermer les réglages abandonne les choix non
 appliqués. Les autres modèles et la saisie d’un identifiant restent accessibles dans les réglages.

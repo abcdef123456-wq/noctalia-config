@@ -31,7 +31,7 @@ Item {
     readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant" && m.num > depuis)
     function chargerReglagesRapides() {
         if (visible && !dansDashboard && !historiqueOuvert && !entree.activeFocus && !AssistantEtat.brouillon
-            && !AssistantEtat.reglagesDemandes && !AssistantEtat.enCours)
+            && AssistantEtat.relectureAttendue() && !AssistantEtat.enCours)
             AssistantEtat.lireReglages()
     }
     function defiler(dy) {

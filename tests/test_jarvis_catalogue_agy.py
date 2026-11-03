@@ -321,6 +321,50 @@ class Moteur(unittest.TestCase):
                 finally:
                     p.stop()
 
+    def test_format_inattendu_dit_dans_le_journal_sans_son_contenu(self):
+        for jeu in ("print('secret-dans-la-sortie sans tabulation')", "print('--yolo\\tsecret-dans-la-sortie')",
+                    "sys.stdout.buffer.write(b'secret-dans-la-sortie\\xff')"):
+            with self.subTest(jeu=jeu):
+                agy = faux_agy(self.d, jeu)
+                p = patch.object(self.m, "executable", return_value=str(agy))
+                p.start()
+                try:
+                    with self.assertLogs("nc_engines", "WARNING") as journal:
+                        e = self.m.Engines(self.up)
+                        self.assertTrue(e.rafraichir_agy())
+                        self.attendre()
+                finally:
+                    p.stop()
+                texte = " ".join(journal.output)
+                self.assertIn("agy models", texte)
+                self.assertIn("format inattendu", texte)
+                self.assertNotIn("secret-dans-la-sortie", texte)
+
+    def test_pas_connecte_reste_silencieux(self):
+        for jeu in ("print('Please sign in', file=sys.stderr)\nsys.exit(1)", "pass", "print()"):
+            with self.subTest(jeu=jeu):
+                agy = faux_agy(self.d, jeu)
+                p = patch.object(self.m, "executable", return_value=str(agy))
+                p.start()
+                try:
+                    with self.assertNoLogs("nc_engines", "WARNING"):
+                        e = self.m.Engines(self.up)
+                        self.assertTrue(e.rafraichir_agy())
+                        self.attendre()
+                finally:
+                    p.stop()
+
+    def test_snapshot_dit_quand_une_relecture_tourne(self):
+        agy = faux_agy(self.d, "time.sleep(2)\nprint('a\\tA')")
+        self.avec(agy)
+        e = self.m.install(self.up)
+        self.assertIs(e.snapshot()["engines"][0]["catalogue_en_cours"], False)
+        self.assertTrue(e.rafraichir_agy())
+        self.assertIs(e.snapshot()["engines"][0]["catalogue_en_cours"], True, "juste après le départ du fil, sans course")
+        self.assertIs(e.snapshot()["engines"][1]["catalogue_en_cours"], False)
+        self.attendre()
+        self.assertIs(e.snapshot()["engines"][0]["catalogue_en_cours"], False)
+
     def test_ancien_agy_jamais_lance_avec_models(self):
         agy = faux_agy(self.d, aide=ANCIENNE_AIDE)
         self.avec(agy)

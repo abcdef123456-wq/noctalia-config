@@ -130,11 +130,16 @@ def lancer_catalogue_agy(chemin):
             bloc = os.read(fd, 8192)
             if not bloc: break
             taille += len(bloc)
-            if taille > AGY_CATALOGUE_SORTIE_MAX: return None
+            if taille > AGY_CATALOGUE_SORTIE_MAX:
+                logging.getLogger('nc_engines').warning('Sortie de agy models au format inattendu (trop longue) : la liste actuelle est gardée.')
+                return None
             morceaux.append(bloc)
         p.wait(timeout=max(0.1, fin - time.monotonic()))
         termine = True
         return b''.join(morceaux).decode('utf-8') if p.returncode == 0 else None
+    except UnicodeDecodeError:
+        logging.getLogger('nc_engines').warning('Sortie de agy models au format inattendu (pas de l\'UTF-8) : la liste actuelle est gardée.')
+        return None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     finally:
@@ -965,7 +970,10 @@ class Engines:
             if not agy_cite_models(chemin) or ia_coupee(): return    # IA coupée depuis la décision : rien ne part
             sortie = lancer_catalogue_agy(chemin)
             modeles = lire_catalogue_agy(sortie) if sortie else None
-            if not modeles: return             # pas connecté, hors ligne, format inattendu : la dernière bonne liste reste
+            if not modeles:                    # pas connecté, hors ligne (silencieux), ou format inattendu : la dernière bonne liste reste
+                if sortie and sortie.strip():
+                    logging.getLogger('nc_engines').warning('Sortie de agy models au format inattendu : la liste actuelle est gardée.')
+                return
             self.agy_models, self.agy_lu = modeles, time.time()
             # Le catalogue du moteur courant seulement : un rafraîchissement en fond n'écrase pas celui de codex
             if self.state['engine'] == 'agy': self.up.KNOWN_MODELS = modeles
@@ -1000,6 +1008,7 @@ class Engines:
     def snapshot(self, session_key=None):
         return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
             permission_modes=modes_permis(k),catalogue_compte=k=='agy' and bool(self.agy_lu),
+            catalogue_en_cours=k=='agy' and self.agy_verrou.locked(),
             efforts=(['low','medium','high'] if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
             shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
