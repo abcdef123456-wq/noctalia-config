@@ -218,6 +218,43 @@ trace = {}; PAS(); AIMANT.relache(); dire("fin", #trace)
                          "rangée dans la zone sous le curseur, comme le cadre le promettait")
         self.assertEqual(sorties[2], "fin\t0", "le vrai relâchement ne range pas une seconde fois")
 
+    def glisser_depuis(self, x, plein=0, super_lache=False):
+        return lua(self.ECRAN + f'''
+hl.is_key_down = function() return false end
+WIN = {{ floating = true, address = "0xab", fullscreen = {plein}, at = {{ x = 100, y = 100 }}, size = {{ x = 500, y = 500 }} }}
+CURSEUR = {{ x = {x}, y = 300 }}
+AIMANT.presse({"true" if super_lache else "false"}); CURSEUR = {{ x = 1919, y = 500 }}; trace = {{}}
+{"PAS()" if super_lache else "AIMANT.relache()"}
+dire(table.concat(trace, "|"))
+''', 'REG.AIMANT_APERCU = false\n')[0]
+
+    def test_appui_sur_la_fenetre_active_range(self):
+        for x in (100, 350, 600, 85, 615):        # dedans, ou à 15 points : la bordure et sa zone de prise
+            self.assertEqual(self.glisser_depuis(x), "taille 945 1060|place 965 10", x)
+
+    def test_appui_hors_de_la_fenetre_active_ne_la_range_pas(self):
+        """Super + appui sur le fond d'écran, glisser jusqu'à un bord : Hyprland ne déplace rien, l'active ne saute pas."""
+        for x in (0, 75, 625, 900):
+            self.assertEqual(self.glisser_depuis(x), "", x)
+
+    def test_super_lache_hors_de_la_fenetre_active_ne_la_range_pas(self):
+        self.assertEqual(self.glisser_depuis(900, super_lache=True), "actif false")
+        self.assertEqual(self.glisser_depuis(350, super_lache=True), "actif false|taille 945 1060|place 965 10")
+
+    def test_maximisee_a_l_appui_comme_avant(self):
+        self.assertEqual(self.glisser_depuis(900, plein=1), "taille 945 1060|place 965 10", "sans photo : on ne sait pas")
+
+    def test_appui_loin_mais_fenetre_rangee_oubliee_rien(self):
+        """Un glisser sur le fond ne remet pas non plus une fenêtre rangée comme avant."""
+        sorties = lua(self.ECRAN + '''
+WIN = { floating = true, address = "0xab", at = { x = 100, y = 100 }, size = { x = 500, y = 500 } }
+CURSEUR = { x = 300, y = 300 }; AIMANT.presse(); CURSEUR = { x = 1919, y = 500 }; AIMANT.relache()
+WIN.at = { x = 965, y = 10 }; WIN.size = { x = 945, y = 1060 }
+CURSEUR = { x = 100, y = 800 }; AIMANT.presse(); CURSEUR = { x = 600, y = 500 }; trace = {}; AIMANT.relache()
+dire(table.concat(trace, "|"))
+''', 'REG.AIMANT_APERCU = false\n')
+        self.assertEqual(sorties[0], "")
+
     def test_super_lache_loin_des_bords_ne_range_rien(self):
         sorties = lua(self.ECRAN + '''
 hl.is_key_down = function() return false end
@@ -382,12 +419,12 @@ function R(x, y, w, h, l, ht) local a, b = AIMANT.recaler({ x = x, y = y, w = w,
     def depose(self, taille_reelle, apres=""):
         return lua(self.ECRAN + f'''
 WIN = {{ floating = true, address = "0xab", at = {{ x = 100, y = 100 }}, size = {{ x = 500, y = 500 }} }}
-CURSEUR = {{ x = 900, y = 500 }}
+CURSEUR = {{ x = 300, y = 300 }}
 AIMANT.presse(); CURSEUR = {{ x = 1599, y = 500 }}; AIMANT.relache()
 WINS = {{ {{ address = "0xab", floating = true, at = {{ x = 805, y = 10 }}, size = {taille_reelle} }} }}
 {apres}
-trace = {{}}; if RECALE then RECALE() end
-dire(table.concat(trace, "|"))
+trace = {{}}
+if RECALE then RECALE(); dire(table.concat(trace, "|")) else dire("AUCUNE RELECTURE PROGRAMMEE") end
 ''', 'REG.AIMANT_APERCU = false\n')
 
     def test_fenetre_trop_large_decalee_une_seule_fois(self):
@@ -402,6 +439,9 @@ dire(table.concat(trace, "|"))
     def test_fenetre_fermee_ou_maximisee_entre_temps_rien(self):
         self.assertEqual(self.depose("{ x = 833, y = 980 }", "WINS = {}")[0], "")
         self.assertEqual(self.depose("{ x = 833, y = 980 }", "WINS[1].fullscreen = 1")[0], "")
+
+    def test_remise_en_tuile_entre_temps_rien(self):
+        self.assertEqual(self.depose("{ x = 833, y = 980 }", "WINS[1].floating = false")[0], "")
 
     def test_haut_ne_relit_rien(self):
         sorties = lua(self.ECRAN + '''

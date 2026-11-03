@@ -169,6 +169,7 @@ local debut, depart = 0, nil
 local avec_super = false     -- le glisser a commencé avec Super maintenu
 local apercu = true           -- le cadre de l'île est demandé pour ce glisser
 local RELECTURE = 250         -- ms avant de relire la taille réelle d'une fenêtre rangée (son client répond après coup)
+local PRISE = 20              -- points autour d'une fenêtre où un appui compte encore comme sur elle
 local avant = {}              -- par adresse : l'état d'avant le rangement { libre, x, y, w, h } (voir M.remettre)
 local instantane = {}         -- à l'appui : l'état de chaque fenêtre (la glissée est celle sous le curseur, pas forcément l'active)
 
@@ -263,7 +264,10 @@ function M.appliquer(w, z, r)
                     if type(v) == "table" and v.address == a then
                         local l, h = xy(v.size)
                         local x, y = M.recaler(r, l, h, ecrans_logiques())
-                        if x and (tonumber(v.fullscreen) or 0) == 0 then hl.dispatch(hl.dsp.window.move({ window = v, x = x, y = y })) end
+                        -- encore libre : Super + V a pu la remettre en tuile entre-temps
+                        if x and v.floating == true and (tonumber(v.fullscreen) or 0) == 0 then
+                            hl.dispatch(hl.dsp.window.move({ window = v, x = x, y = y }))
+                        end
                         return
                     end
                 end
@@ -317,8 +321,13 @@ function M.relache()
     if not (w and px and depart and depart[1]) then return end
     -- un simple clic (bouton latéral Précédent) ne range rien : le curseur doit avoir bougé de plus que le seuil
     if (px - depart[1]) ^ 2 + (py - depart[2]) ^ 2 <= 64 then return end
-    local z, r = zone_au_curseur()
     local a = w.address
+    -- Appui sur le fond d'écran ou sur une autre fenêtre : Hyprland n'a pas déplacé l'active, elle ne saute pas à l'autre bout
+    -- de l'écran. Tolérance pour la bordure et sa zone de prise. Sans photo (maximisée à l'appui), on ne sait pas : comme avant.
+    local e = a and photo[a]
+    if e and (depart[1] < e.x - PRISE or depart[1] > e.x + e.w + PRISE
+              or depart[2] < e.y - PRISE or depart[2] > e.y + e.h + PRISE) then return end
+    local z, r = zone_au_curseur()
     if z then
         -- l'état d'avant le PREMIER rangement est gardé : passer d'un bord à l'autre ne l'oublie pas
         if a and not avant[a] then avant[a] = photo[a] end
