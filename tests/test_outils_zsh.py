@@ -236,7 +236,7 @@ class OutilsZsh(unittest.TestCase):
                     (h / "bin/fzf").chmod(0o755)
                 (h / ".config/nc/reglages.conf").write_text(f"TERMINAL_OUTILS={reglage}\n")
                 r = subprocess.run([shutil.which("zsh"), "-f", "-c", "ZSH=$HOME/omz; plugins=(git); " + bloc + "; print -r -- $plugins"],
-                                   env=dict(HOME=str(h), PATH=f"{h}/bin:/usr/bin:/bin"), capture_output=True, text=True, timeout=30)
+                                   env=dict(HOME=str(h), PATH=f"{h}/bin"), capture_output=True, text=True, timeout=30)   # jamais le fzf de la machine
                 self.assertEqual(r.stdout.strip(), attendu, r.stderr)
 
     def test_ligne_ajoutee_par_install_sh(self):

@@ -15,7 +15,7 @@ QML = REPO / "home/.config/quickshell/nc-ile"
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class PageAssistant(unittest.TestCase):
-    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False, dictee=None):
+    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False, dictee=None, limite=5):
         with tempfile.TemporaryDirectory(prefix="nc-assistant-page-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -114,14 +114,14 @@ ShellRoot {
 ''' + scenario + '''
  }finally{test.dansEtape=false}
  }}
- Timer {interval:5000;running:true;onTriggered:Qt.exit(9)}
-}''')
+ Timer {interval:LIMITE;running:true;onTriggered:Qt.exit(9)}
+}'''.replace('LIMITE', str(limite * 1000)))
             (root/'shell.qml').write_text(shell.replace('// TEST_INPUT','TestCase {id:clavier;name:"ChatInput";when:false}\nfunction ecrire(texte){for(var i=0;i<texte.length;i++)clavier.keyClick(texte.charAt(i))}' if evenements else ''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / "cache"))
             env.pop("WAYLAND_DISPLAY", None)
             r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env,
-                               capture_output=True, text=True, timeout=8)
+                               capture_output=True, text=True, timeout=limite + 3)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertNotIn("ReferenceError", r.stdout + r.stderr)
             self.assertNotIn("TypeError", r.stdout + r.stderr)
@@ -327,18 +327,19 @@ else if(etape===1){
 
     def test_reopen_resize_and_recreate_restore_the_end_after_layout(self):
         self.executer('''
-function enBas(){var h=trouver(page,"nc-jarvis-history");verifier(h.contentHeight>h.height*2,"historique de test trop court");verifier(Math.abs(h.contentY-Math.max(0,h.contentHeight-h.height))<1,"retour en tête : "+h.contentY+" / "+h.contentHeight+" / "+h.height)}
+// La page se place à la fin juste après sa mise en page (Qt.callLater) : mesuré 6 à 46 ms après le tic, donc on attend cet état, 2 s au plus
+function enBas(){var h=trouver(page,"nc-jarvis-history");verifier(h.contentHeight>h.height*2,"historique de test trop court");if(Math.abs(h.contentY-Math.max(0,h.contentHeight-h.height))<1){memo.depuis=0;return true}if(!memo.depuis)memo.depuis=Date.now();verifier(Date.now()-memo.depuis<2000,"retour en tête : "+h.contentY+" / "+h.contentHeight+" / "+h.height);return false}
 if(etape===0){for(var i=0;i<18;i++)AssistantEtat.ajouter("assistant",("Message "+i+" ligne longue\\n").repeat(12));creer();etape++}
-else if(etape===1){enBas();page.defiler(1);verifier(!page.suivreFin,"lecture des anciens messages empêchée");etape++}
+else if(etape===1){if(!enBas())return;page.defiler(1);verifier(!page.suivreFin,"lecture des anciens messages empêchée");etape++}
 else if(etape===2){page.visible=false;etape++}
 else if(etape===3){page.visible=true;etape++}
-else if(etape===4){enBas();page.width=330;page.height=410;etape++}
-else if(etape===5){enBas();AssistantEtat.reglagesOuverts=true;etape++}
+else if(etape===4){if(!enBas())return;page.width=330;page.height=410;etape++}
+else if(etape===5){if(!enBas())return;AssistantEtat.reglagesOuverts=true;etape++}
 else if(etape===6){AssistantEtat.reglagesOuverts=false;etape++}
-else if(etape===7){enBas();page.destroy();creer();page.dansDashboard=true;etape++}
-else if(etape===8){enBas();page.defiler(1);page.animationsActives=false;etape++}
+else if(etape===7){if(!enBas())return;page.destroy();creer();page.dansDashboard=true;etape++}
+else if(etape===8){if(!enBas())return;page.defiler(1);page.animationsActives=false;etape++}
 else if(etape===9){page.animationsActives=true;etape++}
-else if(etape===10){enBas();Qt.quit()}
+else if(etape===10){if(!enBas())return;Qt.quit()}
 ''')
 
     def test_live_command_completion_by_keyboard_in_both_chat_modes(self):

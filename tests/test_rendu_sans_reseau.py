@@ -107,8 +107,9 @@ class RenduSansReseau(unittest.TestCase):
         # U seul : BACKGROUND ou URL en majuscules contiennent aussi cette lettre
         return [re.sub(r"(?<![A-Za-z])U(?![A-Za-z])", lambda _, n=i: self.adresse(n), p) for i, p in enumerate(PIEGES)]
 
-    def executer(self, scenario):
-        banc.PageAssistant.executer(self, scenario)
+    def executer(self, scenario, **options):
+        # Des centaines de textes rendus : le délai de 5 s du banc ne tient pas sur une machine chargée
+        banc.PageAssistant.executer(self, scenario, limite=25, **options)
 
     # Toutes les surfaces qui lisent du Markdown ou du HTML, sous leur vraie forme ; le témoin passe par le même canal, sans filtre
     OUTILS = """
@@ -322,7 +323,7 @@ if(etape===0){
     def test_ctrl_c_dans_le_vrai_qt(self):
         """Le vrai TextEdit du chat, le vrai clavier de QtTest, le presse-papiers de Qt relu ensuite : si Qt copie aussi, le test le voit."""
         message = "Ligne un\n\n```\ncat <f\ndeux\n```\n\n- puce\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nfin `x<y>` z\n\nespace&nbsp;dur\n\ncoupe" + chr(0x2028) + "ici"
-        banc.PageAssistant.executer(self, """
+        self.executer("""
 var invisibles=""" + self.INVISIBLES + """
 if(etape===0){
  creer();page.historiqueOuvert=true
@@ -360,7 +361,7 @@ if(etape===0){
 
     def test_ctrl_c_du_cockpit(self):
         """Le même Ctrl + C, dans le vrai JarvisResultat.qml."""
-        banc.PageAssistant.executer(self, """
+        self.executer("""
 var invisibles=""" + self.INVISIBLES + """
 if(etape===0){
  creer()

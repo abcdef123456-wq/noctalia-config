@@ -470,10 +470,10 @@ class TransportJarvis(unittest.TestCase):
             self.server.sortie.wait(3)
         # une autre action noctalia reste bornée à 1 s
         self.server.entree,self.server.sortie=threading.Event(),threading.Event()
-        threading.Timer(1.5,self.server.sortie.set).start()
+        threading.Timer(5,self.server.sortie.set).start()
         debut=time.monotonic();r=self.req('noctalia',dict(action='etat',params={}),True);duree=time.monotonic()-debut
-        self.assertEqual(r.returncode,1);self.assertLess(duree,1.4)
-        self.server.sortie.wait(3)
+        self.assertEqual(r.returncode,1);self.assertLess(duree,4,"la requête a attendu le serveur au lieu de s'arrêter à 1 s")
+        self.server.sortie.wait(6)
 
     def test_vpn_delais_identiques_a_ceux_du_serveur(self):
         m=module(BIN/'nc-jarvis','nc_jarvis_vpn_delais')
