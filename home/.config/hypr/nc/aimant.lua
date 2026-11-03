@@ -107,6 +107,21 @@ function M.recadrer(r, ecrans)
     return { x = math.floor(x), y = math.floor(y), w = math.floor(w), h = math.floor(h) }
 end
 
+-- Fonction PURE. Une fenêtre a pu refuser sa cible r (taille minimale : l, h plus grands que r.w, r.h) : sa place pour rester
+-- entière à l'écran, du côté du bord choisi (une cible à droite garde son bord droit, une cible en bas son bord bas).
+-- nil : elle tient dans sa cible (à 2 points près, l'arrondi d'affichage), rien à faire.
+function M.recaler(r, l, h, ecrans)
+    if type(r) ~= "table" or type(l) ~= "number" or type(h) ~= "number" or type(ecrans) ~= "table" then return nil end
+    if l <= r.w + 2 and h <= r.h + 2 then return nil end
+    local m = ecran_de(r.x + r.w / 2, r.y + r.h / 2, ecrans)
+    if not m then return nil end
+    local x, y = r.x, r.y
+    if l > r.w and r.x + r.w / 2 > m.x + m.w / 2 then x = r.x + r.w - l end
+    if h > r.h and r.y + r.h / 2 > m.y + m.h / 2 then y = r.y + r.h - h end
+    local c = M.recadrer({ x = x, y = y, w = l, h = h }, ecrans)
+    return c.x, c.y
+end
+
 -- Les écrans de Hyprland, en points logiques
 local function ecrans_logiques()
     local liste = {}
@@ -152,6 +167,8 @@ local suivi = false           -- un glisser est en cours
 local derniere                -- dernière zone annoncée à l'île
 local debut, depart = 0, nil
 local avec_super = false     -- le glisser a commencé avec Super maintenu
+local apercu = true           -- le cadre de l'île est demandé pour ce glisser
+local RELECTURE = 250         -- ms avant de relire la taille réelle d'une fenêtre rangée (son client répond après coup)
 local avant = {}              -- par adresse : l'état d'avant le rangement { libre, x, y, w, h } (voir M.remettre)
 local instantane = {}         -- à l'appui : l'état de chaque fenêtre (la glissée est celle sous le curseur, pas forcément l'active)
 
@@ -188,10 +205,11 @@ end
 
 local function pas()
     if not suivi then return end
-    -- Super lâché avant le bouton : Hyprland ne joue plus le raccourci de relâchement (il compare les modificateurs
-    -- d'à présent) ; on arrête ici, aperçu effacé, sans ranger la fenêtre
-    if avec_super and not super_tenu() then suivi = false; arreter_minuteur(); return end
+    -- Super lâché avant le bouton : tout événement clavier termine le glisser (0.56 comme 0.57). C'est un dépôt : la zone
+    -- sous le curseur range la fenêtre, comme le cadre le promettait ; relache coupe le suivi, le vrai relâchement ne fait rien
+    if avec_super and not super_tenu() then M.relache(); return end
     if os.time() - debut >= GARDE_FOU then suivi = false; arreter_minuteur(); return end
+    if not apercu then return end
     local z, _, cadre = zone_au_curseur()
     if z ~= derniere then
         derniere = z
@@ -212,7 +230,9 @@ function M.presse(super)
     if type(active) == "table" and active.address and instantane[active.address] == nil then
         instantane[active.address] = etat_de(active)
     end
-    if not nc.reglage("AIMANT_APERCU", true) then return end        -- sans aperçu, rien à suivre
+    apercu = nc.reglage("AIMANT_APERCU", true) and true or false
+    -- Sans aperçu, rien à suivre, sauf Super lâché avant le bouton (un glisser commencé avec Super)
+    if not apercu and not avec_super then return end
     if not minuteur then
         local ok, t = pcall(hl.timer, pas, { timeout = 50, type = "repeat" })
         if not ok or not t then return end
@@ -234,6 +254,21 @@ function M.appliquer(w, z, r)
         if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "enable", window = w })) end
         hl.dispatch(hl.dsp.window.resize({ window = w, x = r.w, y = r.h }))
         hl.dispatch(hl.dsp.window.move({ window = w, x = r.x, y = r.y }))
+        -- Une fenêtre à taille minimale reste plus grande que sa cible : relue une seule fois, puis gardée entière à l'écran
+        local a = w.address
+        if adresse_valide(a) then
+            pcall(hl.timer, function()
+                if suivi then return end
+                for _, v in ipairs(fenetres()) do
+                    if type(v) == "table" and v.address == a then
+                        local l, h = xy(v.size)
+                        local x, y = M.recaler(r, l, h, ecrans_logiques())
+                        if x and (tonumber(v.fullscreen) or 0) == 0 then hl.dispatch(hl.dsp.window.move({ window = v, x = x, y = y })) end
+                        return
+                    end
+                end
+            end, { timeout = RELECTURE, type = "oneshot" })
+        end
     end
 end
 

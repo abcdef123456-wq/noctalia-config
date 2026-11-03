@@ -36,6 +36,7 @@ hl = {
   exec_cmd = function(c) noter("exec " .. c) end,
   dispatch = function(d) noter(d) end,
   timer = function(f, o)
+    if o.timeout == 250 then RECALE = f; return {} end  -- la relecture d'une fenêtre rangée : testée à part (classe Recalage)
     noter("timer-cree " .. o.timeout .. " " .. o.type)
     if o.type == "repeat" then PAS = f else DIFFERE = f end
     return { set_enabled = function(self, b) noter("actif " .. tostring(b)) end }
@@ -202,7 +203,7 @@ trace = {}; PAS(); dire("apres", #trace)
         self.assertEqual(sorties[1], '10s\tactif false|exec qs -c nc-ile ipc call ile aimant "" 0 0 0 0')
         self.assertEqual(sorties[2], "apres\t0", "plus rien après l'arrêt du garde-fou")
 
-    def test_super_lache_avant_le_bouton_arrete_sans_ranger(self):
+    def test_super_lache_avant_le_bouton_depose_dans_la_zone(self):
         sorties = lua(self.ECRAN + '''
 KEYS = { Super_L = true }
 hl.is_key_down = function(n) return KEYS[n] == true end
@@ -213,8 +214,42 @@ KEYS = {}; PAS(); dire("lache", table.concat(trace, "|"))
 trace = {}; PAS(); AIMANT.relache(); dire("fin", #trace)
 ''')
         self.assertEqual(sorties[0], "tenu\t0")
-        self.assertEqual(sorties[1], 'lache\tactif false|exec qs -c nc-ile ipc call ile aimant "" 0 0 0 0')
-        self.assertEqual(sorties[2], "fin\t0", "plus de suivi et aucun rangement")
+        self.assertEqual(sorties[1], 'lache\tactif false|exec qs -c nc-ile ipc call ile aimant "" 0 0 0 0|taille 945 1060|place 10 10',
+                         "rangée dans la zone sous le curseur, comme le cadre le promettait")
+        self.assertEqual(sorties[2], "fin\t0", "le vrai relâchement ne range pas une seconde fois")
+
+    def test_super_lache_loin_des_bords_ne_range_rien(self):
+        sorties = lua(self.ECRAN + '''
+hl.is_key_down = function() return false end
+CURSEUR = { x = 900, y = 500 }; WIN = { floating = true, address = "0xab" }
+AIMANT.presse(true); CURSEUR = { x = 700, y = 400 }; trace = {}
+PAS(); dire(table.concat(trace, "|"))
+''')
+        self.assertEqual(sorties[0], "actif false")
+
+    def test_super_clic_sans_deplacement_ne_range_rien(self):
+        sorties = lua(self.ECRAN + '''
+hl.is_key_down = function() return false end
+CURSEUR = { x = 2, y = 500 }; WIN = { floating = true, address = "0xab" }
+AIMANT.presse(true); CURSEUR = { x = 4, y = 502 }; trace = {}
+PAS(); dire(table.concat(trace, "|"))
+''')
+        self.assertEqual(sorties[0], "actif false", "moins de 8 points de déplacement : le seuil de relache protège")
+
+    def test_sans_apercu_super_lache_est_vu_et_l_ile_n_est_pas_prevenue(self):
+        sorties = lua(self.ECRAN + '''
+KEYS = { Super_L = true }
+hl.is_key_down = function(n) return KEYS[n] == true end
+CURSEUR = { x = 900, y = 500 }; WIN = { floating = true, address = "0xab" }
+AIMANT.presse(true); dire("appui", table.concat(trace, "|")); trace = {}
+CURSEUR = { x = 0, y = 500 }; PAS(); dire("tenu", #trace)
+KEYS = {}; PAS(); dire("lache", table.concat(trace, "|"))
+trace = {}; PAS(); AIMANT.relache(); dire("fin", #trace)
+''', 'REG.AIMANT_APERCU = false\n')
+        self.assertEqual(sorties[0], "appui\ttimer-cree 50 repeat|actif true", "le minuteur sert à voir Super lâché")
+        self.assertEqual(sorties[1], "tenu\t0", "aucun message à l'île pendant le glisser")
+        self.assertEqual(sorties[2], "lache\tactif false|taille 945 1060|place 10 10", "minuteur arrêté, rangée, île jamais prévenue")
+        self.assertEqual(sorties[3], "fin\t0")
 
     def test_bouton_lateral_non_concerne_par_super(self):
         sorties = lua(self.ECRAN + '''
@@ -236,6 +271,15 @@ AIMANT.presse(true); CURSEUR = { x = 0, y = 500 }; PAS(); trace = {}; PAS(); dir
     def test_sans_apercu_pas_de_minuteur(self):
         sorties = lua(self.ECRAN + 'CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); dire(#trace)\n', 'REG.AIMANT_APERCU = false\n')
         self.assertEqual(sorties, ["0"])
+
+    def test_sans_apercu_le_garde_fou_arrete_le_minuteur(self):
+        sorties = lua(self.ECRAN + '''
+KEYS = { Super_L = true }
+hl.is_key_down = function(n) return KEYS[n] == true end
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(true); trace = {}
+TEMPS = 10; PAS(); dire(table.concat(trace, "|"))
+''', 'REG.AIMANT_APERCU = false\n')
+        self.assertEqual(sorties[0], "actif false")
 
     def test_relache_sans_appui_ne_fait_rien(self):
         sorties = lua(self.ECRAN + 'WIN = { floating = true }; CURSEUR = { x = 0, y = 500 }; AIMANT.relache(); dire(#trace)\n')
@@ -314,6 +358,60 @@ dire(#trace)
 
 
 @unittest.skipUnless(shutil.which("lua"), "Lua requis")
+class Recalage(unittest.TestCase):
+    """Une fenêtre à taille minimale reste plus grande que sa cible (fonction pure, puis une seule relecture différée)."""
+    ECRAN = 'MONS = { { name = "A", x = 0, y = 0, width = 1600, height = 1000, scale = 1, reserved = {} } }\n'
+
+    def recale(self, code):
+        return lua(self.ECRAN + """
+ECRANS = { ecran(0, 0, 1600, 1000) }
+function R(x, y, w, h, l, ht) local a, b = AIMANT.recaler({ x = x, y = y, w = w, h = h }, l, ht, ECRANS); dire(tostring(a), tostring(b)) end
+""" + code)
+
+    def test_pure_tient_dans_sa_cible_rien_a_faire(self):
+        self.assertEqual(self.recale("R(805, 10, 781, 980, 781, 980); R(805, 10, 781, 980, 700, 500); R(805, 10, 781, 980, 783, 982)"),
+                         ["nil\tnil"] * 3, "plus petite, ou à 2 points près (arrondi d'affichage) : rien")
+
+    def test_pure_droite_garde_son_bord_droit_gauche_son_bord_gauche(self):
+        self.assertEqual(self.recale("R(805, 10, 781, 980, 833, 980); R(10, 10, 781, 980, 833, 980)"), ["753\t10", "10\t10"])
+
+    def test_pure_bas_garde_son_bord_bas_et_jamais_hors_ecran(self):
+        self.assertEqual(self.recale("R(805, 510, 781, 480, 781, 600)"), ["805\t390"])
+        self.assertEqual(self.recale("R(805, 10, 781, 980, 1700, 980)"), ["0\t10"], "plus large que l'écran : calée au bord")
+
+    def depose(self, taille_reelle, apres=""):
+        return lua(self.ECRAN + f'''
+WIN = {{ floating = true, address = "0xab", at = {{ x = 100, y = 100 }}, size = {{ x = 500, y = 500 }} }}
+CURSEUR = {{ x = 900, y = 500 }}
+AIMANT.presse(); CURSEUR = {{ x = 1599, y = 500 }}; AIMANT.relache()
+WINS = {{ {{ address = "0xab", floating = true, at = {{ x = 805, y = 10 }}, size = {taille_reelle} }} }}
+{apres}
+trace = {{}}; if RECALE then RECALE() end
+dire(table.concat(trace, "|"))
+''', 'REG.AIMANT_APERCU = false\n')
+
+    def test_fenetre_trop_large_decalee_une_seule_fois(self):
+        self.assertEqual(self.depose("{ x = 833, y = 980 }")[0], "place 757 10")
+
+    def test_fenetre_qui_tient_ne_bouge_plus(self):
+        self.assertEqual(self.depose("{ x = 786, y = 980 }")[0], "", "cible de 785 : à 2 points près, l'arrondi d'affichage")
+
+    def test_nouveau_glisser_entre_temps_rien(self):
+        self.assertEqual(self.depose("{ x = 833, y = 980 }", "CURSEUR = { x = 900, y = 500 }; AIMANT.presse()")[0], "")
+
+    def test_fenetre_fermee_ou_maximisee_entre_temps_rien(self):
+        self.assertEqual(self.depose("{ x = 833, y = 980 }", "WINS = {}")[0], "")
+        self.assertEqual(self.depose("{ x = 833, y = 980 }", "WINS[1].fullscreen = 1")[0], "")
+
+    def test_haut_ne_relit_rien(self):
+        sorties = lua(self.ECRAN + '''
+WIN = { floating = true, address = "0xab" }
+CURSEUR = { x = 900, y = 500 }; AIMANT.presse(); CURSEUR = { x = 800, y = 0 }; AIMANT.relache()
+dire(tostring(RECALE))
+''', 'REG.AIMANT_APERCU = false\nREG.AIMANT_PLEIN_MASQUE = false\n')
+        self.assertEqual(sorties, ["nil"], "agrandie : rien à recaler")
+
+
 class Grille(unittest.TestCase):
     """Même grille que les tuiles : bordure dessinée autour de la surface, 2·espace entre deux voisines."""
     # L'écran de l'essai réel : 1600 × 1000 points, barre de 42 en haut, marge 10, bordure 2, espace 4 ; une tuile de
@@ -573,7 +671,7 @@ class Chargement(unittest.TestCase):
 print("refus", #refus, "echecs", #nc.echecs, "minuteurs", #timers)
 for _, b in ipairs(binds) do
   if (b.k == "mouse:275" or b.k == "SUPER + mouse:272") and not b.o.mouse and not b.o.click and not b.o.drag then
-    print("bind", b.k, b.o.release and "release" or "press")
+    print("bind", b.k, b.o.release and "release" or "press", b.o.transparent and "transparent" or "-")
   end
 end
 local p, r
@@ -610,10 +708,11 @@ n = #dispatches; sv(); print("apres", #dispatches - n)
             with self.subTest(saisie=saisie):
                 l = self.lancer(saisie, self.FLUX)
                 self.assertEqual(l[0], "refus\t0\techecs\t0\tminuteurs\t0", "aucun refus, module chargé, minuteur absent au chargement")
-                self.assertIn("bind\tmouse:275\tpress", l)
-                self.assertIn("bind\tmouse:275\trelease", l)
-                self.assertIn("bind\tSUPER + mouse:272\tpress", l)
-                self.assertIn("bind\tSUPER + mouse:272\trelease", l)
+                # Le relâchement est transparent : en 0.57, l'appui consommé par le déplacement le masquerait sinon
+                self.assertIn("bind\tmouse:275\tpress\t-", l)
+                self.assertIn("bind\tmouse:275\trelease\ttransparent", l)
+                self.assertIn("bind\tSUPER + mouse:272\tpress\t-", l)
+                self.assertIn("bind\tSUPER + mouse:272\trelease\ttransparent", l)
                 self.assertEqual(l[-3].split("\t")[:4], ["apres appui", "1", "50", "repeat"])
                 # le cadre d'aperçu, bordure comprise, avec les vrais réglages (bordure 2, espace 4)
                 self.assertEqual(l[-2], "exec\tqs -c nc-ile ipc call ile aimant droite 964 10 946 1060")
@@ -637,9 +736,9 @@ n = #dispatches; sv(); print("apres", #dispatches - n)
         self.assertNotIn("aimanter", src)
         self.assertNotRegex(src, r"mouse\s*=\s*true[^}]*release")
         aimant = (HYPR / "nc/aimant.lua").read_text()
-        # un seul minuteur qui se répète (pendant un glisser) ; l'autre est à un coup, après une sortie du maximisé
         self.assertEqual(len(re.findall(r'type = "repeat"', aimant)), 1, "un seul minuteur répété")
-        self.assertEqual(len(re.findall(r"hl\.timer", aimant)), 2)
+        # un seul minuteur répété, et deux à un coup : sortie du maximisé, relecture d'une fenêtre rangée
+        self.assertEqual(len(re.findall(r"hl\.timer", aimant)), 3)
 
 
 class Reglages(unittest.TestCase):

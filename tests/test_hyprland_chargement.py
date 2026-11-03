@@ -224,6 +224,9 @@ for _, r in ipairs(refus) do print("REFUS " .. r) end
             "    end\n"
             "    local d = {}\n"
             "    for _, n in ipairs({ 'mouse', 'click', 'drag' }) do if o[n] then d[#d + 1] = n end end\n"
+            "    if (o.click or o.release) and tostring(k):find('mouse:27[2-6]') then\n"
+            "      print('RELACHEMENT', tostring(k), o.click and 'click' or 'release', o.mouse and 'mouse' or '-', o.transparent and 'transparent' or 'masque')\n"
+            "    end\n"
             "    if tostring(k):find('mouse:27[2-6]') then vus[#vus + 1] = tostring(k) .. ' ' .. table.concat(d, ',') end\n").replace(
             "    return {}\n  end,", "    return { click = o.click == true, drag = o.drag == true, remove = function() end }\n  end,")
         with tempfile.TemporaryDirectory() as d:
@@ -246,6 +249,16 @@ for _, r in ipairs(refus) do print("REFUS " .. r) end
                 lignes = self.lancer(saisie)
                 self.assertEqual([l for l in lignes if l.startswith("REFUS")], [])
                 self.assertIn("SUPER + mouse:272 mouse", lignes, "le vrai déplacement garde mouse = true")
+
+    def test_chaque_relachement_souris_est_transparent_sans_mouse(self):
+        """Hyprland 0.57 : l'appui consommé par le déplacement masque tout raccourci de relâchement sur la même touche, sauf
+        transparent (shadowBinds). Le bouton Précédent / Suivant (click) et le rangement de l'aimant (release) seraient morts."""
+        lignes = [l.split("\t")[1:] for l in self.lancer("les-deux") if l.startswith("RELACHEMENT")]
+        attendus = [["mouse:275", "click", "-", "transparent"], ["mouse:276", "click", "-", "transparent"],
+                    ["mouse:275", "release", "-", "transparent"], ["SUPER + mouse:272", "release", "-", "transparent"]]
+        for attendu in attendus:
+            self.assertIn(attendu, lignes)
+        self.assertEqual([l for l in lignes if l[3] != "transparent"], [])
 
     def test_boutons_lateraux_clic_et_glisser_sans_mouse(self):
         lignes = self.lancer("les-deux")
