@@ -30,6 +30,9 @@ FloatingWindow {
     property string section: ""
     property string recherche: ""
     property string message: ""
+    property int dureeMessage: 6000
+    // Un second message garde toute sa durée : running reste vrai d'un message à l'autre, le minuteur ne repartait pas
+    onMessageChanged: if (message !== "" && !erreur) effaceMessage.restart()
     property bool erreur: false
     property bool lectureIllisible: false          // le dernier message est « catalogue illisible »
     property var file: []                           // écritures en attente : des commandes nc-reglages, une par une
@@ -262,7 +265,7 @@ FloatingWindow {
         stderr: StdioCollector { onStreamFinished: if (text.trim()) { fen.message = text.trim().split("\n").pop(); fen.erreur = true } }
         onExited: (code, status) => { if (code !== 0 && !fen.erreur) { fen.message = Reglages.t("Valeur refusée.", "Value rejected."); fen.erreur = true }; fen.charger(); fen.suivant() }
     }
-    Timer { id: effaceMessage; interval: 6000; running: fen.message !== "" && !fen.erreur; onTriggered: fen.message = "" }
+    Timer { id: effaceMessage; interval: fen.dureeMessage; running: fen.message !== "" && !fen.erreur; onTriggered: fen.message = "" }
 
     Shortcut {
         sequence: "Escape"; enabled: !fen.capture

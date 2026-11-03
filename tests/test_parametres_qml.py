@@ -117,6 +117,23 @@ if(etape===4){fen.close();verifier(!fen.visible,"fermeture");Qt.quit()}
         self.assertEqual(sets, [["set", "GESTES", "non"], ["set", "SOURIS_VITESSE", "5"], ["reset", "GESTES"]])
         self.assertGreaterEqual(sum(1 for a in appels if a[0] == "catalogue"), 3, "le catalogue est relu après les écritures")
 
+    def test_second_message_garde_toute_sa_duree(self):
+        """Mesuré au moment de l'effacement : un minuteur ne part jamais en avance, donc une machine chargée ne fausse pas ce test."""
+        self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+if(etape===1){fen.dureeMessage=800;fen.message="un";ligne0=Date.now();etape++;return}
+if(etape===2){
+ if(Date.now()-ligne0<400)return
+ // Machine chargée : le premier est déjà parti, on recommence
+ if(fen.message!=="un"){etape=1;return}
+ fen.message="deux";y0=Date.now();etape++;return}
+if(etape===3){
+ if(fen.message==="deux")return
+ verifier(Date.now()-y0>=750,"second message effacé après "+(Date.now()-y0)+" ms au lieu de 800")
+ Qt.quit()}
+''')
+
     def test_tout_au_clavier(self):
         appels = self.executer('''
 if(etape===0){creer();etape++;return}

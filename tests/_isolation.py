@@ -34,12 +34,20 @@
    2026-10-28). Un test qui vérifie un texte français pose lui-même NC_LANGUE=fr (ou LANGUE=fr dans son reglages.conf,
    ou module.EN = False) : les versions françaises restent testées (île, nc-reglages, nc-ia…).
 
+7. Limite de processus : ulimit -u compte TOUS les fils de l'utilisateur, ceux de ses applications comprises. Trop près de la
+   limite, fork échoue au hasard : Quickshell ne lance pas ses programmes, en silence, et des tests sans rapport échouent
+   (reproduit le 2026-11-03 : test_presse garde un fichier jamais supprimé). Un avertissement le dit au départ.
+
 Le dossier temporaire est effacé à la fin des tests."""
 import atexit
 import os
 from pathlib import Path
+import resource
 import shlex
 import shutil
+import signal
+import subprocess
+import sys
 import tempfile
 
 # Les faux : nom -> ce qu'ils affichent (après avoir noté leurs arguments au journal)
@@ -96,7 +104,39 @@ fi
 """)
 
 
+def avis_limite_de_processus(limite=None, fils=None):
+    """Le texte à afficher si la marge de RLIMIT_NPROC est trop faible pour une suite, sinon une chaîne vide."""
+    if limite is None:
+        limite = resource.getrlimit(resource.RLIMIT_NPROC)[0]
+    if limite == resource.RLIM_INFINITY:
+        return ""
+    if fils is None:
+        try:
+            sortie = subprocess.run(["ps", "-L", "-u", str(os.getuid()), "-o", "lwp="], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        fils = len(sortie.splitlines())
+    if limite - fils >= 300:
+        return ""
+    return (f"Attention : ulimit -u {limite} pour {fils} fils déjà ouverts par cet utilisateur. Près de la limite, fork échoue au hasard "
+            "et des tests sans rapport échouent : monte la limite (fils ouverts + 3000).\n")
+
+
+def executer_sans_orphelin(commande, timeout, **options):
+    """subprocess.run ne tue que le premier processus au délai : derrière dbus-run-session, qs restait seul, sans bus, sur un cœur
+    entier (vu 2 h 23). Ici, tout le groupe part. Capture la sortie en texte, comme capture_output=True, text=True."""
+    p = subprocess.Popen(commande, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, **options)
+    try:
+        sortie, erreur = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        sortie, erreur = p.communicate()
+        raise subprocess.TimeoutExpired(commande, timeout, output=sortie, stderr=erreur) from None
+    return subprocess.CompletedProcess(commande, p.returncode, sortie, erreur)
+
+
 if not os.environ.get("NC_TEST_ISOLE"):
+    sys.stderr.write(avis_limite_de_processus())
     _racine = Path(tempfile.mkdtemp(prefix="nc-tests-"))
     atexit.register(shutil.rmtree, _racine, True)
     os.environ["NC_TEST_VRAI_RUNTIME"] = os.environ.get("XDG_RUNTIME_DIR", "")

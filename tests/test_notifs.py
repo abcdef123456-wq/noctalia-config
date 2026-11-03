@@ -80,7 +80,7 @@ class Notifications(unittest.TestCase):
             (root / "vrai-bin").mkdir()
             (root / "vrai-bin/notify-send").symlink_to(_isolation.vrai("notify-send"))
             env["PATH"] = str(root / "vrai-bin") + os.pathsep + env["PATH"]
-            r = subprocess.run(["dbus-run-session", "--", "qs", "--no-color", "-p", str(root / "shell.qml")], env=env, capture_output=True, text=True, timeout=20)
+            r = _isolation.executer_sans_orphelin(["dbus-run-session", "--", "qs", "--no-color", "-p", str(root / "shell.qml")], 20, env=env)
             sortie = r.stdout + r.stderr
             self.assertEqual(r.returncode, 0, sortie)
             for e in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
