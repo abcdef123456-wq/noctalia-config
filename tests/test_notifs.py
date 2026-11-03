@@ -31,13 +31,13 @@ class Notifications(unittest.TestCase):
             if memo is not None:
                 (root / ".local/state/nc/ile").mkdir(parents=True, mode=0o700)
                 (root / ".local/state/nc/ile/notifs.json").write_text(json.dumps(memo))
-            for nom in ("Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml", "Projecteur.qml", "NotifIA.qml", "DemandeIA.qml", "IaPrete.qml"):
+            for nom in ("AssistantEtat.qml", "Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml", "Projecteur.qml", "NotifIA.qml", "DemandeIA.qml", "IaPrete.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k]!==undefined?valeurs[k]:d}}')
             (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool jeu: false; property bool ecranVu: true; property var maintenant: new Date(); property var minute: new Date(); property var hauteurs: ({}); property int fermetures: 0; property string ouvert: ""; property string ecranOuvert: ""; function basculer(e,c){ouvert="b"+c; ecranOuvert=e} function aller(n){ouvert+=n} function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("Notifs", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage", "Projecteur") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("PageNotifs", "Notifs", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage", "Projecteur", "NotifIA", "DemandeIA", "IaPrete")))
+                ("singleton " if n in ("AssistantEtat", "Notifs", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage", "Projecteur") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("AssistantEtat", "PageNotifs", "Notifs", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage", "Projecteur", "NotifIA", "DemandeIA", "IaPrete")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window
@@ -89,6 +89,76 @@ class Notifications(unittest.TestCase):
                 apres(root)
             f = root / ".local/state/nc/ile/notifs.json"
             return json.loads(f.read_text()) if f.exists() else None
+
+    def test_image_de_notification_jamais_chargee_du_reseau(self):
+        """N'importe quelle appli locale peut envoyer une adresse comme image ou icône : la vraie page, le vrai bus, aucune requête."""
+        import http.server
+        import threading
+        recus = []
+
+        class Serveur(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                recus.append(self.path)
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
+        threading.Thread(target=serveur.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(serveur.server_close)
+        self.addCleanup(serveur.shutdown)
+        u = f"http://127.0.0.1:{serveur.server_address[1]}"
+        self.executer(f"""
+if(etape===0){{
+ creer()
+ temoin.source="{u}/temoin.png"
+ envoi.command=["notify-send","-a","App","-h","string:image-path:{u}/image.png","Titre","Corps"]
+ envoi.running=true;etape++
+}}else if(etape===1&&Notifs.liste.length>0&&!envoi.running){{
+ envoi.command=["notify-send","-a","Autre","-i","{u}/icone.png","Titre2","Corps2"]
+ envoi.running=true;memo.t=Date.now();etape++
+}}else if(etape===2&&Notifs.liste.length>1&&Date.now()-memo.t>1500){{
+ for(var n of Notifs.liste)verifier(Notifs.icone(n).indexOf("http")!==0,"icône réseau : "+Notifs.icone(n))
+ Qt.quit()
+}}
+""", proprietes="Image { id: temoin }")
+        self.assertIn("/temoin.png", recus, "le serveur n'a rien vu : ce test ne prouverait rien")
+        self.assertEqual([r for r in recus if r != "/temoin.png"], [])
+
+    def test_resume_ia_de_la_vraie_page_sans_requete(self):
+        """Le résumé des notifications : du texte de tiers repassé par une IA, le chemin le plus exposé. La vraie page."""
+        import http.server
+        import threading
+        recus = []
+
+        class Serveur(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                recus.append(self.path)
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
+        threading.Thread(target=serveur.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(serveur.server_close)
+        self.addCleanup(serveur.shutdown)
+        u = f"http://127.0.0.1:{serveur.server_address[1]}"
+        resume = json.dumps(f'<table background="{u}/a.png"><tr><td>x</td></tr></table>\n\n<p style="background-image:url({u}/b.png)">y</p>\n\n'
+                            f'<style>@import url({u}/c.css);</style>\n\n![z]({u}/d.png)\n\n[i]: {u}/e.png\n\n![i]')
+        self.executer(f"""
+if(etape===0){{
+ creer();temoin.source="{u}/temoin.png"
+ page.resumeIA={resume}
+ memo.t=Date.now();etape++
+}}else if(etape===1&&Date.now()-memo.t>1500){{
+ verifier(trouver(page,"nc-notifs-resume").visible,"carte du résumé invisible")
+ Qt.quit()
+}}
+""", proprietes="Image { id: temoin }")
+        self.assertIn("/temoin.png", recus, "le serveur n'a rien vu : ce test ne prouverait rien")
+        self.assertEqual([r for r in recus if r != "/temoin.png"], [])
 
     def test_carte_des_mises_a_jour(self):
         import time

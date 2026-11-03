@@ -233,7 +233,7 @@ Item {
                             text: resumeur.running && p.resumeIA === "" ? (p.resumeQui || Reglages.t("L'IA", "The AI")) + Reglages.t(" résume…", " is summarizing…")
                                   : p.resumeErreur !== "" && p.resumeIA === "" ? Reglages.t("Résumé impossible", "Summary unavailable")
                                   : Reglages.t("Résumé · ", "Summary · ") + p.resumeQui }
-                    Text { width: parent.width; text: p.resumeIA; textFormat: Text.MarkdownText; wrapMode: Text.Wrap
+                    Text { width: parent.width; text: p.resumeIA !== "" ? AssistantEtat.formater(p.resumeIA) : ""; textFormat: Text.MarkdownText; wrapMode: Text.Wrap
                            color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13; visible: p.resumeIA !== "" }
                     Texte { objectName: "nc-notifs-resume-erreur"; width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone
                             font.pixelSize: 12; text: p.resumeErreur; visible: p.resumeErreur !== "" && p.resumeIA === "" }

@@ -26,7 +26,8 @@ Column {
         visible:r.message!==""; width:parent.width; height:visible?texte.implicitHeight+32:0
         radius:18; color:Couleurs.carte
         TextEdit { id:texte; x:16;y:16;width:parent.width-32;height:contentHeight;text:AssistantEtat.formater(r.message)
-                   color:Couleurs.texte; font.family:"Adwaita Sans";font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText }
+                   color:Couleurs.texte; font.family:"Adwaita Sans";font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText
+                   Keys.onPressed: (e) => { if (e.matches(StandardKey.Copy)) { AssistantEtat.copierSansInvisible(selectedText); e.accepted = true } } }
     }
     Repeater {
         model:r.lignes
@@ -43,7 +44,7 @@ Column {
                     width:parent.width;secondaire:true;textFormat:Text.MarkdownText;wrapMode:Text.Wrap;elide:Text.ElideNone
                     text:carte.kind==="history"||carte.kind==="messages"?AssistantEtat.formater(String(carte.item.response||carte.item.content||"")):
                          carte.kind==="value"||carte.kind==="profile"?AssistantEtat.formater(String(carte.item.text||"")):
-                         [carte.item.id!==undefined?"ID : "+carte.item.id:"",carte.item.desc||"",carte.item.platform||"",carte.item.remind_at||"",carte.item.state||"",carte.item.model||""].filter(x=>x!=="").join(" · ")
+                         AssistantEtat.sansReseau([carte.item.id!==undefined?"ID : "+carte.item.id:"",carte.item.desc||"",carte.item.platform||"",carte.item.remind_at||"",carte.item.state||"",carte.item.model||""].filter(x=>x!=="").join(" · "))
                     visible:text!==""
                 }
                 Flow {

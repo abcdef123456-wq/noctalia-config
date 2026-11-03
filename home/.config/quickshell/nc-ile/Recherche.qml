@@ -1166,7 +1166,8 @@ Item {
             id: texteReponse
             anchors.top: enTete.bottom; anchors.topMargin: 6
             x: 14; width: parent.width - 28
-            text: r.reponseAide !== "" ? r.reponseAide : zoneReponse.enDiag ? diag.resume : AssistantEtat.formater(r.reponse)
+            // Filtré quel que soit le format : text et textFormat sont deux liaisons, Qt peut lire l'un avec l'ancien état de l'autre
+            text: AssistantEtat.sansReseau(r.reponseAide !== "" ? r.reponseAide : zoneReponse.enDiag ? diag.resume : AssistantEtat.formater(r.reponse))
             visible: !zoneReponse.attend || r.reponseAide !== ""
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
             textFormat: r.reponseAide !== "" || zoneReponse.enDiag ? Text.PlainText : Text.MarkdownText

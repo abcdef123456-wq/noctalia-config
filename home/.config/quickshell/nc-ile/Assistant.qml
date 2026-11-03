@@ -297,7 +297,8 @@ Item {
                                     color: Couleurs.texte
                                     selectionColor: Couleurs.accent
                                     font.family: "Adwaita Sans"; font.pixelSize: 13
-                                    onLinkActivated: lien => page.ouvrirLien(lien)
+                                    onLinkActivated: lien => page.ouvrirLien(AssistantEtat.sansInvisible(lien))
+                                    Keys.onPressed: (e) => { if (e.matches(StandardKey.Copy)) { AssistantEtat.copierSansInvisible(selectedText); e.accepted = true } }
                                     HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
                                 }
                                 // Fichiers joints à ce message (issue #31)

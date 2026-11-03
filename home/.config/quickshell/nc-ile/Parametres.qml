@@ -428,7 +428,7 @@ FloatingWindow {
                     Texte { visible: ligne.aConfirmer; objectName: "nc-reglage-question-" + ligne.r.cle; width: parent.width; text: ligne.r.confirmer || ""
                             color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold; wrapMode: Text.Wrap; elide: Text.ElideNone }
                     // Rapport de mise à jour : le résumé de l'IA (Markdown), puis le détail à la demande
-                    Text { visible: ligne.r.genre === "rapport"; width: parent.width; text: ligne.r.aide || ""; textFormat: Text.MarkdownText
+                    Text { visible: ligne.r.genre === "rapport"; width: parent.width; text: ligne.r.genre === "rapport" ? AssistantEtat.sansReseau(ligne.r.aide || "") : ""; textFormat: Text.MarkdownText
                            wrapMode: Text.Wrap; color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13 }
                     Texte { visible: ligne.r.genre === "rapport" && !!ligne.r.ia; text: Reglages.t("Résumé par ", "Summary by ") + (ligne.r.ia || ""); secondaire: true; font.pixelSize: 11 }
                     Column {

@@ -3,6 +3,7 @@
 import QtQuick
 
 Text {
+    textFormat: Text.PlainText
     property string nom: ""
     property real taille: 22
     property bool plein: true

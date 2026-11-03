@@ -23,7 +23,7 @@ class PageAssistant(unittest.TestCase):
             if configuration is not None:
                 (root / "catalogue.json").write_text(json.dumps(configuration))
             noms = ["Assistant.qml", "AssistantEtat.qml", "Defilement.qml", "Texte.qml", "Ico.qml",
-                    "Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml", "AssistantPieces.qml"]
+                    "Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml", "AssistantPieces.qml", "JarvisResultat.qml", "JarvisEtat.qml"]
             if compact:
                 noms.append("Compact.qml")
             for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:
@@ -44,7 +44,7 @@ class PageAssistant(unittest.TestCase):
                 (root/'Terminal.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false; property string commande: ""; property string dureeTexte: "0:00"; property var fini: null}')
                 (root/'Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {\n'+ '\n'.join('property var '+k+':'+v for k,v in champs.items())+'\nfunction duree(n){return "0:00"} function nomJoli(s){return s} function octets(n){return "0"}\n}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml") else "")
+                ("singleton " if nom in ("AssistantEtat.qml", "JarvisEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml") else "")
                 + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml"] if compact else [])))
             if not absent:
                 bin = root / ".local/bin"
@@ -652,9 +652,9 @@ if(etape===0){
  for(var im of ["x\\n\\n[i]: http://127.0.0.1:1/r.png\\n\\n![i]","![i](http://127.0.0.1:1/r.png)","!![a](http://127.0.0.1:1/a.png)","x\\n\\n[i]: http://127.0.0.1:1/c.png\\n\\n!![i]","!\\\\( \\\\)[a](http://127.0.0.1:1/d.png)","[l](https://x.invalid)![a](http://127.0.0.1:1/g.png)","https://x.invalid/![a](http://127.0.0.1:1/f.png)","mailto:a![a](http://127.0.0.1:1/h.png)","file:///x![a](http://127.0.0.1:1/i.png)","HTTP://x![a](http://127.0.0.1:1/j.png)"])
   verifier(AssistantEtat.formater(im).indexOf("![")<0,"image : "+im)
  // Le point d'exclamation reste, une adresse et le code ne changent pas
- var bravo=creerTexte("Bravo![1]");verifier(bravo.getText(0,bravo.length)==="Bravo![1]","Bravo : "+bravo.getText(0,bravo.length));bravo.destroy()
+ var bravo=creerTexte("Bravo![1]");verifier(AssistantEtat.sansInvisible(bravo.getText(0,bravo.length))==="Bravo![1]","Bravo : "+bravo.getText(0,bravo.length));bravo.destroy()
  verifier(AssistantEtat.formater("https://x.invalid/a_b$c")==="https://x.invalid/a_b$c","adresse changée")
- verifier(AssistantEtat.formater("`![i]`")==="`![i]`","code changé")
+ verifier(AssistantEtat.sansInvisible(AssistantEtat.formater("`![i]`"))==="`![i]`","code changé")
  // /cours tapé en entier passe devant /courses
  verifier(AssistantEtat.proposerCommandes("/cours",6)[0].texte==="/cours","autocomplétion : "+AssistantEtat.proposerCommandes("/cours",6)[0].texte)
  Qt.quit()

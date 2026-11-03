@@ -311,12 +311,12 @@ Singleton {
         // Balises HTML éventuelles renvoyées par un backend orienté Telegram
         t = t.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_, c) => garder("\n```\n" + c.trim() + "\n```\n"))
         t = t.replace(/<code>([\s\S]*?)<\/code>/gi, (_, c) => garder("`" + c + "`"))
+        t = t.replace(/<br\s*\/?>/gi, "\n")
         t = t.replace(/<(?:b|strong)>([\s\S]*?)<\/(?:b|strong)>/gi, "**$1**")
         t = t.replace(/<(?:i|em)>([\s\S]*?)<\/(?:i|em)>/gi, "*$1*")
         t = t.replace(/<s>([\s\S]*?)<\/s>/gi, "~~$1~~")
         // Les caractères LaTeX d'une URL (notamment $, _ et \\) font partie du lien.
-        // S'arrête avant « ![ » : l'image qui suit ne se cache pas derrière l'adresse, elle passe par le remplacement du « ! »
-        t = t.replace(/(?:https?:\/\/|file:\/\/\/|mailto:)(?:(?!!\[)[^\s<>"`])+/gi, m => garder(m))
+        t = t.replace(/(?:https?:\/\/|file:\/\/\/|mailto:)[^\s<>"`]+/gi, m => garder(m))
         // Blocs LaTeX ($$...$$, \[...\], \begin{equation|align|gather|math|displaymath}...\end{...})
         t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => a.formaterLatex(m, true))
         t = t.replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => a.formaterLatex(m, true))
@@ -331,10 +331,26 @@ Singleton {
         if (/\\(?:frac|dfrac|tfrac|sqrt|binom|mathbb|mathcal|text|vec|hat|bar|overline|sum|prod|int|infty|partial|nabla|pm|mp|times|cdot|leq|geq|neq|approx|equiv|to|rightarrow|Rightarrow|iff|implies|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|tau|phi|omega|Delta|Sigma|Omega)(?![a-zA-Z])/.test(t)) {
             t = a.formaterCommandesLatex(t)
         }
-        // Pas de chargement d'image externe en Markdown : ni en ligne, ni par une définition de référence (« ![i] »). En dernier,
-        // après le LaTeX qui pourrait en faire apparaître, et avant de rendre le code, qui ne change pas
-        t = t.replace(/!(?=\[)/g, "&#33;")
-        return t.replace(/\u0000BLOC(\d+)\u0000/g, (_, idx) => blocs[Number(idx)] || "")
+        return sansReseau(t.replace(/\u0000BLOC(\d+)\u0000/g, (_, idx) => blocs[Number(idx)] || ""))
+    }
+    // Le dernier passage de tout texte affiché en Markdown : aucune requête réseau, aucun clic, quoi que dise le texte (une réponse
+    // d'IA peut recopier une balise venue d'une notification ou d'une page, et une adresse peut porter des données). Aucune analyse du
+    // Markdown, partout, y compris dans le code : un caractère invisible après « < » devant ce qui peut ouvrir une balise, et dans « ![ ».
+    // Un parcours « ceci est certainement du code » a été contourné : il diverge de md4c et des étapes de Qt avant lui. Le texte du code
+    // se lit pareil ; ce caractère est retiré à la copie au clavier (copierSansInvisible), pas de la sélection à la souris. D'abord, les
+    // demi-surrogats isolés : Qt les retire avant md4c, et « !<demi>[ » deviendrait « ![ » après ce filtre.
+    function sansReseau(texte) {
+        return String(texte || "").replace(/[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g, m => m.length === 2 ? m : "\ufffd")
+            .replace(/<(?=[A-Za-z\/!?])/g, "<\u200b").replace(/!\[/g, "!\u200b[")
+    }
+    // Ce que copie un TextEdit en Markdown : selectedText rend aussi les fins de ligne et les cases de tableau sous forme de séparateurs
+    function sansInvisible(texte) {
+        return String(texte || "").replace(/\u200b/g, "").replace(/[\u2028\u2029\ufdd0\ufdd1]/g, "\n").replace(/\u00a0/g, " ")
+    }
+    // Le presse-papiers de Qt, comme la copie qu'elle remplace : ni limite de la ligne de commande (128 Kio), ni texte visible dans ps
+    function copierSansInvisible(texte) {
+        var t = sansInvisible(texte)
+        if (t) Quickshell.clipboardText = t
     }
     function apercu(texte) {
         var t = formater(texte)

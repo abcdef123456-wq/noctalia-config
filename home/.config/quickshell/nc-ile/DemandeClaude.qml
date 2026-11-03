@@ -63,6 +63,7 @@ Item {
                 id: det
                 x: 10; y: 6; width: parent.width - 20
                 text: d.vue ? (d.vue.detail || "") : ""
+                textFormat: Text.PlainText
                 font.family: "monospace"; font.pixelSize: 12; color: Couleurs.texteDoux
                 elide: Text.ElideRight; maximumLineCount: 1
             }
