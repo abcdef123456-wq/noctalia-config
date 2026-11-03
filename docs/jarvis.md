@@ -937,7 +937,10 @@ approbation et qu'un gestionnaire d'approbation est enregistré » : omp reste d
 | Cursor, Kiro, Amp | hooks ou extension | non | seulement « fini » ou « prêt » |
 
 Dans tous les cas la réponse demande un terminal kitty à socket (`ecrire`) ; l'agent doit être au premier plan de ce terminal
-(reconnu par le nom exact de son processus). Gemini CLI et Antigravity sont dans cette liste et branchés par
+(reconnu par le nom exact de son processus). kitty n'accepte le pilotage que par ce socket (`allow_remote_control socket-only`) :
+une commande reçue par le terminal est refusée, donc du texte affiché (fichier piégé, journal, hôte SSH) ne peut pas le piloter ;
+un programme lancé sous ton compte peut toujours joindre le socket. Le réglage compte à l'ouverture de kitty : les fenêtres déjà
+ouvertes le prennent quand kitty est relancé. Gemini CLI et Antigravity sont dans cette liste et branchés par
 `nc-claude installer gemini` / `installer antigravity`.
 Le code est dans la surcouche (`server/nc_agents.py`, branché par `nc_telegram.py` ; JARVIS-BIS n'est pas modifié) et dans
 `nc-claude`, `nc-noeud`, `nc-alertes` et `nc-reglages` côté PC.
