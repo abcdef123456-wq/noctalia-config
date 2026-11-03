@@ -11,8 +11,8 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 CONF = REPO / "home/.config/kitty/kitty.conf"
-# « kitty @ », « kitten @ », et leurs formes en liste : ["kitty", "@", …]
-PILOTAGE = re.compile(r"""\b(?:kitty|kitten)\b["',\s]*@(?![\w.])""")
+# « kitty @ », « kitten @ », « $KITTY @ », « kitty_bin @ », et les formes en liste, même sur deux lignes : ["kitty", "@", …]
+PILOTAGE = re.compile(r"""(?<![\w-])\$?\{?(?:kitty|kitten)\w*\}?["',\s]*@(?![\w.])""", re.I)
 
 
 def fichiers_du_depot():
@@ -34,25 +34,36 @@ class Pilotage(unittest.TestCase):
         self.assertEqual([l for l in lignes if l.startswith("allow_remote_control")], ["allow_remote_control socket-only"])
         self.assertEqual([l for l in lignes if l.startswith("listen_on")], ["listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}"],
                          "sans listen_on, socket-only coupe tout : l'île ne pourrait plus écrire dans le terminal")
-        self.assertNotIn("remote_control_password", CONF.read_text(), "un mot de passe rouvrirait le terminal")
+        self.assertNotIn("remote_control_password", CONF.read_text(), "ce dépôt n'utilise pas de mot de passe de pilotage")
 
     def test_tout_appel_du_depot_passe_par_le_socket(self):
+        """--to est exigé parce que l'île tourne hors de kitty : sans lui, kitty lirait KITTY_LISTEN_ON, absent de son environnement."""
         appels = []
         for f, texte in fichiers_du_depot():
-            for n, ligne in enumerate(texte.splitlines(), 1):
-                if not PILOTAGE.search(ligne):
+            for trouve in PILOTAGE.finditer(texte):
+                ligne = texte[texte.rfind("\n", 0, trouve.start()) + 1:].split("\n", 1)[0].strip()
+                if ligne.startswith(("#", "//", '"""')):         # un commentaire ou une docstring ne lance rien
                     continue
-                nu = ligne.strip()
-                if nu.startswith(("#", "//", '"""')):           # un commentaire ou une docstring ne lance rien
-                    continue
-                appels.append(f"{f.relative_to(REPO)}:{n}")
-                self.assertIn('"--to", "unix:"', ligne, f"{f.relative_to(REPO)}:{n} : sans --to, le terminal est refusé")
+                ou = f"{f.relative_to(REPO)}:{texte.count(chr(10), 0, trouve.start()) + 1}"
+                appels.append(ou)
+                self.assertIn("--to", texte[trouve.end():trouve.end() + 60], f"{ou} : sans --to, ce pilotage ne vise pas le socket")
         self.assertGreaterEqual(len(appels), 3, f"le motif ne voit plus les appels de nc-claude : {appels}")
 
-    def test_aucune_fenetre_ne_recoit_le_droit_a_part(self):
-        """launch --allow-remote-control donnerait le pilotage par le terminal à cette fenêtre, malgré socket-only."""
+    def test_le_motif_voit_les_formes_courantes(self):
+        for forme in ("kitty @ ls", "kitten @ ls", '["kitty", "@", "ls"]', '["kitten",\n  "@", "ls"]', "$KITTY @ ls", "${KITTY} @ ls", "kitty_bin @ ls"):
+            self.assertRegex(forme, PILOTAGE, forme)
+        for autre in ("nc-kitty @x", "kitty@exemple.org", "kitten|kitty|pet"):
+            self.assertNotRegex(autre, PILOTAGE, autre)
+
+    def test_aucune_fenetre_ni_aucun_script_ne_rouvre_le_terminal(self):
+        """Une fenêtre lancée avec ce droit reste pilotable par le texte affiché, malgré socket-only ; une commande écrite à la
+        main sur le terminal serait refusée ; et ce réglage ne se décide que dans kitty.conf."""
         for f, texte in fichiers_du_depot():
-            self.assertNotIn("--allow-remote-control", texte, str(f.relative_to(REPO)))
+            nom = str(f.relative_to(REPO))
+            for interdit in ("--allow-remote-control", "new_window @", "P@kitty-cmd"):
+                self.assertNotIn(interdit, texte, nom)
+            if f != CONF:
+                self.assertNotIn("allow_remote_control", texte, nom)
 
     @unittest.skipUnless(shutil.which("kitty"), "kitty requis")
     def test_le_vrai_kitty_lit_cette_valeur(self):
