@@ -72,7 +72,8 @@ function nc.halo(n)
 end
 
 -- ── Mode jeu automatique ────────────────────────────────────────────────────
--- Jeux reconnus : Steam / Proton (steam_app_…), gamescope, jeux Windows (….exe). Le profil d'avant est noté dans
+-- Jeux reconnus : Steam / Proton (steam_app_…), gamescope, jeux Windows (….exe), sauf Roblox et Roblox Studio, qui
+-- restent ouverts pendant le travail et garderaient le profil Performance. Le profil d'avant est noté dans
 -- un fichier (1re ligne) : il est remis à la fermeture du dernier jeu. La 2e ligne « jeu » dit que le mode jeu a été mis
 -- par ici : lui seul est coupé à la fin, et seulement s'il est toujours en place (un mode jeu mis ou changé à la main,
 -- Super + Alt + G, n'est jamais défait par un automatisme).
@@ -81,7 +82,24 @@ local MARQUE_JEU = RUN .. "nc-mode-jeu"
 
 local function est_jeu(w)
     local c = w and w.class or ""
+    if c:lower():find("roblox", 1, true) then return false end
     return c:match("^steam_app_") ~= nil or c == "gamescope" or c:lower():match("%.exe$") ~= nil
+end
+
+local function un_jeu_ouvert(sauf)
+    for _, autre in ipairs(hl.get_windows() or {}) do
+        if autre.address ~= sauf and est_jeu(autre) then return true end
+    end
+    return false
+end
+
+-- Dernier jeu fermé : profil d'avant, et mode jeu coupé seulement si on l'a mis et qu'il est toujours là (l'utilisateur
+-- l'a peut-être déjà coupé)
+local function revenir(note)
+    os.remove(JEU_AUTO)
+    local avant, par_ici = note:match("^([^\n]*)(.*)")
+    hl.exec_cmd("noctalia msg power-set " .. (avant ~= "" and avant or "balanced"))
+    if par_ici:find("jeu", 1, true) and nc.jeu and lire(MARQUE_JEU) then nc.mode_jeu() end
 end
 
 hl.on("window.open", function(w)
@@ -95,16 +113,17 @@ end)
 hl.on("window.close", function(w)
     if not est_jeu(w) then return end
     local note = lire(JEU_AUTO)
-    if not note then return end
-    for _, autre in ipairs(hl.get_windows()) do
-        if autre.address ~= w.address and est_jeu(autre) then return end   -- un autre jeu tourne encore
-    end
-    os.remove(JEU_AUTO)
-    local avant, par_ici = note:match("^([^\n]*)(.*)")
-    hl.exec_cmd("noctalia msg power-set " .. (avant ~= "" and avant or "balanced"))
-    -- Coupé seulement si on l'a mis et qu'il est toujours là (l'utilisateur l'a peut-être déjà coupé)
-    if par_ici:find("jeu", 1, true) and nc.jeu and lire(MARQUE_JEU) then nc.mode_jeu() end
+    if not note or un_jeu_ouvert(w.address) then return end   -- un autre jeu tourne encore
+    revenir(note)
 end)
+
+-- Au chargement, une fois tous les modules lus : une note sans aucun jeu ouvert ne se refermerait jamais (fenêtre qui
+-- n'est plus reconnue comme un jeu, jeu disparu sans window.close). Elle garderait le profil Performance, et
+-- empêcherait le prochain jeu de se déclarer.
+pcall(hl.timer, function()
+    local note = lire(JEU_AUTO)
+    if note and not un_jeu_ouvert() then revenir(note) end
+end, { timeout = 2000, type = "oneshot" })
 
 -- ── Marque-pages de fenêtres ────────────────────────────────────────────────
 -- Super + Ctrl + N : 1er appui, la fenêtre active est attachée à N ; ensuite, N amène à elle (son bureau compris) ;
@@ -188,6 +207,7 @@ end
 local function exclue(w)
     local c, t = w.class or "", w.initial_title or ""
     return c == "" or c == "dropterm" or c == "nc-code" or c == "fingerpop" or est_jeu(w) or w.pinned
+        or c:lower():match("%.exe$") ~= nil          -- Roblox Studio aussi : ses boîtes Windows ne sont pas mémorisées
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
         or (w.class == "org.quickshell" and (t == FENETRE_VPN or w.title == FENETRE_VPN))
