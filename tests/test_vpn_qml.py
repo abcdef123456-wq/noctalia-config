@@ -907,7 +907,7 @@ class HorsEcran(unittest.TestCase):
                     verifier(tous(fen.contentItem, "nc-vpn-actif").length === 2, "un profil de labo ET Mullvad en même temps")
                     verifier(textes(fen.contentItem).indexOf("Connecté · " + String.fromCodePoint(0x1F1F8, 0x1F1EA) + " SE · 2 tunnels") >= 0, "titre : " + textes(fen.contentItem))
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
-                if (etape === 2) { if (ticks < 8) return
+                if (etape === 2) { if (ticks < 15) return
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', etats={0: etat})
