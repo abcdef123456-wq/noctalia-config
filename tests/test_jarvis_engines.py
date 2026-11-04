@@ -73,6 +73,24 @@ else: print(json.dumps(dict(type='text',part=dict(text='réponse OpenCode'))))
             with self.subTest(commande=m), self.assertRaises(ValueError):
                 self.m.commande('codex', str(self.cli), m, '')
 
+    def test_effort_et_mode_sur_agy(self):
+        self.e.choose(engine='agy')
+        recus = []
+        self.e.original['update_session'] = lambda **kw: recus.append(kw) or kw
+        for cle in ('effort', 'mode'):
+            for m in ('-x', '--dangerously-skip-permissions', 'a b', 'a\n', '@x', 7, ['a']):
+                with self.subTest(cle=cle, m=m):
+                    with self.assertRaises(self.m.ModeleRefuse):
+                        self.e.choose(**{cle: m})
+                    r = asyncio.run(self.e.run('q', **{cle: m}))
+                    self.assertFalse(r['success'])
+                    self.assertIn('Réglage invalide', r['error'])
+        self.assertEqual(recus, [])
+        self.e.original['run_agy'].assert_not_called()
+        self.e.choose(effort='high', mode='agent')
+        self.assertEqual(recus[-1]['effort'], 'high')
+        self.assertEqual(recus[-1]['mode'], 'agent')
+
     def test_each_choice_reaches_its_cli_with_model_effort_and_private_stdin(self):
         for engine,model,effort,expected in [('codex','requested-model','xhigh','Codex'),('claude','sonnet','high','Claude'),('opencode','provider/model','high','OpenCode')]:
             with self.subTest(engine=engine):
@@ -215,6 +233,18 @@ class ReglagesEnregistres(unittest.TestCase):
                 self.assertNotIn('model',e.state['settings']['agy'])
                 self.assertEqual([r['effort'] for r in self.recus if r['effort']],['low'],'les autres réglages restent')
                 if mauvais not in ('é',7): self.assertNotIn(str(mauvais),'\n'.join(journal.output))   # la valeur n'est pas journalisée
+
+    def test_effort_et_mode_de_mauvaise_forme_ignores_au_demarrage(self):
+        for cle in ('effort', 'mode'):
+            for mauvais in ('--x', 'a b', 7):
+                with self.subTest(cle=cle, mauvais=mauvais):
+                    self.recus.clear()
+                    self.ecrit({'model': 'gemini-x', cle: mauvais})
+                    with self.assertLogs('nc_engines', level='WARNING'):
+                        e = self.m.Engines(self.up)
+                    self.assertEqual([r[cle] for r in self.recus if r[cle]], [])
+                    self.assertNotIn(cle, e.state['settings']['agy'])
+                    self.assertEqual([r['model'] for r in self.recus if r['model']], ['gemini-x'], 'le modèle reste')
 
     def test_allowed_saved_settings_are_still_restored(self):
         self.ecrit(dict(model='gemini-x',permission_mode='plan'))

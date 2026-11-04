@@ -68,6 +68,10 @@ MODELE_REFUSE = ('Identifiant de modèle invalide : seulement lettres, chiffres 
                  '80 caractères au plus.')
 
 
+# agy reçoit aussi effort et mode en option (--effort, --mode), sans contrôle chez l'amont : même forme
+REGLAGE_REFUSE = "Réglage invalide : l'effort et le mode suivent la même forme que le modèle (ni tiret, ni @, ni crochet au début)."
+
+
 class ModeleRefuse(ValueError):
     """Attrapée à part par nc_runner : sur /session, l'amont n'attrape rien, et le message devenait une erreur 500."""
 
@@ -888,9 +892,10 @@ class Engines:
         écrit par 4ecc57a) est ignoré avec une ligne de journal, sans valeur : jamais d'exception au démarrage."""
         agy = self.state['settings']['agy']
         if not isinstance(agy, dict): return
-        if not modele_valide(agy.get('model')):
-            logging.getLogger('nc_engines').warning('Modèle AGY enregistré refusé (forme invalide) : ignoré, valeur par défaut.')
-            agy.pop('model', None)
+        for cle in ('model', 'effort', 'mode'):
+            if not modele_valide(agy.get(cle)):
+                logging.getLogger('nc_engines').warning('Réglage AGY enregistré refusé (%s, forme invalide) : ignoré, valeur par défaut.', cle)
+                agy.pop(cle, None)
         # Un état ancien, ou écrit depuis un autre PC, peut se contredire (argon-low et effort high) : aligné avant d'être appliqué
         try:
             couple = {k: agy[k] for k in ('model', 'effort') if isinstance(agy.get(k), str) and agy[k]}
@@ -1032,6 +1037,7 @@ class Engines:
         if self.occupe(): raise ValueError('Une réponse est en cours ; attends avant de changer de moteur.')
         if set(values)-{'engine','model','effort','mode','permission_mode'}: raise ValueError('Réglage inconnu.')
         if not modele_valide(values.get('model')): raise ModeleRefuse(MODELE_REFUSE)
+        if not (modele_valide(values.get('effort')) and modele_valide(values.get('mode'))): raise ModeleRefuse(REGLAGE_REFUSE)
         engine = values.get('engine',self.state['engine'])
         if engine not in ENGINES: raise ValueError('Moteur inconnu.')
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
@@ -1103,6 +1109,7 @@ class Engines:
         def failure(message): return dict(success=False,output='',error=message,session=self.session(session_key))
         if ia_coupee(): return failure('L’IA est coupée sur ce PC (réglage IA_MODE=non) : aucun moteur n’est lancé.')
         if not modele_valide(model): return failure(MODELE_REFUSE)
+        if not (modele_valide(effort) and modele_valide(mode)): return failure(REGLAGE_REFUSE)
         if self.lock.locked(): return failure('Une autre requête JARVIS est déjà en cours.')
         # /run n'est jamais contrôlé par l'upstream (P2-2 de 94a3a93) : un agent qui a SECRET_KEY y demandait
         # bypassPermissions. Hors de notre liste : le mode de la session (aucun de nos clients n'envoie ce champ).
