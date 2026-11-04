@@ -60,11 +60,9 @@ class Spotlight(unittest.TestCase):
         self.assertEqual(self.compact(500, retour_spot=False, repos=0), 0.0)
 
     def test_super_r_sur_une_page_ouverte_pas_de_clignotement(self):
-        self.assertIn("spotDepuisPilule = ile.etirementRecherche === 0", self.src)
-        for largeur in (110, 200, 260):
-            self.assertEqual(self.etirement(largeur), 0.0, "départ de la pilule : détecté")
+        # Comparée à la largeur de la pilule : une pilule à titre et artiste dépasse 300 px, et reste une pilule
+        self.assertIn("spotDepuisPilule = ile.width <= compact.largeur + 1", self.src)
         for largeur in (432, 440, 460):
-            self.assertGreater(self.etirement(largeur), 0.0, "départ d'une page ou d'une bannière : pas la pilule")
             for l in range(largeur, 721, 10):
                 self.assertEqual(self.compact(l, recherche=True, depuis_pilule=False), 0.0, f"{l} px : l'heure ne revient pas")
 
@@ -73,7 +71,8 @@ class Spotlight(unittest.TestCase):
         self.assertIsNotNone(m)
         cadre = m.group(1)
         self.assertNotIn("visible: e > 0", cadre)
-        self.assertIn("opacity: fen.ouverte || fen.banniere || fen.enCarte ? 1 : 0", cadre)
+        # Sans contour : rien de dessiné, sinon le dégradé reste sous l'île, de sa taille exacte
+        self.assertIn("opacity: Couleurs.aContour && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0", cadre)
         self.assertIn("visible: opacity > 0.01", cadre)
         self.assertIn("readonly property real e: Couleurs.aContour ? 2 : 0", cadre)
         self.assertIn("Behavior on opacity { NumberAnimation { duration: 220 } }", cadre)

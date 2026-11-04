@@ -561,7 +561,18 @@ ShellRoot {
    verifier(spot.resultats[0].garder === true && spot.resultats[0].glyphe === "auto_awesome", "l'IA d'abord : " + JSON.stringify(titres()))
    verifier(titres().indexOf("Veille de l'écran") === 1, "config après l'IA : " + JSON.stringify(titres()))
    verifier(spot.resultats[1].aide.indexOf("↓") < 0, "pas de rappel sans titre exact")
-   champ.text = "?"; etape++; return }
+   // Aucune IA à qui demander : les réponses de la config d'abord, sans rappel, la ligne sans issue après
+   spot.iaCoupee = true; champ.text = "? veille"; etape = 10; return }
+  if (etape === 10 || etape === 11) {
+   verifier(titres()[0] === "Veille de l'écran", "partielle, sans IA : config d'abord : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].aide.indexOf("↓") < 0, "pas de rappel sans IA : " + spot.resultats[0].aide)
+   verifier(spot.resultats[spot.resultats.length - 1].glyphe !== "auto_awesome", "ligne sans issue, pas une question")
+   champ.text = "?  luminosite"; etape += 2; return }
+  if (etape === 12 || etape === 13) {
+   verifier(titres()[0] === "Luminosité", "exacte, sans IA : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].aide.indexOf("↓") < 0, "exacte, pas de rappel sans IA : " + spot.resultats[0].aide)
+   if (etape === 12) { spot.iaCoupee = false; spot.nomIA = "-"; champ.text = "? veille"; etape = 11; return }
+   spot.nomIA = "Test"; champ.text = "?"; etape = 3; return }
   if (etape === 3) {
    verifier(spot.resultats[0].glyphe !== "auto_awesome" && spot.resultats.length >= 1, "« ? » seul : le bilan en tête : " + JSON.stringify(titres()))
    // (6) nc-apps en échec : Entrée sur une saisie sans préfixe ne reste pas en attente

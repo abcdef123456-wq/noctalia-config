@@ -800,11 +800,14 @@ Item {
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
                 // « ? » seul, ou « ? ça marche pas » : « Que se passe-t-il ? » en tête. Sinon la ligne de l'IA d'abord,
-                // sauf si une réponse de la config porte exactement le titre de la question : elle reste en tête, avec le rappel
+                // sauf si une réponse de la config porte exactement le titre de la question : elle reste en tête, avec le rappel.
+                // Aucune IA à qui demander (coupée, hors ligne, aucune) : les réponses de la config d'abord, elles marchent sans IA
+                let iaVraie = !r.reflechit && !iaCoupee && nomIA !== "-"      // horsLigne suppose déjà nomIA === "-"
                 let norm = t => sansAccents(t).trim().toLowerCase()
                 let exacte = deLaConfig.findIndex(e => norm(e.titre) === norm(question))
                 if (question === "" || estDiag(question)) resultats = [ligneDiag].concat(deLaConfig, ia)
-                else if (exacte >= 0 && ia.length > 0) {
+                else if (!iaVraie) resultats = deLaConfig.concat(ia)
+                else if (exacte >= 0) {
                     let rappel = Object.assign({}, deLaConfig[exacte], { aide: deLaConfig[exacte].aide + Reglages.t("  ·  ↓ pour demander à l'IA", "  ·  ↓ to ask the AI") })
                     resultats = [rappel].concat(deLaConfig.filter((e, i) => i !== exacte), ia)
                 }

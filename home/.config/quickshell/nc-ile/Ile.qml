@@ -22,9 +22,10 @@ PanelWindow {
     // pleinEcran reste donc vrai après la recherche, le temps que l'île revienne à sa taille
     anchors.top: true
     readonly property bool pleinEcran: recherche || retourRecherche.running
-    // Super + R sur une page déjà ouverte : la pilule n'est pas là, son heure ne doit pas clignoter (largeur lue, pas l'opacité)
+    // Super + R sur une page déjà ouverte : la pilule n'est pas là, son heure ne doit pas clignoter (largeur lue, pas l'opacité).
+    // shortcut: une pilule plus large qu'une page ouverte (432 px) ferait réapparaître l'heure, à revoir si ce cas arrive
     property bool spotDepuisPilule: true
-    onRechercheChanged: if (recherche) { retourRecherche.stop(); spotDepuisPilule = ile.etirementRecherche === 0 } else { retourRecherche.restart(); repos.restart() }
+    onRechercheChanged: if (recherche) { retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + 1 } else { retourRecherche.restart(); repos.restart() }
     Timer { id: retourRecherche; interval: 900 }
     // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
     // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
@@ -188,7 +189,7 @@ PanelWindow {
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
-        opacity: fen.ouverte || fen.banniere || fen.enCarte ? 1 : 0
+        opacity: Couleurs.aContour && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0
         visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
         Behavior on opacity { NumberAnimation { duration: 220 } }
         gradient: Gradient {
