@@ -23,6 +23,7 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
 Notifications de Claude (terminé, t'attend) : envoyées par nc-claude à la place des siennes ; un clic sur « t'attend »
 (Voir) ouvre l'île sur sa question en entier, sur « terminé » ramène sur son terminal ; elles s'en vont seules quand
 tu y retournes ou qu'il repart.
+  nc-claude purger      retire les demandes dont le hook est mort et les réponses que personne ne lira (appelé par l'île)
   nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
 question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
@@ -93,6 +94,7 @@ done, and its requests (allow a command, answer a question) from the island.
 Claude's notifications (done, waiting for you): sent by nc-agents instead of its own; a click on “waiting” (View)
 opens the island on its whole question, on “done” brings you back to its terminal; they go away on their own when
 you go back there or it starts again.
+  nc-agents purger      removes requests whose hook died and answers nobody will read (called by the island)
   nc-agents diag        checks that everything is in place (Claude Code and Antigravity), with the last events received
 Requests show in the island only when you are not on Claude's terminal; if you go back to it, the question goes
 back to the terminal. Without the island (or nc-settings → AI agents), nothing changes: Claude never waits.
@@ -111,6 +113,7 @@ RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/nc-{os.getuid()}"
 ETAT = os.path.join(RUN, "etat.json")
 VERROU = os.path.join(RUN, "etat.lock")
 REPONSES = os.path.join(RUN, "reponses")
+DELAI_DEMANDE = 600     # timeout des hooks ; attendre() s'arrête à 590 s
 SETTINGS = os.path.join(HOME, ".claude/settings.json")
 COMMANDE = "$HOME/.local/bin/nc-claude hook"
 GARDER = 6 * 3600                  # une session sans nouvelles depuis 6 h disparaît de l'île
@@ -128,6 +131,37 @@ def reglage(cle, defaut):
 
 
 # ── État partagé (verrou : plusieurs hooks peuvent tourner en même temps) ─────────────────────────────────────────
+def purger_demandes(d, maintenant):
+    """Un hook tué ne passe pas par le finally de demande() : sa demande resterait pour toujours dans l'île. Toutes IA, quelle
+    que soit la cause. Sans champ hook (ancien format) : au bout de DELAI_DEMANDE. La session passe à « pret », pas à « terminal »,
+    qui garderait « T'attend dans le terminal » dans la pilule jusqu'à 6 h."""
+    for ident, x in list(d["demandes"].items()):
+        pid, _, debut = str(x.get("hook") or "").partition(":")
+        if pid_notre(int(pid), debut or None) if pid.isdigit() else maintenant - x.get("t", 0) <= DELAI_DEMANDE:
+            continue
+        del d["demandes"][ident]
+        if not any(y["session"] == x["session"] for y in d["demandes"].values()):
+            for s in d["sessions"].values():
+                if s.get("id") == x["session"] and s.get("etat") == "demande":
+                    s["etat"] = "pret"
+
+
+def purger():
+    """Après un clic sur une demande morte : son hook ne lira jamais la réponse. Celle d'un hook vivant reste : son id est encore là."""
+    with Etat() as d:
+        purger_demandes(d, time.time())
+        try:
+            noms = os.listdir(REPONSES)
+        except OSError:
+            noms = []
+        for nom in noms:
+            if nom not in d["demandes"]:
+                try:
+                    os.remove(os.path.join(REPONSES, nom))
+                except OSError:
+                    pass
+
+
 class Etat:
     def __enter__(self):
         os.makedirs(RUN, mode=0o700, exist_ok=True)
@@ -144,6 +178,7 @@ class Etat:
 
     def __exit__(self, *_):
         maintenant = time.time()
+        purger_demandes(self.d, maintenant)
         for sid in [s for s, v in self.d["sessions"].items() if maintenant - v.get("maj", 0) > GARDER]:
             del self.d["sessions"][sid]
         tmp = ETAT + ".tmp"
@@ -407,6 +442,7 @@ def demande(ev, genre, ia="claude"):
         if len(qs) != 1 or qs[0].get("multiSelect") or not qs[0].get("options"):
             return
     ident = uuid.uuid4().hex[:12]
+    hook = f"{os.getpid()}:{debut_pid(os.getpid()) or ''}"
     with Etat() as d:
         s = session(d, ev, ia)
         pid = s.get("terminal") or 0
@@ -421,12 +457,12 @@ def demande(ev, genre, ia="claude"):
             d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
                                     "genre": "question", "titre": court(q.get("question"), 140),
                                     "options": [court(o.get("label"), 40) for o in q.get("options", [])][:4], "agent": ia,
-                                    "t": time.time()}
+                                    "t": time.time(), "hook": hook}
         else:
             titre, detail = demande_texte(outil, e)
             d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
                                     "genre": "permission", "titre": titre, "detail": detail, "agent": ia,
-                                    "toujours": ia == "claude" and bool(ev.get("permission_suggestions")), "t": time.time()}
+                                    "toujours": ia == "claude" and bool(ev.get("permission_suggestions")), "t": time.time(), "hook": hook}
     try:
         r = attendre(ident, pid)
     finally:
@@ -1763,6 +1799,8 @@ def main():
                 installer_ia(ia, bavard=False)
     elif a[0] == "statusline":
         ligne()
+    elif a[0] == "purger":
+        purger()
     elif a[0] == "etat" and a[1:2] == ["--json"] and set(a[2:]) <= {"--texte", "--text"}:
         if not os.environ.get("XDG_RUNTIME_DIR"):
             sys.exit(2)

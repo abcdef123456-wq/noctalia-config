@@ -235,6 +235,124 @@ class AutresAgents(Module):
         self.assertIn("rm -rf build", s["question"]["texte"])
 
 
+class HookMort(Module):
+    """Une demande dont le hook meurt sans passer par son finally (SIGKILL, SIGTERM) ne reste pas bloquée dans l'île."""
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.m.REPONSES, mode=0o700)
+
+    def processus(self):
+        p = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
+        return p
+
+    def poser(self, *demandes, etat="demande"):
+        with self.m.Etat() as d:
+            d["sessions"]["S"] = {"id": "S", "etat": etat, "projet": "p", "maj": time.time()}
+            for ident, plus in demandes:
+                d["demandes"][ident] = dict({"id": ident, "session": "S", "genre": "permission", "titre": "t", "t": time.time()}, **plus)
+
+    def hook(self, p):
+        return {"hook": f"{p.pid}:{self.m.debut_pid(p.pid)}"}
+
+    def lire(self):
+        return json.loads(Path(self.m.ETAT).read_text())
+
+    def test_hook_tue_puis_evenement_suivant(self):
+        p = self.processus()
+        self.poser(("a", self.hook(p)))
+        self.assertIn("a", self.lire()["demandes"], "vivant : gardée")
+        p.kill()
+        p.wait()
+        with self.m.Etat():
+            pass
+        d = self.lire()
+        self.assertEqual(d["demandes"], {})
+        self.assertEqual(d["sessions"]["S"]["etat"], "pret", "ni « demande » ni « terminal » : plus rien n'attend")
+
+    def test_hook_vivant_demande_et_reponse_gardees_apres_purger(self):
+        p = self.processus()
+        self.poser(("a", self.hook(p)))
+        f = Path(self.m.REPONSES) / "a"
+        f.write_text("oui")
+        self.m.purger()
+        self.assertIn("a", self.lire()["demandes"])
+        self.assertEqual(f.read_text(), "oui")
+        self.assertEqual(self.lire()["sessions"]["S"]["etat"], "demande")
+
+    def test_pid_reutilise_purgee(self):
+        p = self.processus()
+        self.poser(("a", {"hook": f"{p.pid}:1"}))
+        self.assertEqual(self.lire()["demandes"], {})
+
+    def test_ancien_format_selon_son_age(self):
+        self.poser(("recente", {"t": time.time() - 590}), ("vieille", {"t": time.time() - 601}))
+        self.assertEqual(list(self.lire()["demandes"]), ["recente"])
+        self.assertEqual(self.lire()["sessions"]["S"]["etat"], "demande", "une demande reste")
+
+    def test_morte_d_abord_session_gardee_tant_qu_une_autre_vit(self):
+        vivant, mort = self.processus(), self.processus()
+        self.poser(("v", self.hook(vivant)), ("m", self.hook(mort)))
+        mort.kill()
+        mort.wait()
+        with self.m.Etat():
+            pass
+        self.assertEqual(list(self.lire()["demandes"]), ["v"])
+        self.assertEqual(self.lire()["sessions"]["S"]["etat"], "demande")
+
+    def test_session_dans_un_autre_etat_pas_touchee(self):
+        p = self.processus()
+        self.poser(("a", self.hook(p)), etat="travail")
+        p.kill()
+        p.wait()
+        with self.m.Etat():
+            pass
+        self.assertEqual(self.lire()["sessions"]["S"]["etat"], "travail")
+
+    def test_clic_sur_une_demande_morte(self):
+        p = self.processus()
+        self.poser(("a", self.hook(p)))
+        p.kill()
+        p.wait()
+        f = Path(self.m.REPONSES) / "a"
+        f.write_text("non")
+        orpheline = Path(self.m.REPONSES) / "ancienne"
+        orpheline.write_text("non")
+        self.m.purger()
+        self.assertFalse(f.exists(), "personne ne la lira")
+        self.assertFalse(orpheline.exists())
+        self.assertEqual(self.lire()["demandes"], {})
+
+    def test_purger_sans_dossier_de_reponses(self):
+        os.rmdir(self.m.REPONSES)
+        self.m.purger()
+
+    def test_le_hook_se_note_et_le_chemin_normal_ne_change_pas(self):
+        vus = []
+
+        def attendre(ident, pid, delai=590):
+            d = self.lire()["demandes"][ident]
+            vus.append(d["hook"])
+            return reponse
+        self.m.attendre = attendre
+        for reponse, etat, sortie in (("oui", "travail", True), ("non", "travail", True), ("terminal", "terminal", False)):
+            with self.subTest(reponse=reponse):
+                sorties = io.StringIO()
+                with contextlib.redirect_stdout(sorties):
+                    self.m.demande({"session_id": "x" + reponse, "cwd": "/tmp", "tool_name": "Bash", "tool_input": {"command": "ls"}}, "permission")
+                self.assertEqual(vus[-1], f"{os.getpid()}:{self.m.debut_pid(os.getpid())}")
+                self.assertEqual(self.lire()["demandes"], {})
+                self.assertEqual(bool(sorties.getvalue().strip()), sortie)
+                s = next(v for k, v in self.lire()["sessions"].items() if "x" + reponse in k)
+                self.assertEqual(s["etat"], etat)
+
+    def test_l_ile_appelle_purger_apres_avoir_ecrit(self):
+        q = (QML / "Agents.qml").read_text()
+        self.assertIn("> \\\"$1/$3\\\"; exec \\\"$4\\\" purger", q)
+        self.assertIn('Quickshell.env("HOME") + "/.local/bin/nc-claude"])', q)
+
+
 class Notification(unittest.TestCase):
     """« nc-claude notification … voir » lancé pour de vrai : faux notify-send qui répond « default »."""
     def lancer(self, reponse_qs, voir=True):
@@ -393,12 +511,24 @@ ShellRoot {
 
     def test_demande_de_la_session_voulue_d_abord(self):
         etat = self.etat()
-        etat["demandes"] = {"d1": {"id": "d1", "session": "R", "genre": "question", "titre": "Autre", "options": ["a"], "t": 1},
-                            "d2": {"id": "d2", "session": "Q", "genre": "question", "titre": "La mienne", "options": ["b"], "t": 2}}
+        t = time.time()
+        etat["demandes"] = {"d1": {"id": "d1", "session": "R", "genre": "question", "titre": "Autre", "options": ["a"], "t": t - 2},
+                            "d2": {"id": "d2", "session": "Q", "genre": "question", "titre": "La mienne", "options": ["b"], "t": t - 1}}
         self.executer(etat, '''
  if (etape === 0) { if (Agents.demandes.length === 2) etape++; return }
  if (etape === 1) { verifier(Agents.demande.id === "d1", "plus ancienne d'abord"); Agents.cible = "Q"; etape++; return }
  if (etape === 2) { verifier(Agents.demande.id === "d2", "demande de la session voulue pas montrée"); Qt.quit() }
+''')
+
+    def test_demande_de_plus_de_600_s_ignoree(self):
+        """Hook mort, sans événement ni clic pour la retirer de l'état : l'île ne la montre plus."""
+        t = time.time()
+        etat = self.etat()
+        etat["demandes"] = {"vieille": {"id": "vieille", "session": "R", "genre": "question", "titre": "Morte", "options": ["a"], "t": t - 601},
+                            "recente": {"id": "recente", "session": "Q", "genre": "question", "titre": "Vive", "options": ["b"], "t": t - 500}}
+        self.executer(etat, '''
+ if (etape === 0) { if (Agents.sessions.length === 2) etape++; return }
+ if (etape === 1) { verifier(Agents.demandes.map(d => d.id).join() === "recente", "demandes : " + Agents.demandes.map(d => d.id).join()); Qt.quit() }
 ''')
 
 

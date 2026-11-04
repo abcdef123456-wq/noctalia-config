@@ -41,8 +41,9 @@ Singleton {
         l.sort((x, y) => (y.maj || 0) - (x.maj || 0))
         return l
     }
+    // Plus de 600 s (timeout des hooks) : son hook est mort, et aucun événement ni clic n'est venu la retirer de l'état
     readonly property var demandes: Object.values(donnees.demandes || {}).filter(d =>
-        suivie((donnees.sessions || {})[d.session] || d)).sort((x, y) => (x.t || 0) - (y.t || 0))
+        suivie((donnees.sessions || {})[d.session] || d) && Etat.maintenant.getTime() / 1000 - (d.t || 0) < 600).sort((x, y) => (x.t || 0) - (y.t || 0))
     // La demande montrée : celle de la session voulue (notification « Voir »), sinon la plus ancienne
     readonly property var demande: demandes.find(d => d.session === cible) || (demandes.length ? demandes[0] : null)
     // Session montrée en premier dans la page (notification « Voir », clic sur la pilule) ; oubliée à la fermeture
@@ -137,7 +138,8 @@ Singleton {
     Connections { target: Etat; function onEcranOuvertChanged() { if (Etat.ecranOuvert === "") { a.cible = ""; a.allerCible = false } } }
 
     function repondre(id, choix) {
-        Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf %s \"$2\" > \"$1/$3\"", "sh", dossier + "/reponses", choix, id])
+        Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf %s \"$2\" > \"$1/$3\"; exec \"$4\" purger", "sh", dossier + "/reponses", choix, id,
+                                 Quickshell.env("HOME") + "/.local/bin/nc-claude"])
     }
     // Écrire à l'agent depuis l'île : tapé dans son terminal kitty, puis Entrée (nc-claude ecrire)
     function ecrire(id, texte) {
