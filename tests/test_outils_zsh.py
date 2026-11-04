@@ -221,6 +221,14 @@ class OutilsZsh(unittest.TestCase):
         self.assertLess(z.index("fzf-tab"), z.index("zsh-autosuggestions"))
         self.assertIn("-d ${ZSH_CUSTOM:-$ZSH/custom}/plugins/fzf-tab", z, "fzf-tab seulement si son dossier existe")
 
+    def test_zsh_deja_defini_est_respecte(self):
+        ligne = next(l for l in (RACINE / "home/.zshrc").read_text(encoding="utf-8").splitlines() if l.startswith("export ZSH="))
+        for env, attendu in (({"ZSH": "/ailleurs/omz"}, "/ailleurs/omz"), ({}, "/home/user/.oh-my-zsh"), ({"ZSH": ""}, "/home/user/.oh-my-zsh")):
+            with self.subTest(env=env):
+                r = subprocess.run([shutil.which("zsh"), "-f", "-c", ligne + "; print -r -- $ZSH"], env=dict(env, HOME="/home/user"),
+                                   capture_output=True, text=True, timeout=30)
+                self.assertEqual(r.stdout.strip(), attendu, r.stderr)
+
     def test_fzf_tab_seulement_avec_fzf_et_le_reglage(self):
         """Sans fzf, Tab ne complèterait plus rien ; TERMINAL_OUTILS=non coupe aussi fzf-tab."""
         z = (RACINE / "home/.zshrc").read_text(encoding="utf-8")

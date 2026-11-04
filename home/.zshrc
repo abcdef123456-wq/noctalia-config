@@ -4,7 +4,7 @@
 # Invite instantanée de powerlevel10k désactivée : l'accueil du terminal s'affiche avant la première invite.
 typeset -g POWERLEVEL9K_INSTANT_PROMPT=off
 
-export ZSH="$HOME/.oh-my-zsh"
+export ZSH="${ZSH:-$HOME/.oh-my-zsh}"
 ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(git)
 # fzf-tab (Tab en liste filtrable) seulement s'il est téléchargé (sinon oh-my-zsh affiche « plugin not found »), si fzf

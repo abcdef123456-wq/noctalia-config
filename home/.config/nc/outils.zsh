@@ -53,8 +53,8 @@ if [[ "$(_nc_reglage TERMINAL_OUTILS)" != non ]]; then
 
   # ── fzf-tab : Tab ouvre la liste filtrable (chargé ici si .zshrc ne l'a pas déjà fait via plugins=) ──
   if (( $+commands[fzf] && ! $+functions[enable-fzf-tab] && $+functions[compdef] )) \
-     && [[ -r ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/fzf-tab/fzf-tab.plugin.zsh ]]; then
-    source ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/fzf-tab/fzf-tab.plugin.zsh
+     && [[ -r ${ZSH_CUSTOM:-${ZSH:-$HOME/.oh-my-zsh}/custom}/plugins/fzf-tab/fzf-tab.plugin.zsh ]]; then
+    source ${ZSH_CUSTOM:-${ZSH:-$HOME/.oh-my-zsh}/custom}/plugins/fzf-tab/fzf-tab.plugin.zsh
   fi
   if (( $+functions[enable-fzf-tab] )); then
     zstyle ':completion:*' menu no
