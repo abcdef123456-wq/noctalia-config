@@ -47,6 +47,32 @@ else: print(json.dumps(dict(type='text',part=dict(text='réponse OpenCode'))))
 ''');self.cli.chmod(0o755)
         self.find=patch.object(self.m,'executable',return_value=str(self.cli));self.find.start();self.addCleanup(self.find.stop)
 
+    def test_forme_du_modele_sur_chaque_entree(self):
+        bons = ('gpt-5.5', 'anthropic/claude-sonnet-4-5', 'ollama:llama3', 'a_b', '0', 'x'*80, 'opus[1m]', 'claude-opus-4-5@20251101',
+                'google-vertex-anthropic/claude-sonnet-4-5@20250929')
+        mauvais = ('-x', '--dangerously-skip-permissions', '@x', '[x', ']x', 'a#b', 'a b', 'a\nb', 'a\n', ' a', 'x'*81, 'é', 'a;b', 'a`b', '$(id)')
+        for moteur in ('agy', 'codex', 'claude', 'opencode'):
+            for m in mauvais:
+                with self.subTest(moteur=moteur, m=m):
+                    with self.assertRaisesRegex(ValueError, 'tiret'):
+                        self.e.choose(engine=moteur, model=m)
+                    self.assertNotEqual(self.e.state['settings'].get(moteur, {}).get('model'), m)
+            for m in bons:
+                with self.subTest(moteur=moteur, m=m):
+                    self.assertEqual(self.e.choose(engine=moteur, model=m)['engine'], moteur)
+        for moteur in ('agy', 'codex', 'claude', 'opencode'):
+            self.e.choose(engine=moteur, model='')   # vide : le modèle par défaut du CLI, comme avant
+            for m in mauvais + (7, ['a']):
+                with self.subTest(run=m, moteur=moteur):
+                    r = asyncio.run(self.e.run('q', model=m))
+                    self.assertFalse(r['success'])
+                    self.assertIn('tiret', r['error'])
+                    self.assertFalse(self.cli.with_suffix('.args').exists(), 'aucun CLI lancé')
+        self.e.original['run_agy'].assert_not_called()
+        for m in mauvais:
+            with self.subTest(commande=m), self.assertRaises(ValueError):
+                self.m.commande('codex', str(self.cli), m, '')
+
     def test_each_choice_reaches_its_cli_with_model_effort_and_private_stdin(self):
         for engine,model,effort,expected in [('codex','requested-model','xhigh','Codex'),('claude','sonnet','high','Claude'),('opencode','provider/model','high','OpenCode')]:
             with self.subTest(engine=engine):
@@ -177,6 +203,18 @@ class ReglagesEnregistres(unittest.TestCase):
         self.assertFalse([r for r in self.recus if r['permission_mode']])
         self.assertNotIn('always-proceed',e.state['settings']['agy'].values())
         self.assertNotIn('y'*32,'\n'.join(journal.output))   # aucun secret dans le journal
+
+    def test_modele_enregistre_de_mauvaise_forme_ignore_au_demarrage(self):
+        for mauvais in ('--dangerously-skip-permissions', 'a b', 'a\nb', 'x'*81, 'é', 7):
+            with self.subTest(mauvais=mauvais):
+                self.recus.clear()
+                self.ecrit(dict(model=mauvais,effort='low'))
+                with self.assertLogs('nc_engines',level='WARNING') as journal:
+                    e=self.m.Engines(self.up)
+                self.assertEqual([r['model'] for r in self.recus if r['model']],[])
+                self.assertNotIn('model',e.state['settings']['agy'])
+                self.assertEqual([r['effort'] for r in self.recus if r['effort']],['low'],'les autres réglages restent')
+                if mauvais not in ('é',7): self.assertNotIn(str(mauvais),'\n'.join(journal.output))   # la valeur n'est pas journalisée
 
     def test_allowed_saved_settings_are_still_restored(self):
         self.ecrit(dict(model='gemini-x',permission_mode='plan'))

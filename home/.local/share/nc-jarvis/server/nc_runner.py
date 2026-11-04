@@ -26,7 +26,7 @@ if "__file__" in globals():
 import main as upstream
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from nc_engines import install, executable
+from nc_engines import install, executable, ModeleRefuse
 
 
 def _sans_jeton_d_origine():
@@ -205,6 +205,11 @@ async def settings(request: Request, session_key: str | None = None):
     return engines.snapshot(session_key)
 
 
+@app.exception_handler(ModeleRefuse)
+async def modele_refuse(_request, erreur):
+    return JSONResponse(status_code=400, content=dict(detail=str(erreur)))
+
+
 @app.post('/nc/engine')
 async def select(request: Request):
     upstream._check_secret(request)
@@ -215,6 +220,7 @@ async def select(request: Request):
         values=json.loads(raw)
         if not isinstance(values,dict) or any(not isinstance(v,str) or len(v)>200 for v in values.values()): raise ValueError
         return dict(status='updated',session=engines.choose(**values))
+    except ModeleRefuse: raise
     except (ValueError,TypeError): raise HTTPException(400,detail='Réglages moteur invalides, CLI absent ou requête en cours.') from None
 
 

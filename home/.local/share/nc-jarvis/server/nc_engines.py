@@ -61,6 +61,21 @@ AGY_CATALOGUE_MAX = 50
 # Pas de tiret de tête : l'identifiant part après --model. 55 au plus : au-delà, le callback de Telegram (64 octets) casse tout le clavier /models
 AGY_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,54}')
 AGY_SUFFIXE = re.compile(r'(.+)-(low|medium|high)')
+# Toute entrée (/session, /nc/engine, /run, /model, état enregistré) : un identifiant saisi à la main reste permis, mais il part après --model
+# @ et [ ] : formes réelles (claude-x@20251101, opus[1m]), jamais au début ; # sépare l'effort chez OpenCode ; l'argv part sans shell
+MODELE = re.compile(r'[A-Za-z0-9._:/][A-Za-z0-9._:/@\[\]-]{0,79}')
+MODELE_REFUSE = ('Identifiant de modèle invalide : seulement lettres, chiffres et . _ : / - @ [ ] (ni tiret, ni @, ni crochet au début), '
+                 '80 caractères au plus.')
+
+
+class ModeleRefuse(ValueError):
+    """Attrapée à part par nc_runner : sur /session, l'amont n'attrape rien, et le message devenait une erreur 500."""
+
+
+def modele_valide(model):
+    return model in (None, '') or (isinstance(model, str) and MODELE.fullmatch(model) is not None)
+
+
 # Ce qu'agy peut lire pour sa session en plus de ENV_COMMUN ; rien des jetons du serveur
 AGY_ENV_CATALOGUE = ('DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS',
                      'GOOGLE_CLOUD_PROJECT', 'CLOUDSDK_CORE_PROJECT')
@@ -691,9 +706,7 @@ def ecriture_refusee(texte):
 
 
 def commande(engine, path, model, effort, opencode_v=None):
-    if not isinstance(model, str) or len(model)>200 or any(ord(c)<33 for c in model):
-        if model != '': raise ValueError('Identifiant de modèle invalide.')
-    if model.startswith('-'): raise ValueError('Identifiant de modèle invalide.')
+    if not modele_valide(model): raise ModeleRefuse(MODELE_REFUSE)
     if effort not in EFFORTS: raise ValueError('Niveau de réflexion invalide.')
     if engine == 'codex':
         cmd = [path, 'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '--json']
@@ -875,6 +888,9 @@ class Engines:
         écrit par 4ecc57a) est ignoré avec une ligne de journal, sans valeur : jamais d'exception au démarrage."""
         agy = self.state['settings']['agy']
         if not isinstance(agy, dict): return
+        if not modele_valide(agy.get('model')):
+            logging.getLogger('nc_engines').warning('Modèle AGY enregistré refusé (forme invalide) : ignoré, valeur par défaut.')
+            agy.pop('model', None)
         # Un état ancien, ou écrit depuis un autre PC, peut se contredire (argon-low et effort high) : aligné avant d'être appliqué
         try:
             couple = {k: agy[k] for k in ('model', 'effort') if isinstance(agy.get(k), str) and agy[k]}
@@ -1015,6 +1031,7 @@ class Engines:
     def choose(self, session_key=None, **values):
         if self.occupe(): raise ValueError('Une réponse est en cours ; attends avant de changer de moteur.')
         if set(values)-{'engine','model','effort','mode','permission_mode'}: raise ValueError('Réglage inconnu.')
+        if not modele_valide(values.get('model')): raise ModeleRefuse(MODELE_REFUSE)
         engine = values.get('engine',self.state['engine'])
         if engine not in ENGINES: raise ValueError('Moteur inconnu.')
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
@@ -1085,6 +1102,7 @@ class Engines:
                   continue_session=True, reset_session_flag=False, permission_mode=None, session_key=None, **futurs):
         def failure(message): return dict(success=False,output='',error=message,session=self.session(session_key))
         if ia_coupee(): return failure('L’IA est coupée sur ce PC (réglage IA_MODE=non) : aucun moteur n’est lancé.')
+        if not modele_valide(model): return failure(MODELE_REFUSE)
         if self.lock.locked(): return failure('Une autre requête JARVIS est déjà en cours.')
         # /run n'est jamais contrôlé par l'upstream (P2-2 de 94a3a93) : un agent qui a SECRET_KEY y demandait
         # bypassPermissions. Hors de notre liste : le mode de la session (aucun de nos clients n'envoie ce champ).

@@ -96,6 +96,45 @@ def appeler(app, chemin, corps=b"{}", methode="POST"):
 
 
 @unittest.skipUnless(fastapi, "FastAPI requis")
+class ModeleRefuseAvecMessage(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-runner-")
+        self.addCleanup(d.cleanup)
+        with unittest.mock.patch.dict(os.environ, HOME=d.name, NC_PIECES_JOINTES=d.name + "/pieces"):
+            self.m = charger_runner(faux_upstream(Path(d.name)))
+
+    def reponse(self, chemin):
+        messages = []
+
+        async def envoyer(m):
+            messages.append(m)
+
+        async def recevoir():
+            return dict(type="http.request", body=b'{"model": "--x"}', more_body=False)
+        scope = dict(type="http", asgi=dict(version="3.0"), http_version="1.1", method="POST", scheme="http", path=chemin, raw_path=chemin.encode(),
+                     root_path="", query_string=b"", headers=[(b"content-type", b"application/json")], client=("127.0.0.1", 1), server=("127.0.0.1", 80))
+        asyncio.run(self.m.app(scope, recevoir, envoyer))
+        corps = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body").decode()
+        return next(m for m in messages if m["type"] == "http.response.start")["status"], corps
+
+    def refuser(self, **_):
+        raise self.m.ModeleRefuse("tiret refusé")
+
+    def test_route_de_l_amont_sans_try(self):
+        """/session de l'amont n'attrape rien : sans ce passage, le refus devient une erreur 500 sans message."""
+        self.m.app.post("/session")(lambda: self.refuser())
+        statut, corps = self.reponse("/session")
+        self.assertEqual(statut, 400)
+        self.assertIn("tiret refusé", corps)
+
+    def test_nc_engine_donne_le_message(self):
+        with unittest.mock.patch.object(self.m.engines, "choose", self.refuser):
+            statut, corps = self.reponse("/nc/engine")
+        self.assertEqual(statut, 400)
+        self.assertIn("tiret refusé", corps)
+
+
+@unittest.skipUnless(fastapi, "FastAPI requis")
 class MenagePiecesJointes(unittest.TestCase):
     def setUp(self):
         d = tempfile.TemporaryDirectory(prefix="nc-runner-")
