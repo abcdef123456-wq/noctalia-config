@@ -22,7 +22,9 @@ PanelWindow {
     // pleinEcran reste donc vrai après la recherche, le temps que l'île revienne à sa taille
     anchors.top: true
     readonly property bool pleinEcran: recherche || retourRecherche.running
-    onRechercheChanged: if (recherche) retourRecherche.stop(); else { retourRecherche.restart(); repos.restart() }
+    // Super + R sur une page déjà ouverte : la pilule n'est pas là, son heure ne doit pas clignoter (largeur lue, pas l'opacité)
+    property bool spotDepuisPilule: true
+    onRechercheChanged: if (recherche) { retourRecherche.stop(); spotDepuisPilule = ile.etirementRecherche === 0 } else { retourRecherche.restart(); repos.restart() }
     Timer { id: retourRecherche; interval: 900 }
     // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
     // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
@@ -133,6 +135,7 @@ PanelWindow {
     Rectangle {
         id: pointPrive
         readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && (Etat.microActif || Etat.cameraActive)
+                                       && !retour.running && !retourRecherche.running      // pas avant que l'île ait fini de rétrécir
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
         y: 9 + 15 - height / 2
         width: 8; height: 8; radius: 4
@@ -152,6 +155,7 @@ PanelWindow {
         readonly property bool terminal: !minuteur && !agent && Terminal.enCours
         readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && Etat.aMusique && !Appel.enCours
                                        && (minuteur || Agents.travaille || Terminal.enCours) && Etat.activiteType === ""
+                                       && !retour.running && !retourRecherche.running
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
         color: Couleurs.fond
@@ -180,12 +184,12 @@ PanelWindow {
     // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
     Rectangle {
         id: cadre
-        readonly property real e: (fen.ouverte || fen.banniere || fen.enCarte) && Couleurs.aContour ? 2 : 0
+        readonly property real e: Couleurs.aContour ? 2 : 0
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
-        visible: e > 0
-        opacity: e > 0 ? 1 : 0
+        opacity: fen.ouverte || fen.banniere || fen.enCarte ? 1 : 0
+        visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
         Behavior on opacity { NumberAnimation { duration: 220 } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -250,15 +254,19 @@ PanelWindow {
         onHeightChanged: fen.revenue()
         // Spotlight : son contenu apparaît avec la largeur de l'île (0 à 300 px, 1 à 560 px), et la pilule ne s'efface qu'à
         // mesure : l'île n'est jamais une forme vide pendant qu'elle s'étire (un « carré noir » quand la pilule partait en
-        // 90 ms et le Spotlight n'apparaissait qu'au-delà de 560 px). Suit le ressort image par image : rien de plus lent
-        readonly property real apparitionRecherche: fen.recherche ? Math.max(0, Math.min(1, (width - 300) / 260)) : 0
+        // 90 ms et le Spotlight n'apparaissait qu'au-delà de 560 px). Suit le ressort image par image : rien de plus lent.
+        // Géométrie pure, aussi à la fermeture : la pilule et le Spotlight suivent la largeur dans les deux sens
+        readonly property real etirementRecherche: Math.max(0, Math.min(1, (width - 300) / 260))
+        // Retour du Spotlight vers la pilule (pas vers une page : alors l'île reste ouverte)
+        readonly property bool retourSpot: retourRecherche.running && !fen.ouverte && !fen.banniere && !fen.enCarte
 
         Compact {
             id: compact
             anchors.centerIn: parent
             width: parent.width
-            opacity: fen.recherche ? 1 - ile.apparitionRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1)
-            Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
+            opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)
+                     : (ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))
+            Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
         }
 
         // Spotlight : longue capsule de recherche
@@ -270,12 +278,11 @@ PanelWindow {
             // directement sur item (active dépendrait de item, qui dépend de active : boucle de liaisons)
             property bool occupe: false
             anchors.fill: parent
-            active: fen.recherche || garderSpot.running || occupe
+            active: fen.recherche || fen.pleinEcran || occupe     // pleinEcran : tant que l'île est encore large
             sourceComponent: Recherche {
                 actif: fen.recherche
-                opacity: ile.apparitionRecherche
+                opacity: fen.recherche || ile.retourSpot ? ile.etirementRecherche : 0
                 visible: opacity > 0.01
-                Behavior on opacity { enabled: !fen.recherche; NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }   // fermeture
             }
         }
         Connections {
@@ -283,8 +290,6 @@ PanelWindow {
             ignoreUnknownSignals: true
             function onOccupeChanged() { spot.occupe = spot.item ? spot.item.occupe : false }
         }
-        Timer { id: garderSpot; interval: 400 }
-        Connections { target: fen; function onRechercheChanged() { if (!fen.recherche) garderSpot.restart() } }
 
         Loader {
             anchors.fill: parent

@@ -301,6 +301,7 @@ Item {
         modeDiag = false; diag.annuler()
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
         retourDock = null
+        applisLues = false
         lireApplis.running = true
         lireDock.running = true
         lireFenetres.running = true
@@ -390,9 +391,11 @@ Item {
     Process {
         id: lireApplis
         command: [Etat.bin + "nc-apps", "list"]
+        onExited: r.applisLues = true
         stdout: StdioCollector {
             onStreamFinished: {
                 try { r.applis = JSON.parse(text) } catch (e) {}
+                r.applisLues = true
                 r.chercher()
                 // Entrée tapée avant que les applis soient chargées : validée maintenant, sur la liste complète
                 if (r.entreeEnAttente) { r.entreeEnAttente = false; r.valider(r.sel, false) }
@@ -796,8 +799,16 @@ Item {
                           : [{ titre: question || Reglages.t("Pose ta question", "Ask your question"),
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
-                // « ? » seul, ou « ? ça marche pas » : « Que se passe-t-il ? » en tête
-                resultats = (question === "" || estDiag(question) ? [ligneDiag] : []).concat(deLaConfig, ia)
+                // « ? » seul, ou « ? ça marche pas » : « Que se passe-t-il ? » en tête. Sinon la ligne de l'IA d'abord,
+                // sauf si une réponse de la config porte exactement le titre de la question : elle reste en tête, avec le rappel
+                let norm = t => sansAccents(t).trim().toLowerCase()
+                let exacte = deLaConfig.findIndex(e => norm(e.titre) === norm(question))
+                if (question === "" || estDiag(question)) resultats = [ligneDiag].concat(deLaConfig, ia)
+                else if (exacte >= 0 && ia.length > 0) {
+                    let rappel = Object.assign({}, deLaConfig[exacte], { aide: deLaConfig[exacte].aide + Reglages.t("  ·  ↓ pour demander à l'IA", "  ·  ↓ to ask the AI") })
+                    resultats = [rappel].concat(deLaConfig.filter((e, i) => i !== exacte), ia)
+                }
+                else resultats = ia.concat(deLaConfig)
             }
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
@@ -1074,6 +1085,7 @@ Item {
         }
     }
     property bool entreeEnAttente: false
+    property bool applisLues: false          // la liste d'applis a été lue (vide ou non) ou a échoué : plus d'attente
     // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
     // Un enregistrement ou une suppression de session en cours aussi : décharger le Spotlight arrêterait nc-session
     // (running seul : un nc-session introuvable, jamais lancé, ne garderait pas le Spotlight chargé pour rien)
@@ -1086,7 +1098,7 @@ Item {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@:]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+        if (!applisLues && !/^([?>+!@:]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
             && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
@@ -1098,6 +1110,13 @@ Item {
     }
 
     // ── Dessin ──
+    // Un clic sur une zone sans rien dedans (loupe, marges) garde le Spotlight ouvert et rend le focus au champ
+    MouseArea {
+        objectName: "nc-spotlight-fond"
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onClicked: champ.forceActiveFocus()
+    }
     // Barre de recherche
     Item {
         id: barre

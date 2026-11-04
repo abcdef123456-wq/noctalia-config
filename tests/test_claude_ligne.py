@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 NC_CLAUDE = REPO / "home/.local/bin/nc-claude"
@@ -202,6 +203,20 @@ class LigneEtat(unittest.TestCase):
         (self.home / ".config/nc/reglages.conf").write_text("CLAUDE_LIGNE=non\n")
         self.lancer("installer")
         self.assertNotIn("statusLine", self.lire())
+
+    def test_reglage_graphique_de_la_ligne(self):
+        """Règle « config en graphique » : CLAUDE_LIGNE, lue par nc-claude, a son réglage (oui/non, texte FR et EN)."""
+        import runpy
+        import warnings
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, HOME=d), warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)
+            m = runpy.run_path(str(REPO / "home/.local/bin/nc-reglages"))
+        r = next((x for x in m["REGLAGES"] if x.cle == "CLAUDE_LIGNE"), None)
+        self.assertIsNotNone(r, "CLAUDE_LIGNE n'a pas de réglage graphique")
+        self.assertEqual((r.genre, r.defaut, r.section), ("ouinon", "oui", "Agents IA (coucou)"))
+        self.assertEqual(r.section, next(x for x in m["REGLAGES"] if x.cle == "CLAUDE_ILE").section)
+        for texte in (r._nom, r._aide):
+            self.assertTrue(texte.fr and texte.en and texte.fr != texte.en)
 
     def test_diag_la_mentionne(self):
         self.lancer("installer")

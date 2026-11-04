@@ -93,7 +93,7 @@ class Source(unittest.TestCase):
         sautait faisait une île « trop brute » en stream) ; seule la bannière est retirée sans attendre."""
         ile = (QML / "Ile.qml").read_text()
         self.assertEqual(len(re.findall(r"enabled: !Notifs\.enPause;", ile)), 3)                  # largeur, hauteur, rayon
-        self.assertIn("enabled: !Notifs.enPause && !fen.recherche;", ile)                            # la pilule (Spotlight : suit la largeur)
+        self.assertIn("enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot;", ile)                            # la pilule (Spotlight : suit la largeur)
         self.assertIn("garderBanniere.running && !Notifs.enPause && !Partage.silence", ile)
         for f in sorted(QML.glob("*.qml")):
             for l in f.read_text().splitlines():

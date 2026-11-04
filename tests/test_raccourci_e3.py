@@ -92,6 +92,20 @@ esac
         self.faux_hyprctl("us", self.pris_sur_38())
         self.assertEqual(self.run_bin("nc-raccourci", "ajoute", "Super+Q", "true").returncode, 0)
 
+    def test_touches_f_et_leur_code(self):
+        # La config lie F4 par code:70 : Super+F4 et Super+code:70 désignent le même raccourci (dans le faux catalogue)
+        pris = self.PRIS.replace("key: \n", "key: code:70\n")
+        for touches in ("Super+F4", "Super+code:70"):
+            self.faux_hyprctl("us", pris)
+            r = self.run_bin("nc-raccourci", "ajoute", touches, "true")
+            self.assertEqual(r.returncode, 1, touches + " : " + r.stdout)
+            self.assertIn("déjà pris", r.stderr, touches)
+        for touche, code in (("F1", 67), ("F10", 76), ("F11", 95), ("F12", 96)):
+            self.faux_hyprctl("us", self.PRIS.replace("key: \n", f"key: code:{code}\n"))
+            self.assertEqual(self.run_bin("nc-raccourci", "ajoute", "Super+" + touche, "true").returncode, 1, touche)
+        self.faux_hyprctl("us", pris)
+        self.assertEqual(self.run_bin("nc-raccourci", "ajoute", "Super+F5", "true").returncode, 0, "F5 n'est pas pris")
+
     def test_disposition_inconnue_garde_qwerty(self):
         self.faux_hyprctl("fr", self.pris_sur_38())
         (self.faux / "hyprctl").write_text((self.faux / "hyprctl").read_text().replace("getoption)", "getoption) exit 0 ;;\n  zz)"))

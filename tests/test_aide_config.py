@@ -155,8 +155,8 @@ ShellRoot {
   if (etape === 0) { if (!spot.aide) return; champ.text = "? comment changer le fond d'écran"; etape++; return }
   if (etape === 1) {
    var t = spot.resultats.map(x => x.titre)
-   verifier(JSON.stringify(t.slice(0, ATTENDU.length)) === JSON.stringify(ATTENDU), "JavaScript et Python classent pareil : " + JSON.stringify(t))
-   verifier(spot.resultats[spot.resultats.length - 1].sous.indexOf("Demander à") === 0, "l'IA en dernier")
+   verifier(JSON.stringify(t.slice(1, 1 + ATTENDU.length)) === JSON.stringify(ATTENDU), "JavaScript et Python classent pareil : " + JSON.stringify(t))
+   verifier(spot.resultats[0].sous.indexOf("Demander à") === 0, "l'IA d'abord, les réponses de la config après")
    var i = t.indexOf("Fonds d'écran"); verifier(i >= 0, "passage de doc absent"); spot.valider(i, false)
    verifier(spot.reponseAide.indexOf("carrousel") > 0 && Etat.fermetures === 0, "la doc s'affiche dans le Spotlight, sans le fermer")
    spot.valider(t.indexOf("Taille du pointeur") >= 0 ? t.indexOf("Taille du pointeur") : t.indexOf("Changer de fond automatiquement"), false)

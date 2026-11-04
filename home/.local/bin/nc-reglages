@@ -1581,6 +1581,12 @@ REGLAGES = [
         "In the island only when you're not on its terminal; if you go back to it, the question moves back to the terminal."),
       [("ile", L("Dans l'île quand tu es ailleurs", "In the island when you're elsewhere")),
        ("terminal", L("Toujours dans le terminal", "Always in the terminal"))]),
+    R("CLAUDE_LIGNE", "Agents IA (coucou)", L("Ligne d'état de Claude Code aux couleurs du bureau", "Claude Code status line in desktop colors"),
+      "ouinon", "oui",
+      L("Ajoutée à la configuration de Claude Code seulement si tu n'en as pas déjà une (la tienne n'est jamais remplacée). "
+        "Non : elle n'est pas ajoutée.",
+        "Added to Claude Code's configuration only if you don't already have one (yours is never replaced). No: it isn't added."),
+      groupe="claude"),
     R("ANTIGRAVITY_ILE", "Agents IA (coucou)", L("Antigravity dans l'île aussi", "Antigravity in the island too"), "ouinon", "oui",
       L("L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
         "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.",

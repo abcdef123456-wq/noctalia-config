@@ -499,6 +499,88 @@ ShellRoot {
         self.assertEqual(appels, ["nc-diag --json --rapide", "nc-diag reparer redemarrer:noctalia.service --json"])
 
 
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+class SpotlightLot(unittest.TestCase):
+    def test_clic_dans_le_vide_liste_d_applis_vide_et_question_exacte(self):
+        """Lot B1 : (5) un clic sur une zone sans rien dedans rend le focus au champ sans fermer ; (6) nc-apps en échec :
+        Entrée n'attend pas pour toujours ; (9) « ? » : la ligne de l'IA d'abord, sauf titre de config exact (avec rappel)."""
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-lot-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({}); readonly property bool iaCoupee: false\n'
+                                            ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' property bool nuit: false; readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            scripts = {"nc-apps": "#!/bin/sh\nexit 1\n", "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                       "nc-demander": '''#!/bin/sh
+case "$1" in
+  --ia) echo '{"nom": "Claude (API Anthropic)", "agent": "claude", "coupee": false}' ;;
+esac
+'''}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (root / "cache/nc").mkdir(parents=True)
+            entree = lambda titre, mt: {"type": "reglage", "titre": titre, "section": "Écran", "valeur": "", "mt": mt, "mx": []}
+            (root / "cache/nc/aide-config.json").write_text(json.dumps({"entrees": [entree("Luminosité", ["luminosite"]),
+                                                                                    entree("Veille de l'écran", ["veille", "ecran"])],
+                                                                         "vides": [], "synonymes": []}))
+            (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "" || spot.reponsesAide("luminosite", 3).length === 0) return
+   // (5) un clic dans le vide : focus au champ, rien de fermé
+   var fond = trouver(spot, "nc-spotlight-fond")
+   verifier(fond && fond.acceptedButtons === Qt.AllButtons, "zone de clic du vide")
+   fond.forceActiveFocus(); verifier(!champ.activeFocus, "le focus a quitté le champ")
+   fond.clicked(null)
+   verifier(champ.activeFocus, "le clic rend le focus au champ"); verifier(Etat.fermetures === 0, "le clic ne ferme pas")
+   // (9) titre exact : la réponse de config reste en tête, avec le rappel ; avec la casse, les accents et les espaces
+   champ.text = "?  LUMINOSITE "; etape++; return }
+  if (etape === 1) {
+   verifier(titres()[0] === "Luminosité", "réponse exacte en tête : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].aide.indexOf("↓ pour demander à l'IA") >= 0 && spot.resultats[0].aide.indexOf("↵") === 0, "rappel : " + spot.resultats[0].aide)
+   verifier(spot.resultats[spot.resultats.length - 1].garder === true && spot.resultats.length === 2, "ligne de l'IA après : " + JSON.stringify(titres()))
+   // question partielle : la ligne de l'IA d'abord, les réponses de config après
+   champ.text = "? veille"; etape++; return }
+  if (etape === 2) {
+   verifier(spot.resultats[0].garder === true && spot.resultats[0].glyphe === "auto_awesome", "l'IA d'abord : " + JSON.stringify(titres()))
+   verifier(titres().indexOf("Veille de l'écran") === 1, "config après l'IA : " + JSON.stringify(titres()))
+   verifier(spot.resultats[1].aide.indexOf("↓") < 0, "pas de rappel sans titre exact")
+   champ.text = "?"; etape++; return }
+  if (etape === 3) {
+   verifier(spot.resultats[0].glyphe !== "auto_awesome" && spot.resultats.length >= 1, "« ? » seul : le bilan en tête : " + JSON.stringify(titres()))
+   // (6) nc-apps en échec : Entrée sur une saisie sans préfixe ne reste pas en attente
+   champ.text = "zz"; spot.valider(0, false); etape++; return }
+  if (etape === 4) { if (spot.occupe) return
+   verifier(!spot.entreeEnAttente, "Entrée n'attend plus"); Qt.quit() }
+ } }
+ Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            for erreur in ("ReferenceError", "TypeError", "is not a type"):
+                self.assertNotIn(erreur, sortie)
+
+
 class SpotlightSource(unittest.TestCase):
     """Lecture du source (pas besoin de Quickshell) : ce que le bilan (constats, sortie de systemctl) met à l'écran n'est
     jamais interprété comme du HTML, et l'icône de l'en-tête est celle de l'IA du bilan."""

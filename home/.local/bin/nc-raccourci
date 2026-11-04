@@ -137,6 +137,8 @@ def parse_keys(text):
         codes = {int(k[5:])}
     elif re.fullmatch(r"[Ff]([1-9]|1[0-2])", k):
         key = k.upper()
+        n = int(k[1:])
+        codes = {66 + n if n <= 10 else 84 + n}     # F1 = 67 … F10 = 76, F11 = 95, F12 = 96 : la config les lie par code
     elif k.lower() in NAMES:
         key = NAMES[k.lower()]
         if key in CODES:
