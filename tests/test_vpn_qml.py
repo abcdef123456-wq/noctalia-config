@@ -23,7 +23,7 @@ U3 = "33333333-3333-4333-8333-333333333333"
 
 FAUX_PARTAGE = "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }\n"
 FAUX_NC_VPN = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 H = os.environ["HOME"]
 a = sys.argv[1:]
 open(H + "/appels", "a").write(json.dumps(a) + "\n")
@@ -35,6 +35,7 @@ elif a[:2] == ["indicateur", "--json"]:
     n = sum(1 for l in open(H + "/appels") if json.loads(l) == ["indicateur", "--json"]) - 1
     f = H + "/etat-%d.json" % n
     e = json.loads(open(f if os.path.exists(f) else H + "/etat.json").read())
+    if os.path.exists(H + "/delai-%d" % n): time.sleep(float(open(H + "/delai-%d" % n).read()))     # lecture lente : la réponse est déjà décidée, donc périmée
     act = e.get("actives", [])
     if not e.get("disponible"):
         print(json.dumps(dict(disponible=False, actif=False, fournisseur="", pays="", nom="", nombre=0)))
@@ -91,6 +92,13 @@ import os, sys, time
 H = os.environ["HOME"]
 open(H + "/appels-mullvad", "a").write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1:] == ["status", "listen"]:
+    time.sleep(20)
+'''
+NMCLI_MUET = r'''#!/usr/bin/env python3
+import os, sys, time
+H = os.environ["HOME"]
+open(H + "/appels-nmcli", "a").write(" ".join(sys.argv[1:]) + "\n")
+if sys.argv[1:] == ["monitor"]:
     time.sleep(20)
 '''
 NOMS_VPN = ("VpnEtat", "VpnLigne", "VpnProtections", "VpnEntete", "VpnCarte", "VpnStat", "VpnBarre", "VpnPastille", "VpnFiltres",
@@ -205,14 +213,14 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, etats=None, reglages=None, delai=30, ks=None, sysfs=None, croissance=False):
+    def lancer(self, corps, etats=None, reglages=None, delai=30, ks=None, sysfs=None, croissance=False, nmcli=FAUX_NMCLI, delais=None):
         """etats : {0: état de départ, 1: état à la 2e lecture…} ; renvoie (journal de qs, appels de nc-vpn, appels de nmcli)."""
         with tempfile.TemporaryDirectory(prefix="nc-vpnqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages") + NOMS_VPN,
                               extra={"Vpn.qml": panneau_hors_fenetre(), "Partage.qml": FAUX_PARTAGE}, singletons=("VpnEtat", "Partage"))
             home = root / "home"
             (home / ".local/bin").mkdir(parents=True)
-            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nc-assistant-install", FAUX_INSTALLEUR, home / ".local/bin"), ("nmcli", FAUX_NMCLI, root / "bin"),
+            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nc-assistant-install", FAUX_INSTALLEUR, home / ".local/bin"), ("nmcli", nmcli, root / "bin"),
                                    ("mullvad", FAUX_MULLVAD, root / "bin")):
                 (ou / nom).write_text(texte)
                 (ou / nom).chmod(0o755)
@@ -222,6 +230,8 @@ class HorsEcran(unittest.TestCase):
             H.faux(root, "mv", 'cat "$2" >> "%s/contenus-barre"; exec /usr/bin/mv "$@"' % root)
             H.faux(root, "zenity", "echo /ailleurs/labo.ovpn")
             etats = etats or {0: etat_deux_tunnels()}
+            for k, v in (delais or {}).items():                 # {numéro de la lecture légère : secondes de retard}
+                (home / ("delai-%d" % k)).write_text(str(v))
             if ks:
                 (home / "ks.json").write_text(json.dumps(ks))
             (home / "etat.json").write_text(json.dumps(etats[0]))
@@ -374,9 +384,10 @@ class HorsEcran(unittest.TestCase):
                     verifier(VpnEtat.indNombre === 2 && VpnEtat.indicateur, "l'événement de nmcli a relancé la lecture : " + VpnEtat.indNombre)
                     console.log("FINI"); Qt.exit(0) }
             } }
-        ''', etats={0: zero, 1: un})
+        ''', etats={0: zero, 1: zero, 2: un})
         self.assertEqual(nmcli, ["monitor"], "nmcli monitor lancé une seule fois")
-        self.assertEqual([a for a in appels if a == ["indicateur", "--json"]], [["indicateur", "--json"]] * 2, "un relevé au départ, un seul après l'événement, aucun entre les deux")
+        self.assertEqual([a for a in appels if a == ["indicateur", "--json"]], [["indicateur", "--json"]] * 3,
+                         "un relevé au départ, un après le départ du moniteur, un seul après l'événement, aucun entre les deux")
 
     def test_libelle_fournisseur_pays_drapeau_plusieurs_tunnels_et_partage(self):
         c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0"), LIGNE_J(U3, "Bureau", "vpn", True, "tun1"),
@@ -811,7 +822,7 @@ class HorsEcran(unittest.TestCase):
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 2) return
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
-                if (etape === 4) { if (ticks < 4 || VpnEtat.externeEnLecture) return
+                if (etape === 4) { if (ticks < 4 || VpnEtat.externeEnLecture()) return
                     VpnEtat.lancer(["fournisseur", "proton", "deconnecter"], "ext:proton")
                     VpnEtat.relire()
                     etape++; ticks = 0; return }
@@ -896,7 +907,7 @@ class HorsEcran(unittest.TestCase):
                     verifier(tous(fen.contentItem, "nc-vpn-actif").length === 2, "un profil de labo ET Mullvad en même temps")
                     verifier(textes(fen.contentItem).indexOf("Connecté · " + String.fromCodePoint(0x1F1F8, 0x1F1EA) + " SE · 2 tunnels") >= 0, "titre : " + textes(fen.contentItem))
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
-                if (etape === 2) { if (ticks < 15) return
+                if (etape === 2) { if (ticks < 8) return
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', etats={0: etat})
@@ -1094,6 +1105,47 @@ class HorsEcran(unittest.TestCase):
         ''', etats={0: etat})
         self.assertEqual(self.appels_mullvad, [], "ni panneau ouvert ni tunnel : pas de mullvad status listen")
 
+    def demandes_pendant_une_lecture(self, n):
+        """La 1re lecture dure 2,5 s et ne dit rien (NetworkManager indisponible) ; n demandes arrivent pendant ce temps, puis l'état change.
+        Sans relecture de rattrapage, l'île ne verrait jamais le nouvel état. Une lecture de rattrapage, puis celle du départ du moniteur."""
+        un = etat_deux_tunnels()
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) {
+                    if (ticks === 3) verifier(VpnEtat.lecturesEnCours > 0 && !VpnEtat.lu, "la première lecture est en cours")
+                    if (ticks >= 3 && ticks < 3 + @N@) VpnEtat.relire()
+                    if (ticks > 3 + @N@ && VpnEtat.indNombre === 2) { etape++; ticks = 0 }
+                    return }
+                if (etape === 2) { if (ticks < 20) return
+                    verifier(VpnEtat.indNombre === 2 && VpnEtat.indicateur, "le nouvel état est resté")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        '''.replace("@N@", str(n)), etats={0: {"disponible": False}, 1: un, 2: un}, delais={0: 2.5}, nmcli=NMCLI_MUET)
+        self.assertEqual([a for a in appels if a == ["indicateur", "--json"]], [["indicateur", "--json"]] * 3,
+                         "départ, une seule relecture de rattrapage, départ du moniteur, puis plus rien pendant 2 s")
+
+    def test_demande_pendant_une_lecture_retardee_n_est_pas_perdue(self):
+        self.demandes_pendant_une_lecture(1)
+
+    def test_plusieurs_demandes_pendant_une_lecture_une_seule_relecture(self):
+        self.demandes_pendant_une_lecture(3)
+
+    def test_moniteur_muet_un_releve_part_quand_meme_apres_son_depart(self):
+        _, appels, nmcli = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (!VpnEtat.veille) return; etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 25) return
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', nmcli=NMCLI_MUET)
+        self.assertEqual(nmcli, ["monitor"])
+        self.assertEqual([a for a in appels if a == ["indicateur", "--json"]], [["indicateur", "--json"]] * 2,
+                         "le relevé du départ, un seul relevé après le départ du moniteur (sans événement), aucun ensuite")
+
     def test_networkmanager_absent_rien_ne_tourne(self):
         _, appels, nmcli = self.lancer('''
             Timer { interval: 100; running: true; repeat: true; onTriggered: {
@@ -1127,7 +1179,7 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''')
-        self.assertEqual(appels, [["indicateur", "--json"]], "un seul relevé léger, au réveil, sans panneau")
+        self.assertEqual(appels, [["indicateur", "--json"]] * 2, "un relevé léger au réveil, un après le départ du moniteur, sans panneau")
 
     def test_fermeture_native_desactive_le_lazyloader_et_l_ile_reste_vivante(self):
         """Super + Q ferme la vraie fenêtre : Vpn émet fermer (onClosed / fenêtre plus visible), shell.qml remet vpnOuvert à faux, le

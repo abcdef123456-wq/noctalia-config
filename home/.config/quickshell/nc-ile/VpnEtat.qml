@@ -169,11 +169,13 @@ Singleton {
         id: lectureExterne
         command: [v.bin + "nc-vpn", "fournisseurs-json"]
         stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+        onStarted: v.lecturesEnCours++
+        onExited: v.finLecture()
     }
     // Vérification EXPLICITE du compte Proton (`protonvpn info` et `countries list`) : une seule fois par ouverture de la fenêtre, à
     // l'ouverture de l'onglet Proton, ou après une connexion au compte (force). Jamais pendant une action, jamais depuis relire().
     property bool protonVerifie: false
-    readonly property bool externeEnLecture: lectureExterne.running      // lecture automatique en cours (pour les tests)
+    function externeEnLecture() { return lectureExterne.running }      // lecture automatique en cours (pour les tests)
     function verifierProton(force) {
         if (!panneauOuvert || agir.running || verificationProton.running || (protonVerifie && force !== true)) return
         protonVerifie = true
@@ -238,7 +240,19 @@ Singleton {
         }
     }
 
+    // Une demande arrivée pendant une lecture y serait perdue, et la réponse périmée resterait : une seule relecture, quand toutes sont finies.
+    // Compté au départ réel du processus : une lecture pas encore partie verra le nouvel état. Pas de liaison sur Process.running : elle vaut
+    // undefined à la fermeture de qs (« Unable to assign »).
+    property bool relireEnAttente: false
+    property int lecturesEnCours: 0
+    function finLecture() {
+        lecturesEnCours = Math.max(0, lecturesEnCours - 1)
+        if (!relireEnAttente || lecturesEnCours > 0) return
+        relireEnAttente = false
+        if (voulu) Qt.callLater(relire)
+    }
     function relire() {
+        if (lecturesEnCours > 0) relireEnAttente = true
         if (!agir.running) lireExterne()           // une action en cours relira l'état à sa fin (onExited)
         if (panneauOuvert && !lecture.running) lecture.running = true      // tous les tunnels : panneau ouvert seulement
         if (panneauOuvert && mullvadInstalle && !lectureMullvad.running) lectureMullvad.running = true
@@ -247,6 +261,8 @@ Singleton {
     Process {
         id: resume
         command: [v.bin + "nc-vpn", "indicateur", "--json"]
+        onStarted: v.lecturesEnCours++
+        onExited: v.finLecture()
         stdout: StdioCollector {
             onStreamFinished: {
                 var d = null
@@ -294,6 +310,8 @@ Singleton {
     Process {
         id: lecture
         command: [v.bin + "nc-vpn", "etat-json"]
+        onStarted: v.lecturesEnCours++
+        onExited: v.finLecture()
         stdout: StdioCollector {
             onStreamFinished: {
                 var d = null
@@ -354,6 +372,8 @@ Singleton {
     Process {
         id: lectureMullvad
         command: [v.bin + "nc-vpn", "mullvad", "etat-json"]
+        onStarted: v.lecturesEnCours++
+        onExited: v.finLecture()
         stdout: StdioCollector {
             onStreamFinished: {
                 var d = null
@@ -380,6 +400,7 @@ Singleton {
         id: moniteur
         command: ["nmcli", "monitor"]
         running: v.veille
+        onStarted: attente.restart()               // ce qui a changé entre le premier relevé et le départ du moniteur
         stdout: SplitParser { onRead: ligne => attente.restart() }
     }
     Timer { id: attente; interval: 600; onTriggered: v.relire() }

@@ -252,6 +252,16 @@ class ProtonFlatpak(BaseVpn):
         self.assertIn(["run", "--user", APP], self.runs())
         self.assertEqual(self.appels_de("kitty"), [])
 
+    def test_tunnel_actif_sans_cache_est_pilote_appli_aussi_en_flatpak(self):
+        self.flatpak()
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid="55555555-5555-4555-8555-555555555555", type="wireguard",
+                                                                           active=True, dev="proton0", nom="ProtonVPN FR#12")]))
+        f = self.fiche(verifier=False)
+        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"], f["pilotage"]), ("pilote_appli", True, "FR", "appli"))
+        self.assertNotIn("pays", f)
+        self.assertEqual(self.runs(), [])
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
     def test_verrou_et_montee_gardes_comme_pour_la_cli_native(self):
         self.flatpak()
         (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid="55555555-5555-4555-8555-555555555555", type="wireguard",

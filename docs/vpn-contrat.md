@@ -104,7 +104,7 @@ Ce contrat est la version 1.
 | Clé | Sens |
 | --- | --- |
 | `id` | `nord`, `proton` ou `mullvad` |
-| `etat` | `absent` : commande introuvable (silencieux) ; `sans_compte` : client installé, pas de compte connecté (ou client inutilisable, ou appareil révoqué, voir `probleme`) ; `pilote_appli` : Proton seulement, sans sa CLI (application graphique seule) ou avec l'application ouverte (`probleme` vaut alors `appli_ouverte`) : tout (compte, pays, connexion) se fait dans l'application ; `pret` : compte connecté |
+| `etat` | `absent` : commande introuvable (silencieux) ; `sans_compte` : client installé, pas de compte connecté (ou client inutilisable, ou appareil révoqué, voir `probleme`) ; `pilote_appli` : Proton seulement, sans sa CLI (application graphique seule) ou avec l'application ouverte (`probleme` vaut alors `appli_ouverte`) : tout (compte, pays, connexion) se fait dans l'application ; aussi avec la CLI quand NetworkManager voit un tunnel Proton monté (hors montée) alors que le dernier relevé du compte est absent, négatif ou en erreur : `connecte` vrai, pays du tunnel, pas de liste de pays, et aucune commande Proton n'est lancée pour le savoir ; `pret` : compte connecté |
 | `message` | une phrase, dans la langue de la session (français ou anglais) ; texte brut |
 | `pays` | **seulement si `etat` vaut `pret`** : `[{"code": "FR", "nom": "France"}]`, code en deux lettres majuscules ; le nom vient TOUJOURS du code ISO (table interne français ou anglais selon la langue du bureau), jamais d'une CLI ; liste triée par ce nom. Absente à l'état `pilote_appli` de Proton (le pays se choisit dans l'appli) |
 | `pays_actif` | code du pays du tunnel de ce fournisseur, ou `""` |

@@ -1965,12 +1965,19 @@ def proton_fournisseur():
             return proton_fiche_appli()
         return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."), pilotage="appli")
     c = (proton_verifier() if VERIFIER_PROTON else None) or proton_cache_lire()
+    if c is not None and c["appli_ouverte"]:
+        return proton_fiche_appli("appli_ouverte")
+    # Le cache est en mémoire de session : absent après un démarrage, il ne doit pas cacher un tunnel que NetworkManager voit monté
+    if c is None or c["probleme"] or c["compte"] is False:
+        monte, actif, _ = proton_tunnel_nm()
+        if monte and proton_en_montee_strict() is False:     # None : nmcli n'a pas répondu, on ne déduit rien
+            return fiche("proton", "Proton VPN", "pilote_appli",
+                         T("Tunnel Proton VPN actif. Le compte se vérifie dans l'application.",
+                           "Proton VPN tunnel active. The account is checked in the app."), pays_actif=actif, connecte=True, pilotage="appli")
     if c is None:
         return fiche("proton", "Proton VPN", "sans_compte",
                      T("Le compte Proton VPN n'est pas encore vérifié : ouvre l'onglet Proton VPN.",
                        "The Proton VPN account is not checked yet: open the Proton VPN tab."), probleme="non_verifie")
-    if c["appli_ouverte"]:
-        return proton_fiche_appli("appli_ouverte")
     if c["probleme"]:
         return fiche("proton", "Proton VPN", "sans_compte", proton_msg_probleme(c["probleme"]), probleme=c["probleme"])
     if c["compte"] is False:

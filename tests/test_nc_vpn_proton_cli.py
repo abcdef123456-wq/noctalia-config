@@ -123,7 +123,84 @@ class ProtonCli(BaseVpn):
             r = self.seul(*args)
             self.assertEqual(r.returncode, 0, args)
         self.assertEqual(self.appels_de("protonvpn"), [])
-        f = self.fiche(verifier=False)                                           # pas encore vérifié : dit d'ouvrir l'onglet, sans appel
+        f = self.fiche(verifier=False)                                           # pas de cache mais tunnel monté : vu par NetworkManager, sans appel
+        self.assertEqual((f["etat"], f["probleme"], f["connecte"]), ("pilote_appli", "", True))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    # ── tunnel déjà monté au démarrage : le cache (mémoire de session) ne doit pas le cacher ──
+    def tunnel(self, **plus):
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=True, dev="proton0",
+                                                                           nom="ProtonVPN FR#12", **plus)]))
+
+    def cache(self, compte=True, probleme="", appli_ouverte=False):
+        (self.r / "run" / "nc-vpn-proton.json").write_text(json.dumps(
+            {"appli_ouverte": appli_ouverte, "compte": compte, "probleme": probleme, "pays": ["FR"], "pays_probleme": ""}))
+
+    def assertFicheTunnel(self, f):
+        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"], f["pilotage"]), ("pilote_appli", True, "FR", "appli"))
+        self.assertNotIn("pays", f)
+
+    def test_tunnel_actif_sans_cache_est_pilote_appli(self):
+        self.cli()
+        self.tunnel()
+        self.assertFicheTunnel(self.fiche(verifier=False))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_tunnel_actif_cache_sans_compte_puis_tunnel_coupe(self):
+        self.cli()
+        self.cache(compte=False)
+        self.tunnel()
+        self.assertFicheTunnel(self.fiche(verifier=False))
+        (self.r / "etat.json").write_text(json.dumps(connexions()))
+        f = self.fiche(verifier=False)
+        self.assertEqual((f["etat"], f["peut_login"], f["connecte"]), ("sans_compte", True, False))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_tunnel_actif_cache_en_probleme_est_pilote_appli(self):
+        self.cli()
+        self.cache(compte=None, probleme="delai")
+        self.tunnel()
+        self.assertFicheTunnel(self.fiche(verifier=False))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_tunnel_en_montee_sans_cache_reste_non_verifie(self):
+        self.cli()
+        self.tunnel(etat="activating")
+        f = self.fiche(verifier=False)
+        self.assertEqual((f["etat"], f["probleme"]), ("sans_compte", "non_verifie"))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_etat_du_tunnel_illisible_sans_cache_ne_conclut_rien(self):
+        self.cli()
+        self.tunnel()
+        f = self.fiche(verifier=False, NM_ECHEC_STATE="1")
+        self.assertEqual((f["etat"], f["probleme"]), ("sans_compte", "non_verifie"))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_appli_ouverte_garde_sa_priorite_sur_le_tunnel(self):
+        self.cli()
+        self.cache(compte=None, appli_ouverte=True)
+        self.tunnel()
+        f = self.fiche(verifier=False)
+        self.assertEqual((f["etat"], f["probleme"]), ("pilote_appli", "appli_ouverte"))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_tunnel_actif_cache_avec_compte_reste_pret(self):
+        self.cli()
+        self.cache(compte=True)
+        self.tunnel()
+        f = self.fiche(verifier=False)
+        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"], f["pilotage"]), ("pret", True, "FR", "direct"))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_nmcli_en_erreur_ou_muet_sans_cache_ne_deduit_rien(self):
+        self.cli()
+        self.tunnel()
+        f = self.fiche(verifier=False, NM_ARRETE="1")
+        self.assertEqual((f["etat"], f["probleme"], f["connecte"]), ("sans_compte", "non_verifie", False))
+        muet = self.r / "faux-bin" / "nmcli"
+        muet.write_text("#!/bin/sh\nexit 0\n")
+        f = self.fiche(verifier=False)
         self.assertEqual((f["etat"], f["probleme"], f["connecte"]), ("sans_compte", "non_verifie", False))
         self.assertEqual(self.appels_de("protonvpn"), [])
 
