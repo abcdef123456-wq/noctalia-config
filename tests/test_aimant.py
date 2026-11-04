@@ -748,10 +748,10 @@ n = #dispatches; sv(); print("apres", #dispatches - n)
             with self.subTest(saisie=saisie):
                 l = self.lancer(saisie, self.FLUX)
                 self.assertEqual(l[0], "refus\t0\techecs\t0\tminuteurs\t0", "aucun refus, module chargé, minuteur absent au chargement")
-                # Le relâchement est transparent : en 0.57, l'appui consommé par le déplacement le masquerait sinon
-                self.assertIn("bind\tmouse:275\tpress\t-", l)
+                # Appui et relâchement sont transparents : en 0.57, le déplacement les masquerait sinon (dragBegin puis shadowBinds)
+                self.assertIn("bind\tmouse:275\tpress\ttransparent", l)
                 self.assertIn("bind\tmouse:275\trelease\ttransparent", l)
-                self.assertIn("bind\tSUPER + mouse:272\tpress\t-", l)
+                self.assertIn("bind\tSUPER + mouse:272\tpress\ttransparent", l)
                 self.assertIn("bind\tSUPER + mouse:272\trelease\ttransparent", l)
                 self.assertEqual(l[-3].split("\t")[:4], ["apres appui", "1", "50", "repeat"])
                 # le cadre d'aperçu, bordure comprise, avec les vrais réglages (bordure 2, espace 4)

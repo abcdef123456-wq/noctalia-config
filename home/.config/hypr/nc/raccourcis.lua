@@ -352,7 +352,8 @@ if saisie == "souris" or saisie == "les-deux" then
     if aimant then
         for _, combinaison in ipairs({ "mouse:275", SUPER .. " + mouse:272" }) do
             local avec_super = combinaison:find("SUPER", 1, true) ~= nil      -- Super lâché avant le bouton : voir aimant.lua
-            pcall(touche, combinaison, function() aimant.presse(avec_super) end)
+            -- transparent : en 0.57, dragBegin appelle shadowBinds() pendant que drag() se joue, ce qui masquerait cet appui, joué juste après
+            pcall(touche, combinaison, function() aimant.presse(avec_super) end, nil, { transparent = true })
             si_compris("release", combinaison, aimant.relache)
         end
     end
