@@ -407,7 +407,7 @@ class Assistant(unittest.TestCase):
         p = self.run / "nc-claude"
         p.mkdir(mode=0o700)
         initial = {"sessions": {"codex-existing": {"agent": "codex", "maj": time.time(), "etat": "travail"}},
-                   "demandes": {"permission": {"session": "codex-existing"}}}
+                   "demandes": {"permission": {"session": "codex-existing", "t": time.time()}}}   # récente : pas purgée
         (p / "etat.json").write_text(json.dumps(initial))
         r = self.cli("demander", "test $(false) 'quotes'")
         self.assertEqual(r.returncode, 0, r.stderr)
