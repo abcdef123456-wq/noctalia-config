@@ -7,12 +7,17 @@ Item {
     property color couleur: Couleurs.accent
     property string texte: ""
     width: 84; height: 84
-    onValeurChanged: arc.requestPaint()
-    onCouleurChanged: arc.requestPaint()
+    property int peintures: 0
+    property int demandes: 0
+    function demander() { demandes++; arc.requestPaint() }
+    onValeurChanged: if (visible) demander()
+    onCouleurChanged: if (visible) demander()
+    onVisibleChanged: if (visible) demander()
     Canvas {
         id: arc
         anchors.fill: parent
         onPaint: {
+            j.peintures++
             var c = getContext("2d"); c.reset()
             var r = width / 2 - 7, cx = width / 2, cy = height / 2
             var a0 = Math.PI * 0.75, tout = Math.PI * 1.5

@@ -129,6 +129,7 @@ FloatingWindow {
             }
 
             GarminTiroir { visible: garmin.tiroir && GarminEtat.actif; width: parent.width }
+            GarminTableau { objectName: "nc-garmin-tableau" }
 
             Flow {
                 id: grille

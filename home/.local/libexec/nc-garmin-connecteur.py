@@ -5,6 +5,7 @@ Affiche UNE ligne JSON : {"metriques": {...}} ou {"erreur": "<categorie>"} (pas_
 | python_ancien | installation). Le texte des erreurs de la bibliothèque n'est JAMAIS repris : il peut contenir une adresse, un jeton.
 Connecteur non officiel (garminconnect) : peut cesser de marcher si Garmin change son service."""
 import json
+import math
 import os
 import re
 import sys
@@ -37,7 +38,7 @@ def categorie(e):
 
 
 def nombre(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
 
 
 def premier(*vals):
@@ -45,6 +46,17 @@ def premier(*vals):
         if nombre(v) is not None:
             return v
     return None
+
+
+def serie(v, i=1, n=300):
+    """Liste de paires [horodatage, valeur] -> au plus n valeurs finies (None si trop peu pour une courbe)."""
+    if not isinstance(v, list):
+        return None
+    out = [x[i] for x in v[:20000] if isinstance(x, (list, tuple)) and len(x) > i and nombre(x[i]) is not None]
+    if len(out) < 2:
+        return None
+    pas = -(-len(out) // n)
+    return out[::pas]
 
 
 def dico(v):
@@ -66,24 +78,29 @@ def collecte(api, jour):
     def corps():
         bb = api.get_body_battery(jour)
         niv = [x[1] for x in dico(bb[0] if isinstance(bb, list) and bb else {}).get("bodyBatteryValuesArray", []) if isinstance(x, list) and len(x) > 1 and nombre(x[1]) is not None]
-        return {"body_battery": niv[-1] if niv else None}
+        return {"body_battery": niv[-1] if niv else None,
+                "bb_serie": serie(dico(bb[0] if isinstance(bb, list) and bb else {}).get("bodyBatteryValuesArray"))}
 
     def coeur():
         h = dico(api.get_heart_rates(jour))
-        return {"fc_repos": nombre(h.get("restingHeartRate")), "fc_max": nombre(h.get("maxHeartRate"))}
+        return {"fc_repos": nombre(h.get("restingHeartRate")), "fc_max": nombre(h.get("maxHeartRate")),
+                "fc_serie": serie(h.get("heartRateValues"))}
 
     def sommeil():
         s = dico(dico(api.get_sleep_data(jour)).get("dailySleepDTO"))
         score = dico(dico(s.get("sleepScores")).get("overall")).get("value")
-        return {"sommeil_s": nombre(s.get("sleepTimeSeconds")), "sommeil_score": nombre(score)}
+        return {"sommeil_s": nombre(s.get("sleepTimeSeconds")), "sommeil_score": nombre(score),
+                "sommeil_profond_s": nombre(s.get("deepSleepSeconds")), "sommeil_leger_s": nombre(s.get("lightSleepSeconds")),
+                "sommeil_paradoxal_s": nombre(s.get("remSleepSeconds")), "sommeil_eveil_s": nombre(s.get("awakeSleepSeconds"))}
 
     def stress():
-        return {"stress_moyen": nombre(dico(api.get_stress_data(jour)).get("avgStressLevel"))}
+        d = dico(api.get_stress_data(jour))
+        return {"stress_moyen": nombre(d.get("avgStressLevel")), "stress_serie": serie([x for x in d.get("stressValuesArray", []) if isinstance(x, list) and len(x) > 1 and nombre(x[1]) is not None and x[1] >= 0] if isinstance(d.get("stressValuesArray"), list) else None)}
 
     def pas():
         s = dico(api.get_stats(jour))
         return {"pas": nombre(s.get("totalSteps")), "pas_objectif": nombre(s.get("dailyStepGoal")),
-                "calories_actives": nombre(s.get("activeKilocalories")), "etages": nombre(s.get("floorsAscended")),
+                "distance_m": nombre(s.get("totalDistanceMeters")), "calories_actives": nombre(s.get("activeKilocalories")), "etages": nombre(s.get("floorsAscended")),
                 "minutes_intenses": nombre((nombre(s.get("moderateIntensityMinutes")) or 0)
                                            + (nombre(s.get("vigorousIntensityMinutes")) or 0))}
 

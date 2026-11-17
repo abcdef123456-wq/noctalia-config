@@ -210,10 +210,14 @@ CATALOGUE = [  # (id, nom, par défaut)
 IDS = [c[0] for c in CATALOGUE]
 DEFAUT = [c[0] for c in CATALOGUE if c[2]]
 METRIQUES = ("body_battery", "fc_repos", "fc_max", "sommeil_s", "sommeil_score", "stress_moyen", "pas", "pas_objectif", "calories_actives",
-             "etages", "minutes_intenses", "vfc_nuit", "activite_nom", "activite_minutes", "spo2", "respiration", "vo2max", "readiness")
+             "etages", "minutes_intenses", "vfc_nuit", "activite_nom", "activite_minutes", "spo2", "respiration", "vo2max", "readiness",
+             "distance_m", "sommeil_profond_s", "sommeil_leger_s", "sommeil_paradoxal_s", "sommeil_eveil_s")
+SERIES = ("bb_serie", "fc_serie", "stress_serie")  # listes optionnelles de nombres finis, 300 au plus
 DEMO = {"body_battery": 74, "fc_repos": 52, "fc_max": 148, "sommeil_s": 27300, "sommeil_score": 82, "stress_moyen": 28, "pas": 6840,
         "pas_objectif": 10000, "calories_actives": 410, "etages": 9, "minutes_intenses": 32, "vfc_nuit": 58, "activite_nom": "Course",
-        "activite_minutes": 41, "spo2": 96, "respiration": 14, "vo2max": 51.0, "readiness": 68}
+        "activite_minutes": 41, "spo2": 96, "respiration": 14, "vo2max": 51.0, "readiness": 68, "distance_m": 5200, "sommeil_profond_s": 5400, "sommeil_leger_s": 14400, "sommeil_paradoxal_s": 5700,
+        "sommeil_eveil_s": 1800, "bb_serie": [30, 45, 62, 80, 74, 66, 58, 74], "fc_serie": [58, 64, 72, 95, 120, 88, 70, 62],
+        "stress_serie": [20, 28, 45, 38, 25, 30, 22]}
 
 
 def id_valide(i):
@@ -231,6 +235,10 @@ def valider_metriques(d):
             if isinstance(v, str) and 0 < len(v) <= 60 and v.isprintable():
                 out[k] = v
         elif isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) < 1e9:
+            out[k] = v
+    for k in SERIES:
+        v = d.get(k)
+        if isinstance(v, list) and 2 <= len(v) <= 300 and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and abs(x) < 1e9 for x in v):
             out[k] = v
     return out
 

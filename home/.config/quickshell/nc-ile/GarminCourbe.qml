@@ -6,9 +6,14 @@ Canvas {
     property var points: []
     property color couleur: Couleurs.rose
     width: 120; height: 34
-    onPointsChanged: requestPaint()
-    onCouleurChanged: requestPaint()
+    property int peintures: 0                     // compté pour les tests : rien n'est peint tant que la courbe est cachée
+    property int demandes: 0                      // demandes de peinture : comptées pour les tests, aucune tant que la courbe est cachée
+    function demander() { demandes++; requestPaint() }
+    onPointsChanged: if (visible) demander()
+    onCouleurChanged: if (visible) demander()
+    onVisibleChanged: if (visible) demander()
     onPaint: {
+        peintures++
         var c = getContext("2d"); c.reset()
         var p = cb.points
         if (!p || p.length < 2) return
