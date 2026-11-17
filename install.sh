@@ -11,6 +11,7 @@
 #                              sinon refus, ou question à part non par défaut)
 #   ./install.sh --oui         sans terminal, répond aussi oui au démarrage, à la connexion et aux pilotes (sinon : non)
 #   ./install.sh --garmin      active le tableau de bord Santé Garmin (connecteur non officiel), sans poser la question
+#   ./install.sh --graphique  ouvre l'installeur graphique (GTK4) s'il est possible, sinon continue dans le terminal
 #   ./install.sh --en | --fr   force la langue : anglais ou français (sinon le réglage LANGUE, puis celle du système)
 #
 # Distributions : Arch (et dérivées), Fedora, Debian/Ubuntu, openSUSE : Hyprland et Noctalia v5 sont installés
@@ -37,17 +38,88 @@ OUI=0   # --oui : sans terminal, accepte aussi les étapes sensibles (démarrage
 HYPR_MIN=0.55.0
 NOCT_DOCS=https://docs.noctalia.dev/noctalia/getting-started/installation/
 
-say()  { printf '\n\033[1;35m==\033[0m \033[1m%s\033[0m\n' "$*"; }
-info() { printf '   %s\n' "$*"; }
-ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
-warn() { printf '   \033[33m! %s\033[0m\n' "$*"; }
-die()  { printf '\033[31m%s%s\033[0m\n' "$(t 'Erreur : ' 'Error: ')" "$*" >&2; exit 1; }
+# ── Mode UI (NC_UI=1) : l'application graphique lit un JSON par ligne sur le fd 3 (NC_UI_SORTIE) et répond par des
+# lignes « <id> <réponse> » sur NC_UI_ENTREE. Sans NC_UI=1, rien de tout cela n'existe ; stdout ne change jamais.
+[ "${NC_UI:-0}" = 1 ] || NC_UI=0
+NC_UI_N=0; NC_UI_ID=0; NC_UI_FINI=0; NC_UI_IN=0; NC_UI_BIN=""; NC_J=""; NC_R=""
+nc_json_echappe() { # nc_json_echappe "texte" -> $NC_J : texte sûr dans une chaîne JSON (codes ANSI retirés, contrôles en \uXXXX)
+  local s="$1" c n i
+  while [[ "$s" =~ $'\033'\[[0-9\;]*[A-Za-z] ]]; do s="${s/"${BASH_REMATCH[0]}"/}"; done
+  NC_J=""
+  if [[ "$s" =~ ^[^[:cntrl:]\\\"]*$ ]]; then NC_J="$s"; return 0; fi
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      '\') NC_J+='\\' ;;
+      '"') NC_J+='\"' ;;
+      *) printf -v n '%d' "'$c"
+         if [ "$n" -lt 32 ] || [ "$n" -eq 127 ]; then printf -v c '\\u%04x' "$n"; fi
+         NC_J+="$c" ;;
+    esac
+  done
+}
+nc_ui_ev() { [ "${NC_UI:-0}" = 1 ] || return 0; { printf '%s\n' "$1" >&3; } 2>/dev/null || true; }
+nc_ui_txt() { nc_json_echappe "$2"; nc_ui_ev "{\"type\":\"$1\",\"texte\":\"$NC_J\"}"; }
+nc_ui_fin() { # une seule fois, quel que soit le piège qui l'appelle
+  [ "${NC_UI:-0}" = 1 ] && [ "$NC_UI_FINI" = 0 ] || return 0
+  NC_UI_FINI=1; nc_ui_ev "{\"type\":\"fin\",\"code\":$1}"
+  [ -z "$NC_UI_BIN" ] || rm -rf -- "$NC_UI_BIN"
+  return 0
+}
+nc_ui_lis() { # lit UNE ligne ; NC_R = la réponse si elle est « <id> <réponse> » avec le bon id, sinon vide (= non / défaut)
+  local l=""
+  NC_R=""
+  [ "$NC_UI_IN" = 1 ] || return 0
+  IFS= read -r -t "${NC_UI_ATTENTE:-3600}" -u 4 l || return 0
+  l="${l%$'\r'}"
+  [[ "$l" =~ ^([0-9]+)\ (.*)$ ]] || return 0
+  if [ "${BASH_REMATCH[1]}" = "$NC_UI_ID" ]; then NC_R="${BASH_REMATCH[2]}"; fi
+  return 0
+}
+if [ "${NC_UI:-0}" = 1 ]; then
+  # Sortie impossible à ouvrir : on continue comme en terminal (jamais de sortie du script pour cela)
+  if [ -n "${NC_UI_SORTIE:-}" ] && { exec 3>>"$NC_UI_SORTIE"; } 2>/dev/null; then
+    # shellcheck disable=SC2064
+    trap '' PIPE
+    # Entrée : jamais bloquante (O_RDWR) et seulement si c'est une FIFO
+    if [ -p "${NC_UI_ENTREE:-}" ] && { exec 4<>"$NC_UI_ENTREE"; } 2>/dev/null; then NC_UI_IN=1; fi
+    # sudo sans terminal : SUDO_ASKPASS + une enveloppe « sudo -A » en tête du PATH (couvre aussi les sous-scripts)
+    NC_VRAI_SUDO="$(command -v sudo 2>/dev/null || true)"
+    if [ -n "$NC_VRAI_SUDO" ]; then
+      NC_UI_BIN="$(mktemp -d 2>/dev/null || true)"
+      if [ -n "$NC_UI_BIN" ]; then
+        printf '#!/bin/sh\nexec "%s" -A "$@"\n' "$NC_VRAI_SUDO" >"$NC_UI_BIN/sudo"
+        chmod 700 "$NC_UI_BIN/sudo"
+        export PATH="$NC_UI_BIN:$PATH" SUDO_ASKPASS="$REPO/installeur/nc-askpass"
+      fi
+    fi
+    # Pièges précoces : le « fin » part même si le script meurt avant ses pièges habituels
+    trap 'nc_ui_fin 130; exit 130' INT
+    trap 'nc_ui_fin 143; exit 143' TERM
+    trap 'nc_ui_fin "$?"' EXIT
+  else NC_UI=0; fi
+fi
+
+say()  { nc_ui_n_etape "$*"; printf '\n\033[1;35m==\033[0m \033[1m%s\033[0m\n' "$*"; }
+info() { nc_ui_txt info "$*"; printf '   %s\n' "$*"; }
+ok()   { nc_ui_txt ok "$*"; printf '   \033[32m✓\033[0m %s\n' "$*"; }
+warn() { nc_ui_txt avert "$*"; printf '   \033[33m! %s\033[0m\n' "$*"; }
+die()  { nc_ui_txt erreur "$(t 'Erreur : ' 'Error: ')$*"; printf '\033[31m%s%s\033[0m\n' "$(t 'Erreur : ' 'Error: ')" "$*" >&2; exit 1; }
+nc_ui_n_etape() { [ "${NC_UI:-0}" = 1 ] || return 0; NC_UI_N=$((NC_UI_N + 1)); nc_json_echappe "$1"; nc_ui_ev "{\"type\":\"etape\",\"n\":$NC_UI_N,\"titre\":\"$NC_J\"}"; }
 # Pas de terminal utilisable (CI, ssh sans tty, tâche de fond) : le même test pour ask(), choisir() et les options de
 # pacman. Les réponses viennent alors des valeurs par défaut.
 sans_tty() { ! { true </dev/tty; } 2>/dev/null; }
 ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
   # « sensible » : démarrage, connexion, pilotes. Sans terminal, la réponse par défaut y est NON, sauf avec --oui.
-  local d="${2:-n}" r hint
+  local d="${2:-n}" r hint sens=false
+  if [ "${NC_UI:-0}" = 1 ]; then # interface graphique : question sur le fd 3, réponse « <id> o » ; tout le reste vaut non
+    [ "${3:-}" = sensible ] && sens=true
+    NC_UI_ID=$((NC_UI_ID + 1)); nc_json_echappe "$1"
+    nc_ui_ev "{\"type\":\"question\",\"id\":$NC_UI_ID,\"question\":\"$NC_J\",\"defaut\":\"$d\",\"sensible\":$sens}"
+    nc_ui_lis
+    [ "$NC_R" = o ] && return 0
+    return 1
+  fi
   hint="$(t "[o/N]" "[y/N]")"
   [ "$d" = o ] && hint="$(t "[O/n]" "[Y/n]")"
   r=""
@@ -154,6 +226,16 @@ sonder() { # sonder DURÉE LIBELLÉ COMMANDE…
 choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans $CHOIX (1 par défaut)
   local q="$1" i=1 r=""
   shift
+  if [ "${NC_UI:-0}" = 1 ]; then # interface graphique : choix sur le fd 3, réponse « <id> <numéro> » ; défaut 1
+    local js="" o
+    for o in "$@"; do nc_json_echappe "$o"; js="$js${js:+,}\"$NC_J\""; done
+    NC_UI_ID=$((NC_UI_ID + 1)); nc_json_echappe "$q"
+    nc_ui_ev "{\"type\":\"choix\",\"id\":$NC_UI_ID,\"question\":\"$NC_J\",\"options\":[$js],\"defaut\":1}"
+    nc_ui_lis; r="$NC_R"
+    [[ "$r" =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le $# ] || r=1
+    CHOIX=$r
+    return 0
+  fi
   info "$q"
   for o in "$@"; do info "  $i) $o"; i=$((i + 1)); done
   if ! sans_tty; then read -r -p "   $(t "Ton choix [1] : " "Your choice [1]: ")" r </dev/tty || r=""; else info "$(t "-> réponse par défaut (1)" "-> default answer (1)")"; fi
@@ -163,13 +245,17 @@ choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans 
 # Longue étape sans sudo (compilation, téléchargement) : tourne en arrière-plan pendant qu'une ligne s'actualise
 # (roue, temps écoulé ; pour une compilation, avancement en %). avec_progres "Message" journal commande… -> son code
 avec_progres() {
-  local msg="$1" log="$2" pid t0=$SECONDS i=0 roue='|/-\' pc="" fpc
+  local msg="$1" log="$2" pid t0=$SECONDS i=0 roue='|/-\' pc="" fpc xy
   fpc="$(t ' · %d %%' ' · %d%%')"
   shift 2
   "$@" >"$log" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     pc="$(grep -ao '\[[0-9]*/[0-9]*\]' "$log" 2>/dev/null | tail -1 | awk -F'[][/]' -v f="$fpc" '$3 > 0 { printf f, 100 * $2 / $3 }' || true)"
+    if [ "${NC_UI:-0}" = 1 ]; then
+      xy="$(grep -ao '\[[0-9]*/[0-9]*\]' "$log" 2>/dev/null | tail -1 | tr -d '[]' || true)"
+      [[ "$xy" =~ ^([0-9]+)/([0-9]+)$ ]] && [ "${BASH_REMATCH[2]}" -gt 0 ] && nc_ui_ev "{\"type\":\"progres\",\"x\":${BASH_REMATCH[1]},\"y\":${BASH_REMATCH[2]}}"
+    fi
     [ -t 1 ] && printf '\r   %s %s (%d min %02d s)%s   ' "${roue:$((i++ % 4)):1}" "$msg" $(((SECONDS - t0) / 60)) $(((SECONDS - t0) % 60)) "$pc"
     sleep 1
   done
@@ -177,7 +263,7 @@ avec_progres() {
   wait "$pid"
 }
 
-ATTENDS_ETAPE=0; DEMANDE_SEULEMENT=0
+ATTENDS_ETAPE=0; DEMANDE_SEULEMENT=0; GRAPHIQUE=0
 for a in "$@"; do
   if [ "$ATTENDS_ETAPE" = 1 ]; then SEULEMENT="$a"; ATTENDS_ETAPE=0; continue; fi
   case "$a" in
@@ -188,6 +274,7 @@ for a in "$@"; do
     --restore) MODE=restore ;;
     --oui|--yes) OUI=1 ;;
     --garmin) GARMIN=1 ;;
+    --graphique) GRAPHIQUE=1 ;;
     --en|--fr) ;;   # langue : prise en compte plus haut
     --legion|--no-legion) info "$(t "Option $a ignorée : les profils d'énergie sont maintenant proposés sur tous les PC." "Option $a ignored: power profiles are now offered on every PC.")" ;;
     -h|--help)
@@ -205,6 +292,7 @@ install.sh: installs the noctalia-config desktop (Hyprland + Noctalia v5) on you
                              otherwise refusal, or a separate question, "no" by default)
   ./install.sh --oui | --yes without a terminal, also answer yes to boot, login and driver steps (otherwise: no)
   ./install.sh --garmin      enable the Garmin health dashboard (unofficial connector), without asking
+  ./install.sh --graphique  open the graphical installer (GTK4) if possible, otherwise go on in the terminal
   ./install.sh --en | --fr   force the language: English or French (otherwise the LANGUE setting, then the system's)
 
 Distributions: Arch (and derivatives), Fedora, Debian/Ubuntu, openSUSE: Hyprland and Noctalia v5 are installed
@@ -215,7 +303,7 @@ The script never runs a system update, and only touches the boot (Plymouth, GRUB
 if you answer yes to the matching question.
 AIDE_EN
       else
-        sed -n '2,18p' "$0"
+        sed -n '2,19p' "$0"
       fi
       exit 0 ;;
     *) die "$(t "option inconnue : $a (voir ./install.sh --help)" "unknown option: $a (see ./install.sh --help)")" ;;
@@ -532,6 +620,30 @@ if [ "$MODE" = seulement ]; then
     energie) say "$(t "Assistant des profils d'énergie" "Power profiles helper")"; etape_energie_root ;;
   esac
   exit 0
+fi
+
+# ── --graphique : l'installeur GTK4 s'il est possible, sinon on continue ici, dans le terminal ───────────────────────────────────
+if [ "$GRAPHIQUE" = 1 ]; then
+  gtk_ok() { python3 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("Adw","1"); from gi.repository import Gtk, Adw' >/dev/null 2>&1; }
+  if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
+    if ! gtk_ok && [ "$FAMILY" != nixos ] && [ "$FAMILY" != other ]; then
+      # suse : python3-gobject* sont des provides de python313-*/python314-*, zypper prend la saveur du python3 du système
+      case "$FAMILY" in
+        arch) gtk_pkgs=(python-gobject gtk4 libadwaita) ;;
+        debian) gtk_pkgs=(python3-gi gir1.2-gtk-4.0 gir1.2-adw-1) ;;
+        fedora) gtk_pkgs=(python3-gobject gtk4 libadwaita) ;;
+        suse) gtk_pkgs=(python3-gobject python3-gobject-Gdk typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1) ;;
+      esac
+      if ask "$(t "Installer les paquets GTK4 de l'installeur graphique (${gtk_pkgs[*]}) ?" "Install the GTK4 packages for the graphical installer (${gtk_pkgs[*]})?")" o; then
+        pkg_install "${gtk_pkgs[@]}" || true
+      fi
+    fi
+    if gtk_ok && [ -f "$REPO/installeur/nc-installeur" ]; then
+      args=(); for a in "$@"; do [ "$a" = --graphique ] || args+=("$a"); done
+      exec python3 "$REPO/installeur/nc-installeur" "${args[@]}"
+    fi
+  fi
+  info "$(t "Installeur graphique indisponible : on continue dans le terminal." "Graphical installer unavailable: continuing in the terminal.")"
 fi
 
 # ── Vérifications ────────────────────────────────────────────────────────────
@@ -975,6 +1087,7 @@ sortie_install() {
   trap - INT TERM EXIT
   relancer_noctalia
   rm -f "$tmp"
+  if [ "${NC_UI:-0}" = 1 ]; then nc_ui_fin "$code"; fi
   # Pas de sauvegarde vide : les dossiers laissés vides par les sauvegardes retirées (dossiers utilisateur, signets), puis
   # $BK lui-même s'il ne garde rien. rmdir ne retire qu'un dossier vide : rien d'autre n'est touché.
   if [ -n "${BK:-}" ] && [ -d "$BK" ]; then rmdir -- "$BK/.config/gtk-3.0" "$BK/.config" "$BK" 2>/dev/null || true; fi
@@ -1679,6 +1792,8 @@ elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Ins
       # Fedora : l'image de base n'a pas chsh (util-linux-user, devenu un alias de util-linux) ; ailleurs il est déjà là
       have chsh || case "$FAMILY" in fedora) pkg_try util-linux-user ;; suse) pkg_try shadow ;; debian) pkg_try passwd ;; arch) pkg_try util-linux ;; esac
       if ! have chsh; then info "$(t "Shell par défaut inchangé : la commande chsh est absente (installe le paquet qui la fournit, puis : chsh -s $(command -v zsh))." "Default shell unchanged: the chsh command is missing (install the package that provides it, then: chsh -s $(command -v zsh)).")"
+      elif [ "${NC_UI:-0}" = 1 ]; then
+        ask "$(t "Passer zsh en shell par défaut (il te demandera ton mot de passe) ?" "Set zsh as your default shell (it will ask for your password)?")" o && sudo chsh -s "$(command -v zsh)" "$USER" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
       elif sans_tty; then info "$(t "Shell par défaut inchangé : chsh demande ton mot de passe, il faut un terminal (chsh -s $(command -v zsh))." "Default shell unchanged: chsh asks for your password, which needs a terminal (chsh -s $(command -v zsh)).")"
       else
         ask "$(t "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" "Make zsh your default shell (it will ask for your password)?")" o && chsh -s "$(command -v zsh)" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
@@ -2000,6 +2115,8 @@ fi
 # Pas de configuration automatique sans terminal, ni de remplacement d'une connexion existante lors de nc-maj.
 if [ -e "$HOME/.config/nc/assistant.conf" ]; then
   ok "$(t "Configuration de l'assistant distant préservée." "Remote assistant configuration preserved.")"
+elif [ "${NC_UI:-0}" = 1 ]; then
+  warn "$(t "Assistant distant non configuré ici (il faut un terminal) ; lance nc-assistant configurer plus tard." "Remote assistant not configured here (needs a terminal); run nc-assistant configurer later.")"
 elif { true </dev/tty; } 2>/dev/null && ask "$(t "Connecter un assistant distant (serveur déjà installé) ?" "Connect a remote assistant (server already installed)?")" n; then
   if "$HOME/.local/bin/nc-assistant" configurer </dev/tty; then
     if ask "$(t "L'utiliser pour les questions du Spotlight ?" "Use it for Spotlight questions?")" n; then
@@ -2219,7 +2336,13 @@ if [ "$MODE" = full ]; then
     if ask "$(t "Régler le pays du Wi-Fi ?" "Set the Wi-Fi country?")" o sensible; then
       dflt="$(echo "${LANG:-fr_FR}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p')"; dflt="${dflt:-FR}"
       cc=""
+      if [ "${NC_UI:-0}" = 1 ]; then
+        NC_UI_ID=$((NC_UI_ID+1)); nc_json_echappe "$(t "Code du pays (2 lettres)" "Country code (2 letters)")"
+        nc_ui_ev "{\"type\":\"saisie\",\"id\":$NC_UI_ID,\"question\":\"$NC_J\",\"defaut\":\"$dflt\"}"
+        nc_ui_lis; cc="$NC_R"
+      else
       { true </dev/tty; } 2>/dev/null && { read -r -p "$(t "   Code du pays (2 lettres) [$dflt] " "   Country code (2 letters) [$dflt] ")" cc </dev/tty || cc=""; }
+      fi
       cc="$(echo "${cc:-$dflt}" | tr '[:lower:]' '[:upper:]')"
       if [[ "$cc" =~ ^[A-Z]{2}$ ]]; then
         sbackup /etc/conf.d/wireless-regdom

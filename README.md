@@ -100,6 +100,7 @@ en charge** par l'installateur : il copie tout dans `~/.config` et `~/.local/sta
 | `./install.sh --files-only` | seulement la copie des fichiers |
 | `./install.sh --restore` | remet tes fichiers comme avant la dernière installation |
 | `./install.sh --seulement killswitch` ou `energie` | seulement l'assistant root du kill switch VPN, ou celui des profils d'énergie : une question (non par défaut, `--oui` ne l'accepte pas), rien d'autre ; c'est ce que lance le bouton « Installer l'assistant… » de l'île |
+| `./install.sh --graphique` | ouvre l'installeur graphique (GTK4) s'il est possible, sinon continue dans le terminal |
 | `./install.sh --oui` | sans terminal (CI, ssh), répond aussi oui aux étapes de démarrage, de connexion et de pilotes, que le script saute sinon |
 
 Le script :
