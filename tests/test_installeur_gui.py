@@ -12,16 +12,26 @@ import unittest
 from unittest import mock
 
 BIN = pathlib.Path(__file__).resolve().parent.parent / "installeur"
-_TMP = tempfile.mkdtemp(prefix="nc-ig-test-")
-# HOME, XDG_* et TMPDIR isolés pour ce fichier seulement, rendus à la fin (les autres tests du même processus n'en héritent pas)
-_ISOLE = mock.patch.dict(os.environ, dict({k: _TMP for k in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
-                                                             "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR")}, NC_LANGUE="fr"))
-_ISOLE.start()
+_TMP = None  # créé par setUpModule : rien ne change à l'import (la découverte importe tous les modules avant le premier test)
+
+
+def setUpModule():
+    global _TMP
+    _TMP = tempfile.mkdtemp(prefix="nc-ig-test-")
 
 
 def tearDownModule():
-    _ISOLE.stop()
     shutil.rmtree(_TMP, ignore_errors=True)
+
+
+class Isole(unittest.TestCase):
+    """HOME, XDG_* et TMPDIR vers le dossier du module, le temps d'un test seulement."""
+
+    def setUp(self):
+        p = mock.patch.dict(os.environ, dict({k: _TMP for k in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                                                 "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR")}, NC_LANGUE="fr"))
+        p.start()
+        self.addCleanup(p.stop)
 
 
 _l = importlib.machinery.SourceFileLoader("nc_installeur", str(BIN / "nc-installeur"))
@@ -36,7 +46,7 @@ def os_release(texte):
     return M.lire_os_release({"NC_OS_RELEASE": p})
 
 
-class Pur(unittest.TestCase):
+class Pur(Isole):
     def test_distributions(self):
         cas = [('NAME="Arch Linux"\nPRETTY_NAME="Arch Linux"\nID=arch\nLOGO=archlinux-logo\n', "#1793d1"),
                ('PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nID=debian\n', "#d70a53"),
@@ -119,7 +129,7 @@ esac
 '''
 
 
-class Bout(unittest.TestCase):
+class Bout(Isole):
     def lancer(self, mode, repondre=None, options=()):
         d = tempfile.mkdtemp(dir=_TMP)
         script = os.path.join(d, "install.sh")
@@ -190,7 +200,7 @@ def _gtk_ok():
 
 
 @unittest.skipUnless(_gtk_ok(), "GTK 4, libadwaita ou écran absents")
-class Fenetre(unittest.TestCase):
+class Fenetre(Isole):
     def test_construction(self):
         M.charger_gtk()
         if not M.Gtk.init_check():
