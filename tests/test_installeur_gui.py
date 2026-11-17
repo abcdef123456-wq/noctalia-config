@@ -103,6 +103,7 @@ case "$NC_FAUX_MODE" in
   e '{"type":"saisie","id":3,"question":"Nom ?","defaut":""}'; a
   e '{"type":"fin","code":0}'; exit 0;;
  lent) trap 'exit 130' INT; e '{"type":"etape","n":1,"titre":"Long"}'; while :; do sleep 0.1; done;;
+ commande) trap 'exit 130' INT; e '{"type":"etape","n":1,"titre":"Compilation"}'; sleep 60; exit 0;;
  sans_fin) e '{"type":"info","texte":"salut"}'; exit 3;;
 esac
 '''
@@ -146,6 +147,19 @@ class Bout(unittest.TestCase):
         self.assertTrue(s.termine.wait(15))
         self.assertEqual(fin[0][0], 130)
         self.assertIn("annulée", M.message_fin(*fin[0][:1])[1])
+
+    def test_annulation_pendant_une_commande_longue(self):
+        # SIGINT au seul bash attendrait la fin de « sleep 60 » ; au groupe, la commande s'arrête tout de suite
+        import time
+        s, d, evs, jour, fin = self.lancer("commande")
+        for _ in range(100):
+            if evs:
+                break
+            time.sleep(0.1)
+        time.sleep(0.2)
+        s.annuler()
+        self.assertTrue(s.termine.wait(5), "Annuler attend la fin de la commande en cours")
+        self.assertEqual(fin[0][0], 130)
 
     def test_fin_inattendue(self):
         s, d, evs, jour, fin = self.lancer("sans_fin")

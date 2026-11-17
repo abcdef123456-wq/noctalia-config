@@ -286,8 +286,9 @@ class Session:
 
     def annuler(self):
         if self.proc and self.proc.poll() is None:
+            # tout le groupe, comme Ctrl + C : bash n'exécute son piège INT qu'après la fin de la commande en cours
             try:
-                self.proc.send_signal(signal.SIGINT)
+                os.killpg(self.proc.pid, signal.SIGINT)
             except OSError:
                 pass
 
@@ -369,6 +370,7 @@ class Interface:
         self.session = None
         self.dernier_progres = 0.0
         self.fini = False
+        self.fermer_apres = False
         self.lignes_etapes = []
         self._appliquer_accent()
         self.win = Adw.ApplicationWindow(application=app, title=self.t["titre"], default_width=560,
@@ -522,11 +524,16 @@ class Interface:
         self.fin_page.set_title(texte or msg)
         self.fin_page.set_icon_name("emblem-ok-symbolic" if ok else "dialog-error-symbolic")
         self.pile.set_visible_child_name("fin")
+        if self.fermer_apres:
+            self.win.close()
         return False
 
     def _fermeture(self, *_):
+        # pendant l'installation : on annule et la fenêtre attend la fin d'install.sh (pas d'install.sh orphelin)
         if self.session and not self.fini:
+            self.fermer_apres = True
             self.session.annuler()
+            return True
         return False
 
     # -- questions en direct
