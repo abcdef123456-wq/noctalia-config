@@ -144,24 +144,71 @@ class Plugins(Base):
                 self.appel("activer_plugin", {}, h)
         self.assertFalse((self.home / PLUG).exists())
 
-    def test_activation_copie_et_ecrit_sans_perdre_les_autres_lignes(self):
+    def faux_noctalia(self):
+        """Remplace subprocess.run : note chaque argv et fait comme Noctalia (écrit settings.toml)."""
+        appels = []
+        etat = self.home / ".local/state/noctalia/settings.toml"
+
+        def run(argv, *a, **k):
+            appels.append(list(argv))
+            if argv[:4] == ["noctalia", "msg", "plugins", "enable"]:
+                etat.parent.mkdir(parents=True, exist_ok=True)
+                deja = re.findall(r'"([^"]+)"', etat.read_text()) if etat.exists() else []
+                etat.write_text("[plugins]\nenabled = [%s]\n" % ", ".join('"%s"' % x for x in deja + [argv[4]]))
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        self.nc["appliquer_noctalia"].__globals__["subprocess"].run = staticmethod(run)
+        return appels
+
+    def zy(self):
+        f = self.home / ".config/noctalia/zy-reglages.toml"
+        return f.read_text() if f.exists() else ""
+
+    def test_activation_par_ipc_argv_fixe_sans_toucher_aux_fichiers(self):
         self.conf(["nc/aaa", "nc/launcher"])
+        avant = (self.home / ".config/noctalia/config.toml").read_text()
+        appels = self.faux_noctalia()
         self.appel("activer_plugin", {}, "nc-bbb")
         self.assertTrue((self.home / PLUG / "nc-bbb/plugin.toml").is_file())
-        vals = self.appel("lire")
-        self.assertEqual(vals.get("PLUGINS_NC"), "nc-bbb")
-        self.appel("appliquer_noctalia", vals)
-        t = (self.home / ".config/noctalia/zy-reglages.toml").read_text()
-        m = re.search(r"enabled = \[(.*?)\]", t, re.S)
-        self.assertIsNotNone(m)
-        for n in ("nc/aaa", "nc/launcher", "nc/bbb"):
-            self.assertIn(n, m.group(1))
+        self.assertEqual(appels, [["noctalia", "msg", "plugins", "enable", "nc/bbb"]])
+        self.appel("appliquer_noctalia", self.appel("lire"))
+        self.assertNotIn("[plugins]", self.zy())
+        self.assertEqual((self.home / ".config/noctalia/config.toml").read_text(), avant)
+
+    def test_activation_refusee_par_noctalia_leve_une_erreur(self):
+        self.nc["appliquer_noctalia"].__globals__["subprocess"].run = staticmethod(
+            lambda a, *k, **kw: subprocess.CompletedProcess(a, 1, b"", b"non"))
+        with self.assertRaises(OSError):
+            self.appel("activer_plugin", {}, "nc-bbb")
+
+    def test_scenario_c1_puis_autre_plugin_dans_config_puis_reappliquer(self):
+        self.conf(["nc/aaa"])
+        self.faux_noctalia()
+        self.appel("activer_plugin", {}, "nc-bbb")
+        self.conf(["nc/aaa", "autre/plugin"])  # l'utilisateur édite config.toml
+        self.appel("appliquer_noctalia", self.appel("lire"))
+        self.assertNotIn("[plugins]", self.zy())
+        etat = (self.home / ".local/state/noctalia/settings.toml").read_text()
+        self.assertIn("nc/bbb", etat)
+        self.assertIn("autre/plugin", (self.home / ".config/noctalia/config.toml").read_text())
+        # le bouton d'activation de nc-bbb a disparu : l'état de Noctalia compte
+        (self.home / PLUG / "nc-aaa").mkdir(parents=True, exist_ok=True)
+        l = {x["cle"] for x in self.appel("catalogue_composants", {})}
+        self.assertNotIn("plugin:nc-bbb", l)
+
+    def test_nouveautes_ferme_le_fichier_depot(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            for nom in ("nouveautes", "maj_disponible"):
+                self.appel(nom)
+        src = NC_REGLAGES.read_text(encoding="utf-8")
+        self.assertIsNone(re.search(r"open\([^\n]*(depot|maj-annoncee)[^\n]*\)\.read\(", src))
 
     def test_catalogue_complet_a_la_section(self):
         self.conf([])
         cat = self.appel("catalogue", {})
         self.assertTrue(any(x["section"] == "Composants" for x in cat))
         self.assertFalse(any(x["cle"] == "PLUGINS_NC" for x in cat))
+        self.assertNotIn("PLUGINS_NC", self.nc["PAR_CLE"])
 
 
 if __name__ == "__main__":

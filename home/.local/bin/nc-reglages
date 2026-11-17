@@ -344,8 +344,6 @@ class R:
                 v = "aucune"
             if self.cle == "VERROU_MESSAGE" and v.lower() == "none":
                 v = "aucun"
-            if self.cle == "PLUGINS_NC" and v and not re.fullmatch(r"nc-[a-z0-9-]+( nc-[a-z0-9-]+)*", v):
-                raise ValueError(T("noms de plugins nc-* séparés par des espaces", "nc-* plugin names separated by spaces"))
             if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
                 if not re.fullmatch(r"[a-z]{2,3}(,[a-z]{2,3})*", v) or \
                         any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
@@ -1635,10 +1633,6 @@ REGLAGES = [
       L("Un petit cœur et la Body Battery dans la barre ; un clic ouvre la page Garmin. Demande la santé Garmin.",
         "A small heart and the Body Battery in the bar; a click opens the Garmin page. Needs Garmin health."),
       groupe="noctalia"),
-    R("PLUGINS_NC", "Composants", L("Plugins nc activés ici", "nc plugins enabled here"), "texte", "",
-      L("Noms des plugins Noctalia nc-* activés depuis la section Composants (cachée dans la fenêtre graphique).",
-        "Names of the nc-* Noctalia plugins enabled from the Components section (hidden in the window)."),
-      groupe="noctalia"),
     R("GARMIN_RESUME_MATIN", "Santé Garmin", L("Résumé du matin", "Morning summary"), "ouinon", "non",
       L("Un résumé de ta nuit et de ta forme au premier réveil de la journée.",
         "A summary of your night and form at the first wake-up of the day.")),
@@ -1963,7 +1957,8 @@ SECTIONS.append("Nouveautés")
 def nouveautes(n=10):
     """[{date, titre, points, id}] des n dernières mises à jour, la plus récente d'abord ; points : ce qu'elle apporte."""
     try:
-        depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
+        with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
+            depot = f.read().strip()
     except OSError:
         return []
     brut = sortie(["git", "-C", depot, "log", f"-{n}", "--date=format:%Y-%m-%d", "--format=%h%x1f%cd%x1f%s%x1e"])
@@ -1993,8 +1988,10 @@ def nouveautes(n=10):
 def maj_disponible():
     """Une version plus récente a été annoncée (nc-maj verifier) et n'est pas encore installée."""
     try:
-        annonce = open(os.path.join(HOME, ".cache/nc/maj-annoncee"), encoding="utf-8").read().strip()
-        depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
+        with open(os.path.join(HOME, ".cache/nc/maj-annoncee"), encoding="utf-8") as f:
+            annonce = f.read().strip()
+        with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
+            depot = f.read().strip()
     except OSError:
         return False
     # Même base que nc-maj verifier : la version installée si une installation lancée par nc-maj n'est pas allée au
@@ -2514,12 +2511,6 @@ def plugins_manquants(depot, installes, actifs, ignores=PLUGINS_OPTIONNELS):
     return res
 
 
-def plugins_actives_ici(vals):
-    """Les noms de PLUGINS_NC gardés, filtrés par le dépôt (jamais un nom hors liste)."""
-    dep = set(plugins_depot())
-    return [n for n in vals.get("PLUGINS_NC", "").split() if n in dep]
-
-
 def toml_val(v):
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -2602,13 +2593,6 @@ def appliquer_noctalia(vals):
                 i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
                 fin = fin[:i] + [PILULE_GARMIN] + fin[i:]
             mettre("bar.default", "end", fin)
-        except (OSError, KeyError, ValueError):
-            pass
-    if vals.get("PLUGINS_NC"):
-        # Le dernier .toml l'emporte : la liste écrite est la liste complète de config.toml plus les plugins activés ici
-        try:
-            base = list(plugins_actifs(os.path.join(NOCTALIA_DIR, "config.toml")))
-            mettre("plugins", "enabled", base + ["nc/" + n[3:] for n in plugins_actives_ici(vals) if "nc/" + n[3:] not in base])
         except (OSError, KeyError, ValueError):
             pass
     if vals.get("VPN_MASQUER_TRAY") == "oui":
@@ -4027,10 +4011,14 @@ def catalogue_composants(vals):
         installes = set(os.listdir(os.path.join(HOME, PLUGINS_DEPOT_REL)))
     except OSError:
         installes = set()
-    try:
-        actifs = plugins_actifs(os.path.join(NOCTALIA_DIR, "config.toml"))
-    except (OSError, KeyError, ValueError):
-        actifs = []
+    actifs = []
+    # config.toml, puis l'état écrit par Noctalia (plugins activés par « noctalia msg plugins enable »)
+    for chemin in (os.path.join(NOCTALIA_DIR, "config.toml"), os.path.join(
+            os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "noctalia", "settings.toml")):
+        try:
+            actifs += plugins_actifs(chemin)
+        except (OSError, KeyError, ValueError):
+            pass
     for n in plugins_manquants(plugins_depot(), installes, actifs):
         lignes.append(dict(base, cle="plugin:" + n, nom=T(f"Plugin Noctalia {n}", f"Noctalia plugin {n}"),
                            aide=T("Absent ou pas activé dans Noctalia.", "Missing or not enabled in Noctalia."),
@@ -4039,7 +4027,7 @@ def catalogue_composants(vals):
 
 
 def activer_plugin(vals, nom):
-    """Copie le plugin du dépôt s'il manque, puis le garde dans PLUGINS_NC. Le nom doit être EXACTEMENT un nom du dépôt."""
+    """Copie le plugin du dépôt s'il manque, puis le fait activer par Noctalia (argv fixe). Le nom doit être EXACTEMENT un nom du dépôt."""
     if nom not in plugins_depot():
         raise ValueError(T(f"plugin inconnu : {nom[:40]}", f"unknown plugin: {nom[:40]}"))
     cible = os.path.join(HOME, PLUGINS_DEPOT_REL, nom)
@@ -4048,16 +4036,19 @@ def activer_plugin(vals, nom):
             src = os.path.join(f.read().strip(), "home", PLUGINS_DEPOT_REL, nom)
         os.makedirs(os.path.dirname(cible), exist_ok=True)
         shutil.copytree(src, cible)
-    gardes = [n for n in vals.get("PLUGINS_NC", "").split() if n != nom] + [nom]
-    return regler(vals, "PLUGINS_NC", " ".join(gardes))
+    # Noctalia garde lui-même l'activation (settings.toml) : rien n'est écrit dans config.toml ni zy-reglages
+    try:
+        r = subprocess.run(["noctalia", "msg", "plugins", "enable", "nc/" + nom[3:]], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise OSError(T(f"noctalia ne répond pas : {e}", f"noctalia does not answer: {e}"))
+    if r.returncode:
+        raise OSError(T("noctalia a refusé d'activer le plugin", "noctalia refused to enable the plugin"))
 
 
 def catalogue(vals):
     """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
     res = []
     for r in VISIBLES:
-        if r.cle == "PLUGINS_NC":
-            continue
         v = valeur_sure(vals, r.cle)[0]
         res.append(dict(cle=r.cle, section=r.section, sectionNom=nom_section(r.section), nom=r.nom, genre=r.genre,
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
@@ -4450,10 +4441,9 @@ def cli(a):
         print(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(vals, a[1]))}")
     elif a[0] == "activer-plugin" and len(a) == 2:
         try:
-            g = activer_plugin(vals, a[1])
+            activer_plugin(vals, a[1])
         except (ValueError, OSError) as e:
             sys.exit(T(f"nc-reglages : {e}", f"nc-settings: {e}"))
-        appliquer([g] if g else [], vals)
         print(T(f"Plugin {a[1]} activé.", f"Plugin {a[1]} enabled."))
     elif a[0] == "reset":
         if len(a) == 2 and a[1] not in PAR_CLE:
