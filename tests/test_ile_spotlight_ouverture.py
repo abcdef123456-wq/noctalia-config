@@ -31,7 +31,8 @@ class Spotlight(unittest.TestCase):
         self.assertIn("opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)", self.src)
         self.assertIn("(ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))", self.src)
         self.assertIn("Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation", self.src)
-        self.assertIn("opacity: fen.recherche || ile.retourSpot ? ile.etirementRecherche : 0", self.src)
+        # D-A : le contenu est multiplié par fonduSpot (1 hors entrée depuis une page) ; les valeurs d'étirement sont inchangées
+        self.assertIn("opacity: fen.recherche || ile.retourSpot ? ile.etirementRecherche * fen.fonduSpot : 0", self.src)
         self.assertIn("NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic", self.src)
         self.assertNotIn("apparitionRecherche", self.src)
         self.assertNotIn("ile.width > 560", self.src)
@@ -65,6 +66,49 @@ class Spotlight(unittest.TestCase):
         for largeur in (432, 440, 460):
             for l in range(largeur, 721, 10):
                 self.assertEqual(self.compact(l, recherche=True, depuis_pilule=False), 0.0, f"{l} px : l'heure ne revient pas")
+
+    @staticmethod
+    def sortie_cubique(x):
+        x = max(0.0, min(1.0, x))
+        return 1 - (1 - x) ** 3
+
+    def lire_duree(self, motif):
+        m = re.search(motif, self.src)
+        self.assertIsNotNone(m, motif)
+        return int(m.group(1))
+
+    def test_entree_depuis_une_page_le_contenu_part_de_zero(self):
+        """D-A : page -> Spotlight. La page sort en 80 ms, le contenu monte en 170 ms depuis 0 ; calcul image par image."""
+        sortie_page = self.lire_duree(r"duration: fen\.ouverte && !fen\.recherche \? 200 : (\d+);")
+        entree = self.lire_duree(r"id: entreeSpot;[^\n]*duration: (\d+);")
+        self.assertIn("if (!spotDepuisPilule && !Notifs.enPause) { fonduSpot = 0; entreeSpot.start() }", self.src)
+        self.assertIn("entreeSpot.stop(); fonduSpot = 1", self.src)   # Échap, Super + R deux fois, pilule : retour à 1
+        self.assertIn('id: entreeSpot;', self.src)
+        self.assertRegex(self.src, r"id: entreeSpot;[^\n]*easing\.type: Easing\.InOutQuad")
+        quad = lambda x: (lambda x: 2 * x * x if x < 0.5 else 1 - (-2 * x + 2) ** 2 / 2)(max(0.0, min(1.0, x)))
+        # 432 px, bannière ou carte (0,6), page de 560 px ou plus (1)
+        for etir in (self.etirement(432), 0.6, self.etirement(560), 1.0):
+            spot = lambda t: etir * quad(t / entree)
+            page = lambda t: 1 - self.sortie_cubique(t / sortie_page)
+            self.assertEqual(spot(0), 0.0, "le contenu part de 0 à t = 0")
+            self.assertLessEqual(page(0), 1.0)
+            for t in (0, 50, 100, 200):
+                self.assertLessEqual(spot(t) + page(t) - 1.0, 0.35 + 1e-9, f"{t} ms : empilement page + Spotlight")
+            premier = next(t for t in range(0, 300) if spot(t) > 0.5 or t == 299)
+            self.assertLess(page(min(premier, 299)), 0.1, "la page est presque partie avant que le Spotlight dépasse 0,5")
+
+    def test_sortie_vers_une_page_le_contenu_se_fond(self):
+        """D-C et D-B : Spotlight -> page, bannière ou carte. 120 ms au lieu d'un saut, sans toucher au retour pilule."""
+        duree = self.lire_duree(r"Behavior on opacity \{ enabled: !Notifs\.enPause && !fen\.recherche && !ile\.retourSpot; NumberAnimation \{ duration: (\d+);")
+        self.assertEqual(duree, 120)
+        etir = 0.6
+        valeurs = [etir * (1 - self.sortie_cubique(t / duree)) for t in (0, 50, 100, 200)]
+        self.assertAlmostEqual(valeurs[0], etir)
+        self.assertEqual(valeurs[3], 0.0)
+        self.assertTrue(all(a > b for a, b in zip(valeurs, valeurs[1:3])), "baisse continue")
+        # Le chargeur reste actif pendant le fondu (pleinEcran tient 900 ms), le Behavior se coupe pendant retourSpot
+        self.assertIn("active: fen.recherche || fen.pleinEcran || occupe", self.src)
+        self.assertIn("readonly property bool pleinEcran: recherche || retourRecherche.running", self.src)
 
     def test_contour_fondu_de_fermeture(self):
         m = re.search(r"id: cadre\n(.*?)gradient:", self.src, re.S)

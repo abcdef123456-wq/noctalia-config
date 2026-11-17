@@ -25,7 +25,19 @@ PanelWindow {
     // Super + R sur une page déjà ouverte : la pilule n'est pas là, son heure ne doit pas clignoter (largeur lue, pas l'opacité).
     // shortcut: une pilule plus large qu'une page ouverte (432 px) ferait réapparaître l'heure, à revoir si ce cas arrive
     property bool spotDepuisPilule: true
-    onRechercheChanged: if (recherche) { retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + 1 } else { retourRecherche.restart(); repos.restart() }
+    // Entrée dans le Spotlight depuis une page, une bannière ou une carte : l'île est déjà large (etirementRecherche vaut
+    // 0,5 à 0,6 dès la première image), le contenu part donc de 0 et monte en 170 ms pendant que la page s'efface en 80 ms
+    // (InOutQuad : 0,5 vers 85 ms, la page est déjà partie, même pour une page de 560 px ou plus).
+    // Depuis la pilule : 1 tout de suite, le fondu suit seulement la largeur (déjà validé). Sans animation en pause.
+    property real fonduSpot: 1
+    NumberAnimation { id: entreeSpot; target: fen; property: "fonduSpot"; from: 0; to: 1; duration: 170; easing.type: Easing.InOutQuad }
+    onRechercheChanged: {
+        entreeSpot.stop(); fonduSpot = 1
+        if (recherche) {
+            retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + 1
+            if (!spotDepuisPilule && !Notifs.enPause) { fonduSpot = 0; entreeSpot.start() }
+        } else { retourRecherche.restart(); repos.restart() }
+    }
     Timer { id: retourRecherche; interval: 900 }
     // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
     // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
@@ -282,8 +294,10 @@ PanelWindow {
             active: fen.recherche || fen.pleinEcran || occupe     // pleinEcran : tant que l'île est encore large
             sourceComponent: Recherche {
                 actif: fen.recherche
-                opacity: fen.recherche || ile.retourSpot ? ile.etirementRecherche : 0
+                opacity: fen.recherche || ile.retourSpot ? ile.etirementRecherche * fen.fonduSpot : 0
                 visible: opacity > 0.01
+                // Sortie vers une page, une bannière ou une carte : l'île reste large, le contenu s'efface en 120 ms au lieu de sauter
+                Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
             }
         }
         Connections {
@@ -427,7 +441,7 @@ PanelWindow {
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
                 opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
-                Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 200 : 80; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {
                     id: chargeur
                     anchors.fill: parent
