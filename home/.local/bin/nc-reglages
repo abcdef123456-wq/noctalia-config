@@ -395,7 +395,7 @@ SECTIONS_EN = {
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal", "Applications": "Applications",
-    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
+    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots", "Santé Garmin": "Garmin health",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
     "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System", "IA": "AI",
@@ -1624,6 +1624,24 @@ REGLAGES = [
         "l'ouverture de la page, gardé 5 minutes.",
         "A colored dot under days with events, the next event, the day's agenda on click; read when the page opens, "
         "kept 5 minutes.")),
+    # Santé Garmin (connecteur non officiel, tout à non par défaut)
+    R("GARMIN_ACTIF", "Santé Garmin", L("Santé Garmin", "Garmin health"), "ouinon", "non",
+      L("Connecteur non officiel : lit tes données Garmin Connect et les montre dans l'île (Super + Alt + S).",
+        "Unofficial connector: reads your Garmin Connect data and shows it in the island (Super + Alt + S)."),
+      groupe="effets"),
+    R("GARMIN_PILULE_BARRE", "Santé Garmin", L("Pilule dans la barre", "Pill in the bar"), "ouinon", "non",
+      L("Un petit cœur et la Body Battery dans la barre ; un clic ouvre la page Garmin. Demande la santé Garmin.",
+        "A small heart and the Body Battery in the bar; a click opens the Garmin page. Needs Garmin health."),
+      groupe="noctalia"),
+    R("GARMIN_RESUME_MATIN", "Santé Garmin", L("Résumé du matin", "Morning summary"), "ouinon", "non",
+      L("Un résumé de ta nuit et de ta forme au premier réveil de la journée.",
+        "A summary of your night and form at the first wake-up of the day.")),
+    R("GARMIN_DEMO", "Santé Garmin", L("Données de démonstration", "Demo data"), "ouinon", "non",
+      L("Des chiffres d'exemple à la place des vrais, pour voir la page sans compte Garmin.",
+        "Sample numbers instead of the real ones, to see the page without a Garmin account.")),
+    R("GARMIN_JARVIS", "Santé Garmin", L("JARVIS peut lire ma santé", "JARVIS can read my health"), "ouinon", "non",
+      L("Laisse l'assistant JARVIS répondre avec tes chiffres Garmin. Non : il ne les voit jamais.",
+        "Lets the JARVIS assistant answer with your Garmin numbers. No: it never sees them.")),
     # Mises à jour
     R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "notif",
       L("Paquets des dépôts, de l'AUR (paru ou yay) et Flatpak. Notification : quand de nouvelles arrivent, avec les versions "
@@ -2461,6 +2479,7 @@ def toml_val(v):
 # officielles, non vérifiés sur un poste ici ; la liste sert de filet, une icône inconnue reste affichée (la voir dans le tray de
 # Noctalia : clic droit sur l'icône).
 PILULE_VPN = "nc/vpn:vpn"
+PILULE_GARMIN = "nc/garmin:garmin"
 TRAY_VPN = ("nordvpn-tray-white", "nordvpn-tray-black", "nordvpn-tray", "nordvpn", "nordvpn-gui",
             "protonvpn-app", "proton-vpn-app", "protonvpn", "Proton VPN", "ProtonVPN",
             "mullvad-vpn", "Mullvad VPN", "mullvad-gui")
@@ -2512,7 +2531,7 @@ def appliquer_noctalia(vals):
             mettre(table, "transition_duration", nombre(vals, cle + "_DUREE", True))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", nombre(vals, "BARRE_OPACITE") / 100)
-    if "BARRE_SYSTEME" in vals or vals.get("VPN_PILULE_BARRE") == "oui":
+    if "BARRE_SYSTEME" in vals or vals.get("VPN_PILULE_BARRE") == "oui" or "GARMIN_ACTIF" in vals or "GARMIN_PILULE_BARRE" in vals:
         # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système, et avec la pilule VPN
         # (plugin nc/vpn) juste avant le profil d'énergie si elle est demandée
         try:
@@ -2522,6 +2541,11 @@ def appliquer_noctalia(vals):
             if vals.get("VPN_PILULE_BARRE") == "oui" and PILULE_VPN not in fin:
                 i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
                 fin = fin[:i] + [PILULE_VPN] + fin[i:]
+            # Pastille Garmin (plugin nc/garmin) : seulement si la santé Garmin ET sa pastille sont à oui, retirée sinon
+            fin = [w for w in fin if w != PILULE_GARMIN]
+            if vals.get("GARMIN_ACTIF") == "oui" and vals.get("GARMIN_PILULE_BARRE") == "oui":
+                i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
+                fin = fin[:i] + [PILULE_GARMIN] + fin[i:]
             mettre("bar.default", "end", fin)
         except (OSError, KeyError, ValueError):
             pass
@@ -3969,6 +3993,35 @@ def catalogue(vals):
                                 "In Spotlight (Super + R): right-click the app, or Alt + P; or right-click its icon in the "
                                 "dock → Pin. To change the order: nc-settings in the terminal (Bar and Dock), or "
                                 "nc-dock up|down ID."))
+        lignes.append(ligne)
+    res[fin:fin] = lignes
+    # Santé Garmin : quatre actions à la fin de la section (argv fixes) ; « Installer » dans un terminal s'il y en a un
+    fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Santé Garmin"), default=len(res))
+    term = shutil.which("kitty")
+    lignes = []
+    for cle_g, nom_g, aide_g, cmd_g, bt_g, conf_g in (
+            ("GARMIN_ACTION_INSTALLER", T("Installer le connecteur", "Install the connector"),
+             T("Installe le connecteur non officiel de Garmin Connect, dans un terminal.",
+               "Installs the unofficial Garmin Connect connector, in a terminal."),
+             ([term, "--class", "nc-reglages", "-e", "nc-garmin", "installer"] if term else ["nc-garmin", "installer"]),
+             T("Installer", "Install"), ""),
+            ("GARMIN_ACTION_CONNECTER", T("Connecter mon compte Garmin", "Connect my Garmin account"),
+             T("Te connecte à Garmin Connect (ouvre un terminal).", "Signs you in to Garmin Connect (opens a terminal)."),
+             ["nc-garmin", "login"], T("Connecter", "Connect"), ""),
+            ("GARMIN_ACTION_DECONNECTER", T("Déconnecter mon compte", "Disconnect my account"),
+             T("Oublie la connexion à Garmin Connect.", "Forgets the Garmin Connect sign-in."),
+             ["nc-garmin", "logout"], T("Déconnecter", "Disconnect"), ""),
+            ("GARMIN_ACTION_RETIRER", T("Tout retirer", "Remove everything"),
+             T("Désinstalle le connecteur et efface la connexion et les données Garmin gardées ici.",
+               "Uninstalls the connector and erases the sign-in and Garmin data kept here."),
+             ["nc-garmin", "desinstaller"], T("Tout retirer", "Remove all"),
+             T("Retirer le connecteur Garmin, la connexion et les données gardées ?",
+               "Remove the Garmin connector, the sign-in and the kept data?"))):
+        ligne = dict(cle=cle_g, section="Santé Garmin", sectionNom=nom_section("Santé Garmin"), nom=nom_g, genre="action",
+                     defaut="", aide=aide_g, choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="", affiche=bt_g,
+                     modifie=False, groupe="", commande=cmd_g, relire=True)
+        if conf_g:
+            ligne.update(confirmer=conf_g, bouton=bt_g)
         lignes.append(ligne)
     res[fin:fin] = lignes
     return res + catalogue_raccourcis() + catalogue_nouveautes()

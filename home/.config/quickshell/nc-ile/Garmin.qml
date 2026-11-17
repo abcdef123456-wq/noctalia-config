@@ -103,7 +103,7 @@ FloatingWindow {
                         Texte { id: tPer; anchors.centerIn: parent; text: Reglages.t("Personnaliser", "Customize"); color: garmin.tiroir ? Couleurs.surAccent : Couleurs.texte }
                         MouseArea { anchors.fill: parent; onClicked: garmin.tiroir = !garmin.tiroir }
                     }
-                    BoutonReglages { section: "Santé" }
+                    BoutonReglages { section: "Santé Garmin" }
                     Rectangle {
                         height: 30; width: tFer.implicitWidth + 24; radius: 15; color: Couleurs.carteSurvol
                         Texte { id: tFer; anchors.centerIn: parent; text: Reglages.t("Fermer", "Close") }
