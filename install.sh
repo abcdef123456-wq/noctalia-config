@@ -224,19 +224,31 @@ case "$SEULEMENT" in killswitch|energie) ;; "") [ "$DEMANDE_SEULEMENT" = 0 ] || 
 
 # ── Distribution ─────────────────────────────────────────────────────────────
 OSID=""; OSLIKE=""; OSCODE=""; OSNAME=""; OSLOGO=""; OSVER=0
-if [ -r /etc/os-release ]; then
-  OSID="$(. /etc/os-release; echo "${ID:-}")"; OSLIKE="$(. /etc/os-release; echo "${ID_LIKE:-}")"
-  OSCODE="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"; OSNAME="$(. /etc/os-release; echo "${NAME:-Linux}")"
-  OSLOGO="$(. /etc/os-release; echo "${LOGO:-}")"
-  OSVER="$(. /etc/os-release; echo "${VERSION_ID:-0}")"
+OSREL=/etc/os-release
+if [ "${NC_INSTALLER_TEST:-}" = 1 ]; then OSREL="${NC_OS_RELEASE:-$OSREL}"; fi   # tests seulement
+# shellcheck disable=SC1090
+if [ -r "$OSREL" ]; then
+  OSID="$(. "$OSREL"; echo "${ID:-}")"; OSLIKE="$(. "$OSREL"; echo "${ID_LIKE:-}")"
+  OSCODE="$(. "$OSREL"; echo "${VERSION_CODENAME:-}")"; OSNAME="$(. "$OSREL"; echo "${NAME:-Linux}")"
+  OSLOGO="$(. "$OSREL"; echo "${LOGO:-}")"
+  OSVER="$(. "$OSREL"; echo "${VERSION_ID:-0}")"
 fi
 FAMILY=other
 case " $OSID $OSLIKE " in
+  *" nixos "*) FAMILY=nixos ;;
   *" arch "*) FAMILY=arch ;;
   *" fedora "*) FAMILY=fedora ;;
   *" debian "*|*" ubuntu "*) FAMILY=debian ;;
   *suse*) FAMILY=suse ;;
 esac
+
+# NixOS : le système se déclare dans la configuration Nix. Ce script n'y touche jamais (ni paquets, ni /etc, ni sudo) :
+# il copie seulement la session de l'utilisateur, comme --no-system.
+NIXOS_LIEN="https://github.com/RaphaelBlanc/noctalia-config-nixos"
+if [ "$FAMILY" = nixos ]; then
+  [ "$MODE" != full ] || MODE=nosystem
+  [ "$MODE" != seulement ] || die "$(t "Sur NixOS, cette partie se déclare dans ta configuration Nix (ce script n'installe rien dans le système)." "On NixOS, this part is declared in your Nix configuration (this script installs nothing system-wide).")"
+fi
 
 # Dépôt Noctalia pour Debian / Ubuntu. La clé (nickh-archive-keyring.gpg, la même que dans le paquet
 # nickh-archive-keyring.deb) est téléchargée seule en HTTPS ; son empreinte est comparée à celle-ci, en dur, AVANT d'être
@@ -318,6 +330,7 @@ pkg_install() {
     debian) apt_maj || true
             sudo apt-get $APT_OPT install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get $APT_OPT install -y -t trixie-backports "$@"; } ;;
     suse) sudo zypper --non-interactive install "$@" ;;
+    nixos) info "$(t "NixOS : rien n'est installé ici ; à déclarer dans ta configuration Nix : $*" "NixOS: nothing is installed here; declare in your Nix configuration: $*")"; return 1 ;;
     *) return 1 ;;
   esac
 }
@@ -325,6 +338,7 @@ pkg_install() {
 # question ne doit attendre de réponse invisible (pacman demanderait de confirmer ou de choisir un fournisseur).
 pkg_try() {
   local p
+  [ "$FAMILY" != nixos ] || return 0
   for p in "$@"; do
     pkg_installed "$p" && continue
     info "$(t "installation : $p" "installing: $p")"
@@ -518,9 +532,16 @@ fi
 
 # ── Vérifications ────────────────────────────────────────────────────────────
 say "$(t "Vérifications" "Checks")"
+# NixOS : le script n'installe rien ; les outils de la session doivent déjà être déclarés dans la configuration Nix
+if [ "$FAMILY" = nixos ] && [ "$MODE" != files ]; then
+  manque=(); for t in Hyprland hyprctl noctalia qs python3 jq kitty uwsm; do have "$t" || manque+=("$t"); done
+  if [ ${#manque[@]} -gt 0 ]; then
+    die "$(t "outils absents du PATH : ${manque[*]}. Sur NixOS ce script n'installe rien : déclare-les dans ta configuration Nix, par exemple avec le module communautaire (non officiel) $NIXOS_LIEN" "tools missing from PATH: ${manque[*]}. On NixOS this script installs nothing: declare them in your Nix configuration, for example with the community (unofficial) module $NIXOS_LIEN")"
+  fi
+fi
 # Outils de base du script : installés s'ils manquent (Debian neuf : jq et diffutils absents)
 manque=(); for t in jq sed find cmp awk timeout; do have "$t" || manque+=("$t"); done
-if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ] && [ "$MODE" != files ]; then
+if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ] && [ "$FAMILY" != nixos ] && [ "$MODE" != files ]; then
   info "$(t "Outils nécessaires au script : ${manque[*]}" "Tools the script needs: ${manque[*]}")"
   paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; timeout) paquets+=(coreutils) ;; *) paquets+=("$t") ;; esac; done
   sudo -v || die "$(t "authentification sudo impossible." "sudo authentication failed.")"
@@ -624,6 +645,7 @@ if [ "$MODE" != files ]; then
   hv="$(hypr_version)"
   if [ -z "$(hypr_bin)" ] || { [ -n "$hv" ] && ! ver_ge "$hv" "$HYPR_MIN"; }; then
     if [ -z "$(hypr_bin)" ]; then info "$(t "Hyprland n'est pas installé." "Hyprland is not installed.")"; else info "$(t "Hyprland $hv est trop ancien (0.55 ou plus)." "Hyprland $hv is too old (0.55 or later needed).")"; fi
+    [ "$FAMILY" != nixos ] || die "$(t "Sur NixOS, Hyprland 0.55 ou plus se déclare dans ta configuration Nix ; rien n'est installé ici." "On NixOS, Hyprland 0.55 or later is declared in your Nix configuration; nothing is installed here.")"
     ask "$(t "L'installer maintenant ?" "Install it now?")" o || die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
     dv=""
     if [ "$FAMILY" = fedora ]; then
@@ -1008,7 +1030,9 @@ GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty 
          zsh git curl unzip xdg-utils nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
          sound-theme-freedesktop enregistreur inotify-tools nm-openvpn secret-tool)   # sound-theme-freedesktop : sons du minuteur et du Pomodoro ; inotify-tools : fin des téléchargements vue sans relevé (île) ; même nom sur les 4 distributions
 [ "$FAMILY" = suse ] && GENERIC+=(python-curses)
-if [ "$MODE" != files ]; then
+if [ "$MODE" != files ] && [ "$FAMILY" = nixos ]; then
+  info "$(t "1. Paquets : sautés sur NixOS (à déclarer dans ta configuration Nix)." "1. Packages: skipped on NixOS (declare them in your Nix configuration).")"
+elif [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
   missing=(); missing_opt=(); manual=()
   # Arch : ces paquets améliorent le bureau mais ne sont pas nécessaires pour qu'il démarre ; ils sont proposés (une
@@ -1261,7 +1285,14 @@ if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-q
   bash "$REPO/home/.local/bin/nc-qs-capture" ||
     warn "$(t "Quickshell sans capture ou sans réseau : la vue des fenêtres (Super + A) ou le suivi de la connexion est indisponible ; relance nc-maj et accepte sa recompilation." "Quickshell without capture or networking: the window overview (Super + A) or connection tracking is unavailable; run nc-update again and accept rebuilding it.")"
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
-  if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
+  if [ "$FAMILY" = nixos ]; then
+    # NixOS : jamais de téléchargement ; la police vient de la configuration Nix (fontconfig)
+    if [ ! -s "$POLICE_ICONES" ]; then
+      POLICE_ICONES="$(fc-match -f '%{file}' 'Material Symbols Rounded' 2>/dev/null || true)"
+      case "$(fc-match -f '%{family}' 'Material Symbols Rounded' 2>/dev/null || true)" in *"Material Symbols Rounded"*) ;; *) POLICE_ICONES="" ;; esac
+      [ -n "$POLICE_ICONES" ] || info "$(t "Police Material Symbols Rounded absente : déclare-la dans ta configuration Nix (fonts.packages) ; l'île du plugin Noctalia est utilisée." "Material Symbols Rounded font missing: declare it in your Nix configuration (fonts.packages); the Noctalia plugin island is used.")"
+    fi
+  elif [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
     info "$(t "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons" "Island icons: Material Symbols Rounded font (Google), https://github.com/google/material-design-icons")"
     if ask "$(t "La télécharger (15 Mo) ?" "Download it (15 MB)?")" o; then
       mkdir -p "$(dirname "$POLICE_ICONES")"
@@ -1300,15 +1331,39 @@ for paire in HOME:"$HOME" MONITOR:"$MON" KB_LAYOUT:"$KBL" KB_VARIANT:"$KBV" KB_O
              NOTIF_WIDGET:"$NOTIF_WIDGET" PLUGIN_ILE:"$PLUGIN_ILE"; do
   SED_ARGS+=(-e "s|@${paire%%:*}@|$(esc_sed "${paire#*:}")|g")
 done
+# NixOS : ces fichiers viennent souvent de Home Manager (liens vers le store) ; remplacés seulement sur ta réponse (non par défaut)
+NIXOS_TERM=o; NIXOS_NVIM=o
+if [ "$FAMILY" = nixos ] && [ "$MODE" != files ]; then
+  for f in .zshrc .p10k.zsh; do
+    if { [ -e "$HOME/$f" ] || [ -L "$HOME/$f" ]; } && { [ -L "$HOME/$f" ] || ! cmp -s "$root/$f" "$HOME/$f"; }; then NIXOS_TERM=n; fi
+  done
+  if [ "$NIXOS_TERM" = n ] && ask "$(t "Remplacer ton ~/.zshrc et ton ~/.p10k.zsh (ils seront sauvegardés) ?" "Replace your ~/.zshrc and ~/.p10k.zsh (they will be backed up)?")" n; then NIXOS_TERM=o; fi
+  if { [ -e "$HOME/.config/nvim" ] || [ -L "$HOME/.config/nvim" ]; } && { [ -L "$HOME/.config/nvim" ] || ! diff -rq "$root/.config/nvim" "$HOME/.config/nvim" >/dev/null 2>&1; }; then
+    ask "$(t "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" "Replace your ~/.config/nvim config (it will be backed up)?")" n || NIXOS_NVIM=n
+  fi
+fi
 while IFS= read -r -d '' src; do
   rel="${src#"$root/"}"
   dst="$HOME/$rel"
   # assistant.conf contient la clé privée : aucun modèle du dépôt ne doit remplacer ce fichier personnel.
-  case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*|.config/nc/assistant.conf) continue ;; esac   # étapes 3 et 3b
+  case "$rel" in .config/nc/assistant.conf) continue ;; esac
+  # Étapes 3 et 3b (terminal, Neovim) : elles écrivent ces fichiers ; sur NixOS elles sont sautées, donc copiés ici
+  if [ "$FAMILY" != nixos ] || [ "$MODE" = files ]; then
+    case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*) continue ;; esac
+  else
+    case "$rel" in
+      .zshrc|.p10k.zsh) [ "$NIXOS_TERM" = o ] || continue ;;
+      .config/nvim/*) [ "$NIXOS_NVIM" = o ] || continue ;;
+    esac
+  fi
   if grep -Iq . "$src" 2>/dev/null; then
     sed "${SED_ARGS[@]}" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
+  fi
+  # NixOS : pas de /usr/bin, les programmes du système sont dans /run/current-system/sw/bin (copie installée seulement)
+  if [ "$FAMILY" = nixos ]; then
+    case "$rel" in .config/systemd/user/*) sed -i 's|/usr/bin/|/run/current-system/sw/bin/|g' "$tmp" ;; esac
   fi
   if [ -f "$dst" ] && cmp -s "$tmp" "$dst"; then same=$((same + 1)); continue; fi
   case "$rel" in
@@ -1558,6 +1613,9 @@ fi
 
 [ "$MODE" = files ] && { noter_version; say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; info "$(t "Assistant distant facultatif : nc-assistant configurer (URL et clé du serveur)." "Optional remote assistant: nc-assistant configurer (server URL and key).")"; exit 0; }
 
+if [ "$FAMILY" = nixos ]; then
+  info "$(t "NixOS : terminal (zsh, oh-my-zsh, powerlevel10k) et Neovim sont à déclarer dans ta configuration Nix ; .zshrc, .p10k.zsh et .config/nvim sont copiés s'ils sont absents, sinon sur ta réponse." "NixOS: terminal (zsh, oh-my-zsh, powerlevel10k) and Neovim are declared in your Nix configuration; .zshrc, .p10k.zsh and .config/nvim are copied if absent, otherwise on your answer.")"
+else
 # ── 3. Terminal : zsh + oh-my-zsh + powerlevel10k ─────────────────────────────
 say "$(t "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)" "3. Terminal: zsh, oh-my-zsh, powerlevel10k (two-line prompt, suggestions, colors)")"
 ZSH_DIR="$HOME/.oh-my-zsh"; ZC="$ZSH_DIR/custom"
@@ -1728,6 +1786,7 @@ elif ask "$nv_q" o; then
   fi
 fi
 
+fi   # fin du « sinon » NixOS (étapes 3 et 3b)
 # ── 3c. Firefox ──────────────────────────────────────────────────────────────
 # Préférences (user.js) et style de l'île (chrome/userChrome.css) dans le profil Firefox par défaut : facultatif,
 # proposé seulement si Firefox a un profil ici ; « nc-firefox desinstaller » pour revenir en arrière
