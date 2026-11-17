@@ -115,6 +115,8 @@ if nc.jeu then
         animations = { enabled = false },
         decoration = { dim_inactive = false, blur = { enabled = false }, shadow = { enabled = false } },
     })
+    -- Pointeur sans accélération le temps du jeu ; clavier.lua (chargé avant) remet le réglage du bureau en sortant
+    if nc.reglage("JEU_SOURIS_PLATE", true) then hl.config({ input = { accel_profile = "flat" } }) end
     hl.animation({ leaf = "borderangle", enabled = false })
 end
 
