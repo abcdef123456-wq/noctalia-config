@@ -392,6 +392,23 @@ esac
         self.lancer("compter", PATH=str(nu), NC_OS_RELEASE=str(os_release))
         self.assertIn("dnf -q check-update --refresh", self.appels())
 
+    def test_nixos_aucun_gestionnaire(self):
+        """Sur NixOS (ID=nixos), aucun gestionnaire, même avec un dnf dans le PATH : rien n'est appelé, rien n'est
+        affiché sur la sortie d'erreur, et le cache est un compte à zéro."""
+        nu = self.home / "nu"; nu.mkdir()
+        for p in (self.home / "sys").iterdir():
+            (nu / p.name).symlink_to(os.readlink(p))
+        for nom in ("dnf", "rpm"):
+            (nu / nom).write_text(f'#!/bin/sh\necho "{nom} $*" >> "$HOME/appels"\nexit 0\n'); (nu / nom).chmod(0o755)
+        os_release = self.home / "os-release"
+        os_release.write_text('ID=nixos\nID_LIKE=""\n')
+        for action in ("compter", "verifier"):
+            with self.subTest(action=action):
+                r = self.lancer(action, PATH=str(nu), NC_OS_RELEASE=str(os_release))
+                self.assertEqual((r.returncode, r.stderr), (0, ""), r)
+                self.assertEqual(self.appels(), [])
+        self.assertEqual((self.home / ".cache/nc/paquets").read_text().split("\n")[0], "0")
+
     def test_paquets_restants_et_ignores(self):
         r = self.lancer("terminal", NC_TEST_LOCAL="linux 6.1-1 -> 6.2-1\nnvidia 1-1 -> 1-2 [ignored]\n")
         self.assertEqual(r.returncode, 0, r.stderr)

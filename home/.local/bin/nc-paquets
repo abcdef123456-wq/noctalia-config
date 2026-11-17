@@ -40,6 +40,7 @@ os_id="$(osr ID)"
 gestionnaire() {
   local - x g
   set -f                                     # ID_LIKE découpé en mots, jamais développé en noms de fichiers (« * »)
+  [ "$os_id" = nixos ] && return 0   # NixOS : paquets déclarés dans la configuration Nix, aucun gestionnaire à piloter
   for x in $os_id $(osr ID_LIKE); do
     case "$x" in
       arch) g=pacman ;; fedora|rhel|centos|nobara) g=dnf ;; debian|ubuntu) g=apt ;; suse|opensuse*|sles|sled) g=zypper ;;
