@@ -69,3 +69,14 @@ class EnvironnementALImport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GitSansArrierePlan(unittest.TestCase):
+    """tests/_isolation.py, point 8 : aucun git détaché n'écrit dans un dossier temporaire pendant son effacement."""
+
+    def test_git_ne_travaille_pas_en_arriere_plan(self):
+        import subprocess
+        for cle, attendu in (("gc.auto", "0"), ("maintenance.auto", "false"), ("fetch.writeCommitGraph", "false")):
+            r = subprocess.run(["git", "config", "--get", cle], capture_output=True, text=True,
+                               env=dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1"))
+            self.assertEqual(r.stdout.strip(), attendu, cle)

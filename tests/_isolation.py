@@ -38,6 +38,11 @@
    limite, fork échoue au hasard : Quickshell ne lance pas ses programmes, en silence, et des tests sans rapport échouent
    (reproduit le 2026-11-03 : test_presse garde un fichier jamais supprimé). Un avertissement le dit au départ.
 
+8. Git ne travaille plus en arrière-plan : un git fetch (nc-maj…) lançait « git maintenance --auto » détaché, qui écrivait
+   encore objects/info/commit-graphs quand le test effaçait son dossier temporaire (« Directory not empty », au hasard,
+   test_paquets sur Debian puis test_maj_reecriture sur Arch, 2026-11-17 et 18). gc.auto=0, maintenance.auto=false et
+   fetch.writeCommitGraph=false passent par GIT_CONFIG_COUNT, hérité par chaque script lancé avec dict(os.environ, …).
+
 Le dossier temporaire est effacé à la fin des tests."""
 import atexit
 import os
@@ -164,4 +169,9 @@ if not os.environ.get("NC_TEST_ISOLE"):
     for _cle in ("NC_LANGUE", "LC_ALL", "LC_MESSAGES", "LANGUAGE"):
         os.environ.pop(_cle, None)
     os.environ["LANG"] = "C.UTF-8"
+    _n = int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)
+    for _k, _v in (("gc.auto", "0"), ("maintenance.auto", "false"), ("fetch.writeCommitGraph", "false")):
+        os.environ[f"GIT_CONFIG_KEY_{_n}"], os.environ[f"GIT_CONFIG_VALUE_{_n}"] = _k, _v
+        _n += 1
+    os.environ["GIT_CONFIG_COUNT"] = str(_n)
     os.environ["NC_TEST_ISOLE"] = str(_racine)
