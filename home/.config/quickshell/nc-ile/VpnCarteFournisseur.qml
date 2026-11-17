@@ -1,10 +1,10 @@
-// La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (tant que nc-vpn ne
-// répond pas), « client absent », « installé, pas de compte » (Proton : bouton « Se connecter au compte »), « se pilote dans son
+// La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (NordVPN, tant que nc-vpn ne
+// répond pas), « vérification en cours… » (Proton, tant que la première réponse ou la vérification du compte n'est pas là : icône d'attente, aucun bouton ; champ attente), « client absent », « installé, pas de compte » (Proton : bouton « Se connecter au compte »), « se pilote dans son
 // application » (Proton sans sa CLI : bouton « Ouvrir Proton VPN », qui lance l'application officielle, rien de caché) et
 // « application ouverte » (Proton : la CLI ne tourne pas avec l'application, le message de nc-vpn dit de la fermer), « abonnement inactif » et
 // « abonnement à vérifier » (Nord : compte connecté, mais abonnement VPN inactif ou non confirmé ; état sans_compte du contrat, sans pays ni
 // bouton de connexion au compte). Un message clair, jamais de faux bouton.
-// Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays}.
+// Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, attente, pays}.
 import QtQuick
 
 Rectangle {
@@ -13,10 +13,11 @@ Rectangle {
     signal ouvrirLien(string lien)                // « Ouvrir la page officielle » (parcours guidé)
     signal connecterCompte(string id)             // « Se connecter au compte » / « Ouvrir » : la fenêtre se ferme et lance le login (Vpn.qml)
     property var modele: ({ fournisseur: "", etat: "absent", bientot: false, peutLogin: false, message: "" })
-    readonly property string etatTexte: modele.bientot ? "bientot" : modele.etat
+    readonly property string etatTexte: modele.attente ? "attente" : modele.bientot ? "bientot" : modele.etat
     // Compte connecté, abonnement VPN inactif (ou non confirmé) : l'état reste sans_compte (contrat v1), le texte le dit autrement
     readonly property bool abonnement: modele.etat === "sans_compte" && (modele.probleme === "abonnement_inactif" || modele.probleme === "abonnement_inconnu")
     readonly property string titre: {
+        if (modele.attente) return modele.fournisseur + " · " + Reglages.t("vérification en cours…", "checking…")
         if (modele.bientot) return modele.fournisseur + " · " + Reglages.t("bientôt", "coming soon")
         if (modele.etat === "pilote_appli")
             return modele.fournisseur + " · " + (modele.probleme === "appli_ouverte" ? Reglages.t("application ouverte", "app is open")
@@ -28,6 +29,7 @@ Rectangle {
         return modele.fournisseur + " · " + Reglages.t("client absent", "client not installed")
     }
     readonly property string message: {
+        if (modele.attente) return ""
         if (!modele.bientot && modele.probleme === "abonnement_inactif" && modele.etat === "sans_compte")
             return Reglages.t("Ton compte " + modele.fournisseur + " est bien connecté, mais son abonnement VPN est inactif ou expiré : aucun pays ne peut être choisi. Renouvelle-le sur le site du service, puis rouvre cette fenêtre.",
                               "Your " + modele.fournisseur + " account is signed in, but its VPN subscription is inactive or expired: no country can be chosen. Renew it on the service's website, then reopen this window.")
@@ -58,7 +60,7 @@ Rectangle {
         x: 20; y: 18; width: parent.width - 40; spacing: 14
         Ico {
             anchors.top: parent.top
-            nom: k.etatTexte === "bientot" ? "schedule" : k.abonnement ? "credit_card_off" : (k.etatTexte === "sans_compte" ? "person_off" : (k.etatTexte === "pilote_appli" ? "open_in_new" : "download"))
+            nom: k.etatTexte === "attente" ? "progress_activity" : k.etatTexte === "bientot" ? "schedule" : k.abonnement ? "credit_card_off" : (k.etatTexte === "sans_compte" ? "person_off" : (k.etatTexte === "pilote_appli" ? "open_in_new" : "download"))
             taille: 26; color: Couleurs.texteSec
         }
         Column {
@@ -66,7 +68,7 @@ Rectangle {
             Texte { objectName: "nc-vpn-fournisseur-titre"; width: parent.width; text: k.titre; font.pixelSize: 15; font.weight: Font.DemiBold }
             Rectangle {
                 objectName: "nc-vpn-fournisseur-login"
-                visible: k.modele.peutLogin === true && k.modele.etat === "sans_compte" && !k.modele.bientot && !k.abonnement
+                visible: k.modele.peutLogin === true && k.modele.etat === "sans_compte" && !k.modele.bientot && !k.modele.attente && !k.abonnement
                 width: libelleLogin.implicitWidth + 32; height: 32; radius: 16
                 color: zoneLogin.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6
@@ -77,7 +79,7 @@ Rectangle {
                     secondaire: true; font.pixelSize: 12 }
             VpnInstaller {
                 objectName: "nc-vpn-fournisseur-installer"
-                visible: k.modele.etat === "absent" && !k.modele.bientot && k.modele.installation !== undefined && k.modele.installation !== null
+                visible: k.modele.etat === "absent" && !k.modele.bientot && !k.modele.attente && k.modele.installation !== undefined && k.modele.installation !== null
                 width: parent.width
                 ident: k.modele.id || ""
                 installation: k.modele.installation || null
@@ -86,7 +88,7 @@ Rectangle {
             }
             Rectangle {
                 objectName: "nc-vpn-fournisseur-ouvrir"
-                visible: k.modele.peutLogin === true && k.modele.etat === "pilote_appli" && !k.modele.bientot
+                visible: k.modele.peutLogin === true && k.modele.etat === "pilote_appli" && !k.modele.bientot && !k.modele.attente
                 width: libelleOuvrir.implicitWidth + 32; height: 32; radius: 16
                 color: zoneOuvrir.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6

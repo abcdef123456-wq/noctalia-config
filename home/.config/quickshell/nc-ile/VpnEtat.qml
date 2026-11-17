@@ -106,6 +106,9 @@ Singleton {
     // Nord ou Proton : « bientôt » tant que nc-vpn ne sait pas les lire, sinon l'état donné par nc-vpn
     function fiche(id, nom) {
         var x = externe[id]
+        // Proton : « vérification en cours » (attente) tant que la première réponse n'est pas là ou pendant la vérification explicite
+        if (id === "proton" && (!externeLu || protonEnVerification))
+            return { id: id, fournisseur: nom, etat: "absent", bientot: false, attente: true, peutLogin: false, message: "", pays: [] }
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
         return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
                  connecte: x.connecte, probleme: x.probleme, paysProbleme: x.paysProbleme,
@@ -163,15 +166,26 @@ Singleton {
         onExited: { v.barreEcrit = v.barreEnCours; v.lancerBarre() }
     }
 
-    function lireExterne() { if (panneauOuvert && !lectureExterne.running) lectureExterne.running = true }
+    // Pendant la vérification explicite de Proton, aucune lecture automatique ne démarre : elle est reportée (relireEnAttente).
+    function lireExterne() {
+        if (!panneauOuvert || lectureExterne.running) return
+        if (verificationProton.running || protonEnVerification) { relireEnAttente = true; return }
+        lectureExterne.running = true
+    }
     // Lecture AUTOMATIQUE (événements NetworkManager, relire()) : nc-vpn ne lance alors aucune commande Proton (voir docs/vpn-contrat.md).
     Process {
         id: lectureExterne
         command: [v.bin + "nc-vpn", "fournisseurs-json"]
-        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
-        onStarted: v.lecturesEnCours++
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text, false) }
+        onStarted: { v.revLectureAuto = v.protonRev; v.lecturesEnCours++ }
         onExited: v.finLecture()
     }
+    // Première réponse reçue ; vérification explicite en cours ; révision de l'état Proton (une lecture automatique lancée avant
+    // une vérification explicite et finie après porte un état Proton périmé : on l'ignore pour Proton seulement).
+    property bool externeLu: false
+    property bool protonEnVerification: false
+    property int protonRev: 0
+    property int revLectureAuto: 0
     // Vérification EXPLICITE du compte Proton (`protonvpn info` et `countries list`) : une seule fois par ouverture de la fenêtre, à
     // l'ouverture de l'onglet Proton, ou après une connexion au compte (force). Jamais pendant une action, jamais depuis relire().
     property bool protonVerifie: false
@@ -179,14 +193,18 @@ Singleton {
     function verifierProton(force) {
         if (!panneauOuvert || agir.running || verificationProton.running || (protonVerifie && force !== true)) return
         protonVerifie = true
+        protonEnVerification = true
+        protonRev++
         verificationProton.running = true
     }
     Process {
         id: verificationProton
         command: [v.bin + "nc-vpn", "fournisseurs-json", "--verifier-proton"]
-        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text, true) }
+        onStarted: v.lecturesEnCours++
+        onExited: { v.protonEnVerification = false; v.protonRev++; v.finLecture() }
     }
-    function ingererExterne(text) {
+    function ingererExterne(text, explicite) {
         var d = null
         try { d = JSON.parse(text) } catch (e) { d = null }
         var res = {}
@@ -211,8 +229,13 @@ Singleton {
                               paysProbleme: x.pays_probleme === "delai" ? "delai" : "" }
             })
         }
+        if (!explicite && protonRev !== revLectureAuto) {
+            if (externe.proton) res.proton = externe.proton; else delete res.proton
+            if (installations.proton) inst.proton = installations.proton; else delete inst.proton
+        }
         v.externe = res
         v.installations = inst
+        v.externeLu = true
     }
     // Un lien https vers un des sites officiels des trois fournisseurs (liste blanche, aucun caractère étrange)
     function lienOfficiel(u) {
