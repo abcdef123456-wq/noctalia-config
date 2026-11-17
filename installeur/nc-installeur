@@ -1,0 +1,596 @@
+#!/usr/bin/env python3
+"""nc-installeur : l'installeur graphique (GTK 4 + libadwaita). Il pilote install.sh, qui reste le seul moteur.
+
+Protocole (NC_UI=1) : install.sh écrit une ligne JSON par événement sur la FIFO NC_UI_SORTIE et lit les
+réponses « <id> <réponse> » sur la FIFO NC_UI_ENTREE. Le mot de passe sudo ne passe jamais ici : c'est nc-askpass.
+Tout ce qui ne dépend pas de GTK est en haut du fichier (testable sans écran) ; gi n'est importé qu'au lancement.
+"""
+import json
+import os
+import re
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TYPES = ("etape", "info", "ok", "avert", "erreur", "progres", "question", "choix", "saisie", "fin")
+LIGNE_MAX = 65536
+
+# ---------- textes ----------
+T = {
+    "fr": {
+        "titre": "Installation", "bienvenue": "Bienvenue", "go": "Commencer",
+        "intro": "Cet assistant installe votre bureau, étape par étape.",
+        "mode": "Que voulez-vous installer ?", "langue": "Langue de l'installation",
+        "m_complet": "Tout (système et fichiers)", "m_nosys": "Sans le système", "m_files": "Fichiers seulement",
+        "installer": "Installer", "annuler": "Annuler", "journal": "Détails", "fermer": "Fermer",
+        "oui": "Oui", "non": "Non", "ok": "Valider", "sensible": "Cette question change le système.",
+        "reussi": "Installation terminée", "annulee": "Installation annulée",
+        "echec": "L'installation a échoué (code {code})",
+        "inattendu": "L'installation s'est arrêtée sans prévenir (code {code}).",
+        "script_absent": "install.sh est introuvable.",
+    },
+    "en": {
+        "titre": "Installation", "bienvenue": "Welcome", "go": "Start",
+        "intro": "This assistant installs your desktop, step by step.",
+        "mode": "What do you want to install?", "langue": "Installation language",
+        "m_complet": "Everything (system and files)", "m_nosys": "Without the system", "m_files": "Files only",
+        "installer": "Install", "annuler": "Cancel", "journal": "Details", "fermer": "Close",
+        "oui": "Yes", "non": "No", "ok": "Confirm", "sensible": "This question changes the system.",
+        "reussi": "Installation complete", "annulee": "Installation cancelled",
+        "echec": "The installation failed (code {code})",
+        "inattendu": "The installation stopped without warning (code {code}).",
+        "script_absent": "install.sh was not found.",
+    },
+}
+
+
+def langue_depuis(env=None):
+    env = os.environ if env is None else env
+    v = (env.get("NC_LANGUE") or env.get("LANG") or "").lower()
+    return "fr" if v.startswith("fr") else "en"
+
+
+# ---------- nettoyage ----------
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+# contrôles C0/C1 sauf tab, et caractères invisibles ou de sens d'écriture
+_CTRL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f"
+                   + "".join(chr(c) for c in list(range(0x200B, 0x2010)) + list(range(0x202A, 0x202F))
+                             + list(range(0x2060, 0x2070)) + [0xFEFF]) + "]")
+
+
+def retirer_ansi(texte):
+    """Texte de journal : sans codes ANSI ni contrôles ; un \\r garde la dernière partie (barres de progression)."""
+    texte = _ANSI.sub("", str(texte))
+    parts = [p for p in texte.split("\r") if p]
+    return _CTRL.sub("", parts[-1] if parts else "")
+
+
+def nettoyer_ligne(texte):
+    """Une seule ligne, sans contrôle : sert aux textes d'événements et aux réponses de saisie."""
+    return _CTRL.sub(" ", _ANSI.sub("", str(texte))).strip()
+
+
+# ---------- événements ----------
+def _entier(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _nombre(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) < 1e12
+
+
+def parse_evenement(ligne):
+    """Une ligne de la FIFO -> dict propre, ou None (JSON invalide, type inconnu, champ du mauvais type)."""
+    try:
+        if len(ligne) > LIGNE_MAX:
+            return None
+        e = json.loads(ligne)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(e, dict) or e.get("type") not in TYPES:
+        return None
+    t = e["type"]
+    if t in ("info", "ok", "avert", "erreur"):
+        if not isinstance(e.get("texte"), str):
+            return None
+        return {"type": t, "texte": nettoyer_ligne(e["texte"])}
+    if t == "etape":
+        if not _entier(e.get("n")) or not isinstance(e.get("titre"), str):
+            return None
+        return {"type": t, "n": e["n"], "titre": nettoyer_ligne(e["titre"])}
+    if t == "progres":
+        if not _nombre(e.get("x")) or not _nombre(e.get("y")) or e["y"] <= 0:
+            return None
+        return {"type": t, "x": e["x"], "y": e["y"]}
+    if t == "fin":
+        return {"type": t, "code": e["code"]} if _entier(e.get("code")) else None
+    # question, choix, saisie : un id entier et une question texte
+    if not _entier(e.get("id")) or not isinstance(e.get("question"), str):
+        return None
+    r = {"type": t, "id": e["id"], "question": nettoyer_ligne(e["question"])}
+    if t == "question":
+        r["defaut"] = "n" if e.get("defaut") == "n" else "o"
+        r["sensible"] = e.get("sensible") is True
+    elif t == "choix":
+        o = e.get("options")
+        if not isinstance(o, list) or not o or not all(isinstance(x, str) for x in o):
+            return None
+        r["options"] = [nettoyer_ligne(x) for x in o]
+        d = e.get("defaut")
+        r["defaut"] = d if _entier(d) and 1 <= d <= len(o) else 1
+    else:
+        d = e.get("defaut")
+        r["defaut"] = nettoyer_ligne(d) if isinstance(d, str) else ""
+    return r
+
+
+def formater_reponse(id_, reponse):
+    """« <id> <réponse>\\n » : True/False -> o/n, un entier reste un entier, un texte devient une seule ligne."""
+    if not _entier(id_):
+        raise ValueError("id")
+    if isinstance(reponse, bool):
+        reponse = "o" if reponse else "n"
+    return "%d %s\n" % (id_, nettoyer_ligne(reponse))
+
+
+def message_fin(code, lang="fr", inattendu=False):
+    """(réussi, texte) pour la page de fin."""
+    t = T[lang]
+    if code == 0 and not inattendu:
+        return True, t["reussi"]
+    if code in (130, 10):
+        return False, t["annulee"]
+    if inattendu:
+        return False, t["inattendu"].format(code=code)
+    return False, t["echec"].format(code=code)
+
+
+# ---------- commande ----------
+def analyser_args(args, env=None):
+    """Arguments reçus -> (mode, langue, reste). Le reste est transmis à install.sh tel quel."""
+    mode, langue, reste = "complet", langue_depuis(env), []
+    for a in args:
+        if a == "--no-system":
+            mode = "no-system"
+        elif a == "--files-only":
+            mode = "files-only"
+        elif a in ("--fr", "--en"):
+            langue = a[2:]
+        else:
+            reste.append(a)
+    return mode, langue, reste
+
+
+def options_install(mode, langue, reste=()):
+    return (["--no-system"] if mode == "no-system" else ["--files-only"] if mode == "files-only" else []) \
+        + ["--" + langue] + list(reste)
+
+
+def chemin_script(env=None):
+    env = os.environ if env is None else env
+    return env.get("NC_INSTALLEUR_SCRIPT") or os.path.join(os.path.dirname(HERE), "install.sh")
+
+
+def construire_commande(options, sortie, entree, env=None):
+    """(argv, env) : une liste, jamais de shell ; les options partent telles quelles."""
+    env = dict(os.environ if env is None else env)
+    env.update(NC_UI="1", NC_UI_SORTIE=sortie, NC_UI_ENTREE=entree)
+    return [chemin_script(env)] + list(options), env
+
+
+# ---------- distribution ----------
+def lire_os_release(env=None):
+    env = os.environ if env is None else env
+    chemins = [env["NC_OS_RELEASE"]] if env.get("NC_OS_RELEASE") else ["/etc/os-release", "/usr/lib/os-release"]
+    for c in chemins:
+        try:
+            with open(c, encoding="utf-8", errors="replace") as f:
+                lignes = f.read().splitlines()
+        except OSError:
+            continue
+        d = {}
+        for l in lignes:
+            m = re.match(r"\s*([A-Z_][A-Z0-9_]*)=(.*)$", l)
+            if m:
+                v = m.group(2).strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                d[m.group(1)] = v
+        return d
+    return {}
+
+
+_ANSI_SIMPLE = {0: "#2e3436", 1: "#cc0000", 2: "#4e9a06", 3: "#c4a000", 4: "#3465a4", 5: "#75507b", 6: "#06989a",
+                7: "#d3d7cf"}
+_TABLE = {"arch": "#1793d1", "debian": "#d70a53", "fedora": "#3c6eb4", "opensuse": "#73ba25", "suse": "#73ba25"}
+DEFAUT_ACCENT = "#3584e4"
+
+
+def couleur_accent(osr):
+    """#rrggbb : ANSI_COLOR (« 38;2;R;G;B » ou code simple), sinon table par ID puis ID_LIKE."""
+    ac = (osr.get("ANSI_COLOR") or "").strip()
+    n = [int(x) for x in re.findall(r"\d+", ac)] if re.fullmatch(r"[\d;]*", ac) else []
+    if len(n) >= 5 and n[-5] == 38 and n[-4] == 2 and all(0 <= x <= 255 for x in n[-3:]):
+        return "#%02x%02x%02x" % tuple(n[-3:])
+    for c in n:
+        if 30 <= c <= 37 or 90 <= c <= 97:
+            return _ANSI_SIMPLE[c % 10 if c < 90 else c - 90] if (c % 10) in _ANSI_SIMPLE else DEFAUT_ACCENT
+    for k in [osr.get("ID", "")] + osr.get("ID_LIKE", "").split():
+        if k.lower() in _TABLE:
+            return _TABLE[k.lower()]
+    return DEFAUT_ACCENT
+
+
+def nom_distribution(osr):
+    return osr.get("PRETTY_NAME") or osr.get("NAME") or "Linux"
+
+
+def fichier_logo(logo, dossier="/usr/share/pixmaps"):
+    if not logo or not re.fullmatch(r"[\w.+-]+", logo):
+        return None
+    for ext in (".svg", ".png", ""):
+        p = os.path.join(dossier, logo + ext)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+# ---------- session (sans GTK) ----------
+class Session:
+    """Lance install.sh, lit les événements, répond. Les rappels arrivent depuis des fils : à l'appelant de passer
+    au fil graphique. on_fin(code, inattendu) est appelé une fois, après le dernier événement."""
+
+    def __init__(self, options, on_evenement, on_journal, on_fin, env=None):
+        self.options, self.env = list(options), env
+        self.on_evenement, self.on_journal, self.on_fin = on_evenement, on_journal, on_fin
+        self.proc = None
+        self._dossier = None
+        self._fd_sortie = self._fd_entree = None
+        self._arret = threading.Event()
+        self._fin_code = None
+        self._verrou = threading.Lock()
+        self.termine = threading.Event()
+
+    def demarrer(self):
+        self._dossier = tempfile.mkdtemp(prefix="nc-installeur-")  # 0700
+        sortie, entree = (os.path.join(self._dossier, n) for n in ("sortie", "entree"))
+        os.mkfifo(sortie, 0o600)
+        os.mkfifo(entree, 0o600)
+        # O_RDWR : jamais bloquant à l'ouverture, et pas de fin de fichier quand install.sh ferme son côté
+        self._fd_sortie = os.open(sortie, os.O_RDWR | os.O_NONBLOCK)
+        self._fd_entree = os.open(entree, os.O_RDWR)
+        argv, env = construire_commande(self.options, sortie, entree, self.env)
+        try:
+            self.proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError:
+            self._nettoyer()
+            raise
+        fils = [threading.Thread(target=self._lire_fifo, daemon=True),
+                threading.Thread(target=self._lire_texte, daemon=True)]
+        for f in fils:
+            f.start()
+        threading.Thread(target=self._superviser, args=(fils,), daemon=True).start()
+
+    def repondre(self, id_, reponse):
+        ligne = formater_reponse(id_, reponse).encode("utf-8", "replace")
+        with self._verrou:
+            if self._fd_entree is not None:
+                os.write(self._fd_entree, ligne)
+
+    def annuler(self):
+        if self.proc and self.proc.poll() is None:
+            try:
+                self.proc.send_signal(signal.SIGINT)
+            except OSError:
+                pass
+
+    def _lire_texte(self):
+        for brut in iter(lambda: self.proc.stdout.readline(LIGNE_MAX), b""):
+            self.on_journal(retirer_ansi(brut.decode("utf-8", "replace").rstrip("\n")))
+
+    def _lire_fifo(self):
+        tampon = b""
+        while True:
+            fini = self._arret.is_set()
+            if fini or select.select([self._fd_sortie], [], [], 0.1)[0]:
+                try:
+                    bloc = os.read(self._fd_sortie, 65536)
+                except BlockingIOError:
+                    bloc = b""
+                tampon += bloc
+                *lignes, tampon = tampon.split(b"\n")
+                if len(tampon) > LIGNE_MAX:
+                    tampon = b""
+                for l in lignes:
+                    e = parse_evenement(l.decode("utf-8", "replace"))
+                    if e:
+                        if e["type"] == "fin":
+                            self._fin_code = e["code"]
+                        self.on_evenement(e)
+                if fini and not bloc:
+                    return
+
+    def _superviser(self, fils):
+        rc = self.proc.wait()
+        fils[1].join(2)  # un petit-fils qui garde le tube ne nous bloque pas
+        self._arret.set()
+        fils[0].join(5)
+        inattendu = self._fin_code is None
+        code = rc if self._fin_code is None else self._fin_code
+        if code < 0:
+            code = 128 - code
+        self._nettoyer()
+        try:
+            self.proc.stdout.close()
+        except Exception:
+            pass
+        self.on_fin(code, inattendu)
+        self.termine.set()
+
+    def _nettoyer(self):
+        with self._verrou:
+            for fd in (self._fd_sortie, self._fd_entree):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            self._fd_sortie = self._fd_entree = None
+        if self._dossier:
+            shutil.rmtree(self._dossier, ignore_errors=True)
+
+
+# ---------- fenêtre (GTK 4 + libadwaita) ----------
+Gtk = Adw = GLib = Gdk = None
+
+
+def charger_gtk():
+    global Gtk, Adw, GLib, Gdk
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw as _A, Gdk as _D, GLib as _L, Gtk as _G
+    Gtk, Adw, GLib, Gdk = _G, _A, _L, _D
+
+
+class Interface:
+    def __init__(self, app, args, env=None):
+        self.env = os.environ if env is None else env
+        self.mode, self.langue, self.reste = analyser_args(args, self.env)
+        self.t = T[self.langue]
+        self.osr = lire_os_release(self.env)
+        self.session = None
+        self.dernier_progres = 0.0
+        self.fini = False
+        self.lignes_etapes = []
+        self._appliquer_accent()
+        self.win = Adw.ApplicationWindow(application=app, title=self.t["titre"], default_width=560,
+                                         default_height=640)
+        self.pile = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT)
+        vue = Adw.ToolbarView()
+        vue.add_top_bar(Adw.HeaderBar())
+        vue.set_content(self.pile)
+        self.win.set_content(vue)
+        self.pile.add_named(self._page_bienvenue(), "bienvenue")
+        self.pile.add_named(self._page_choix(), "choix")
+        self.pile.add_named(self._page_install(), "install")
+        self.fin_page = Adw.StatusPage()
+        self.fin_bouton = Gtk.Button(label=self.t["fermer"], halign=Gtk.Align.CENTER)
+        self.fin_bouton.add_css_class("pill")
+        self.fin_bouton.connect("clicked", lambda *_: self.win.close())
+        self.fin_page.set_child(self.fin_bouton)
+        self.pile.add_named(self.fin_page, "fin")
+        self.win.connect("close-request", self._fermeture)
+        GLib.timeout_add(120, self._pulse)
+
+    def _appliquer_accent(self):
+        c = couleur_accent(self.osr)
+        css = "@define-color accent_bg_color %s;\n@define-color accent_color %s;\n" % (c, c)
+        p = Gtk.CssProvider()
+        p.load_from_string(css) if hasattr(p, "load_from_string") else p.load_from_data(css.encode())
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def _page_bienvenue(self):
+        p = Adw.StatusPage(title=nom_distribution(self.osr), description=self.t["intro"])
+        logo, theme = self.osr.get("LOGO", ""), Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        f = fichier_logo(logo)
+        if logo and re.fullmatch(r"[\w.+-]+", logo) and theme.has_icon(logo):
+            p.set_icon_name(logo)
+        elif f:
+            try:
+                p.set_paintable(Gdk.Texture.new_from_filename(f))
+            except GLib.Error:
+                p.set_icon_name("system-software-install-symbolic")
+        else:
+            p.set_icon_name("system-software-install-symbolic")
+        b = Gtk.Button(label=self.t["go"], halign=Gtk.Align.CENTER)
+        b.add_css_class("pill")
+        b.add_css_class("suggested-action")
+        b.connect("clicked", lambda *_: self.pile.set_visible_child_name("choix"))
+        p.set_child(b)
+        return p
+
+    def _page_choix(self):
+        page = Adw.PreferencesPage()
+        g = Adw.PreferencesGroup(title=self.t["mode"])
+        self.rang_mode = Adw.ComboRow(title=self.t["mode"], model=Gtk.StringList.new(
+            [self.t["m_complet"], self.t["m_nosys"], self.t["m_files"]]))
+        self.rang_mode.set_selected(["complet", "no-system", "files-only"].index(self.mode))
+        self.rang_langue = Adw.ComboRow(title=self.t["langue"], model=Gtk.StringList.new(["Français", "English"]))
+        self.rang_langue.set_selected(0 if self.langue == "fr" else 1)
+        g.add(self.rang_mode)
+        g.add(self.rang_langue)
+        page.add(g)
+        g2 = Adw.PreferencesGroup()
+        b = Gtk.Button(label=self.t["installer"], halign=Gtk.Align.CENTER)
+        b.add_css_class("pill")
+        b.add_css_class("suggested-action")
+        b.connect("clicked", self._lancer)
+        g2.add(b)
+        page.add(g2)
+        return page
+
+    def _page_install(self):
+        boite = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=12,
+                        margin_start=16, margin_end=16)
+        self.liste = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.liste.add_css_class("boxed-list")
+        fen = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        fen.set_child(self.liste)
+        self.barre = Gtk.ProgressBar()
+        self.etat = Gtk.Label(xalign=0, wrap=True, use_markup=False)
+        self.etat.add_css_class("dim-label")
+        self.vue_journal = Gtk.TextView(editable=False, monospace=True, cursor_visible=False,
+                                        wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        j = Gtk.ScrolledWindow(min_content_height=160)
+        j.set_child(self.vue_journal)
+        exp = Gtk.Expander(label=self.t["journal"])
+        exp.set_child(j)
+        self.btn_annuler = Gtk.Button(label=self.t["annuler"], halign=Gtk.Align.CENTER)
+        self.btn_annuler.connect("clicked", lambda *_: self.session and self.session.annuler())
+        for w in (fen, self.barre, self.etat, exp, self.btn_annuler):
+            boite.append(w)
+        return boite
+
+    # -- lancement
+    def _lancer(self, *_):
+        mode = ["complet", "no-system", "files-only"][self.rang_mode.get_selected()]
+        langue = ("fr", "en")[self.rang_langue.get_selected()]
+        if not os.path.isfile(chemin_script(self.env)):
+            return self._terminer(1, False, self.t["script_absent"])
+        self.session = Session(options_install(mode, langue, self.reste),
+                               lambda e: GLib.idle_add(self._evenement, e),
+                               lambda l: GLib.idle_add(self._journal, l),
+                               lambda c, i: GLib.idle_add(self._terminer, c, i), self.env)
+        try:
+            self.session.demarrer()
+        except OSError as e:
+            return self._terminer(1, False, str(e))
+        self.pile.set_visible_child_name("install")
+
+    # -- événements (fil graphique)
+    def _journal(self, ligne):
+        b = self.vue_journal.get_buffer()
+        b.insert(b.get_end_iter(), ligne + "\n")
+        self.vue_journal.scroll_mark_onscreen(b.get_insert())
+
+    def _marquer_fait(self):
+        if self.lignes_etapes:
+            row, spin = self.lignes_etapes[-1]
+            spin.set_visible(False)
+            row.add_prefix(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
+
+    def _evenement(self, e):
+        t = e["type"]
+        if t == "etape":
+            self._marquer_fait()
+            row = Adw.ActionRow(title=e["titre"], use_markup=False)
+            spin = Gtk.Spinner(spinning=True)
+            row.add_suffix(spin)
+            self.liste.append(row)
+            self.lignes_etapes.append((row, spin))
+        elif t == "progres":
+            self.dernier_progres = time.monotonic()
+            self.barre.set_fraction(max(0.0, min(1.0, e["x"] / e["y"])))
+        elif t in ("info", "ok", "avert", "erreur"):
+            self.etat.set_label(e["texte"])
+            self._journal({"info": "i ", "ok": "+ ", "avert": "! ", "erreur": "x "}[t] + e["texte"])
+        elif t in ("question", "choix", "saisie"):
+            self._demander(e)
+        return False
+
+    def _pulse(self):
+        if self.fini:
+            return False
+        if self.session and time.monotonic() - self.dernier_progres > 1.0:
+            self.barre.pulse()
+        return True
+
+    def _terminer(self, code, inattendu, texte=None):
+        self.fini = True
+        self.btn_annuler.set_sensitive(False)
+        if not inattendu and code == 0:
+            self._marquer_fait()
+        ok, msg = message_fin(code, self.langue, inattendu)
+        self.fin_page.set_title(texte or msg)
+        self.fin_page.set_icon_name("emblem-ok-symbolic" if ok else "dialog-error-symbolic")
+        self.pile.set_visible_child_name("fin")
+        return False
+
+    def _fermeture(self, *_):
+        if self.session and not self.fini:
+            self.session.annuler()
+        return False
+
+    # -- questions en direct
+    def _demander(self, e):
+        t = self.t
+        Dlg = getattr(Adw, "AlertDialog", None) or Adw.MessageDialog
+        corps = t["sensible"] if e.get("sensible") else ""
+        d = Dlg(heading=e["question"], body=corps) if Dlg is getattr(Adw, "AlertDialog", None) \
+            else Dlg(transient_for=self.win, heading=e["question"], body=corps)
+        extra = None
+        if e["type"] == "question":
+            d.add_response("non", t["non"])
+            d.add_response("oui", t["oui"])
+            if e["sensible"]:
+                d.set_response_appearance("oui", Adw.ResponseAppearance.DESTRUCTIVE)
+            d.set_default_response("oui" if e["defaut"] == "o" else "non")
+            d.set_close_response("non")
+        else:
+            d.add_response("ok", t["ok"])
+            d.set_default_response("ok")
+            d.set_close_response("ok")
+            if e["type"] == "choix":
+                boutons, premier = [], None
+                extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                for i, o in enumerate(e["options"], 1):
+                    b = Gtk.CheckButton(label=o, group=premier)
+                    premier = premier or b
+                    b.set_active(i == e["defaut"])
+                    boutons.append(b)
+                    extra.append(b)
+            else:
+                extra = Gtk.Entry(text=e["defaut"], activates_default=True)
+            d.set_extra_child(extra)
+
+        def repondu(dlg, rep):
+            if not isinstance(rep, str):  # AlertDialog : choose_finish ; ici on passe par "response"
+                return
+            if e["type"] == "question":
+                r = rep == "oui"
+            elif e["type"] == "choix":
+                r = next((i for i, b in enumerate(boutons, 1) if b.get_active()), e["defaut"])
+            else:
+                r = extra.get_text()
+            self.session.repondre(e["id"], r)
+
+        d.connect("response", repondu)
+        d.present(self.win) if Dlg is getattr(Adw, "AlertDialog", None) else d.present()
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ("-h", "--help"):
+        print("nc-installeur [--no-system|--files-only] [--fr|--en] [options d'install.sh]")
+        return 0
+    try:
+        charger_gtk()
+        Adw.init()
+    except (ImportError, ValueError) as e:
+        print("nc-installeur : GTK 4 et libadwaita (PyGObject) sont nécessaires : %s" % e, file=sys.stderr)
+        return 1
+    app = Adw.Application(application_id="org.noctalia.config.installeur")
+    app.connect("activate", lambda a: Interface(a, args).win.present())
+    return app.run([sys.argv[0]])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
