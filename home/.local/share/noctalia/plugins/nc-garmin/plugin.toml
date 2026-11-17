@@ -1,0 +1,17 @@
+id          = "nc/garmin"
+name        = "Pastille Garmin"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Pastille Santé Garmin de la barre, près du profil d'énergie : cœur et Body Battery ; un clic ouvre la fenêtre Garmin de l'île."
+dependencies = ["qs"]
+
+# Dans la barre, ajoutée par nc-reglages (GARMIN_ACTIF=oui et GARMIN_PILULE_BARRE=oui) juste avant power_profile, jamais sans eux.
+# Clic = fenêtre Garmin de l'île (qs -c nc-ile ipc call ile garmin). Le widget ne garde aucune zone de clic quand il est caché.
+[[widget]]
+id = "garmin"
+entry = "garmin.luau"
+
+  [widget.actions]
+  middle = "none"
