@@ -25,6 +25,15 @@ class Export(unittest.TestCase):
         manque = [f[5:] for f in r.stdout.split("\0") if f and not couvert(f[5:])]
         self.assertEqual(manque, [], "à ajouter à HOME_FILES dans export.sh")
 
+    def test_donnees_garmin_jamais_exportees(self):
+        # jetons, cache de santé et venv : jamais copiés depuis ~ vers le dépôt public
+        texte = (REPO / "export.sh").read_text()
+        liste = re.search(r"HOME_FILES=\((.*?)\n\)", texte, re.S)[1].split()
+        for prive in (".config/nc/garmin/jetons/garmin_tokens.json", ".config/nc/garmin/widgets.json",
+                      ".cache/nc/garmin.json", ".local/share/nc/garmin-venv/bin/python"):
+            for e in liste:
+                self.assertFalse(prive == e or prive.startswith(e.rstrip("/") + "/"), (e, prive))
+
 
 class ExportIsole(unittest.TestCase):
     def setUp(self):

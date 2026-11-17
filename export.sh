@@ -93,6 +93,10 @@ HOME_FILES=(
   .local/bin/nc-vpn
   .local/bin/nc-assistant-install
   .local/libexec/nc-vpn-installer
+  .local/bin/nc-garmin
+  .local/libexec/nc-garmin-connecteur.py
+  .local/libexec/nc-garmin-login.py
+  .local/share/nc/garmin-requirements.txt
   .local/bin/nc-assistant
   .local/bin/nc-noeud
   .local/bin/nc-bac
