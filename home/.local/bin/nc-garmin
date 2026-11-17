@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+"""nc-garmin : indicateurs de forme Garmin sur le bureau (île, barre, résumé du matin). Composant OPTIONNEL : inerte tant que
+GARMIN_ACTIF n'est pas « oui » dans ~/.config/nc/reglages.conf (nc-reglages → Santé). Connecteur NON OFFICIEL (garminconnect) : peut
+cesser de marcher si Garmin change son service.
+
+  nc-garmin etat-json                    l'état en JSON (contrat 1) : installe, connecte, demo, pret, widgets_actifs, widgets_catalogue,
+                                         metriques. Écrit aussi $XDG_RUNTIME_DIR/nc-garmin-barre.json. Inactif : {"actif": false}, rien d'autre
+  nc-garmin sync [--force]               va chercher les mesures (pas si le cache a moins de 15 min, ni en Économie sur batterie)
+  nc-garmin widgets basculer|activer|desactiver|monter|descendre ID   ;   widgets defaut|tout
+  nc-garmin demo oui|non|basculer        des chiffres d'exemple, sans compte ni réseau
+  nc-garmin hydratation +250|+500|reset  l'eau bue aujourd'hui (gardée ici, pas chez Garmin)
+  nc-garmin installer                    crée le venv et installe garminconnect (versions et hachages épinglés)
+  nc-garmin desinstaller                 retire le venv, les jetons et le cache
+  nc-garmin login | logout               connexion dans un terminal kitty (mot de passe et code MFA tapés là, jamais en argument) | oubli des jetons
+  nc-garmin resume                       une ligne pour le résumé du matin (vide si inactif ou pendant un partage d'écran)
+Pour les tests : HOME, XDG_*, NC_SYSFS, NC_GARMIN_REQUIREMENTS, NC_PARTAGE_ACTIF."""
+import json
+import math
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+def reglage(cle, defaut=""):
+    try:
+        with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+            val = defaut
+            for x in f:
+                if x.startswith(cle + "="):
+                    val = x.split("=", 1)[1].strip().strip('"')
+            return val
+    except OSError:
+        return defaut
+
+
+def xdg(var, defaut):
+    return os.environ.get(var) or os.path.expanduser(defaut)
+
+
+def chemins():
+    cfg = os.path.join(xdg("XDG_CONFIG_HOME", "~/.config"), "nc", "garmin")
+    data = os.path.join(xdg("XDG_DATA_HOME", "~/.local/share"), "nc")
+    return {"dir": cfg, "jetons": os.path.join(cfg, "jetons"), "widgets": os.path.join(cfg, "widgets.json"),
+            "eau": os.path.join(cfg, "hydratation.json"), "demo": os.path.join(cfg, "demo"),
+            "cache": os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "nc", "garmin.json"),
+            "venv": os.path.join(data, "garmin-venv"),
+            "barre": os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nc-garmin-barre.json")}
+
+
+RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONNECTEUR = os.path.join(RACINE, "libexec", "nc-garmin-connecteur.py")
+LOGIN = os.path.join(RACINE, "libexec", "nc-garmin-login.py")
+REQUIREMENTS = os.environ.get("NC_GARMIN_REQUIREMENTS") or os.path.join(RACINE, "share", "nc", "garmin-requirements.txt")
+FRAICHEUR = 15 * 60
+
+
+class Refus(Exception):
+    pass
+
+
+# ── fichiers privés : 0700 / 0600, jamais de lien symbolique, écriture atomique ──────────────────────────────
+def ensure_dir(p):
+    try:
+        st = os.lstat(p)
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        os.mkdir(p, 0o700)
+        os.chmod(p, 0o700)  # le umask ne doit pas ouvrir le dossier
+        return
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise Refus(T("dossier refusé (lien ou autre propriétaire) : ", "folder refused (link or other owner): ") + os.path.basename(p))
+    if st.st_mode & 0o077:
+        os.chmod(p, 0o700)
+
+
+def write_private(p, texte):
+    parent = os.path.dirname(p)
+    if parent == chemins()["dir"] or parent.startswith(chemins()["dir"] + os.sep):
+        ensure_dir(parent)
+    else:
+        os.makedirs(parent, mode=0o700, exist_ok=True)
+    try:
+        if not stat.S_ISREG(os.lstat(p).st_mode):
+            raise Refus(T("fichier refusé (lien) : ", "file refused (link): ") + os.path.basename(p))
+    except FileNotFoundError:
+        pass
+    tmp = "%s.tmp%d" % (p, os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def read_private(p):
+    """Contenu d'un fichier à nous, ou None (absent, lien, étranger, trop gros)."""
+    try:
+        st = os.lstat(p)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_size > 1 << 20:
+            return None
+        if st.st_mode & 0o077:
+            os.chmod(p, 0o600)
+        fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def lire_json(p):
+    t = read_private(p)
+    try:
+        return json.loads(t) if t else None
+    except ValueError:
+        return None
+
+
+def sortie(d, code=0):
+    d = dict(d, contrat=1)
+    print(json.dumps(d, ensure_ascii=False))
+    sys.exit(code)
+
+
+def erreur(cat, code=1, **plus):
+    sortie(dict(plus, erreur=cat, message=MESSAGES.get(cat, MESSAGES["service_change"])), code)
+
+
+MESSAGES = {
+    "inactif": T("Garmin est désactivé : mets GARMIN_ACTIF=oui dans nc-reglages.", "Garmin is off: set GARMIN_ACTIF=oui in nc-reglages."),
+    "pas_installe": T("Le connecteur n'est pas installé : lance nc-garmin installer.", "The connector is not installed: run nc-garmin installer."),
+    "pas_connecte": T("Pas connecté à Garmin : lance nc-garmin login.", "Not connected to Garmin: run nc-garmin login."),
+    "reseau": T("Garmin est injoignable.", "Garmin cannot be reached."),
+    "service_change": T("Le service Garmin a changé : connecteur non officiel, il doit être mis à jour.",
+                        "The Garmin service changed: unofficial connector, it needs an update."),
+    "trop_de_requetes": T("Trop de requêtes pour Garmin : réessaie plus tard.", "Too many requests to Garmin: try again later."),
+    "python_ancien": T("Python 3.12 minimum est requis (venv).", "Python 3.12 or newer is required (venv)."),
+    "installation": T("La bibliothèque Garmin est absente ou abîmée : relance nc-garmin installer.", "The Garmin library is missing or broken: run nc-garmin installer."),
+    "id_inconnu": T("Indicateur inconnu.", "Unknown indicator."),
+    "usage": T("Usage : voir l'en-tête de nc-garmin.", "Usage: see the header of nc-garmin."),
+    "permissions": T("Dossier ou fichier refusé (lien ou autre propriétaire).", "Folder or file refused (link or other owner)."),
+    "venv_absent": T("Le module venv manque : installe python3-venv (Debian, Ubuntu) ou python3 complet.", "The venv module is missing: install python3-venv (Debian, Ubuntu) or the full python3."),
+    "pip_echec": T("pip a échoué : relance nc-garmin installer (réseau ?).", "pip failed: run nc-garmin installer again (network?)."),
+    "kitty_absent": T("kitty est requis pour la connexion.", "kitty is required to log in."),
+    "pas_de_python": T("python3 3.12 minimum est requis.", "python3 3.12 or newer is required."),
+}
+
+
+# ── catalogue ───────────────────────────────────────────────────────────────────────────────────────────────
+CATALOGUE = [  # (id, nom, par défaut)
+    ("body_battery", T("Body Battery", "Body Battery"), True),
+    ("frequence_cardiaque", T("Fréquence cardiaque", "Heart rate"), True),
+    ("sommeil", T("Sommeil", "Sleep"), True),
+    ("stress", T("Stress", "Stress"), True),
+    ("pas", T("Pas et objectif", "Steps and goal"), True),
+    ("vfc", T("VFC de nuit", "Overnight HRV"), False),
+    ("activite", T("Dernière activité", "Last activity"), False),
+    ("calories", T("Calories, étages, minutes intenses", "Calories, floors, intensity minutes"), False),
+    ("oxygene", T("SpO2 et respiration", "SpO2 and breathing"), False),
+    ("forme", T("VO2 max et disponibilité", "VO2 max and readiness"), False),
+    ("hydratation", T("Hydratation", "Hydration"), False),
+]
+IDS = [c[0] for c in CATALOGUE]
+DEFAUT = [c[0] for c in CATALOGUE if c[2]]
+METRIQUES = ("body_battery", "fc_repos", "fc_max", "sommeil_s", "sommeil_score", "stress_moyen", "pas", "pas_objectif", "calories_actives",
+             "etages", "minutes_intenses", "vfc_nuit", "activite_nom", "activite_minutes", "spo2", "respiration", "vo2max", "readiness")
+DEMO = {"body_battery": 74, "fc_repos": 52, "fc_max": 148, "sommeil_s": 27300, "sommeil_score": 82, "stress_moyen": 28, "pas": 6840,
+        "pas_objectif": 10000, "calories_actives": 410, "etages": 9, "minutes_intenses": 32, "vfc_nuit": 58, "activite_nom": "Course",
+        "activite_minutes": 41, "spo2": 96, "respiration": 14, "vo2max": 51.0, "readiness": 68}
+
+
+def id_valide(i):
+    return isinstance(i, str) and i in IDS  # égalité stricte, jamais un préfixe
+
+
+def valider_metriques(d):
+    """Liste blanche de noms et de types : le cache et le connecteur sont des entrées non fiables."""
+    out = {}
+    if not isinstance(d, dict):
+        return out
+    for k in METRIQUES:
+        v = d.get(k)
+        if k == "activite_nom":
+            if isinstance(v, str) and 0 < len(v) <= 60 and v.isprintable():
+                out[k] = v
+        elif isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) < 1e9:
+            out[k] = v
+    return out
+
+
+def lire_cache():
+    d = lire_json(chemins()["cache"])
+    if not isinstance(d, dict) or d.get("version") != 1:
+        return None
+    ts = d.get("ts")
+    if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not math.isfinite(ts):
+        return None
+    return {"ts": ts, "metriques": valider_metriques(d.get("metriques"))}
+
+
+def widgets_actifs():
+    d = lire_json(chemins()["widgets"])
+    l = d.get("actifs") if isinstance(d, dict) else None
+    if isinstance(l, list) and all(id_valide(i) for i in l):
+        return list(dict.fromkeys(l))
+    return list(DEFAUT)
+
+
+def eau_aujourdhui():
+    d = lire_json(chemins()["eau"])
+    ml = d.get("ml") if isinstance(d, dict) else None
+    if isinstance(d, dict) and d.get("jour") == time.strftime("%Y-%m-%d") and isinstance(ml, int) and not isinstance(ml, bool) and 0 <= ml < 100000:
+        return ml
+    return 0
+
+
+def actif():
+    return reglage("GARMIN_ACTIF", "non") == "oui"
+
+
+def demo_actif():
+    if reglage("GARMIN_DEMO", "non") == "oui":
+        return True
+    try:
+        return stat.S_ISREG(os.lstat(chemins()["demo"]).st_mode)
+    except OSError:
+        return False
+
+
+def venv_python():
+    return os.path.join(chemins()["venv"], "bin", "python")
+
+
+def installe():
+    return os.access(venv_python(), os.X_OK)
+
+
+def connecte():
+    p = os.path.join(chemins()["jetons"], "garmin_tokens.json")
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+        return False
+    if st.st_mode & 0o077:
+        os.chmod(p, 0o600)
+    return True
+
+
+def etat():
+    cat = [{"id": i, "nom": n, "defaut": d} for i, n, d in CATALOGUE]
+    if not actif():
+        return {"actif": False, "installe": False, "connecte": False, "demo": False, "pret": False, "widgets_actifs": [],
+                "widgets_catalogue": cat, "metriques": {}, "non_officiel": True}
+    demo, inst, conn = demo_actif(), installe(), connecte()
+    c = lire_cache()
+    m = dict(DEMO) if demo else (dict(c["metriques"]) if c else {})
+    m["hydratation_ml"] = eau_aujourdhui()
+    act = widgets_actifs()
+    for w in cat:
+        w["actif"] = w["id"] in act
+    return {"actif": True, "installe": inst, "connecte": conn, "demo": demo, "pret": demo or (inst and conn), "widgets_actifs": act,
+            "widgets_catalogue": cat, "metriques": m, "maj": int(c["ts"]) if c and not demo else None, "non_officiel": True}
+
+
+def exiger_actif():
+    if not actif():
+        erreur("inactif", 2)
+
+
+# ── sous-commandes ──────────────────────────────────────────────────────────────────────────────────────────
+def cmd_etat():
+    d = dict(etat(), contrat=1)
+    try:
+        write_private(chemins()["barre"], json.dumps(d, ensure_ascii=False))
+    except (OSError, Refus):
+        pass
+    sortie(d)
+
+
+def economie_sur_batterie():
+    sysfs = os.environ.get("NC_SYSFS") or "/sys"
+    base = os.path.join(sysfs, "class", "power_supply")
+    try:
+        noms = os.listdir(base)
+    except OSError:
+        return False
+    def lire(n, f):
+        try:
+            return open(os.path.join(base, n, f)).read().strip()
+        except OSError:
+            return ""
+    if any(lire(n, "type") == "Mains" and lire(n, "online") == "1" for n in noms) or not any(lire(n, "type") == "Battery" for n in noms):
+        return False
+    if not shutil.which("powerprofilesctl"):
+        return False
+    try:
+        r = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() == "power-saver"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def cmd_sync(args):
+    exiger_actif()
+    force = "--force" in args
+    if demo_actif():
+        sortie({"synchronise": False, "demo": True})
+    if not installe():
+        erreur("pas_installe")
+    if not connecte():
+        erreur("pas_connecte")
+    c = lire_cache()
+    if not force:
+        if c and 0 <= time.time() - c["ts"] < FRAICHEUR:
+            sortie({"synchronise": False, "raison": "frais"})
+        if economie_sur_batterie():
+            sortie({"synchronise": False, "raison": "economie"})
+    ensure_dir(chemins()["dir"])
+    ensure_dir(chemins()["jetons"])
+    env = {k: v for k, v in os.environ.items() if k != "GARMINTOKENS"}
+    try:
+        r = subprocess.run([venv_python(), CONNECTEUR, chemins()["jetons"], time.strftime("%Y-%m-%d")], capture_output=True, text=True,
+                           timeout=120, env=env, stdin=subprocess.DEVNULL)
+        lignes = r.stdout.strip().splitlines()
+        rep = json.loads(lignes[-1]) if lignes else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        rep = None
+    if not isinstance(rep, dict):
+        erreur("service_change")
+    if "metriques" not in rep:
+        e = rep.get("erreur")
+        erreur(e if isinstance(e, str) and e in MESSAGES and e not in ("inactif", "id_inconnu", "usage") else "service_change")
+    m = valider_metriques(rep["metriques"])
+    write_private(chemins()["cache"], json.dumps({"version": 1, "ts": time.time(), "metriques": m}))
+    sortie({"synchronise": True, "metriques": m})
+
+
+def cmd_widgets(args):
+    exiger_actif()
+    if not args:
+        erreur("usage", 2)
+    a, act = args[0], widgets_actifs()
+    if a == "defaut":
+        act = list(DEFAUT)
+    elif a == "tout":
+        act = list(IDS)
+    elif a in ("basculer", "activer", "desactiver", "monter", "descendre"):
+        i = args[1] if len(args) > 1 else None
+        if not id_valide(i):
+            erreur("id_inconnu", 2)
+        if a == "basculer":
+            a = "desactiver" if i in act else "activer"
+        if a == "activer" and i not in act:
+            act.append(i)
+        elif a == "desactiver" and i in act:
+            act.remove(i)
+        elif a in ("monter", "descendre") and i in act:
+            k = act.index(i)
+            j = k - 1 if a == "monter" else k + 1
+            if 0 <= j < len(act):
+                act[k], act[j] = act[j], act[k]
+    else:
+        erreur("usage", 2)
+    write_private(chemins()["widgets"], json.dumps({"actifs": act}))
+    sortie({"widgets_actifs": act})
+
+
+def cmd_demo(args):
+    exiger_actif()
+    a = args[0] if args else ""
+    if a == "basculer":
+        a = "non" if demo_actif() else "oui"
+    if a == "oui":
+        write_private(chemins()["demo"], "oui\n")
+    elif a == "non":
+        try:
+            os.unlink(chemins()["demo"])
+        except FileNotFoundError:
+            pass
+    else:
+        erreur("usage", 2)
+    sortie({"demo": demo_actif()})
+
+
+def cmd_hydratation(args):
+    exiger_actif()
+    a = args[0] if args else ""
+    if a == "reset":
+        ml = 0
+    elif a in ("+250", "+500"):
+        ml = eau_aujourdhui() + int(a[1:])
+    else:
+        erreur("usage", 2)
+    write_private(chemins()["eau"], json.dumps({"jour": time.strftime("%Y-%m-%d"), "ml": ml}))
+    sortie({"hydratation_ml": ml})
+
+
+def evenement(**d):
+    print(json.dumps(dict(d, contrat=1), ensure_ascii=False), flush=True)
+
+
+def cmd_installer():
+    exiger_actif()
+    py = shutil.which("python3")
+    try:
+        v = subprocess.run([py, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"], capture_output=True, text=True, timeout=20).stdout.strip()
+        ok = tuple(int(x) for x in v.split(".")) >= (3, 12)
+    except (OSError, ValueError, subprocess.SubprocessError, TypeError):
+        ok = False
+    if not ok:
+        erreur("pas_de_python")
+    venv = chemins()["venv"]
+    os.makedirs(os.path.dirname(venv), exist_ok=True)
+    evenement(etape="venv")
+    if subprocess.run([py, "-m", "venv", venv], capture_output=True, timeout=300).returncode != 0 or not installe():
+        erreur("venv_absent")
+    evenement(etape="pip")
+    pip = os.path.join(venv, "bin", "pip")
+    env = {k: v for k, v in os.environ.items() if k != "GARMINTOKENS"}
+    r = subprocess.run([pip, "install", "--require-hashes", "--no-deps", "--only-binary=:all:", "-r", REQUIREMENTS], capture_output=True,
+                       timeout=900, env=env, stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        erreur("pip_echec")
+    evenement(etape="fini")
+    sortie({"installe": installe()})
+
+
+def effacer(p):
+    try:
+        if os.path.islink(p) or os.path.isfile(p):
+            os.unlink(p)
+        elif os.path.isdir(p):
+            shutil.rmtree(p)
+    except OSError:
+        pass
+
+
+def cmd_desinstaller():
+    for k in ("venv", "jetons", "cache"):
+        effacer(chemins()[k])
+    sortie({"installe": False, "connecte": False})
+
+
+def cmd_login():
+    exiger_actif()
+    if not installe():
+        erreur("pas_installe")
+    kitty = shutil.which("kitty")
+    if not kitty:
+        erreur("kitty_absent")
+    ensure_dir(chemins()["dir"])
+    ensure_dir(chemins()["jetons"])
+    env = {k: v for k, v in os.environ.items() if k != "GARMINTOKENS"}
+    subprocess.Popen([kitty, "--hold", "--title", "Garmin", venv_python(), LOGIN, chemins()["jetons"]], env=env, start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sortie({"lance": True})
+
+
+def cmd_logout():
+    effacer(chemins()["jetons"])
+    effacer(chemins()["cache"])
+    sortie({"connecte": False})
+
+
+def partage_actif():
+    return os.environ.get("NC_PARTAGE_ACTIF") == "1" or os.path.exists(os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nc-partage-actif"))
+
+
+def cmd_resume():
+    if not actif() or partage_actif():
+        return
+    e = etat()
+    if not e["pret"]:
+        return
+    m, p = e["metriques"], []
+    if "body_battery" in m:
+        p.append("Body Battery %d" % m["body_battery"])
+    if "sommeil_s" in m:
+        p.append(T("sommeil %d h %02d", "sleep %d h %02d") % (m["sommeil_s"] // 3600, m["sommeil_s"] % 3600 // 60))
+    if "pas" in m:
+        p.append(T("%d pas", "%d steps") % m["pas"])
+    if p:
+        print(", ".join(p))
+
+
+def main():
+    a = sys.argv[1:]
+    c, r = (a[0] if a else ""), a[1:]
+    try:
+        if c == "etat-json":
+            cmd_etat()
+        elif c == "sync":
+            cmd_sync(r)
+        elif c == "widgets":
+            cmd_widgets(r)
+        elif c == "demo":
+            cmd_demo(r)
+        elif c == "hydratation":
+            cmd_hydratation(r)
+        elif c == "installer":
+            cmd_installer()
+        elif c == "desinstaller":
+            cmd_desinstaller()
+        elif c == "login":
+            cmd_login()
+        elif c == "logout":
+            cmd_logout()
+        elif c == "resume":
+            cmd_resume()
+        else:
+            erreur("usage", 2)
+    except Refus:
+        erreur("permissions")
+    except OSError:
+        erreur("service_change")
+
+
+if __name__ == "__main__":
+    main()
