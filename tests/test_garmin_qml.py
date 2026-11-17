@@ -22,6 +22,7 @@ FAUX = r"""#!/bin/sh
 J="@ROOT@/journal"
 case "$1" in
   etat-json) cat "@ROOT@/etat.json"; exit 0 ;;
+  installer) echo '{"erreur": "venv_absent", "message": "MODULE VENV MANQUANT", "contrat": 1}'; exit 1 ;;
 esac
 if ! mkdir "@ROOT@/verrou" 2>/dev/null; then echo "CHEVAUCHE $*" >> "$J"; fi
 echo "DEBUT $* $(date +%s.%N)" >> "$J"
@@ -158,6 +159,18 @@ class HorsEcran(unittest.TestCase):
         for (a, ta), (b, tb) in zip(temps, temps[1:]):
             self.assertLessEqual(ta, tb)
         self.assertEqual([t[0] for t in temps], ["DEBUT", "FIN"] * (len(temps) // 2))
+
+    def test_erreur_d_action_montree(self):
+        self.lancer('''
+            Timer { interval: 60; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { GarminEtat.panneauOuvert = true; etape++; return }
+                if (etape === 1) { if (!GarminEtat.lu) return; GarminEtat.installer(); etape++; return }
+                if (GarminEtat.erreur !== "") {
+                    verifier(GarminEtat.erreur === "MODULE VENV MANQUANT", "message du moteur : " + GarminEtat.erreur)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''')
+
 
 
 def textwrap_corps(corps):

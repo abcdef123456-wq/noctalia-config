@@ -27,7 +27,7 @@ Singleton {
     property var widgetsActifs: []
     property var catalogue: []                    // [{id, nom, defaut, actif}]
     property var brut: ({})                       // les mesures telles que le moteur les donne : NE PAS lire hors de ce fichier
-    readonly property string resume: pret && brut.body_battery !== undefined ? "Garmin · " + brut.body_battery + " %" + (brut.pas !== undefined ? " · " + brut.pas + " pas" : "") : ""
+    readonly property string resume: pret && brut.body_battery !== undefined ? "Garmin · " + brut.body_battery + " %" + (brut.pas !== undefined ? " · " + brut.pas + Reglages.t(" pas", " steps") : "") : ""
     property string erreur: ""
     property bool occupe: agir.running
     property var suites: []                       // la file : [[argv…], …]
@@ -85,7 +85,12 @@ Singleton {
     }
     Process {
         id: agir
-        stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") g.erreur = text.trim().split("\n")[0].slice(0, 240) }
+        // nc-garmin dit ses erreurs en JSON sur stdout ({"erreur", "message"}) : seul le message traduit est montré
+        stdout: StdioCollector { onStreamFinished: {
+            var l = text.trim().split("\n"), d = null
+            try { d = JSON.parse(l[l.length - 1]) } catch (e) {}
+            if (d && d.erreur && d.message) g.erreur = String(d.message).slice(0, 240)
+        } }
         onExited: code => {
             if (g.suites.length > 0) {
                 var suivante = g.suites[0]
