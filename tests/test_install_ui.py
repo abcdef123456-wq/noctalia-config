@@ -34,7 +34,8 @@ class Banc:
         if sudo:  # faux sudo : note ses arguments et SUDO_ASKPASS, ne fait rien
             outil(self.bin, "sudo", f'echo "sudo $* ASKPASS=${{SUDO_ASKPASS:-}}" >> "{self.journal}"; exit 0')
         for n in ["curl", "wget", "chsh", "dnf", "apt-get", "pacman", "zypper"]:
-            outil(self.bin, n, f'echo "{n} $*" >> "{self.journal}"; exit 1')
+            outil(self.bin, n, f'echo "{n} $*" >> "{self.journal}"; '
+                               f'echo "DF=${{DEBIAN_FRONTEND:-}} GTP=${{GIT_TERMINAL_PROMPT:-}}" >> "{self.d / "vars"}"; exit 1')
         outil(self.bin, "git", 'for a in "$@"; do case "$a" in rev-parse) echo 0123456789abcdef0123456789abcdef01234567; exit 0;; '
                                'log|diff|ls-files|status|show) exit 0;; esac; done; '
                                f'echo "git $*" >> "{self.journal}"; exit 1')
@@ -257,6 +258,76 @@ class UiTest(unittest.TestCase):
         self.assertFalse(b.sortie.exists() and b.sortie.read_text(), "écriture sur NC_UI_SORTIE sans NC_UI")
         self.assertNotIn("-A", b.appels())
         self.assertNotIn("ASKPASS=/", b.appels())
+
+    def vars_vues(self, b):
+        v = b.d / "vars"
+        return set(v.read_text().split()) if v.exists() else set()
+
+    def test_ui_variables_non_interactives_transmises(self):
+        b = self.banc()
+        b.lance("--oui", repond=self.oui)
+        self.assertIn("DF=noninteractive", self.vars_vues(b))
+        self.assertIn("GTP=0", self.vars_vues(b))
+
+    def test_sans_nc_ui_variables_non_transmises(self):
+        b = self.banc()
+        b.lance("--oui", ui=False, entree=None)
+        vus = self.vars_vues(b)
+        self.assertTrue(vus, "aucun faux outil appelé : test sans valeur")
+        self.assertEqual(vus, {"DF=", "GTP="})
+
+    def test_sans_tty_est_celui_d_avant_hors_ui(self):
+        src = (REPO / "install.sh").read_text()
+        self.assertIn('sans_tty() { [ "${NC_UI:-0}" = 1 ] || ! { true </dev/tty; } 2>/dev/null; }', src)
+        d = src.index("sans_tty() {")
+        fn = src[d:src.index("\n", d)]
+        e = {"PATH": os.environ["PATH"]}
+        for ui, att in (("0", 1), ("1", 0)):  # hors UI : suit /dev/tty (ici absent -> sans_tty vrai si setsid) ; UI : toujours vrai
+            e2 = dict(e, NC_UI=ui)
+            r = subprocess.run(["setsid", "-w", "bash", "-c", fn + "\nsans_tty"], env=e2, stdin=subprocess.DEVNULL,
+                               capture_output=True, timeout=10)
+            self.assertEqual(r.returncode, 0, (ui, r.stderr))  # sans terminal de contrôle : vrai dans les deux cas
+
+    def test_pty_de_controle_assistant_distant_saute_en_ui(self):
+        """Avec un vrai terminal de contrôle (/dev/tty existe), l'assistant distant n'attend rien en mode UI."""
+        import fcntl
+        import pty
+        import termios
+        src = (REPO / "install.sh").read_text()
+        d = src.index('if [ -e "$HOME/.config/nc/assistant.conf" ]; then')
+        f = src.index("# ── 5. Étapes système")
+        b = self.banc()
+        marque = b.d / "assistant_appele"
+        (b.d / "home" / ".local" / "bin").mkdir(parents=True, exist_ok=True)
+        fake = b.d / "home" / ".local" / "bin" / "nc-assistant"
+        fake.write_text(f"#!/bin/sh\ntouch {marque}\nexit 1\n")
+        fake.chmod(0o755)
+        e = b.env()
+        e["HOME"] = str(b.d / "home")
+        e["NC_UI"] = "1"
+        script = ('ok(){ :; }; warn(){ echo "AVERT $*"; }; t(){ echo "$1"; }; ask(){ touch ' + str(b.d / "ask_appele") + '; return 1; }\n'
+                  + src[d:f])
+        maitre, esclave = pty.openpty()
+
+        def prepare():
+            os.setsid()
+            fcntl.ioctl(esclave, termios.TIOCSCTTY, 0)  # le pty devient le terminal de contrôle
+
+        p = subprocess.Popen(["bash", "-c", script], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, env=e, text=True, preexec_fn=prepare)
+        os.close(esclave)
+        try:
+            sortie, _ = p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.kill(p.pid, 9)
+            p.communicate()
+            self.fail("bloque sur /dev/tty en mode UI")
+        finally:
+            os.close(maitre)
+        self.assertEqual(p.returncode, 0, sortie)
+        self.assertIn("AVERT", sortie)
+        self.assertFalse(marque.exists())
+        self.assertFalse((b.d / "ask_appele").exists())
 
     def test_enveloppe_effacee_a_la_fin(self):
         b = self.banc()

@@ -79,8 +79,8 @@ nc_ui_lis() { # lit UNE ligne ; NC_R = la réponse si elle est « <id> <réponse
 if [ "${NC_UI:-0}" = 1 ]; then
   # Sortie impossible à ouvrir : on continue comme en terminal (jamais de sortie du script pour cela)
   if [ -n "${NC_UI_SORTIE:-}" ] && { exec 3>>"$NC_UI_SORTIE"; } 2>/dev/null; then
-    # shellcheck disable=SC2064
-    trap '' PIPE
+    # Aucune invite ne doit attendre sur le terminal de contrôle (le pty de l'application, où personne ne répond)
+    export DEBIAN_FRONTEND=noninteractive GIT_TERMINAL_PROMPT=0
     # Entrée : jamais bloquante (O_RDWR) et seulement si c'est une FIFO
     if [ -p "${NC_UI_ENTREE:-}" ] && { exec 4<>"$NC_UI_ENTREE"; } 2>/dev/null; then NC_UI_IN=1; fi
     # sudo sans terminal : SUDO_ASKPASS + une enveloppe « sudo -A » en tête du PATH (couvre aussi les sous-scripts)
@@ -108,7 +108,7 @@ die()  { nc_ui_txt erreur "$(t 'Erreur : ' 'Error: ')$*"; printf '\033[31m%s%s\0
 nc_ui_n_etape() { [ "${NC_UI:-0}" = 1 ] || return 0; NC_UI_N=$((NC_UI_N + 1)); nc_json_echappe "$1"; nc_ui_ev "{\"type\":\"etape\",\"n\":$NC_UI_N,\"titre\":\"$NC_J\"}"; }
 # Pas de terminal utilisable (CI, ssh sans tty, tâche de fond) : le même test pour ask(), choisir() et les options de
 # pacman. Les réponses viennent alors des valeurs par défaut.
-sans_tty() { ! { true </dev/tty; } 2>/dev/null; }
+sans_tty() { [ "${NC_UI:-0}" = 1 ] || ! { true </dev/tty; } 2>/dev/null; }
 ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
   # « sensible » : démarrage, connexion, pilotes. Sans terminal, la réponse par défaut y est NON, sauf avec --oui.
   local d="${2:-n}" r hint sens=false
@@ -2337,8 +2337,8 @@ if [ "$MODE" = full ]; then
       dflt="$(echo "${LANG:-fr_FR}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p')"; dflt="${dflt:-FR}"
       cc=""
       if [ "${NC_UI:-0}" = 1 ]; then
-        NC_UI_ID=$((NC_UI_ID+1)); nc_json_echappe "$(t "Code du pays (2 lettres)" "Country code (2 letters)")"
-        nc_ui_ev "{\"type\":\"saisie\",\"id\":$NC_UI_ID,\"question\":\"$NC_J\",\"defaut\":\"$dflt\"}"
+        NC_UI_ID=$((NC_UI_ID+1)); nc_json_echappe "$dflt"; dj="$NC_J"; nc_json_echappe "$(t "Code du pays (2 lettres)" "Country code (2 letters)")"
+        nc_ui_ev "{\"type\":\"saisie\",\"id\":$NC_UI_ID,\"question\":\"$NC_J\",\"defaut\":\"$dj\"}"
         nc_ui_lis; cc="$NC_R"
       else
       { true </dev/tty; } 2>/dev/null && { read -r -p "$(t "   Code du pays (2 lettres) [$dflt] " "   Country code (2 letters) [$dflt] ")" cc </dev/tty || cc=""; }

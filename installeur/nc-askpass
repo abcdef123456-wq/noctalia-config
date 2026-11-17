@@ -3,12 +3,24 @@
 sudo l'appelle avec l'invite en argv[1]. Valider : mot de passe + « \n » sur stdout, code 0.
 Annuler ou fermer : rien sur stdout, code 1. Le mot de passe ne va nulle part ailleurs (ni stderr, ni fichier,
 ni journal, ni environnement). gi s'importe tard : la partie sans GTK reste testable."""
+import os
 import sys
 
+TEXTES = {
+    "fr": {"titre": "Mot de passe", "annuler": "Annuler", "valider": "Valider", "invite": "Mot de passe"},
+    "en": {"titre": "Password", "annuler": "Cancel", "valider": "OK", "invite": "Password"},
+}
 
-def texte_invite(argv):
+
+def langue(env=None):
+    env = os.environ if env is None else env
+    v = (env.get("NC_LANGUE") or env.get("LANG") or "").lower()
+    return "fr" if v.startswith("fr") else "en"
+
+
+def texte_invite(argv, env=None):
     t = (argv[1] if len(argv) > 1 else "").strip()
-    return t or "Mot de passe"
+    return t or TEXTES[langue(env)]["invite"]
 
 
 def ecrire_sortie(mdp, out=None):
@@ -22,19 +34,20 @@ def demander(invite):
     import gi
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gtk
+    from gi.repository import Adw, Gdk, Gio, Gtk
     if not Gtk.init_check():
         raise RuntimeError("pas d'écran")
     res = {"mdp": None}
+    tx = TEXTES[langue()]
 
     def activer(app):
-        win = Adw.ApplicationWindow(application=app, title="Mot de passe", default_width=380, resizable=False)
+        win = Adw.ApplicationWindow(application=app, title=tx["titre"], default_width=380, resizable=False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                       margin_top=18, margin_bottom=18, margin_start=18, margin_end=18)
         label = Gtk.Label(label=invite, wrap=True, xalign=0)
         entry = Gtk.PasswordEntry(show_peek_icon=True)
-        annuler = Gtk.Button(label="Annuler")
-        valider = Gtk.Button(label="Valider")
+        annuler = Gtk.Button(label=tx["annuler"])
+        valider = Gtk.Button(label=tx["valider"])
         valider.add_css_class("suggested-action")
         boutons = Gtk.Box(spacing=8, halign=Gtk.Align.END)
 
@@ -50,10 +63,20 @@ def demander(invite):
         for w in (label, entry, boutons):
             box.append(w)
         win.set_content(box)
+        touches = Gtk.EventControllerKey()
+
+        def touche(_c, keyval, *_):  # Échap vaut Annuler
+            if keyval == Gdk.KEY_Escape:
+                win.close()
+                return True
+            return False
+
+        touches.connect("key-pressed", touche)
+        win.add_controller(touches)
         win.present()
         entry.grab_focus()
 
-    app = Adw.Application(application_id="nc.askpass")
+    app = Adw.Application(application_id="nc.askpass", flags=Gio.ApplicationFlags.NON_UNIQUE)
     app.connect("activate", activer)
     app.run([])
     return res["mdp"]
