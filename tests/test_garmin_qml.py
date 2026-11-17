@@ -56,12 +56,46 @@ class Sources(unittest.TestCase):
 
     def test_file_fifo(self):
         etat = lire("GarminEtat.qml")
-        self.assertEqual(len(re.findall(r"\bProcess\s*{", etat)), 2)  # lire et agir : jamais deux nc-garmin d'action
+        self.assertEqual(len(re.findall(r"\bProcess\s*{", etat)), 3)  # lire, agir (file FIFO) et connexion (attend kitty, à part)
         self.assertIn("if (agir.running) { g.suites = g.suites.concat([args]); return }", etat)
         self.assertIn("g.suites.slice(1)", etat)
         self.assertEqual(len(re.findall(r"agir\.running = true", etat)), 1)
         self.assertIn('lancer(["sync", "--force"])', etat)
         self.assertNotIn("Timer", etat)
+
+    def test_connexion_a_part_et_relecture(self):
+        etat = lire("GarminEtat.qml")
+        m = re.search(r"Process\s*{\s*id:\s*connexion\b(.*?)\n    }", etat, re.S)
+        self.assertTrue(m, "Process connexion absent")
+        self.assertIn('"login"', m.group(1))
+        self.assertIn("onExited: g.relire()", m.group(1))
+        self.assertIn("if (!connexion.running)", etat)  # une seule connexion à la fois
+
+    def test_partage_pose_un_fichier_vide_0600(self):
+        t = lire("Partage.qml")
+        self.assertIn("nc-partage-actif", t)
+        self.assertIn('Quickshell.env("XDG_RUNTIME_DIR")', t)
+        self.assertIn("if (marque === \"\") return", t)  # sans XDG_RUNTIME_DIR : rien n'est écrit
+        self.assertIn("onSilenceChanged: poserMarque(silence)", t)
+        self.assertIn("Component.onCompleted: poserMarque(false)", t)  # effacé au démarrage de l'île
+        self.assertIn('["rm", "-f", marque]', t)
+        self.assertIsNone(re.search(r"^\s*component\s+\w+\s*:", t, re.M))
+        # la commande réelle, jouée dans un dossier temporaire : fichier vide en 0600
+        m = re.search(r'\["sh", "-c", "((?:[^"\\]|\\.)*)", "sh", marque\]', t)
+        self.assertTrue(m, "commande de pose introuvable")
+        cmd = m.group(1).replace('\\"', '"')
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "nc-partage-actif"
+            subprocess.run(["sh", "-c", cmd, "sh", str(f)], check=True, env={"PATH": "/usr/bin:/bin"})
+            self.assertEqual(f.stat().st_size, 0)
+            self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+
+    def test_plugin_se_cache_pendant_le_partage(self):
+        lua = (REPO / "home/.local/share/noctalia/plugins/nc-garmin/garmin.luau").read_text()
+        self.assertIn("/nc-partage-actif", lua)
+        self.assertIn("noctalia.fileExists(PARTAGE)", lua)
+        self.assertIn("SANS_RUN or", lua)  # sans XDG_RUNTIME_DIR : caché par prudence
+        self.assertRegex(lua, r"enPartage")
 
     def test_pas_de_component_inline_ajoute(self):
         d = subprocess.run(["git", "-C", str(REPO), "diff", "8ade4dc", "--", "home/.config/quickshell/nc-ile/shell.qml"],

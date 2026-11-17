@@ -160,7 +160,12 @@ class Configuration(unittest.TestCase):
                 self.assertEqual((lignes[cle]["genre"], lignes[cle]["section"], lignes[cle]["relire"]), ("action", "Santé Garmin", True))
             self.assertTrue(lignes["GARMIN_ACTION_RETIRER"]["confirmer"])
             inst = lignes["GARMIN_ACTION_INSTALLER"]["commande"]
-            self.assertEqual(inst[-2:], ["nc-garmin", "installer"])
+            self.assertIn("--texte", " ".join(inst))  # sortie en phrases, pas en JSON
+            if len(inst) > 4:  # avec un terminal : il reste ouvert jusqu'à Entrée
+                self.assertIn("read r", inst[-2])
+                self.assertIn("nc-garmin installer --texte", inst[-2])
+            else:
+                self.assertEqual(inst, ["nc-garmin", "installer", "--texte"])
             for l in lignes.values():
                 if l["cle"].startswith("GARMIN_ACTION"):
                     self.assertIsInstance(l["commande"], list)

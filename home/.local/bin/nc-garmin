@@ -157,7 +157,13 @@ def lire_json(p):
         return None
 
 
+TEXTE = False  # « installer --texte » : des phrases au lieu du JSON
+
+
 def sortie(d, code=0):
+    if TEXTE:
+        print(d.get("message") or T("Terminé : le connecteur Garmin est installé.", "Done: the Garmin connector is installed."), file=sys.stderr if code else sys.stdout)
+        sys.exit(code)
     d = dict(d, contrat=1)
     print(json.dumps(d, ensure_ascii=False))
     sys.exit(code)
@@ -439,7 +445,15 @@ def cmd_hydratation(args):
     sortie({"hydratation_ml": ml})
 
 
+ETAPES = {"venv": T("Création de l'environnement Python…", "Creating the Python environment…"),
+          "pip": T("Téléchargement de la bibliothèque Garmin (cela peut prendre une minute)…", "Downloading the Garmin library (this may take a minute)…"),
+          "fini": T("Installation terminée.", "Installation finished.")}
+
+
 def evenement(**d):
+    if TEXTE:
+        print(ETAPES.get(d.get("etape"), ""), flush=True)
+        return
     print(json.dumps(dict(d, contrat=1), ensure_ascii=False), flush=True)
 
 
@@ -495,8 +509,9 @@ def cmd_login():
     ensure_dir(chemins()["dir"])
     ensure_dir(chemins()["jetons"])
     env = {k: v for k, v in os.environ.items() if k != "GARMINTOKENS"}
-    subprocess.Popen([kitty, "--hold", "--title", "Garmin", venv_python(), LOGIN, chemins()["jetons"]], env=env, start_new_session=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # On attend la fin de kitty : l'île relit l'état à ce moment-là (Process « connexion » de GarminEtat.qml)
+    subprocess.Popen([kitty, "--hold", "--title", "Garmin", venv_python(), LOGIN, chemins()["jetons"]], env=env,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).wait()
     sortie({"lance": True})
 
 
@@ -539,6 +554,8 @@ def main():
         elif c == "hydratation":
             cmd_hydratation(r)
         elif c == "installer":
+            global TEXTE
+            TEXTE = "--texte" in r
             cmd_installer()
         elif c == "desinstaller":
             cmd_desinstaller()

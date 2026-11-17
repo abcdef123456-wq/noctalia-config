@@ -26,6 +26,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `,` | Réglages de la barre |
 | `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) ; déjà ouverte : la ramène, la met devant, ou la masque |
 | `Super` + `Alt` + `V` | VPN : le panneau de l'île avec les tunnels VPN et WireGuard de NetworkManager (tous les tunnels montés, un bouton « Déconnecter » par tunnel, « Tout déconnecter », un clic sur une autre connexion la connecte, « Importer… » prend un `.ovpn` ou un `.conf`) ; `Échap` ferme. Sans l'île : la liste en notification (`nc-vpn liste`) |
+| `Super` + `Alt` + `S` | Santé Garmin : le panneau de l'île (si Santé Garmin est activé dans les réglages ; sinon le raccourci n'existe pas) ; `Échap` ferme |
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `` ` `` | Terminal déroulant (sous Échap) ; rangé tout seul dès que tu vas ailleurs (clic sur une autre fenêtre ou sur le bureau à côté, Alt + Tab, autre bureau), il revient tel quel ; ce que tu y lances s'ouvre sur le bureau du dessous |

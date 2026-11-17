@@ -22,6 +22,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 
 Singleton {
     id: p
@@ -44,6 +45,20 @@ Singleton {
     function confirme() { return indicateur && depuisIndicateur > 0 && Date.now() - depuisIndicateur >= delaiConfirme }   // lu à la fin
     property int delaiFilet: 86400000     // 24 h : filet si une fin se perdait (ne tourne que pendant un partage). Hyprland n'envoie screencast
                                           // qu'au début et à la fin : un filet court coupait l'indicateur en plein partage long
+    // Marque pour la pastille Garmin de la barre (plugin Luau) : fichier VIDE nc-partage-actif dans XDG_RUNTIME_DIR (0600),
+    // présent tant que « silence » est vrai. Effacé au démarrage : un plantage ne cache pas la pastille pour toujours.
+    // shortcut: un seul Process, deux bascules très rapprochées pourraient s'ignorer ; le prochain changement corrige.
+    readonly property string marque: (Quickshell.env("XDG_RUNTIME_DIR") || "") !== "" ? Quickshell.env("XDG_RUNTIME_DIR") + "/nc-partage-actif" : ""
+    function poserMarque(oui) {
+        if (marque === "") return
+        marqueur.command = oui ? ["sh", "-c", "umask 077; : > \"$1\"", "sh", marque] : ["rm", "-f", marque]
+        marqueur.running = false
+        marqueur.running = true
+    }
+    onSilenceChanged: poserMarque(silence)
+    Component.onCompleted: poserMarque(false)
+    Process { id: marqueur }
+
     signal courteFinie(var notif)
     signal termine(int n)                 // vrai partage fini, n bulles retenues (n > 0)
 

@@ -57,7 +57,8 @@ Singleton {
     function hydrater(ml) { lancer(["hydratation", ml]) }
     function demoBasculer() { lancer(["demo", "basculer"]) }
     function installer() { lancer(["installer"]) }
-    function connecter() { lancer(["login"]) }
+    // La connexion attend la fin du terminal : Process à part, pour ne pas bloquer la file des autres actions
+    function connecter() { if (!connexion.running) { erreur = ""; connexion.running = true } }
     function deconnecter() { lancer(["logout"]) }
 
     onPanneauOuvertChanged: {
@@ -82,6 +83,16 @@ Singleton {
         id: lire
         command: [g.bin + "nc-garmin", "etat-json"]
         stdout: StdioCollector { onStreamFinished: g.appliquer(text) }
+    }
+    Process {
+        id: connexion
+        command: [g.bin + "nc-garmin", "login"]
+        stdout: StdioCollector { onStreamFinished: {
+            var l = text.trim().split("\n"), d = null
+            try { d = JSON.parse(l[l.length - 1]) } catch (e) {}
+            if (d && d.erreur && d.message) g.erreur = String(d.message).slice(0, 240)
+        } }
+        onExited: g.relire()
     }
     Process {
         id: agir

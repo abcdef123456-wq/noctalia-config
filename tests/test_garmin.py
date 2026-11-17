@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -376,6 +377,20 @@ class TestLogin(Base):
             self.assertNotIn("MOTDEPASSE789", flux)
         self.assertFalse(os.path.exists(os.path.join(self.jetons, "garmin_tokens.json")))
 
+    def test_login_attend_la_fin_de_kitty(self):
+        self.pret()
+        bin_ = os.path.join(self.tmp, "kbin")
+        os.makedirs(bin_)
+        fin = os.path.join(self.tmp, "kitty.fin")
+        k = os.path.join(bin_, "kitty")
+        open(k, "w").write('#!/bin/sh\nsleep 0.5\n: > "%s"\n' % fin)
+        os.chmod(k, 0o755)
+        t0 = time.monotonic()
+        d, r = self.js("login", PATH=bin_ + os.pathsep + os.environ["PATH"])
+        self.assertEqual(d.get("lance"), True, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(fin), "login a rendu la main avant la fin de kitty")
+        self.assertGreaterEqual(time.monotonic() - t0, 0.45)
+
 
 class TestBarre(Base):
     def test_sans_xdg_runtime_dir_rien_dans_tmp(self):
@@ -412,6 +427,40 @@ esac
         args = open(piplog).read()
         for a in ("--require-hashes", "--no-deps", "--only-binary=:all:", req):
             self.assertIn(a, args)
+
+    def test_installer_texte_sans_json_et_defaut_en_json(self):
+        bin_ = os.path.join(self.tmp, "fbin")
+        os.makedirs(bin_)
+        py = os.path.join(bin_, "python3")
+        open(py, "w").write('''#!/bin/sh
+case "$1" in
+  -c) echo 3.12 ;;
+  -m) d="$3"; mkdir -p "$d/bin"
+      printf '#!/bin/sh\\nexit 0\\n' > "$d/bin/python"; chmod +x "$d/bin/python"
+      printf '#!/bin/sh\\nexit 0\\n' > "$d/bin/pip"; chmod +x "$d/bin/pip" ;;
+esac
+''')
+        os.chmod(py, 0o755)
+        req = os.path.join(self.tmp, "req.txt")
+        open(req, "w").write("x==1 --hash=sha256:00\n")
+        extra = dict(PATH=bin_ + os.pathsep + os.environ["PATH"], NC_GARMIN_REQUIREMENTS=req)
+        r = self.nc("installer", "--texte", **extra)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        lignes = [x for x in r.stdout.splitlines() if x.strip()]
+        self.assertTrue(lignes, "aucune phrase")
+        for x in lignes:
+            self.assertFalse(x.lstrip().startswith("{"), "ligne JSON en mode texte : " + x)
+        self.assertIn("installed", r.stdout)
+        shutil.rmtree(self.venv)
+        r = self.nc("installer", **extra)
+        self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1]), {"installe": True, "contrat": 1}, r.stdout + r.stderr)
+
+    def test_installer_texte_erreur_en_phrase(self):
+        r = self.nc("installer", "--texte", PATH=os.path.join(self.tmp, "vide"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertNotIn("{", r.stderr)
+        self.assertTrue(r.stderr.strip())
 
     def test_python_trop_vieux_pour_installer(self):
         bin_ = os.path.join(self.tmp, "fbin")

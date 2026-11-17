@@ -48,8 +48,10 @@ class Source(unittest.TestCase):
     def test_evenement_sur_le_canal_de_quickshell(self):
         self.assertIn("import Quickshell.Hyprland", self.partage)
         self.assertRegex(self.partage, r'target: Hyprland\s+function onRawEvent\(event\) \{ if \(event\.name === "screencast"\)')
-        # Aucun processus ni sondage de plus : ni Process, ni Timer qui se répète, ni hyprctl
-        self.assertNotRegex(self.code, r"\bProcess\b|hyprctl|repeat: true|running: true")
+        # Aucun sondage : ni Timer qui se répète, ni hyprctl, et un seul Process, le marqueur à lancement ponctuel
+        self.assertNotRegex(self.code, r"hyprctl|repeat: true|running: true")
+        self.assertEqual(len(re.findall(r"\bProcess\b", self.code)), 1)
+        self.assertIn("Process { id: marqueur }", self.code)
 
     def test_delais(self):
         self.assertIn("property int delaiIndicateur: 1500", self.partage)

@@ -1714,7 +1714,7 @@ MATERIEL = {
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie", "BAT_RAPPEL_80": "batterie", "BAT_RAPPEL_SEUIL": "batterie",
     "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
-    "ILE_RESUME_REVEIL": "ile", "ILE_CONCENTRATION": "ile",
+    "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
@@ -4003,7 +4003,8 @@ def catalogue(vals):
             ("GARMIN_ACTION_INSTALLER", T("Installer le connecteur", "Install the connector"),
              T("Installe le connecteur non officiel de Garmin Connect, dans un terminal.",
                "Installs the unofficial Garmin Connect connector, in a terminal."),
-             ([term, "--class", "nc-reglages", "-e", "nc-garmin", "installer"] if term else ["nc-garmin", "installer"]),
+             ([term, "--class", "nc-reglages", "-e", "sh", "-c", 'nc-garmin installer --texte; echo; printf "%s" "$0"; read r',
+              T("Entrée pour fermer", "Press Enter to close")] if term else ["nc-garmin", "installer", "--texte"]),
              T("Installer", "Install"), ""),
             ("GARMIN_ACTION_CONNECTER", T("Connecter mon compte Garmin", "Connect my Garmin account"),
              T("Te connecte à Garmin Connect (ouvre un terminal).", "Signs you in to Garmin Connect (opens a terminal)."),

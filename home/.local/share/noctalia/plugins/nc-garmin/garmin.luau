@@ -5,7 +5,8 @@
 --   État écrit par nc-garmin : $XDG_RUNTIME_DIR/nc-garmin-barre.json {actif, metriques:{body_battery}}. Ici : un simple stat
 --   (taille + date) toutes les 3 s, lecture seulement si le fichier a changé, rien du tout écran éteint (fichier nc-ecran-eteint).
 --   Caché si le fichier manque ou si « actif » n'est pas vrai ; une pastille cachée ne garde JAMAIS de zone de clic.
---   Partage d'écran : le fichier ne le dit pas (seule l'île le sait), donc la pastille ne peut pas se masquer d'elle-même.
+--   Partage d'écran : l'île pose un fichier vide $XDG_RUNTIME_DIR/nc-partage-actif pendant le partage ; tant qu'il existe
+--   (vérifié à la même cadence de 3 s), la pastille est cachée. Sans XDG_RUNTIME_DIR on ne peut pas savoir : cachée par prudence.
 -- Écrit en Lua simple (sans « += » ni types) : tests/test_garmin_reglages.py le charge aussi avec lua.
 
 local function env(nom)
@@ -13,8 +14,10 @@ local function env(nom)
   return (v and v ~= "") and v or nil
 end
 local RUN = env("XDG_RUNTIME_DIR") or "/tmp"
+local SANS_RUN = env("XDG_RUNTIME_DIR") == nil
 local ETAT = RUN .. "/nc-garmin-barre.json"
 local ETEINT = RUN .. "/nc-ecran-eteint"          -- posé par nc-ecran écran éteint
+local PARTAGE = RUN .. "/nc-partage-actif"      -- posé par l'île (Partage.qml) pendant un partage d'écran
 local ROUGE = "#ff453a"
 local INTERVALLE = 3000
 
@@ -23,6 +26,11 @@ local signature = ""
 local visible = nil
 local dernierRendu = nil
 local dossier = nil
+local enPartage = false
+
+local function partage()
+  return SANS_RUN or noctalia.fileExists(PARTAGE)
+end
 
 local function montrer(v)
   if v ~= visible then visible = v; barWidget.setVisible(v) end
@@ -50,7 +58,7 @@ local function texte(e)
 end
 
 function rendre()
-  if not etat or etat.actif ~= true then montrer(false); return end
+  if enPartage or not etat or etat.actif ~= true then montrer(false); return end
   local t = texte(etat)
   montrer(true)
   if t == dernierRendu then return end
@@ -84,7 +92,9 @@ end
 
 function update()
   if noctalia.fileExists(ETEINT) then return end
-  lire()
+  local p = partage()
+  if p ~= enPartage then enPartage = p; rendre() end
+  if not p then lire() end
 end
 
 function onClick()
@@ -94,4 +104,5 @@ end
 
 noctalia.setUpdateInterval(INTERVALLE)
 montrer(false)
-lire()
+enPartage = partage()
+if not enPartage then lire() end
