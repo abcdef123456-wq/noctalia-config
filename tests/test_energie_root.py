@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -117,6 +118,8 @@ class Refus(Base):
             for ligne in source.splitlines():
                 if ligne.lstrip().startswith("#"):
                     continue
+                if mot == "fan" and ligne.count("fan") == ligne.count("nitro_sense/fan_speed"):
+                    continue   # le seul fichier de ventilateurs permis (lot A1), construit ici
                 self.assertNotIn(mot, ligne, f"« {mot} » n'a rien à faire ici : {ligne}")
 
 
@@ -376,6 +379,235 @@ class PlateformePortables(Base):
             self.assertEqual(self.lire("firmware/acpi/platform_profile"), v)
 
 
+class Acer(Base):
+    """Lot A1 : rapl, ventilateurs, gpu-frequence, puissance (portable Acer Nitro, rien de tel ailleurs)."""
+    def setUp(self):
+        super().setUp()
+        self.lib = self.tmp / "lib"
+        self.env["NC_ENERGIE_LIB"] = str(self.lib)
+        self.run = self.tmp / "run"
+        self.env["NC_ENERGIE_RUN"] = str(self.run)
+        self.r0 = self.sys / "class/powercap/intel-rapl:0"
+        self.fan = self.sys / "devices/platform/acer-wmi/nitro_sense/fan_speed"
+
+    def rapl(self):
+        ecrire(self.r0 / "constraint_0_power_limit_uw", "70000000")
+        ecrire(self.r0 / "constraint_1_power_limit_uw", "115000000")
+        ecrire(self.r0 / "energy_uj", "123456")
+
+    def pl(self):
+        return self.lire("class/powercap/intel-rapl:0/constraint_0_power_limit_uw"), self.lire("class/powercap/intel-rapl:0/constraint_1_power_limit_uw")
+
+    def test_valeurs_hors_liste_refusees(self):
+        self.machine()
+        self.rapl()
+        ecrire(self.fan, "0,0")
+        for cmd in ("rapl", "ventilateurs", "gpu-frequence"):
+            for v in ("", "jeu", "30/45", "--", "max;id", "1500", "jeu-30-46"):
+                if (cmd, v) == ("gpu-frequence", "jeu"):
+                    continue   # valeur permise pour cette commande
+                r = self.lancer(cmd, v)
+                self.assertEqual(r.returncode, 2, f"{cmd} {v!r} : {r.stdout}{r.stderr}")
+        for args in (("puissance", "x"), ("puissance", ""), ("rapl", "normal", "x")):
+            self.assertEqual(self.lancer(*args).returncode, 2, args)
+        self.assertEqual(self.pl(), ("70000000", "115000000"))
+        self.assertEqual(self.lire("devices/platform/acer-wmi/nitro_sense/fan_speed"), "0,0")
+        self.assertEqual(self.journal.read_text(), "")
+        self.assertFalse(self.lib.exists())
+
+    def test_rapl_jeu_sauvegarde_puis_normal(self):
+        self.rapl()
+        self.assertEqual(self.lancer("rapl", "jeu-30-45").returncode, 0)
+        self.assertEqual(self.pl(), ("30000000", "45000000"))
+        sauv = self.lib / "rapl-origine"
+        self.assertEqual(sauv.read_text().split(), ["70000000", "115000000"])
+        self.assertEqual(sauv.stat().st_mode & 0o777, 0o600)
+        # Un deuxième jeu n'écrase pas l'origine
+        self.assertEqual(self.lancer("rapl", "jeu-45-65").returncode, 0)
+        self.assertEqual(self.pl(), ("45000000", "65000000"))
+        self.assertEqual(sauv.read_text().split(), ["70000000", "115000000"])
+        self.assertEqual(self.lancer("rapl", "normal").returncode, 0)
+        self.assertEqual(self.pl(), ("70000000", "115000000"))
+
+    def test_rapl_normal_sans_sauvegarde_ne_fait_rien(self):
+        self.rapl()
+        r = self.lancer("rapl", "normal")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(self.pl(), ("70000000", "115000000"))
+
+    def test_rapl_sauvegarde_piegee_refusee(self):
+        self.rapl()
+        self.lib.mkdir()
+        for texte in ("abc def\n", "99999999999999999999 5\n", "70000000 115000000\n1 2\n", "70000000\n", "70000000 115000000 9\n",
+                      "0 0\n", "70000000 999999999999\n", "-5 115000000\n", "70000000 115000000; id\n"):
+            (self.lib / "rapl-origine").write_text(texte)
+            r = self.lancer("rapl", "normal")
+            self.assertEqual(r.returncode, 2, f"{texte!r} : {r.stdout}{r.stderr}")
+            self.assertEqual(self.pl(), ("70000000", "115000000"))
+
+    def test_rapl_sans_intel_rapl(self):
+        for v in ("jeu-30-45", "jeu-45-65", "normal"):
+            r = self.lancer("rapl", v)
+            self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertFalse(self.lib.exists())
+
+    def test_ventilateurs(self):
+        self.assertEqual(self.lancer("ventilateurs", "max").returncode, 3)
+        self.assertFalse(self.fan.exists())
+        ecrire(self.fan, "0,0")
+        self.assertEqual(self.lancer("ventilateurs", "max").returncode, 0)
+        self.assertEqual(self.fan.read_text().strip(), "100,100")
+        self.assertEqual(self.lancer("ventilateurs", "auto").returncode, 0)
+        self.assertEqual(self.fan.read_text().strip(), "0,0")
+
+    def test_gpu_frequence(self):
+        self.machine()
+        self.journal.write_text("")
+        self.assertEqual(self.lancer("gpu-frequence", "jeu").returncode, 0)
+        self.assertEqual(self.journal.read_text(), "nvidia-smi -lgc 210,1500\n")
+        self.journal.write_text("")
+        self.assertEqual(self.lancer("gpu-frequence", "normal").returncode, 0)
+        self.assertEqual(self.journal.read_text(), "nvidia-smi -rgc\n")
+
+    def test_gpu_frequence_carte_endormie_ou_absente(self):
+        self.machine()
+        self.journal.write_text("")
+        ecrire(self.sys / "bus/pci/devices/0000:01:00.0/power/runtime_status", "suspended")
+        for v in ("jeu", "normal"):
+            self.assertEqual(self.lancer("gpu-frequence", v).returncode, 3)
+        self.assertEqual(self.journal.read_text(), "")
+        shutil.rmtree(self.sys / "bus/pci/devices/0000:01:00.0")
+        for v in ("jeu", "normal"):
+            self.assertEqual(self.lancer("gpu-frequence", v).returncode, 3)
+        self.assertEqual(self.journal.read_text(), "")
+
+    def test_gpu_frequence_seulement_cartes_actives(self):
+        # Relecture : suspending, resuming, error ne sont pas « éveillées » ; deux cartes dont une endormie : rien
+        # (nvidia-smi sans -i les réveillerait toutes)
+        self.machine()
+        g = self.sys / "bus/pci/devices/0000:01:00.0/power/runtime_status"
+        for s in ("suspending", "resuming", "error", ""):
+            self.journal.write_text("")
+            ecrire(g, s)
+            self.assertEqual(self.lancer("gpu-frequence", "jeu").returncode, 3, s)
+            self.assertEqual(self.journal.read_text(), "", s)
+        ecrire(g, "active")
+        d2 = self.sys / "bus/pci/devices/0000:02:00.0"
+        ecrire(d2 / "vendor", "0x10de")
+        ecrire(d2 / "class", "0x030200")
+        ecrire(d2 / "power/runtime_status", "suspended")
+        self.journal.write_text("")
+        self.assertEqual(self.lancer("gpu-frequence", "jeu").returncode, 3)
+        self.assertEqual(self.journal.read_text(), "")
+
+    def test_rapl_sauvegarde_vide_remplacee(self):
+        # Coupure pendant l'écriture : sauvegarde vide ; le jeu suivant la refait, et « normal » remet l'origine
+        self.rapl()
+        self.lib.mkdir()
+        (self.lib / "rapl-origine").write_text("")
+        self.assertEqual(self.lancer("rapl", "jeu-30-45").returncode, 0)
+        self.assertEqual((self.lib / "rapl-origine").read_text().split(), ["70000000", "115000000"])
+        self.assertFalse((self.lib / "rapl-origine.tmp").exists())
+        self.assertEqual(self.lancer("rapl", "normal").returncode, 0)
+        self.assertEqual(self.pl(), ("70000000", "115000000"))
+        self.assertFalse((self.lib / "rapl-origine").exists(), "effacée une fois l'origine remise")
+
+    def test_rapl_jamais_un_prereglage_comme_origine(self):
+        # Sauvegarde perdue en pleine partie : les limites lues sont celles du jeu, pas l'origine
+        ecrire(self.r0 / "constraint_0_power_limit_uw", "30000000")
+        ecrire(self.r0 / "constraint_1_power_limit_uw", "45000000")
+        self.assertEqual(self.lancer("rapl", "jeu-45-65").returncode, 0)
+        self.assertFalse((self.lib / "rapl-origine").exists())
+        self.assertEqual(self.lancer("rapl", "normal").returncode, 3)
+
+    def test_ventilateurs_autre_peripherique_et_nom_piege(self):
+        piege = self.sys / "devices/platform/a b/nitro_sense/fan_speed"
+        ecrire(piege, "0,0")
+        self.assertEqual(self.lancer("ventilateurs", "max").returncode, 3, "nom de dossier hors liste : ignoré")
+        self.assertEqual(piege.read_text().strip(), "0,0")
+        autre = self.sys / "devices/platform/acer-wmi.0/nitro_sense/fan_speed"
+        ecrire(autre, "0,0")
+        self.assertEqual(self.lancer("ventilateurs", "max").returncode, 0)
+        self.assertEqual(autre.read_text().strip(), "100,100")
+
+    def test_dossier_de_sauvegarde_fixe_en_root(self):
+        # NC_ENERGIE_LIB n'est lu qu'en essai (hors root, NC_ENERGIE_RACINE posé)
+        src = ROOT.read_text()
+        self.assertIn('LIB=/var/lib/nc-energie', src)
+        self.assertRegex(src, r'(?m)^\[ "\$ESSAI" = 1 \] && \[ -n "\$\{NC_ENERGIE_LIB:-\}" \] && LIB="\$NC_ENERGIE_LIB"$')
+        self.assertEqual(src.count("NC_ENERGIE_LIB"), 2)
+        self.assertIn("RUN=/run/nc-energie ", src)
+        self.assertRegex(src, r'(?m)^\[ "\$ESSAI" = 1 \] && RUN="\$\{NC_ENERGIE_RUN:-')
+        self.assertEqual(src.count("NC_ENERGIE_RUN"), 1)
+
+    def test_gpu_frequence_sans_nvidia_smi(self):
+        self.machine()
+        (self.bin / "nvidia-smi").unlink()
+        self.assertEqual(self.lancer("gpu-frequence", "jeu", env={**self.env, "PATH": str(self.bin) + ":/usr/bin:/bin"}).returncode, 3)
+
+    def puissance(self):
+        # chaque lecture comme si la précédente datait d'une heure (la cadence est testée à part)
+        for f in self.run.glob("puissance-derniere*"):
+            f.unlink()
+        return self.lancer("puissance")
+
+    def test_puissance(self):
+        r = self.puissance()
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.rapl()
+        ecrire(self.r0 / "energy_uj", "123456789")
+        r = self.puissance()
+        self.assertEqual((r.returncode, r.stdout), (0, "paquet_mj=123456\n"), "arrondi au millijoule")
+        r1 = self.sys / "class/powercap/intel-rapl:1"
+        ecrire(r1 / "name", "dram")
+        ecrire(r1 / "energy_uj", "777000")
+        self.assertEqual(self.puissance().stdout, "paquet_mj=123456\n")
+        ecrire(r1 / "name", "psys")
+        self.assertEqual(self.puissance().stdout, "paquet_mj=123456\npsys_mj=777\n")
+        ecrire(r1 / "energy_uj", "7;id")
+        self.assertEqual(self.puissance().stdout, "paquet_mj=123456\n")
+        ecrire(self.r0 / "energy_uj", "abc")
+        self.assertEqual(self.puissance().returncode, 3)
+
+    def test_puissance_une_lecture_par_seconde(self):
+        # Platypus : deux lectures à moins d'une seconde, la seconde est refusée (code 5) ; dossier root 0700
+        self.rapl()
+        self.assertEqual(self.lancer("puissance").returncode, 0)
+        r = self.lancer("puissance")
+        self.assertEqual((r.returncode, r.stdout), (5, ""))
+        self.assertEqual(self.run.stat().st_mode & 0o777, 0o700)
+        time.sleep(1.1)
+        self.assertEqual(self.lancer("puissance").returncode, 0)
+        # une date piégée ou dans le futur ne bloque pas pour toujours
+        (self.run / "puissance-derniere").write_text("abc\n")
+        self.assertEqual(self.lancer("puissance").returncode, 0)
+        (self.run / "puissance-derniere").write_text("99999999999999999999\n")
+        self.assertEqual(self.lancer("puissance").returncode, 0)
+
+    def test_etat_rapl_et_ventilateurs(self):
+        self.assertNotIn("rapl=", self.lancer("etat").stdout)
+        self.assertNotIn("ventilateurs=", self.lancer("etat").stdout)
+        self.rapl()
+        ecrire(self.fan, "100,100")
+        out = self.lancer("etat").stdout
+        self.assertIn("rapl=70000000/115000000\n", out)
+        self.assertIn("ventilateurs=100,100\n", out)
+
+    def test_sudoers_a1(self):
+        base = "/usr/local/bin/nc-energie-root"
+        ligne = self.lancer("sudoers", "alice").stdout.strip()
+        cmds = [c.strip() for c in ligne.split("NOPASSWD:", 1)[1].split(",")]
+        for c in ("rapl jeu-30-45", "rapl jeu-45-65", "rapl normal", "ventilateurs max", "ventilateurs auto",
+                  "gpu-frequence jeu", "gpu-frequence normal", "puissance"):
+            self.assertIn(f"{base} {c}", cmds)
+        src = INSTALL
+        i = src.index("ligne_sudoers_sure() {")
+        fonction = src[i:src.index("\n}\n", i) + 3]
+        r = subprocess.run(["bash", "-c", fonction + '\nligne_sudoers_sure alice "$1" "$2"', "_", "nc-energie-root", ligne],
+                           capture_output=True, text=True, timeout=10, env={"PATH": "/usr/bin:/bin"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
 class Sudoers(Base):
     def test_compte_strict(self):
         """Relecture : jamais ALL, un %groupe, des majuscules ou un tiret en tête dans la règle sudo."""
@@ -400,11 +632,11 @@ class Sudoers(Base):
         self.assertIn(f"{base} etat", cmds)
         self.assertEqual(len(cmds), len(set(cmds)))
         for c in cmds:
-            self.assertRegex(c, r"^/usr/local/bin/nc-energie-root (etat|[a-z-]+ [a-z_0-9-]+)$", c)
+            self.assertRegex(c, r"^/usr/local/bin/nc-energie-root (etat|puissance|[a-z-]+ [a-z_0-9-]+)$", c)
         self.assertNotIn("*", self.ligne())
         self.assertNotIn(f"{base},", self.ligne() + ",", "pas de commande sans argument : tout serait permis")
         self.assertNotIn("sudoers", " ".join(cmds), "la sous-commande sudoers n'est pas permise par sudo")
-        self.assertEqual(len(cmds), 1 + 4 + 2 + 3 + 6 + 2 + 4 + 2 + 2 + 2 + 2 + 4)
+        self.assertEqual(len(cmds), 1 + 4 + 2 + 3 + 6 + 2 + 4 + 2 + 2 + 2 + 2 + 4 + 8)
         for v in ("on", "off"):
             self.assertIn(f"{base} eth-pm {v}", cmds)
 
