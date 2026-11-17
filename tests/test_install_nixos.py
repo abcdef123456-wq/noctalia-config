@@ -48,7 +48,14 @@ class Banc:
             if n not in absents:
                 outil(self.bin, n, 'case "$1" in --version) echo "Hyprland v0.55.1"; echo "Tag: v0.55.1";; esac')
         for n in INTERDITS:
-            outil(self.bin, n, f'echo "{n} $*" >> "{self.journal}"; exit 1')
+            if n != "git":
+                outil(self.bin, n, f'echo "{n} $*" >> "{self.journal}"; exit 1')
+        # git : les lectures du dépôt (version installée, commit) sont permises ; tout ce qui écrit ou va sur le
+        # réseau est noté. En CI le dépôt est un vrai clone (.git dossier) : install.sh y lit sa version.
+        outil(self.bin, "git", 'for a in "$@"; do case "$a" in rev-parse|log|diff|ls-files|status|show) '
+                               'case "$a" in rev-parse) echo 0123456789abcdef0123456789abcdef01234567;; esac; exit 0;; '
+                               'clone|fetch|pull|push|submodule|init|remote|checkout|reset|merge|config|am|apply) break;; esac; done; '
+                               f'echo "git $*" >> "{self.journal}"; exit 1')
         outil(self.bin, "fc-match", 'echo "MaterialSymbolsRounded.ttf: Material Symbols Rounded"')
         for n in BASE:
             w = shutil.which(n)
