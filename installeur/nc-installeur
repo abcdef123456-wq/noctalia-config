@@ -6,7 +6,6 @@ réponses « <id> <réponse> » sur la FIFO NC_UI_ENTREE. Le mot de passe sudo n
 Tout ce qui ne dépend pas de GTK est en haut du fichier (testable sans écran) ; gi n'est importé qu'au lancement.
 """
 import json
-import fcntl
 import os
 import pty
 import re
@@ -16,13 +15,15 @@ import signal
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 TYPES = ("etape", "info", "ok", "avert", "erreur", "progres", "question", "choix", "saisie", "fin")
 LIGNE_MAX = 65536
+LANCEUR_PTY = ("import fcntl, os, sys, termios\n"
+               "fcntl.ioctl(1, termios.TIOCSCTTY, 0)\n"
+               "os.execv(sys.argv[1], sys.argv[1:])\n")
 
 # ---------- textes ----------
 T = {
@@ -273,10 +274,11 @@ class Session:
         # à chaque sous-script ; avec lui, une seule demande (par nc-askpass). Rien n'est jamais écrit sur le maître.
         self._maitre, esclave = pty.openpty()
         try:
-            # start_new_session fait le setsid avant preexec_fn ; stdout (l'esclave) devient le terminal de contrôle
-            self.proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=esclave, stderr=esclave,
-                                         start_new_session=True,
-                                         preexec_fn=lambda: fcntl.ioctl(1, termios.TIOCSCTTY, 0))
+            # start_new_session fait le setsid ; le lanceur fixe prend l'esclave (stdout) comme terminal de contrôle puis
+            # devient install.sh (même pid, donc killpg vise toujours le groupe). Pas de preexec_fn : peu sûr avec des fils.
+            self.proc = subprocess.Popen([sys.executable, "-I", "-c", LANCEUR_PTY] + argv, env=env,
+                                         stdin=subprocess.DEVNULL, stdout=esclave, stderr=esclave,
+                                         start_new_session=True)
         except OSError:
             os.close(esclave)
             self._nettoyer()
