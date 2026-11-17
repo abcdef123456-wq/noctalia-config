@@ -659,8 +659,20 @@ Singleton {
     }
     function lirePage() {
         var quoi = ({ reseau: "wifi", bluetooth: "bt", systeme: "systeme" })[vueActive]
-        lecteurPage.commande = quoi ? [bin + "nc-ile-etat", quoi] : []
+        lecteurPage.commande = !quoi ? [] : quoi === "systeme" ? [bin + "nc-ile-etat", quoi, limiteBin] : [bin + "nc-ile-etat", quoi]
         lecteurPage.demander()
+    }
+
+    // Chemin de nc-limite-charge (nc-plateforme-root) : cherché une seule fois au démarrage de l'île, jamais à chaque relecture
+    // (il ne change pas pendant la session) ; "" s'il manque ou n'a pas la forme attendue
+    property string limiteBin: ""
+    Process {
+        running: true
+        command: [etat.bin + "nc-ile-etat", "limite-bin"]
+        stdout: StdioCollector { onStreamFinished: {
+            var v = text.trim()
+            etat.limiteBin = /^\/[A-Za-z0-9._\/-]+\/nc-limite-charge$/.test(v) ? v : ""
+        } }
     }
 
     // ── Interrupteurs réactifs (Voulu.qml) : le bouton bascule au clic, sans attendre la mesure ──

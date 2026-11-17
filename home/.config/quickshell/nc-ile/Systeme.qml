@@ -138,7 +138,9 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent; anchors.margins: -6
-                        onClicked: Etat.inverser("protection", ["sudo", "-n", "/usr/local/bin/nc-limite-charge", inter.allume ? "off" : "on"])
+                        // Etat.limiteBin : validé au démarrage (nc-plateforme-root) ; revérifié ici, sinon rien n'est lancé
+                        onClicked: if (/^\/[A-Za-z0-9._\/-]+\/nc-limite-charge$/.test(Etat.limiteBin))
+                            Etat.inverser("protection", ["sudo", "-n", Etat.limiteBin, inter.allume ? "off" : "on"])
                     }
                 }
             }

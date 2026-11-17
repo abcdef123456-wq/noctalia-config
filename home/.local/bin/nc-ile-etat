@@ -269,8 +269,13 @@ systeme() {
   fi
   # Santé de la batterie lissée et cycles (même calcul que l'accueil du terminal : nc-sysinfo sante)
   "$HOME/.local/bin/nc-sysinfo" sante | awk -F'\t' 'NF { print "sante=" $1; if ($2 != "") print "cycles=" $2 }'
-  # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé
-  [ -x /usr/local/bin/nc-limite-charge ] && echo "protection=$(/usr/local/bin/nc-limite-charge etat 2>/dev/null)"
+  # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé.
+  # $1 : son chemin, cherché UNE fois au démarrage de l'île (« nc-ile-etat limite-bin »), pas à chaque relecture ; lancé
+  # ici sans sudo (droits de l'utilisateur), seulement s'il a la forme attendue
+  case "${1:-}" in
+    *[!A-Za-z0-9._/-]*) ;;
+    /*/nc-limite-charge) [ -x "$1" ] && echo "protection=$("$1" etat 2>/dev/null)" ;;
+  esac
   # Disposition active du clavier principal (nom lisible) et nombre de dispositions : nc-touches disposition-active
   "$HOME/.local/bin/nc-touches" disposition-active 2>/dev/null | awk -F'\t' 'NF { print "clavier_disposition=" $1; print "clavier_nb=" $2 }'
   hyprctl monitors -j 2>/dev/null | jq -r '.[] | "ecran=\(.name)\t\(.width)x\(.height)\t\(.refreshRate | round) Hz\t\(.scale)"' 2>/dev/null
@@ -307,7 +312,12 @@ case "${1:-}" in
   media) media; exit 0 ;;
   sans-media) sans_media=1 ;;
   jeu|game) jeu; exit 0 ;;
-  systeme|system) systeme; exit 0 ;;
+  systeme|system) systeme "${2:-}"; exit 0 ;;
+  # Chemin sûr de nc-limite-charge (nc-plateforme-root : sur NixOS il n'est pas dans /usr/local/bin), ou rien
+  limite-bin|charge-limit-path)
+    { . "${BASH_SOURCE[0]%/*}/nc-plateforme-root" 2>/dev/null || . "$HOME/.local/bin/nc-plateforme-root" 2>/dev/null; } &&
+      nc_root_bin nc-limite-charge
+    exit 0 ;;
   sante|health) sante; exit 0 ;;
   capteurs|sensors) capteurs; exit 0 ;;
   wifi) wifi; exit 0 ;;

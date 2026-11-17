@@ -169,6 +169,7 @@ HOME_FILES=(
   .local/bin/nc-theme-sync
   .local/bin/nc-wallpaper-colors
   .local/bin/nc-gpu-regle
+  .local/bin/nc-plateforme-root
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode
   .local/bin/nc-rtx-veille

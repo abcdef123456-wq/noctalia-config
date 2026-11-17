@@ -48,7 +48,9 @@ ALIM="${NC_POWER_SUPPLY:-/sys/class/power_supply}"
 LEDS="${NC_LEDS:-/sys/class/leds}"
 CFG="$HOME/.config/nc-profile.conf"
 # L'assistant root de nc-energie (règle sudo à commandes exactes) ; NC_ENERGIE_ROOT_CHEMIN : un faux, pour les tests
-ENERGIE_ROOT="${NC_ENERGIE_ROOT_CHEMIN:-/usr/local/bin/nc-energie-root}"
+# (dossier lu dans ~/.config/nc/plateforme.conf, vérifié par nc-plateforme-root ; assistant absent ou douteux : on ne lance rien)
+. "${BASH_SOURCE[0]%/*}/nc-plateforme-root" 2>/dev/null || . "$HOME/.local/bin/nc-plateforme-root" 2>/dev/null || nc_root_bin() { return 1; }
+ENERGIE_ROOT="${NC_ENERGIE_ROOT_CHEMIN:-$(nc_root_bin nc-energie-root)}"
 # Rétroéclairage de l'écran : le même que les touches et l'île (nc-brightness : nvidia_0 en mode carte dédiée) ;
 # sans nc-brightness, le premier qui n'est pas celui de la carte NVIDIA
 BACKLIGHT=$("$HOME/.local/bin/nc-brightness" appareil 2>/dev/null) ||

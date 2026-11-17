@@ -50,8 +50,8 @@ CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".
 ETAT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "nc")
 FICHIER_PROFILS = os.path.join(CONFIG, "profils-energie.json")
 FICHIER_AVANT = os.path.join(ETAT, "energie-avant.json")
-ASSISTANT = "/usr/local/bin/nc-energie-root"
-LIMITE_CHARGE = "/usr/local/bin/nc-limite-charge"
+ASSISTANT = "nc-energie-root"         # noms ; le chemin vient de assistant_root()
+LIMITE_CHARGE = "nc-limite-charge"
 DELAI = 20                       # secondes, un outil
 DELAI_IA = 60
 
@@ -73,6 +73,38 @@ class Erreur(Exception):
 
 
 # ── Outils ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def assistant_root(nom):
+    """Chemin sûr de l'assistant root NOM, ou "" (même règle que home/.local/bin/nc-plateforme-root).
+    Dossier : NC_ROOT_BIN de ~/.config/nc/plateforme.conf (adaptateur NixOS), sinon /usr/local/bin. Sûr : chemin résolu =
+    fichier ordinaire exécutable, à root, ni groupe ni autres en écriture, dans un dossier à root dans le même cas.
+    NC_PLATEFORME_UID_ROOT : uid pris pour root dans les tests, lu seulement si on n'est pas root."""
+    dossier = "/usr/local/bin"
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".config/nc/plateforme.conf"), encoding="utf-8", errors="replace") as f:
+            for ligne in f.read().split("\n"):
+                if ligne.startswith("NC_ROOT_BIN="):
+                    v = ligne[len("NC_ROOT_BIN="):]
+                    v = (v[:-1] if v.endswith("\r") else v).strip(" \t")   # comme le sh : un \r final, puis blancs
+                    if (re.fullmatch(r"/[A-Za-z0-9._/-]{1,200}", v) and not v.endswith("/")
+                            and not {".", ".."} & set(v.split("/"))):
+                        dossier = v
+    except (OSError, ValueError):
+        pass
+    chemin = os.path.join(dossier, nom)
+    reel = os.path.realpath(chemin)
+    try:
+        uid = 0 if os.getuid() == 0 else int(os.environ.get("NC_PLATEFORME_UID_ROOT") or 0)
+        for p in (reel, os.path.dirname(reel)):
+            st = os.stat(p)
+            if st.st_uid != uid or st.st_mode & 0o022:
+                return ""
+        if not (os.path.isfile(reel) and os.access(reel, os.X_OK)):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    return chemin
+
+
 def lancer(cmd, entree=None, delai=DELAI):
     """(code, sortie) d'un outil ; (127, '') s'il manque, (124, '') s'il traîne. Jamais d'exception."""
     try:
@@ -318,7 +350,7 @@ def fiche():
         caps.append("audio")
     if kbd_max > 0:
         caps.append("clavier")
-    if limite_charge_possible(bats) and os.access(os.environ.get("NC_LIMITE_CHARGE") or LIMITE_CHARGE, os.X_OK):
+    if limite_charge_possible(bats) and os.access(os.environ.get("NC_LIMITE_CHARGE") or assistant_root(LIMITE_CHARGE), os.X_OK):
         caps.append("limite_charge")
     # Sans l'assistant root (PC fixe : install.sh ne le propose que sur un portable ; ou refusé), les réglages matériels
     # ne sont pas proposés : un profil qui en contiendrait serait refusé en entier
@@ -346,7 +378,7 @@ def limite_charge_possible(bats):
 
 
 def assistant_present():
-    return os.access(os.environ.get("NC_ENERGIE_ROOT") or ASSISTANT, os.X_OK)
+    return os.access(os.environ.get("NC_ENERGIE_ROOT") or assistant_root(ASSISTANT), os.X_OK)
 
 
 # ── État actuel (pour l'aperçu, le « avant » et le retour) ─────────────────────────────────────────────────────
@@ -425,7 +457,7 @@ def lire_actuel(cle):
         n = entier(lire(os.path.join(k[0], "brightness"))) if k else None
         return str(n) if n is not None and 0 <= n <= 3 else None
     if cle == "limite_charge":
-        code, sortie = lancer([os.environ.get("NC_LIMITE_CHARGE") or LIMITE_CHARGE, "etat"], delai=10)
+        code, sortie = lancer([os.environ.get("NC_LIMITE_CHARGE") or assistant_root(LIMITE_CHARGE), "etat"], delai=10)
         return {"1": "on", "0": "off"}.get(sortie.strip()) if code == 0 else None
     return None
 
@@ -459,16 +491,18 @@ def appliquer_cle(cle, valeur):
         return code == 0, f"réglage {cle} refusé"
     if cle == "limite_charge":
         direct = os.environ.get("NC_LIMITE_CHARGE")
-        cmd = [direct, valeur] if direct else ["sudo", "-n", LIMITE_CHARGE, valeur]
-        if not direct and not os.access(LIMITE_CHARGE, os.X_OK):
+        lc = assistant_root(LIMITE_CHARGE)
+        cmd = [direct, valeur] if direct else ["sudo", "-n", lc, valeur]
+        if not direct and not lc:
             return False, "nc-limite-charge n'est pas installé"
         code, _ = lancer(cmd, delai=20)
         return code == 0, "limite de charge refusée"
     sous = SOUS_COMMANDES[cle]
     direct = os.environ.get("NC_ENERGIE_ROOT")
-    if not direct and not os.access(ASSISTANT, os.X_OK):
+    racine = assistant_root(ASSISTANT)
+    if not direct and not racine:
         return False, "l'assistant nc-energie-root n'est pas installé (relance install.sh et accepte-le)"
-    cmd = [direct, sous, valeur] if direct else ["sudo", "-n", ASSISTANT, sous, valeur]
+    cmd = [direct, sous, valeur] if direct else ["sudo", "-n", racine, sous, valeur]
     code, _ = lancer(cmd, delai=30)
     if code == 3 and cle == "nvidia_pl":
         return None, "la carte refuse sa limite de puissance (souvent le cas sur un portable) : sautée"

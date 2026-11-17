@@ -1,0 +1,42 @@
+#!/bin/sh
+# nc-plateforme-root : où sont les assistants root (nc-energie-root, nc-limite-charge, nc-vpn-root), écrit une seule fois.
+# Sourcé (sh POSIX) par nc-ile-etat et nc-profile-sync. Les versions Python (nc-energie, nc-vpn) suivent la même règle.
+#   nc_root_bin NOM   affiche DOSSIER/NOM et rend 0 si l'assistant est sûr, sinon n'affiche rien et rend 1
+# DOSSIER : clé NC_ROOT_BIN de ~/.config/nc/plateforme.conf (écrit par l'adaptateur NixOS), sinon /usr/local/bin.
+# Valeur valide : chemin absolu ^/[A-Za-z0-9._/-]{1,200}$ sans segment « . » ni « .. » ni « / » final, sinon le défaut.
+# Retirés avant : un \r final, puis espaces et tabulations des deux bouts. La dernière ligne valide gagne.
+# Sûr : le chemin résolu (liens suivis) est un fichier ordinaire exécutable, à root, ni groupe ni autres en écriture, dans un
+# dossier parent direct à root lui aussi non modifiable par le groupe ou les autres. Sinon l'assistant est traité comme absent.
+# Pour les tests : NC_PLATEFORME_UID_ROOT (uid pris pour « root », lu seulement si on n'est pas root).
+# Variables internes : préfixe _ncp_ (POSIX n'a pas de « local »).
+
+_ncp_sur() {   # $1 : chemin ; 0 si à root et non modifiable par le groupe ou les autres
+  _ncp_s=$(stat -c '%u %A' -- "$1" 2>/dev/null) || return 1
+  _ncp_root=0
+  [ "$(id -u)" != 0 ] && _ncp_root=${NC_PLATEFORME_UID_ROOT:-0}
+  [ "${_ncp_s%% *}" = "$_ncp_root" ] || return 1
+  _ncp_m=${_ncp_s#* }
+  case "$_ncp_m" in ?????w????|????????w?) return 1 ;; esac
+  return 0
+}
+
+nc_root_bin() {
+  _ncp_dir=/usr/local/bin
+  if [ -r "$HOME/.config/nc/plateforme.conf" ]; then
+    while IFS= read -r _ncp_l || [ -n "$_ncp_l" ]; do
+      case "$_ncp_l" in NC_ROOT_BIN=*) ;; *) continue ;; esac
+      _ncp_v=${_ncp_l#NC_ROOT_BIN=}
+      _ncp_v=${_ncp_v%"$(printf '\r')"}   # un seul \r final (fichier édité sous Windows), puis espaces et tabulations
+      _ncp_v=$(printf '%s' "$_ncp_v" | sed 's/^[ 	]*//; s/[ 	]*$//')
+      # LC_ALL=C : [A-Za-z] sans lettres accentuées, comme en Python
+      printf '%s\n' "$_ncp_v" | LC_ALL=C grep -qE '^/[A-Za-z0-9._/-]{1,200}$' || continue
+      case "$_ncp_v/" in */../*|*/./*|*//) continue ;; esac
+      _ncp_dir=$_ncp_v
+    done < "$HOME/.config/nc/plateforme.conf"
+  fi
+  _ncp_p="$_ncp_dir/$1"
+  _ncp_r=$(realpath -e -- "$_ncp_p" 2>/dev/null) || return 1
+  [ -f "$_ncp_r" ] && [ -x "$_ncp_r" ] || return 1
+  _ncp_sur "$_ncp_r" && _ncp_sur "${_ncp_r%/*}/" || return 1
+  printf '%s\n' "$_ncp_p"
+}

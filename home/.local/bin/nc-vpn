@@ -2337,7 +2337,39 @@ def ip_publique():
 # « sudo -n » avec des arguments déjà validés ici ET là-bas. Ici : trouver le VRAI tunnel (TUN/TAP ou WireGuard) et ses
 # endpoints (adresses IP) ; jamais de nom d'hôte résolu par nous, jamais de root, jamais de shell.
 SYSFS = os.environ.get("NC_VPN_SYSFS", "/sys")                   # NC_VPN_SYSFS : un faux /sys, pour les tests
-ROOT_VPN = os.environ.get("NC_VPN_ROOT", "/usr/local/bin/nc-vpn-root")
+def assistant_root(nom):
+    """Chemin sûr de l'assistant root NOM, ou "" (même règle que home/.local/bin/nc-plateforme-root).
+    Dossier : NC_ROOT_BIN de ~/.config/nc/plateforme.conf (adaptateur NixOS), sinon /usr/local/bin. Sûr : chemin résolu =
+    fichier ordinaire exécutable, à root, ni groupe ni autres en écriture, dans un dossier à root dans le même cas.
+    NC_PLATEFORME_UID_ROOT : uid pris pour root dans les tests, lu seulement si on n'est pas root."""
+    dossier = "/usr/local/bin"
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".config/nc/plateforme.conf"), encoding="utf-8", errors="replace") as f:
+            for ligne in f.read().split("\n"):
+                if ligne.startswith("NC_ROOT_BIN="):
+                    v = ligne[len("NC_ROOT_BIN="):]
+                    v = (v[:-1] if v.endswith("\r") else v).strip(" \t")   # comme le sh : un \r final, puis blancs
+                    if (re.fullmatch(r"/[A-Za-z0-9._/-]{1,200}", v) and not v.endswith("/")
+                            and not {".", ".."} & set(v.split("/"))):
+                        dossier = v
+    except (OSError, ValueError):
+        pass
+    chemin = os.path.join(dossier, nom)
+    reel = os.path.realpath(chemin)
+    try:
+        uid = 0 if os.getuid() == 0 else int(os.environ.get("NC_PLATEFORME_UID_ROOT") or 0)
+        for p in (reel, os.path.dirname(reel)):
+            st = os.stat(p)
+            if st.st_uid != uid or st.st_mode & 0o022:
+                return ""
+        if not (os.path.isfile(reel) and os.access(reel, os.X_OK)):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    return chemin
+
+
+ROOT_VPN = os.environ.get("NC_VPN_ROOT") or assistant_root("nc-vpn-root")
 GDBUS_NM = ["gdbus", "call", "--system", "--dest", "org.freedesktop.NetworkManager"]
 
 
