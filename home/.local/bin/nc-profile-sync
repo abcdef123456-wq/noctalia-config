@@ -450,14 +450,15 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   noctalia_config "$profile" "$bat"
 
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
+  # (timeout 3 et </dev/null : bluetooth.service arrêté, bluetoothctl attend sans fin et plus aucun profil n'était appliqué)
   # seulement si c'est ce script qui l'avait coupé.
   local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   if [ "$profile" = power-saver ] && [ "$last_profile" != power-saver ] && [ "$ECO_BLUETOOTH" = oui ]; then
-    if bluetoothctl show 2>/dev/null | grep -q "Powered: yes" && [ -z "$(bluetoothctl devices Connected 2>/dev/null)" ]; then
-      bluetoothctl power off >/dev/null 2>&1 && touch "$rt/nc-bt-off" && log "$(t "Bluetooth coupé (aucun appareil connecté)" "Bluetooth off (no device connected)")"
+    if timeout 3 bluetoothctl show </dev/null 2>/dev/null | grep -q "Powered: yes" && [ -z "$(timeout 3 bluetoothctl devices Connected </dev/null 2>/dev/null)" ]; then
+      timeout 3 bluetoothctl power off </dev/null >/dev/null 2>&1 && touch "$rt/nc-bt-off" && log "$(t "Bluetooth coupé (aucun appareil connecté)" "Bluetooth off (no device connected)")"
     fi
   elif [ "$profile" != power-saver ] && [ "$last_profile" = power-saver ]; then
-    [ -e "$rt/nc-bt-off" ] && bluetoothctl power on >/dev/null 2>&1 && log "$(t "Bluetooth rallumé" "Bluetooth back on")"
+    [ -e "$rt/nc-bt-off" ] && timeout 3 bluetoothctl power on </dev/null >/dev/null 2>&1 && log "$(t "Bluetooth rallumé" "Bluetooth back on")"
     rm -f "$rt/nc-bt-off"
   fi
 

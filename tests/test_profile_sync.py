@@ -236,6 +236,15 @@ class ProfileSync(unittest.TestCase):
         self.assertIn('profil = "power-saver"', lire())
         p.kill()
 
+    def test_bluetooth_arrete_ne_bloque_pas(self):
+        # bluetooth.service arrêté : « bluetoothctl show » attend sans fin ; le passage doit quand même finir
+        (self.faux / "bluetoothctl").write_text('#!/bin/sh\necho "bluetoothctl $*" >> "$JOURNAL"\nexec sleep 600\n')
+        debut = time.time()
+        self.lancer("power-saver")
+        self.assertLess(time.time() - debut, 20)
+        self.assertIn('profil = "power-saver"', (self.home / ".config/hypr/nc/profil.lua").read_text())
+        self.assertIn("bluetoothctl show", self.journal.read_text())
+
     # Carte Ethernet : veille permise en Économie seulement (eth-pm on), jamais ailleurs (eth-pm off) ; dès le premier
     # passage ; une fois par changement ; sans règle sudo, ni message ni nouvel essai.
     def appels(self):
