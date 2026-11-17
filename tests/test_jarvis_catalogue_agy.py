@@ -554,12 +554,34 @@ class Moteur(unittest.TestCase):
         e.choose(effort="high")
         self.assertEqual(self.commande_finale(), ("gpt-oss-120b-medium", "medium"))
 
-    def test_alignement_xhigh_et_max_valent_high(self):
+    def test_alignement_xhigh_et_max_valent_high_sans_variante_xhigh(self):
         e = self.moteur_catalogue()
         for effort in ("xhigh", "max"):
             self.cfg.update(model="claude-opus-5-5-low", effort="low")
             e.choose(effort=effort)
             self.assertEqual(self.commande_finale(), ("claude-opus-5-5-high", "high"), effort)
+        self.assertEqual(e.snapshot()["engines"][0]["efforts"], ["low", "medium", "high"])
+
+    def test_alignement_xhigh_et_max_vont_vers_la_variante_xhigh_du_catalogue(self):
+        e = self.moteur_catalogue()
+        e.agy_models = self.m.lire_catalogue_agy(LISTE + "claude-opus-5-5-xhigh\tClaude Opus 5.5 (XHigh)\n")
+        for effort in ("xhigh", "max"):
+            self.cfg.update(model="claude-opus-5-5-low", effort="low")
+            e.choose(effort=effort)
+            self.assertEqual(e.state["settings"]["agy"]["model"], "claude-opus-5-5-xhigh", effort)
+            self.assertEqual(e.state["settings"]["agy"]["effort"], "xhigh", effort)
+        # un autre modele sans variante xhigh retombe sur high
+        self.cfg.update(model="gemini-4-argon-low", effort="low")
+        e.choose(effort="xhigh")
+        self.assertEqual(e.state["settings"]["agy"]["model"], "gemini-4-argon-high")
+        self.assertEqual(e.snapshot()["engines"][0]["efforts"], ["low", "medium", "high", "xhigh"])
+
+    def test_un_modele_xhigh_sans_effort_donne_prend_l_effort_xhigh(self):
+        e = self.moteur_catalogue()
+        e.agy_models = self.m.lire_catalogue_agy(LISTE + "claude-opus-5-5-xhigh\tClaude Opus 5.5 (XHigh)\n")
+        e.choose(model="claude-opus-5-5-xhigh", effort="")
+        self.assertEqual(e.state["settings"]["agy"]["model"], "claude-opus-5-5-xhigh")
+        self.assertEqual(e.state["settings"]["agy"]["effort"], "xhigh")
 
     def test_alignement_modele_et_effort_contradictoires(self):
         """Le rang « Réflexion » des réglages change l'effort sans toucher au modèle : Appliquer envoie les deux."""

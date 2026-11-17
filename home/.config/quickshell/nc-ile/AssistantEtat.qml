@@ -114,7 +114,12 @@ Singleton {
     readonly property var efforts: reflexionFixe(modele) ? []
         : Array.isArray(modeleCourant.efforts) ? modeleCourant.efforts
         : Array.isArray(moteurCourant.efforts) ? moteurCourant.efforts : []
-    readonly property var famillesModeles: ["Flash", "Argon", "Opus", "Sonnet"]
+    readonly property var famillesModeles: ["Flash", "Argon", "Hydrogen", "Opus", "Sonnet"]
+    // Le bouton xhigh n'existe que pour agy, et si le catalogue a la variante -xhigh du modèle courant
+    readonly property bool xhighDispo: {
+        var s = moteur === "agy" && /-(low|medium|high|xhigh)$/.exec(modele)
+        return !!s && modeles.some(m => m.id === modele.slice(0, -s[0].length) + "-xhigh")
+    }
     function familleModele(item) {
         var mots = ((item.id || "") + " " + (item.name || "")).toLowerCase().split(/[^a-z0-9]+/)
         return famillesModeles.find(nom => mots.indexOf(nom.toLowerCase()) >= 0) || ""
@@ -129,7 +134,7 @@ Singleton {
         // Opus intègre sa propre réflexion et ne supporte aucun paramètre d'effort : boutons grisés
         if (reflexionFixe(modele)) return null
         // Certains CLI encodent aussi l'effort dans l'identifiant du modèle.
-        var suffixe = /-(low|medium|high)$/.exec(modele)
+        var suffixe = /-(low|medium|high|xhigh)$/.exec(modele)
         if (!suffixe) return modele
         var identifiant = modele.slice(0, -suffixe[0].length) + "-" + niveau
         return modeles.some(m => m.id === identifiant) ? identifiant : null
@@ -139,7 +144,7 @@ Singleton {
         var m = modelePourFamille(nom)
         if (!m) return
         modele = m.id
-        var suffixe = /-(low|medium|high)$/.exec(m.id)
+        var suffixe = /-(low|medium|high|xhigh)$/.exec(m.id)
         effort = suffixe ? suffixe[1] : (efforts.indexOf(effort) >= 0 ? effort : "")
     }
     function choisirEffort(niveau) {

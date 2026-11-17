@@ -410,18 +410,22 @@ else if(etape===1){
     def test_model_families_and_reasoning_send_real_ids_only_after_apply(self):
         models = [dict(id='gemini-flash-'+e, name='Gemini Flash ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='gemini-argon-'+e, name='Gemini Argon ('+e+')') for e in ('low','medium','high')]
+        models += [dict(id='gemini-hydrogen-'+e, name='Gemini Hydrogen ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='claude-opus-4-6-thinking',name='Claude Opus 4.6 (Thinking)'),dict(id='claude-sonnet',name='Claude Sonnet',efforts='high')]
         config=dict(session=dict(engine='agy',model='gemini-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
         recus=self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- verifier(AssistantEtat.famillesModeles.join(",")==="Flash,Argon,Opus,Sonnet","familles incohérentes")
+ verifier(AssistantEtat.famillesModeles.join(",")==="Flash,Argon,Hydrogen,Opus,Sonnet","familles incohérentes")
  for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.toLowerCase()).enabled,"famille absente : "+nom)
  var bouton=trouver(page,"nc-jarvis-model-argon");clavier.mouseClick(bouton,bouton.width/2,bouton.height/2)
  verifier(AssistantEtat.modele==="gemini-argon-low","mauvais identifiant Argon")
  var effort=trouver(page,"nc-jarvis-effort-high");clavier.mouseClick(effort,effort.width/2,effort.height/2)
  verifier(AssistantEtat.modele==="gemini-argon-high"&&AssistantEtat.effort==="high","modèle/effort contradictoires")
  verifier(AssistantEtat.sessionReglages.model==="gemini-flash-low"&&AssistantEtat.reglagesModifies,"sélection prétendue confirmée")
+ var h=trouver(page,"nc-jarvis-model-hydrogen"),th=null;for(var c of h.children)if(c.paintedWidth!==undefined)th=c
+ verifier(th!==null&&th.paintedWidth<=h.width,"Hydrogen coupé à 400 : "+th.paintedWidth+" > "+h.width)
+ verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sans variante")
  etape++
 }else if(etape===2){
  var appliquer=trouver(page,"nc-jarvis-apply-model");verifier(appliquer.visible,"application absente")
@@ -444,6 +448,8 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
 }else if(etape===4){
  var low=trouver(page,"nc-jarvis-effort-low"),high=trouver(page,"nc-jarvis-effort-high")
  verifier(low.mapToItem(page,0,0).x>=0&&high.mapToItem(page,high.width,0).x<=page.width,"réflexion hors du padding")
+ var h2=trouver(page,"nc-jarvis-model-hydrogen"),th2=null;for(var c2 of h2.children)if(c2.paintedWidth!==undefined)th2=c2
+ verifier(th2!==null&&th2.paintedWidth<=h2.width,"Hydrogen coupé à 330 : "+th2.paintedWidth+" > "+h2.width)
  Qt.quit()
 }
 ''',lectureReglages=True,evenements=True,configuration=config)
@@ -458,6 +464,8 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
  verifier(!trouver(page,"nc-jarvis-model-argon").enabled,"Argon inventé")
+ verifier(!trouver(page,"nc-jarvis-model-hydrogen").enabled,"Hydrogen inventé")
+ verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sans variante -xhigh")
  verifier(!trouver(page,"nc-jarvis-effort-medium").enabled,"variante non annoncée activée")
  AssistantEtat.choisirFamille("Argon");AssistantEtat.choisirEffort("medium")
  verifier(AssistantEtat.modele==="gemini-flash-low"&&AssistantEtat.effort==="low","identifiant inventé")
@@ -466,12 +474,34 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
 }
 ''',configuration=config)
 
+    def test_bouton_xhigh_seulement_si_le_catalogue_a_la_variante(self):
+        models=[dict(id='claude-opus-5-5-'+e,name='Opus ('+e+')') for e in ('low','medium','high','xhigh')]+[dict(id='gemini-flash-'+e,name='Flash ('+e+')') for e in ('low','medium','high')]
+        config=dict(session=dict(engine='agy',model='claude-opus-5-5-high',effort='high'),engines=[
+            dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high','xhigh']),
+            dict(id='claude',name='Claude',installed=True,models=[dict(id='opus',name='Opus')],efforts=['low','medium','high']),
+            dict(id='codex',name='Codex',installed=True,models=models,efforts=['low','medium','high','xhigh'])])
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var x=trouver(page,"nc-jarvis-effort-xhigh");verifier(x.visible&&x.enabled,"xhigh absent alors que le catalogue l'annonce")
+ x.clic()
+ verifier(AssistantEtat.modele==="claude-opus-5-5-xhigh"&&AssistantEtat.effort==="xhigh","xhigh : "+AssistantEtat.modele+"/"+AssistantEtat.effort)
+ verifier(trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh caché une fois xhigh choisi")
+ AssistantEtat.choisirEffort("low");verifier(AssistantEtat.modele==="claude-opus-5-5-low","retour depuis xhigh : "+AssistantEtat.modele)
+ AssistantEtat.choisirEffort("xhigh");AssistantEtat.choisirFamille("Flash");verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sous Flash, sans variante")
+ AssistantEtat.moteur="claude";verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sous Claude")
+ // Codex garde ses trois boutons, même si son catalogue avait des variantes -xhigh
+ AssistantEtat.moteur="codex";AssistantEtat.modele="claude-opus-5-5-high";verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sous Codex")
+ Qt.quit()
+}
+''',configuration=config)
+
     def test_catalogue_du_compte_argon_actif_et_efforts_de_claude_5_5(self):
         """Issue #37 : les vrais identifiants d'agy. Argon s'active, les Claude 5.5 ont leurs efforts (pas « à réflexion fixe »),
-        et les 13 modèles passent dans « Choisir un modèle… » (la coupe à 12 cachait le dernier)."""
-        familles=('gemini-4-argon','gemini-3.8-flash','claude-opus-5-5','claude-sonnet-5-5')
+        et les modèles passent dans « Choisir un modèle… » (la coupe à 12 cachait le dernier)."""
+        familles=('gemini-4-argon','gemini-3.8-flash','claude-opus-5-5','claude-sonnet-5-5','gemini-hydrogen')
         models=[dict(id=f+'-'+e,name=f+' ('+e+')') for f in familles for e in ('low','medium','high')]+[dict(id='gpt-oss-120b-medium',name='GPT-OSS 120B (Medium)')]
-        self.assertEqual(len(models),13)
+        self.assertEqual(len(models),16)
         config=dict(session=dict(engine='agy',model='gemini-3.8-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
         self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}

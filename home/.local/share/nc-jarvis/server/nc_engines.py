@@ -60,7 +60,7 @@ AGY_CATALOGUE_DISQUE_MAX = 256*1024
 AGY_CATALOGUE_MAX = 50
 # Pas de tiret de tête : l'identifiant part après --model. 55 au plus : au-delà, le callback de Telegram (64 octets) casse tout le clavier /models
 AGY_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,54}')
-AGY_SUFFIXE = re.compile(r'(.+)-(low|medium|high)')
+AGY_SUFFIXE = re.compile(r'(.+)-(low|medium|high|xhigh)')
 # Toute entrée (/session, /nc/engine, /run, /model, état enregistré) : un identifiant saisi à la main reste permis, mais il part après --model
 # @ et [ ] : formes réelles (claude-x@20251101, opus[1m]), jamais au début ; # sépare l'effort chez OpenCode ; l'argv part sans shell
 MODELE = re.compile(r'[A-Za-z0-9._:/][A-Za-z0-9._:/@\[\]-]{0,79}')
@@ -1005,9 +1005,9 @@ class Engines:
             self.agy_verrou.release()
 
     def aligner_agy(self, donnes, session_key=None):
-        """Un identifiant qui finit par -low, -medium ou -high encode déjà l'effort, et agy refuse un couple contradictoire
+        """Un identifiant qui finit par -low, -medium, -high ou -xhigh encode déjà l'effort, et agy refuse un couple contradictoire
         (--model x-low --effort high). Modèle donné sans effort : l'effort du suffixe. Effort donné : la variante du catalogue
-        si elle existe, sinon le modèle reste et l'effort suit son suffixe (comme un effort inconnu) ; xhigh et max valent high.
+        si elle existe, sinon le modèle reste et l'effort suit son suffixe (comme un effort inconnu) ; xhigh et max donnent la variante -xhigh si le catalogue l'a, sinon high.
         Sans suffixe : rien."""
         modele = (donnes.get('model') or '').strip()
         effort = (donnes.get('effort') or '').strip().lower()
@@ -1017,10 +1017,11 @@ class Engines:
             return donnes
         courant = modele or str(self.appel('get_session_info', session_key=session_key).get('model') or '')
         trouve = AGY_SUFFIXE.fullmatch(courant)
-        niveau = 'high' if effort in ('xhigh', 'max') else effort
         if not trouve: return donnes
+        ids = {m.get('id') for m in self.models('agy') if isinstance(m, dict)}
+        niveau = ('xhigh' if f'{trouve[1]}-xhigh' in ids else 'high') if effort in ('xhigh', 'max') else effort
         candidat = f'{trouve[1]}-{niveau}'
-        if niveau in ('low', 'medium', 'high') and niveau != trouve[2] and any(isinstance(m, dict) and m.get('id') == candidat for m in self.models('agy')):
+        if niveau in ('low', 'medium', 'high', 'xhigh') and niveau != trouve[2] and candidat in ids:
             donnes['model'], donnes['effort'] = candidat, niveau
         else:
             donnes['effort'] = trouve[2]
@@ -1030,7 +1031,7 @@ class Engines:
         return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
             permission_modes=modes_permis(k),catalogue_compte=k=='agy' and bool(self.agy_lu),
             catalogue_en_cours=k=='agy' and self.agy_verrou.locked(),
-            efforts=(['low','medium','high'] if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
+            efforts=((['low','medium','high'] + (['xhigh'] if any(isinstance(m, dict) and str(m.get('id')).endswith('-xhigh') for m in self.models('agy')) else [])) if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
             shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
     def choose(self, session_key=None, **values):

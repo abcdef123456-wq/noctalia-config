@@ -457,8 +457,8 @@ Item {
                     JarvisBouton {
                         required property string modelData
                         objectName: "nc-jarvis-model-" + modelData.toLowerCase()
-                        width: (choix.width - 18) / 4; height: 34
-                        texte: modelData
+                        width: (choix.width - choix.spacing * (AssistantEtat.famillesModeles.length - 1)) / AssistantEtat.famillesModeles.length; height: 34
+                        texte: modelData; taille: 11 // cinq boutons : « Hydrogen » doit tenir à 330 px
                         primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.familleModele(AssistantEtat.modeleCourant) === modelData
                         enabled: AssistantEtat.reglagesDisponibles && !!AssistantEtat.moteurCourant.installed
                             && !!AssistantEtat.modelePourFamille(modelData) && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
@@ -469,12 +469,14 @@ Item {
             Row {
                 id: reflexion
                 x: 10; y: 80; width: parent.width - 20; spacing: 6
+                readonly property int n: AssistantEtat.xhighDispo ? 4 : 3
                 Repeater {
-                    model: ["low", "medium", "high"]
+                    model: ["low", "medium", "high", "xhigh"]
                     JarvisBouton {
                         required property string modelData
                         objectName: "nc-jarvis-effort-" + modelData
-                        width: (reflexion.width - 12) / 3; height: 28
+                        visible: modelData !== "xhigh" || AssistantEtat.xhighDispo
+                        width: (reflexion.width - reflexion.spacing * (reflexion.n - 1)) / reflexion.n; height: 28
                         texte: modelData
                         primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.effort === modelData
                         enabled: AssistantEtat.reglagesDisponibles && AssistantEtat.modelePourEffort(modelData) !== null

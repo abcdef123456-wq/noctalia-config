@@ -4,6 +4,7 @@ Rectangle {
     id: b
     property string texte
     property bool primaire: false
+    property int taille: 13
     signal clic()
     implicitWidth: label.implicitWidth + 26; implicitHeight: 32
     radius: 16
@@ -14,7 +15,7 @@ Rectangle {
     Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }
     border.width: activeFocus ? 1 : 0; border.color: Couleurs.texte
     activeFocusOnTab: true
-    Texte { id: label; anchors.centerIn: parent; text: b.texte; color: b.primaire ? Couleurs.surAccent : Couleurs.texte; font.weight: Font.DemiBold; font.pixelSize: 13 }
+    Texte { id: label; anchors.centerIn: parent; text: b.texte; color: b.primaire ? Couleurs.surAccent : Couleurs.texte; font.weight: Font.DemiBold; font.pixelSize: b.taille }
     MouseArea { id: zoneClic; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: b.clic() }
     Keys.onReturnPressed: clic()
     Keys.onSpacePressed: clic()
