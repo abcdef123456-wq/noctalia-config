@@ -3,17 +3,27 @@ import importlib.machinery
 import importlib.util
 import os
 import pathlib
+import shutil
 import stat
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 BIN = pathlib.Path(__file__).resolve().parent.parent / "installeur"
 _TMP = tempfile.mkdtemp(prefix="nc-ig-test-")
-for _k in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"):
-    os.environ[_k] = _TMP
-os.environ["NC_LANGUE"] = "fr"
+# HOME, XDG_* et TMPDIR isolés pour ce fichier seulement, rendus à la fin (les autres tests du même processus n'en héritent pas)
+_ISOLE = mock.patch.dict(os.environ, dict({k: _TMP for k in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                                             "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR")}, NC_LANGUE="fr"))
+_ISOLE.start()
+
+
+def tearDownModule():
+    _ISOLE.stop()
+    shutil.rmtree(_TMP, ignore_errors=True)
+
+
 _l = importlib.machinery.SourceFileLoader("nc_installeur", str(BIN / "nc-installeur"))
 M = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_installeur", _l))
 _l.exec_module(M)
