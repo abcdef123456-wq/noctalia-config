@@ -217,11 +217,15 @@ class ProfileSync(unittest.TestCase):
         p, profil = self.service_ouvert(1)
         time.sleep(1.5)
         profil.write_text("power-saver\n")
+        # Attendre le contenu, pas le compte des passages : « hyprctl monitors » est appelé au début du passage, avant
+        # l'écriture de profil.lua (nc-profile-sync), qu'on lisait parfois trop tôt
+        sortie = self.home / ".config/hypr/nc/profil.lua"
+        lire = lambda: sortie.read_text() if sortie.exists() else ""
         fin = time.time() + 6
-        while time.time() < fin and self.passages() < 2:
+        while time.time() < fin and 'profil = "power-saver"' not in lire():
             time.sleep(0.2)
         self.assertGreaterEqual(self.passages(), 2, self.journal.read_text())
-        self.assertIn('profil = "power-saver"', (self.home / ".config/hypr/nc/profil.lua").read_text())
+        self.assertIn('profil = "power-saver"', lire())
         p.kill()
 
 
