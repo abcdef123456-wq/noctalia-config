@@ -8,9 +8,9 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
-os.environ.setdefault("NC_LANGUE", "fr")
 
 
 def charger():
@@ -28,6 +28,10 @@ def ecrire(chemin, texte):
 
 class Plateforme(unittest.TestCase):
     def setUp(self):
+        # français pour ce test seulement : rien ne change à l'import (la découverte importe tous les modules d'abord)
+        p = mock.patch.dict(os.environ, NC_LANGUE="fr")
+        p.start()
+        self.addCleanup(p.stop)
         self.tmp = Path(tempfile.mkdtemp(prefix="nc-diag-pf-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.mod = charger()
