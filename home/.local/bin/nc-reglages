@@ -63,6 +63,16 @@ except ImportError:          # Python < 3.11 : le paquet tomli (même interface)
 
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
@@ -216,7 +226,7 @@ GESTIONNAIRES = [("nautilus", "Fichiers (Nautilus)"), ("thunar", "Thunar"), ("do
 def themes_curseur():
     """Thèmes de pointeur installés : dossiers d'icônes qui ont un sous-dossier « cursors »."""
     noms = set()
-    for d in ("/usr/share/icons", os.path.join(HOME, ".local/share/icons"), os.path.join(HOME, ".icons")):
+    for d in [x + "/icons" for x in dossiers_donnees()] + [os.path.join(HOME, ".local/share/icons"), os.path.join(HOME, ".icons")]:
         try:
             for n in os.listdir(d):
                 if os.path.isdir(os.path.join(d, n, "cursors")) and re.fullmatch(r"[\w .+-]{1,60}", n):
@@ -346,7 +356,7 @@ class R:
                 v = "aucun"
             if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
                 if not re.fullmatch(r"[a-z]{2,3}(,[a-z]{2,3})*", v) or \
-                        any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
+                        any(not any(os.path.exists(f"{d}/X11/xkb/symbols/{x}") for d in dossiers_donnees()) for x in v.split(",")):
                     raise ValueError(T("codes de disposition séparés par des virgules (ex. us, fr, us,fr), ou systeme",
                                        "comma-separated layout codes (e.g. us, fr, us,fr), or system"))
             if self.cle == "CLAVIER_VARIANTE" and v not in ("systeme", "aucune"):
@@ -362,10 +372,15 @@ class R:
 
 def variantes_xkb_connues(v):
     """Chaque variante existe dans la liste officielle xkb (si elle est lisible) ; sinon on se fie au format."""
-    try:
-        with open("/usr/share/X11/xkb/rules/evdev.lst", encoding="utf-8", errors="replace") as f:
-            lignes = f.read().splitlines()
-    except OSError:
+    lignes = None
+    for d in dossiers_donnees():
+        try:
+            with open(f"{d}/X11/xkb/rules/evdev.lst", encoding="utf-8", errors="replace") as f:
+                lignes = f.read().splitlines()
+            break
+        except OSError:
+            continue
+    if lignes is None:
         return True
     connues, dedans = set(), False
     for l in lignes:

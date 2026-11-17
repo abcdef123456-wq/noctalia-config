@@ -12,7 +12,13 @@ set -euo pipefail
 langue() { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }; }
 [ $# -ge 1 ] || { langue
   t "Usage : nvidia-run <commande> [arguments]" "Usage: nvidia-run <command> [arguments]" >&2; echo >&2; exit 1; }
-EGL_DIR="${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}"
+# Dossiers de données (XDG_DATA_DIRS) et dossier EGL : nc-plateforme-root et nc-gpu-regle ; absents, on garde /usr/share
+for f in nc-plateforme-root nc-gpu-regle; do
+  # shellcheck source=nc-gpu-regle
+  . "${BASH_SOURCE[0]%/*}/$f" 2>/dev/null || . "$HOME/.local/bin/$f" 2>/dev/null || :
+done
+command -v nc_egl_dir >/dev/null || { nc_egl_dir() { echo "${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}"; }; nc_icd_json() { :; }; }
+EGL_DIR=$(nc_egl_dir)
 [ -r "$EGL_DIR/10_nvidia.json" ] || { langue
   t "nvidia-run : pilote NVIDIA introuvable, lancement normal." "nvidia-run: NVIDIA driver not found, launching normally." >&2; echo >&2; exec "$@"; }
 
@@ -40,9 +46,9 @@ if [ "${NC_FORCER_RTX:-}" != 1 ] && [ -r "$regle" ] && . "$regle" && nc_pc_hybri
 fi
 
 # Pilote Vulkan NVIDIA : nvidia_icd.json, ou nvidia_icd.x86_64.json (Fedora, RPM Fusion)
-vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd: || true)
+vk=$(nc_icd_json nvidia | paste -sd: || true)
 vk=${vk:-/usr/share/vulkan/icd.d/nvidia_icd.json}
-others=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -vE 'nvidia|nouveau' | paste -sd: || true)
+others=$(nc_icd_json autres | paste -sd: || true)
 export __EGL_VENDOR_LIBRARY_FILENAMES=$EGL_DIR/10_nvidia.json:$EGL_DIR/50_mesa.json
 export VK_DRIVER_FILES="$vk${others:+:$others}"
 export __NV_PRIME_RENDER_OFFLOAD=1

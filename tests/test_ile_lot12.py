@@ -35,8 +35,11 @@ class LotIle12(unittest.TestCase):
         etat = lire("Etat.qml")
         self.assertIn("function jouerSon(", etat)
         self.assertIn("pw-play", etat)
-        self.assertIn("/usr/share/sounds/freedesktop/stereo/", etat)
-        self.assertRegex(etat, r"command -v pw-play[^\n]*\[ -r")
+        # le son est cherché dans XDG_DATA_DIRS (défaut XDG), le premier lisible gagne ; pw-play seulement s'il est trouvé
+        self.assertIn("sounds/freedesktop/stereo/", etat)
+        self.assertIn('Quickshell.env("XDG_DATA_DIRS") || "/usr/local/share:/usr/share"', etat)
+        self.assertRegex(etat, r'\[ -r \\"\$d/sounds/freedesktop/stereo/\$1\.oga\\" \]')
+        self.assertRegex(etat, r'command -v pw-play[^\n]*\[ -n \\"\$f\\" \]')
         self.assertIn('jouerSon("complete")', etat)
         self.assertIn('jouerSon("alarm-clock-elapsed")', etat)
         self.assertNotIn("canberra-gtk-play -i complete || true", etat)

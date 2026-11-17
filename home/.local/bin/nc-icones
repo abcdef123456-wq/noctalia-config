@@ -20,6 +20,16 @@ import sys
 from pathlib import Path
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
@@ -336,7 +346,7 @@ def ecrire(chemin, texte):
 
 def parents():
     """Thème parent : Papirus (sombre) s'il est là, sinon Adwaita ; hicolor toujours en dernier."""
-    for base in [BASE_ICONES, Path("/usr/share/icons"), Path("/usr/local/share/icons")]:
+    for base in [BASE_ICONES] + [Path(d) / "icons" for d in dossiers_donnees()]:
         if (base / "Papirus-Dark/index.theme").exists():
             return "Papirus-Dark,Adwaita,hicolor"
     return "Adwaita,hicolor"

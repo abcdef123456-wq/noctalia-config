@@ -24,6 +24,16 @@ import time
 os.environ.pop("MALLOC_CONF", None)
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
@@ -376,7 +386,7 @@ def themes_icones():
             noms.append(g)
     except (OSError, subprocess.SubprocessError):
         pass
-    bases = [os.path.expanduser("~/.local/share/icons"), "/usr/share/icons", "/usr/local/share/icons"]
+    bases = [os.path.expanduser("~/.local/share/icons")] + [d + "/icons" for d in dossiers_donnees()]
     i = 0
     while i < len(noms):            # parents déclarés par chaque thème (Inherits=)
         for b in bases:
@@ -412,9 +422,10 @@ def chercher_icone(icone):
                         if os.path.exists(f):
                             return f
     for ext in (".svg", ".png", ".xpm"):
-        f = os.path.join("/usr/share/pixmaps", icone + ext)
-        if os.path.exists(f):
-            return f
+        for d in dossiers_donnees():
+            f = os.path.join(d, "pixmaps", icone + ext)
+            if os.path.exists(f):
+                return f
     return ""
 
 

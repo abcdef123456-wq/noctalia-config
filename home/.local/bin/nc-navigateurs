@@ -27,6 +27,16 @@ NOM = re.compile(r"^(chromium(-browser)?|ungoogled-chromium|google-chrome(-stabl
                  r"|com\.microsoft\.Edge|com\.opera\.Opera|io\.github\.ungoogled_software\.ungoogled_chromium)\.desktop$")
 
 
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def reglage(cle, defaut):
     base = os.environ.get("XDG_CONFIG_HOME") or str(HOME / ".config")
     try:
@@ -48,8 +58,9 @@ def dossier_perso():
 
 def sources():
     """Dossiers d'applications du système et de flatpak, dans l'ordre de priorité (jamais celui de l'utilisateur)."""
-    dirs = [Path(d) / "applications" for d in (os.environ.get("XDG_DATA_DIRS") or "").split(":") if d]
-    dirs += [Path("/usr/local/share/applications"), Path("/usr/share/applications")]
+    dirs = [Path(d) / "applications" for d in dossiers_donnees()]
+    # Un XDG_DATA_DIRS partiel ne cache pas les dossiers standard (correctif déjà testé : test_navigateurs)
+    dirs += [p for p in (Path("/usr/local/share/applications"), Path("/usr/share/applications")) if p not in dirs]
     dirs += [Path("/var/lib/flatpak/exports/share/applications"), donnees() / "flatpak/exports/share/applications"]
     perso = dossier_perso().resolve()
     vus, res = set(), []

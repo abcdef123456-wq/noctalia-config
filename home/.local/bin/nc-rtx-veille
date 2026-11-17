@@ -29,6 +29,16 @@ import time
 
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en), comme nc-diag : T("texte français", "English text")
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
@@ -60,7 +70,8 @@ def T(fr, en):
 SYS = os.environ.get("NC_SYSFS") or "/sys"
 PROC = os.environ.get("NC_PROC") or "/proc"
 DEV = os.environ.get("NC_DEV") or "/dev"
-EGL = os.environ.get("NC_EGL_DIR") or "/usr/share/glvnd/egl_vendor.d"
+EGL = os.environ.get("NC_EGL_DIR") or next((d + "/glvnd/egl_vendor.d" for d in dossiers_donnees()
+                                            if os.path.isdir(d + "/glvnd/egl_vendor.d")), dossiers_donnees()[-1] + "/glvnd/egl_vendor.d")
 ICI = os.path.dirname(os.path.realpath(__file__))
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 DEJA = os.path.join(RUNTIME, "nc-rtx-alertes")          # causes déjà signalées (une ligne par cause)
@@ -391,7 +402,7 @@ def environnement_integre(pid):
         env.pop(v, None)
     if os.path.exists(os.path.join(EGL, "50_mesa.json")):
         env["__EGL_VENDOR_LIBRARY_FILENAMES"] = os.path.join(EGL, "50_mesa.json")
-    icd = "/usr/share/vulkan/icd.d"
+    icd = next((d + "/vulkan/icd.d" for d in dossiers_donnees() if os.path.isdir(d + "/vulkan/icd.d")), "")
     try:
         vk = [os.path.join(icd, f) for f in sorted(os.listdir(icd)) if f.endswith(".json") and not re.search("nvidia|nouveau", f)]
     except OSError:

@@ -144,11 +144,11 @@ profil_auto() {
 }
 
 # PC hybride : une carte NVIDIA et une autre carte (Intel ou AMD), avec les pilotes EGL des deux (nc-gpu-regle)
-EGL_DIR="${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}"
+EGL_DIR=$(nc_egl_dir)
 HYBRID=0
 nc_pc_hybride && HYBRID=1
 # Pilotes Vulkan de la carte intégrée (tous sauf NVIDIA)
-IGPU_VK=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -vE 'nvidia|nouveau' | paste -sd:)
+IGPU_VK=$(nc_icd_json autres | paste -sd:)
 GPU_STATE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
 
 # Carte des applis lancées (PC hybride), selon la règle de nc-gpu-regle (rtx_voulue PROFIL BAT) : NVIDIA sur secteur
@@ -169,7 +169,7 @@ set_gpu_default() {
   if [ "$want" = nvidia ]; then
     egl=$EGL_DIR/10_nvidia.json:$EGL_DIR/50_mesa.json
     # nvidia_icd.json, ou nvidia_icd.x86_64.json (Fedora, RPM Fusion)
-    vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd:)
+    vk=$(nc_icd_json nvidia | paste -sd:)
     vk=${vk:-/usr/share/vulkan/icd.d/nvidia_icd.json}${IGPU_VK:+:$IGPU_VK}
     off=1; layer=NVIDIA_only; glx=nvidia
   else

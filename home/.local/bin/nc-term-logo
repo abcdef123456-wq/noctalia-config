@@ -16,12 +16,16 @@ LOGOS="$HOME/.local/share/nc/logos"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/style.conf" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 
 . /etc/os-release 2>/dev/null
+. "${BASH_SOURCE[0]%/*}/nc-plateforme-root" 2>/dev/null || . "$HOME/.local/bin/nc-plateforme-root" 2>/dev/null
+type nc_dossiers_donnees >/dev/null 2>&1 || nc_dossiers_donnees() { printf '%s\n' /usr/local/share /usr/share; }   # plateforme-root absent
 # Logo vectoriel installé par la distribution
 svg_systeme() {
-  local n f
+  local n f d
   for n in ${LOGO:+"$LOGO"} "${ID:-linux}-logo" "${ID:-linux}linux-logo" "${ID:-linux}-logo-icon" "distributor-logo-${ID:-linux}"; do
-    for f in "/usr/share/pixmaps/$n.svg" "/usr/share/icons/hicolor/scalable/apps/$n.svg"; do
-      [ -r "$f" ] && { echo "$f"; return 0; }
+    for d in $(nc_dossiers_donnees); do
+      for f in "$d/pixmaps/$n.svg" "$d/icons/hicolor/scalable/apps/$n.svg"; do
+        [ -r "$f" ] && { echo "$f"; return 0; }
+      done
     done
   done
   return 1

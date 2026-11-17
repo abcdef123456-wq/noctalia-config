@@ -42,6 +42,16 @@ ENV_C = dict(os.environ, LC_ALL="C", LANG="C")          # sorties des gestionnai
 ANNEXES = re.compile(r"^(lib|python-|python3-|perl-|ruby-|rubygem-|haskell-|ghc-|r-|node-|nodejs-|golang-|rust-|texlive-|php-|lua-|ocaml-)|-(debug|debuginfo|debugsource|dev|devel|doc|docs|headers|static)$")
 
 
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     """fr ou en : NC_LANGUE, puis LANGUE des réglages, puis la langue du système (LC_ALL, LC_MESSAGES, LANG, /etc/locale.conf)."""
     l = os.environ.get("NC_LANGUE", "")
@@ -102,8 +112,9 @@ def mots(terme):
 
 
 # ── Icônes ─────────────────────────────────────────────────────────────────────────────────────────────────────
-CATALOGUES = [Path(d) for d in (os.environ.get("NC_SWCATALOG_DIRS") or
-              "/usr/share/swcatalog:/var/lib/swcatalog:/var/cache/swcatalog:/usr/share/app-info:/var/lib/app-info:/var/cache/app-info").split(":") if d]
+CATALOGUES = [Path(d) for d in (os.environ.get("NC_SWCATALOG_DIRS") or ":".join(
+    [d + "/swcatalog" for d in dossiers_donnees()] + ["/var/lib/swcatalog", "/var/cache/swcatalog"] +
+    [d + "/app-info" for d in dossiers_donnees()] + ["/var/lib/app-info", "/var/cache/app-info"])).split(":") if d]
 FLATPAK_APPSTREAM = [Path(d) for d in (os.environ.get("NC_FLATPAK_APPSTREAM") or
                      "/var/lib/flatpak/appstream:" + str(HOME / ".local/share/flatpak/appstream")).split(":") if d]
 CACHE_ICONES = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc/logiciels-icones.json"

@@ -83,6 +83,16 @@ import urllib.request
 
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def dossiers_donnees():
+    """Dossiers de données (XDG_DATA_DIRS, défaut XDG), dans l'ordre ; même règle que nc_dossiers_donnees (nc-plateforme-root)."""
+    vus = []
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        d = d.rstrip("/")
+        if d.startswith("/") and d not in vus:
+            vus.append(d)
+    return vus or ["/usr/local/share", "/usr/share"]
+
+
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
@@ -2589,8 +2599,8 @@ def modele_whisper():
     m = modele_choisi("whisper")
     if m and Path(m).expanduser().is_file():
         return str(Path(m).expanduser())
-    for motif in (str(HOME / ".local/share/nc/whisper/ggml-*.bin"), "/usr/share/whisper.cpp-model-*/*.bin",
-                  "/usr/share/whisper.cpp/models/ggml-*.bin", "/usr/share/whisper/ggml-*.bin"):
+    for motif in [str(HOME / ".local/share/nc/whisper/ggml-*.bin")] + [d + s for d in dossiers_donnees() for s in (
+            "/whisper.cpp-model-*/*.bin", "/whisper.cpp/models/ggml-*.bin", "/whisper/ggml-*.bin")]:
         import glob
         trouves = sorted(glob.glob(motif))
         if trouves:

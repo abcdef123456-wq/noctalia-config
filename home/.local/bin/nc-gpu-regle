@@ -18,8 +18,32 @@
 # Ancien réglage GPU_PERFORMANCE=integree (sans GPU_REGLE) : jamais.
 #
 # Pour les tests : NC_PROFIL (profil), NC_POWER_SUPPLY (dossier power_supply, ou « batterie » / « secteur »),
-# NC_SYSFS (à la place de /sys), NC_EGL_DIR (à la place de /usr/share/glvnd/egl_vendor.d).
+# NC_SYSFS (à la place de /sys), NC_EGL_DIR (à la place de glvnd/egl_vendor.d des dossiers de données).
 # Variables internes : préfixe _ncg_ (POSIX n'a pas de « local »).
+
+# Dossiers de données : nc_dossiers_donnees (nc-plateforme-root, à sourcer avant) ; sans lui, le défaut XDG.
+_ncg_dirs() {
+  if command -v nc_dossiers_donnees >/dev/null 2>&1; then nc_dossiers_donnees; else printf '%s\n' /usr/local/share /usr/share; fi
+}
+
+# Dossier EGL : NC_EGL_DIR, sinon le premier dossier de données qui a glvnd/egl_vendor.d/10_nvidia.json, sinon celui de /usr/share.
+nc_egl_dir() {
+  if [ -n "${NC_EGL_DIR:-}" ]; then printf '%s\n' "$NC_EGL_DIR"; return 0; fi
+  _ncg_e=$(_ncg_dirs | while read -r _ncg_x; do
+    if [ -r "$_ncg_x/glvnd/egl_vendor.d/10_nvidia.json" ]; then printf '%s\n' "$_ncg_x/glvnd/egl_vendor.d"; break; fi
+  done)
+  printf '%s\n' "${_ncg_e:-/usr/share/glvnd/egl_vendor.d}"
+  unset _ncg_e
+}
+
+# Fichiers vulkan/icd.d/*.json de tous les dossiers de données (le premier dossier gagne pour un même nom), un par ligne.
+# $1 : nvidia (nvidia_icd*, sans i686) ou autres (ni nvidia ni nouveau).
+nc_icd_json() {
+  _ncg_dirs | while read -r _ncg_x; do
+    for _ncg_f in "$_ncg_x"/vulkan/icd.d/*.json; do [ -e "$_ncg_f" ] && printf '%s\n' "$_ncg_f"; done
+  done | awk -F/ -v m="$1" '!vu[$NF]++ {
+    if (m == "nvidia" ? ($NF ~ /^nvidia_icd/ && $NF !~ /i686/) : ($NF !~ /nvidia|nouveau/)) print }'
+}
 
 nc_gpu_reglage() {
   _ncg_regle=""; _ncg_ancien=""
@@ -92,8 +116,10 @@ nc_pc_hybride() {
     if [ "$_ncg_c" = 0x10de ]; then _ncg_nv=1; else _ncg_autre=1; fi
   done
   _ncg_c=1
-  [ "$_ncg_nv" = 1 ] && [ "$_ncg_autre" = 1 ] && [ -r "${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}/10_nvidia.json" ] &&
-    [ -r "${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}/50_mesa.json" ] && _ncg_c=0
+  if [ "$_ncg_nv" = 1 ] && [ "$_ncg_autre" = 1 ]; then
+    _ncg_d=$(nc_egl_dir)
+    [ -r "$_ncg_d/10_nvidia.json" ] && [ -r "$_ncg_d/50_mesa.json" ] && _ncg_c=0
+  fi
   _ncg_nv=$_ncg_c
   unset _ncg_autre _ncg_d _ncg_c
   return "$_ncg_nv"

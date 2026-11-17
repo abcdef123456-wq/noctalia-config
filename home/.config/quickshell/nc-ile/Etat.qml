@@ -211,9 +211,11 @@ Singleton {
     // Son du thème freedesktop : canberra-gtk-play s'il est là, sinon pw-play sur le fichier du thème (paquet
     // sound-theme-freedesktop). Rien si ni l'un ni l'autre, sans message.
     function jouerSon(nom) {
-        Quickshell.execDetached(["sh", "-c", "f=/usr/share/sounds/freedesktop/stereo/\"$1\".oga; "
+        // XDG_DATA_DIRS (défaut XDG), dans l'ordre : le premier dossier qui a le son gagne
+        var dirs = Quickshell.env("XDG_DATA_DIRS") || "/usr/local/share:/usr/share"
+        Quickshell.execDetached(["sh", "-c", "f=; IFS=:; for d in $2; do [ -r \"$d/sounds/freedesktop/stereo/$1.oga\" ] && { f=$d/sounds/freedesktop/stereo/$1.oga; break; }; done; unset IFS; "
             + "{ command -v canberra-gtk-play >/dev/null 2>&1 && canberra-gtk-play -i \"$1\"; } 2>/dev/null "
-            + "|| { command -v pw-play >/dev/null 2>&1 && [ -r \"$f\" ] && pw-play \"$f\"; } 2>/dev/null; true", "sh", nom])
+            + "|| { command -v pw-play >/dev/null 2>&1 && [ -n \"$f\" ] && pw-play \"$f\"; } 2>/dev/null; true", "sh", nom, dirs])
     }
     onMinuteurResteChanged: {
         if (minuteurFin > 0 && minuteurReste === 0 && pomodoro) {

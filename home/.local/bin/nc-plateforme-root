@@ -1,6 +1,7 @@
 #!/bin/sh
 # nc-plateforme-root : où sont les assistants root (nc-energie-root, nc-limite-charge, nc-vpn-root), écrit une seule fois.
-# Sourcé (sh POSIX) par nc-ile-etat et nc-profile-sync. Les versions Python (nc-energie, nc-vpn) suivent la même règle.
+# Sourcé (sh POSIX ou bash) par nc-ile-etat, nc-profile-sync, nc-gpu-regle (si présent), nc-sysinfo, nc-term-logo et nvidia-run. Les versions Python (nc-energie, nc-vpn) suivent la même règle.
+#   nc_dossiers_donnees   affiche les dossiers de données, un par ligne (voir la fonction plus bas)
 #   nc_root_bin NOM   affiche DOSSIER/NOM et rend 0 si l'assistant est sûr, sinon n'affiche rien et rend 1
 # DOSSIER : clé NC_ROOT_BIN de ~/.config/nc/plateforme.conf (écrit par l'adaptateur NixOS), sinon /usr/local/bin.
 # Valeur valide : chemin absolu ^/[A-Za-z0-9._/-]{1,200}$ sans segment « . » ni « .. » ni « / » final, sinon le défaut.
@@ -39,4 +40,25 @@ nc_root_bin() {
   [ -f "$_ncp_r" ] && [ -x "$_ncp_r" ] || return 1
   _ncp_sur "$_ncp_r" && _ncp_sur "${_ncp_r%/*}/" || return 1
   printf '%s\n' "$_ncp_p"
+}
+
+# Dossiers de données : XDG_DATA_DIRS (chemins absolus, sans doublon ni « / » final), sinon /usr/local/share puis /usr/share.
+# Chaque recherche dans /usr/share passe par cette liste : la première trouvée gagne (sur NixOS, /usr/share est presque vide).
+nc_dossiers_donnees() {
+  _ncd_r="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:"
+  _ncd_vus=
+  while [ -n "$_ncd_r" ]; do
+    _ncd_d=${_ncd_r%%:*}
+    _ncd_r=${_ncd_r#*:}
+    while :; do case "$_ncd_d" in ?*/) _ncd_d=${_ncd_d%/} ;; *) break ;; esac; done
+    case "$_ncd_d" in /?*) ;; *) continue ;; esac
+    case "
+$_ncd_vus
+" in *"
+$_ncd_d
+"*) continue ;; esac
+    _ncd_vus="$_ncd_vus
+$_ncd_d"
+  done
+  if [ -n "$_ncd_vus" ]; then printf '%s\n' "${_ncd_vus#?}"; else printf '%s\n' /usr/local/share /usr/share; fi
 }
