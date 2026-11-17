@@ -161,6 +161,13 @@ for a in "$@"; do
       exit 0 ;;
   esac
 done
+# Même motif que MOTIF_VERSION de nc-diag (un test vérifie l'identité)
+motif_version='[0-9a-f]{7,40} [0-9]{4}-[0-9]{2}-[0-9]{2}'
+version_ecrite="$(head -c 200 "$depot/VERSION" 2>/dev/null | head -n 2 || true)"
+if [ ! -d "$depot/.git" ] && [ "$(printf '%s\n' "$version_ecrite" | wc -l)" -le 1 ] && [[ "$version_ecrite" =~ ^($motif_version)$ ]]; then
+  echo "$(t "Cette installation (version $version_ecrite) est mise à jour par le gestionnaire du système, pas par nc-maj." "This installation (version $version_ecrite) is updated by the system package manager, not by nc-update.")"
+  exit 0
+fi
 if [ ! -d "$depot/.git" ]; then
   echo "$(t "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." "noctalia-config repository not found (${depot:-unknown path}).")" >&2
   echo "$(t "Clone-le puis lance l'installation une fois :" "Clone it, then run the installer once:") git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2

@@ -272,6 +272,36 @@ class Bilan:
         return "\n".join(out)
 
 
+# Même motif que « motif_version » de nc-maj (un test vérifie l'identité) : « sha court AAAA-MM-JJ », écrit à la
+# construction quand le dépôt vient de /nix/store (sans .git)
+MOTIF_VERSION = r"[0-9a-f]{7,40} [0-9]{4}-[0-9]{2}-[0-9]{2}"
+
+
+def version_ecrite(depot):
+    """Contenu valide de <depot>/VERSION, sinon "" (lecture bornée, tout ce qui sort du motif est refusé)."""
+    try:
+        with open(os.path.join(depot, "VERSION"), errors="replace") as f:
+            v = f.read(200)
+    except OSError:
+        return ""
+    v = v[:-1] if v.endswith("\n") else v
+    return v if re.fullmatch(MOTIF_VERSION, v) else ""
+
+
+def ligne_depot(b, depot):
+    v = version_ecrite(depot) if depot else ""
+    if depot and os.path.isdir(os.path.join(depot, ".git")):
+        rev, _ = sortie(["git", "-C", depot, "log", "-1", T("--format=%h du %cd", "--format=%h (%cd)"),
+                         T("--date=format:%d/%m/%Y", "--date=short")])
+        b.ok(T(f"noctalia-config : version {rev}", f"noctalia-config: version {rev}"))
+    elif v:
+        b.ok(T(f"noctalia-config : version {v}", f"noctalia-config: version {v}"))
+    else:
+        b.avert(T("dépôt noctalia-config introuvable", "noctalia-config repository not found"),
+                T("relance install.sh depuis le dépôt cloné (nc-maj en a besoin)",
+                  "run install.sh again from the cloned repository (nc-update needs it)"), cle="depot_introuvable")
+
+
 def verifier(b):
     # ── Système ──
     b.titre(T("Système", "System"))
@@ -288,14 +318,7 @@ def verifier(b):
         depot = open(os.path.join(HOME, ".config/nc/depot")).read().strip()
     except OSError:
         pass
-    if depot and os.path.isdir(os.path.join(depot, ".git")):
-        rev, _ = sortie(["git", "-C", depot, "log", "-1", T("--format=%h du %cd", "--format=%h (%cd)"),
-                         T("--date=format:%d/%m/%Y", "--date=short")])
-        b.ok(T(f"noctalia-config : version {rev}", f"noctalia-config: version {rev}"))
-    else:
-        b.avert(T("dépôt noctalia-config introuvable", "noctalia-config repository not found"),
-                T("relance install.sh depuis le dépôt cloné (nc-maj en a besoin)",
-                  "run install.sh again from the cloned repository (nc-update needs it)"), cle="depot_introuvable")
+    ligne_depot(b, depot)
     dossiers_xdg(b)
 
     # ── Hyprland ──
