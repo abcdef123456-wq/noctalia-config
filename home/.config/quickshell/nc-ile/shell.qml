@@ -12,6 +12,7 @@
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
+//   qs -c nc-ile ipc call ile garmin       panneau Santé Garmin : batterie, sommeil, stress, pas (Super + Alt + S, nc-garmin)
 //   qs -c nc-ile ipc call ile aimant ZONE X Y W H   aperçu d'aimantation pendant un glisser (nc/raccourcis.lua) ; ZONE "" l'efface
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
@@ -166,6 +167,20 @@ ShellRoot {
         target: VpnEtat
         function onOuvrirPanneau() { if (!racine.vpnOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.vpnOuvert = true } }
     }
+    // Panneau Santé Garmin (Super + Alt + S, nc-garmin) : créé à l'ouverture seulement
+    property bool garminOuvert: false
+    LazyLoader {
+        id: chargeurGarmin
+        active: racine.garminOuvert
+        Garmin {
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: racine.garminOuvert = false
+        }
+    }
+    Connections {
+        target: GarminEtat
+        function onOuvrirPanneau() { if (!racine.garminOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.garminOuvert = true } }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -206,6 +221,12 @@ ShellRoot {
             Etat.fermer()
             if (!racine.vpnOuvert) Hyprland.refreshMonitors()
             racine.vpnOuvert = !racine.vpnOuvert
+        }
+        // Panneau Santé Garmin (Super + Alt + S) : ouvre ; déjà ouvert, le referme
+        function garmin(): void {
+            Etat.fermer()
+            if (!racine.garminOuvert) Hyprland.refreshMonitors()
+            racine.garminOuvert = !racine.garminOuvert
         }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
