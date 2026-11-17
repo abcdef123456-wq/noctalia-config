@@ -536,6 +536,16 @@ Ton PC a un MUX mais l'option n'apparaît pas ? Ouvre une issue avec le résulta
 Les services Google (agenda dans le calendrier de l’île, par la connexion Google de JARVIS) ne s’affichent que si
 **nc-settings → Intégration Google** est activé : sans compte Google relié, rien ne change (voir [docs/pages-ile.md](docs/pages-ile.md)).
 
+## Santé Garmin (optionnel)
+
+Un tableau de bord de ta montre Garmin dans l'île : sommeil, fréquence cardiaque, pas, stress. Il passe par un **connecteur non officiel**
+(Garmin ne propose pas d'accès public) : il peut cesser de marcher si Garmin change son service. Rien n'est actif par défaut.
+
+- Activation : `./install.sh --garmin`, ou la question « Tableau de bord Santé Garmin ? » à l'installation, puis **nc-reglages → Santé Garmin**.
+- Raccourci : **Super + Alt + S**. Le résumé du matin et JARVIS (`/nc garmin`) n'y touchent que si tu les autorises dans ce même panneau.
+- Les données restent sur ton PC : aucune n'est envoyée à une IA, à Telegram ou à Discord sans ton accord.
+- Limites et détails : [docs/garmin.md](docs/garmin.md).
+
 ## Personnaliser sans perdre tes réglages
 
 [JARVIS](docs/jarvis.md) relie le chat de l’île à une petite fenêtre de chat vierge (**Super + Maj + A**, épinglable

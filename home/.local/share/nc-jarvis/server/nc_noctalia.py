@@ -13,6 +13,7 @@ l'environnement de la session Hyprland (importé dans systemd --user à l'ouvert
   /nc fond                         fond d'écran suivant
   /nc ecran [pc|miroir|etendre|externe]     projection (pc et externe éteignent un écran : confirmation)
   /nc maj                          mises à jour du système en attente (comptées par nc-paquets)
+  /nc garmin                       résumé santé Garmin (lecture seule ; seulement si GARMIN_JARVIS=oui)
   /nc reglage CLE [VALEUR]         un réglage de nc-reglages (nc-reglages liste pour les clés)
   /nc vpn [connecter UUID|deconnecter UUID|tout|killswitch]   les tunnels VPN du PC, par « nc-vpn --json » (contrat 1) ;
                                    connecter, déconnecter et tout couper demandent « /nc oui » ; le kill switch se LIT seulement
@@ -77,6 +78,7 @@ ACTIONS = {
     "fond": dict(label="Fond d'écran suivant", fields=[], readonly=False),
     "ecran": dict(label="Projection", fields=[dict(key="mode", label="pc, miroir, etendre ou externe (vide : état)")], readonly=False, sensible=("pc", "externe")),
     "maj": dict(label="Mises à jour du système", fields=[], readonly=True),
+    "garmin": dict(label="Santé Garmin : résumé (si GARMIN_JARVIS=oui)", fields=[], readonly=True),
     "reglage": dict(label="Un réglage de nc-reglages", fields=[dict(key="cle", label="Clé (nc-reglages liste)"), dict(key="valeur", label="Nouvelle valeur (vide : lire)")], readonly=False),
     "vpn_etat": dict(label="VPN : tunnels du PC", fields=[], readonly=True),
     "vpn_connecter": dict(label="VPN : monter un tunnel", fields=[dict(key="uuid", label="UUID de la connexion (vpn_etat)")], readonly=False, sensible=True),
@@ -84,6 +86,19 @@ ACTIONS = {
     "vpn_tout": dict(label="VPN : couper tous les tunnels", fields=[], readonly=False, sensible=True),
     "vpn_killswitch": dict(label="VPN : état du kill switch (lecture seule)", fields=[], readonly=True),
 }
+
+
+def reglage_oui(cle):
+    """Vrai si cle=oui dans ~/.config/nc/reglages.conf (dernière valeur, relue à chaque appel)."""
+    val = ""
+    try:
+        for ligne in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
+            k, _, v = ligne.partition("=")
+            if k.strip() == cle:
+                val = v.strip().strip("\"'").lower()
+    except OSError:
+        pass
+    return val == "oui"
 
 
 def local():
@@ -186,6 +201,11 @@ def preparer(action, arguments):
         return ["nc-ecrans", mode], mode in ACTIONS["ecran"]["sensible"]
     if action == "maj":
         return ["nc-paquets"], False
+    if action == "garmin":
+        # Données de santé : refus tant que l'utilisateur n'a pas dit oui (évalué à chaque appel), rien n'est lancé
+        if not reglage_oui("GARMIN_JARVIS"):
+            raise ValueError("Santé Garmin : JARVIS n'y a pas accès. Active GARMIN_JARVIS dans nc-reglages → Santé Garmin.")
+        return ["nc-garmin", "resume"], False
     if action.startswith("vpn_"):
         return vpn_argv(action, arguments), ACTIONS[action].get("sensible", False)
     if action == "reglage":
@@ -388,6 +408,7 @@ def aide():
             "/nc fond — fond d'écran suivant\n"
             "/nc ecran [pc|miroir|etendre|externe] — projection (pc et externe : confirmation)\n"
             "/nc maj — mises à jour du système en attente\n"
+            "/nc garmin — résumé santé Garmin (lecture ; seulement si GARMIN_JARVIS=oui)\n"
             "/nc reglage CLE [VALEUR] — un réglage de nc-reglages\n"
             "/nc vpn — tunnels VPN ; /nc vpn connecter UUID, /nc vpn deconnecter UUID, /nc vpn tout (confirmation) ; /nc vpn killswitch (lecture)\n"
             "/nc oui — confirmer l'action sensible en attente")

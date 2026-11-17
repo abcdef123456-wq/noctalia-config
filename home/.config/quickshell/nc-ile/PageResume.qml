@@ -89,6 +89,14 @@ Item {
         }
 
         Module {
+            objectName: "nc-resume-garmin"
+            visible: p.c.garmin !== undefined && p.c.garmin !== ""
+            width: parent.width; height: visible ? 44 : 0; radius: 16
+            Texte { anchors.centerIn: parent; width: parent.width - 28; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                    font.pixelSize: 13; font.weight: Font.DemiBold; text: p.c.garmin || "" }
+        }
+
+        Module {
             objectName: "nc-resume-batterie"
             visible: p.c.batterie >= 0
             width: parent.width; height: visible ? 44 : 0; radius: 16

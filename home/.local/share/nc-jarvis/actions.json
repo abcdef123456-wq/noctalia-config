@@ -394,6 +394,12 @@
       "readonly": true
     },
     {
+      "id": "garmin",
+      "label": "Santé Garmin : résumé (si GARMIN_JARVIS=oui)",
+      "fields": [],
+      "readonly": true
+    },
+    {
       "id": "reglage",
       "label": "Un réglage de nc-reglages",
       "fields": [

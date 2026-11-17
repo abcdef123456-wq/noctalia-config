@@ -10,6 +10,7 @@
 #                              (avant de le poser : le clone doit être sûr, à toi, sans écriture pour d'autres, et system/ non modifié ;
 #                              sinon refus, ou question à part non par défaut)
 #   ./install.sh --oui         sans terminal, répond aussi oui au démarrage, à la connexion et aux pilotes (sinon : non)
+#   ./install.sh --garmin      active le tableau de bord Santé Garmin (connecteur non officiel), sans poser la question
 #   ./install.sh --en | --fr   force la langue : anglais ou français (sinon le réglage LANGUE, puis celle du système)
 #
 # Distributions : Arch (et dérivées), Fedora, Debian/Ubuntu, openSUSE : Hyprland et Noctalia v5 sont installés
@@ -31,6 +32,7 @@ OLD_STATE="$HOME/.local/state/legion-dotfiles"   # sauvegardes des versions « l
 BK="$STATE/backup-$(date +%Y%m%d-%H%M%S)"
 MODE=full
 SEULEMENT=""   # --seulement killswitch | energie : une seule étape root facultative, rien d'autre
+GARMIN=0   # --garmin : tableau de bord Santé Garmin (connecteur non officiel), sans poser la question
 OUI=0   # --oui : sans terminal, accepte aussi les étapes sensibles (démarrage, connexion, pilotes)
 HYPR_MIN=0.55.0
 NOCT_DOCS=https://docs.noctalia.dev/noctalia/getting-started/installation/
@@ -185,6 +187,7 @@ for a in "$@"; do
     --files-only) MODE=files ;;
     --restore) MODE=restore ;;
     --oui|--yes) OUI=1 ;;
+    --garmin) GARMIN=1 ;;
     --en|--fr) ;;   # langue : prise en compte plus haut
     --legion|--no-legion) info "$(t "Option $a ignorée : les profils d'énergie sont maintenant proposés sur tous les PC." "Option $a ignored: power profiles are now offered on every PC.")" ;;
     -h|--help)
@@ -201,6 +204,7 @@ install.sh: installs the noctalia-config desktop (Hyprland + Noctalia v5) on you
                              (before installing it: the clone must be yours, not writable by others, with system/ unmodified;
                              otherwise refusal, or a separate question, "no" by default)
   ./install.sh --oui | --yes without a terminal, also answer yes to boot, login and driver steps (otherwise: no)
+  ./install.sh --garmin      enable the Garmin health dashboard (unofficial connector), without asking
   ./install.sh --en | --fr   force the language: English or French (otherwise the LANGUE setting, then the system's)
 
 Distributions: Arch (and derivatives), Fedora, Debian/Ubuntu, openSUSE: Hyprland and Noctalia v5 are installed
@@ -1927,6 +1931,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     choisir "$(t "Un appui sur le bouton d'arrêt :" "Pressing the power button:")" "$(t "Une petite surprise (des doigts partout)" "A little surprise (fingers everywhere)")" "$(t "Des confettis" "Confetti")" \
       "$(t "Le menu Éteindre / Redémarrer / Veille" "The Shut Down / Restart / Sleep menu")" "$(t "Éteindre, comme d'habitude" "Shut down, as usual")"
     case "$CHOIX" in 2) "$R" set BOUTON_ARRET confettis ;; 3) "$R" set BOUTON_ARRET menu ;; 4) "$R" set BOUTON_ARRET eteindre ;; esac >/dev/null 2>&1
+    ask "$(t "Tableau de bord Santé Garmin (connecteur non officiel) ?" "Garmin health dashboard (unofficial connector)?")" n sensible && GARMIN=1
     ok "$(t "C'est noté." "Got it.")"
   fi
   # Tes réglages (nc-reglages) : ~/.config/nc/reglages.conf n'est jamais touché ; ce qui en est tiré (veille, terminal)
@@ -1980,6 +1985,15 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
 else
   warn "$(t "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés." "No active user session (installing from a login console or over SSH?): services not enabled.")"
   info "$(t "Dans ta session Hyprland, lance :" "In your Hyprland session, run:") systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service nc-bt-appel.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
+fi
+# Santé Garmin (--garmin ou la question) : aussi sans session systemd ; un échec n'arrête pas l'installation
+if [ "$GARMIN" = 1 ]; then   # Santé Garmin : un échec n'arrête pas l'installation
+  mkdir -p "$HOME/.config/nc"
+  { grep -v '^GARMIN_ACTIF=' "$HOME/.config/nc/reglages.conf" 2>/dev/null; echo 'GARMIN_ACTIF=oui'; } > "$HOME/.config/nc/reglages.conf.tmp" &&
+    mv "$HOME/.config/nc/reglages.conf.tmp" "$HOME/.config/nc/reglages.conf"
+  NCG="$HOME/.local/bin/nc-garmin"; [ "${NC_INSTALLER_TEST:-}" = 1 ] && [ -n "${NC_GARMIN_BIN:-}" ] && NCG="$NC_GARMIN_BIN"   # faux outil des tests
+  "$NCG" installer ||
+    warn "$(t "Le connecteur Garmin n'a pas pu s'installer : réessaie depuis nc-reglages → Santé Garmin." "The Garmin connector could not be installed: try again from nc-settings → Garmin Health.")"
 fi
 
 # Assistant distant : mêmes fichiers et dépendances sur toutes les distributions, même sans Quickshell/systemd.

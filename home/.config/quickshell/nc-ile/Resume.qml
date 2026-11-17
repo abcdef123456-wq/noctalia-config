@@ -36,7 +36,7 @@ Singleton {
     property bool actif: false                  // pilule visible ou page ouverte
     property bool ouvert: false                 // la page est ouverte (le clic a eu lieu)
     property bool soir: false
-    property var contenu: ({ meteo: null, evenements: [], nbEvenements: 0, maj: 0, importants: [], batterie: -1 })
+    property var contenu: ({ meteo: null, evenements: [], nbEvenements: 0, maj: 0, importants: [], batterie: -1, garmin: "" })
     property bool paquetsPret: false
     property var paquets: null
 
@@ -44,6 +44,7 @@ Singleton {
     readonly property string fichierPaquets: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/nc/paquets.json"
     readonly property bool agendaVoulu: Reglages.val("GOOGLE_INTEGRATION", "non") === "oui" && Reglages.val("GOOGLE_CALENDRIER", "oui") !== "non" && !Reglages.iaCoupee
     readonly property bool meteoVoulue: Reglages.val("ILE_METEO", "oui") !== "non"
+    readonly property bool garminVoulu: Reglages.val("GARMIN_ACTIF", "non") === "oui" && Reglages.val("GARMIN_RESUME_MATIN", "non") === "oui"
     readonly property bool majVoulue: Reglages.val("MAJ_SYSTEME", "ile") !== "non"
 
     function jour(d) { return Qt.formatDate(d, "yyyy-MM-dd") }
@@ -156,6 +157,7 @@ Singleton {
         if (p > 0 && Array.isArray(paquets.paquets))
             imp = paquets.paquets.filter(x => x && x.important && typeof x.nom === "string").map(x => x.nom.slice(0, 60)).slice(0, 3)
         return { meteo: m, evenements: ev.slice(0, 4), nbEvenements: ev.length, maj: p, importants: imp,
+                 garmin: garminVoulu ? GarminEtat.resumeVisible : "",   // jamais brut ni metriques
                  batterie: Etat.aBatterie && !Etat.branche && Etat.pourcent > 0 ? Etat.pourcent : -1 }
     }
     function montrer() {
@@ -163,11 +165,12 @@ Singleton {
         if (!prepare) return
         prepare = false
         if (!Etat.ecranVu || Partage.silence || Partage.retient || Etat.jeu) return
+        if (garminVoulu) GarminEtat.relire()
         var d = new Date()
         var c = construire(d)
         salueLe = jour(d)
         noter()
-        if (!c.meteo && c.nbEvenements === 0 && c.maj === 0 && c.batterie < 0) return      // rien à dire : pas de pilule vide
+        if (!c.meteo && c.nbEvenements === 0 && c.maj === 0 && c.batterie < 0 && c.garmin === "") return      // rien à dire : pas de pilule vide
         contenu = c
         soir = d.getHours() >= 18 || d.getHours() < 5
         ouvert = false
