@@ -271,7 +271,7 @@ systeme() {
   "$HOME/.local/bin/nc-sysinfo" sante | awk -F'\t' 'NF { print "sante=" $1; if ($2 != "") print "cycles=" $2 }'
   # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé.
   # $1 : son chemin, cherché UNE fois au démarrage de l'île (« nc-ile-etat limite-bin »), pas à chaque relecture ; lancé
-  # ici sans sudo (droits de l'utilisateur), seulement s'il a la forme attendue
+  # ici avec les seuls droits de l'utilisateur, seulement s'il a la forme attendue
   case "${1:-}" in
     *[!A-Za-z0-9._/-]*) ;;
     /*/nc-limite-charge) [ -x "$1" ] && echo "protection=$("$1" etat 2>/dev/null)" ;;
