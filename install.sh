@@ -1931,7 +1931,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     choisir "$(t "Un appui sur le bouton d'arrêt :" "Pressing the power button:")" "$(t "Une petite surprise (des doigts partout)" "A little surprise (fingers everywhere)")" "$(t "Des confettis" "Confetti")" \
       "$(t "Le menu Éteindre / Redémarrer / Veille" "The Shut Down / Restart / Sleep menu")" "$(t "Éteindre, comme d'habitude" "Shut down, as usual")"
     case "$CHOIX" in 2) "$R" set BOUTON_ARRET confettis ;; 3) "$R" set BOUTON_ARRET menu ;; 4) "$R" set BOUTON_ARRET eteindre ;; esac >/dev/null 2>&1
-    ask "$(t "Tableau de bord Santé Garmin (connecteur non officiel) ?" "Garmin health dashboard (unofficial connector)?")" n sensible && GARMIN=1
+    ask "$(t "Tableau de bord Santé Garmin (connecteur non officiel) ?" "Garmin health dashboard (unofficial connector)?")" n && GARMIN=1
     ok "$(t "C'est noté." "Got it.")"
   fi
   # Tes réglages (nc-reglages) : ~/.config/nc/reglages.conf n'est jamais touché ; ce qui en est tiré (veille, terminal)

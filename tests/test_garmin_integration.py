@@ -41,7 +41,7 @@ class InstallGarmin(unittest.TestCase):
 
     def test_sans_option_rien_n_est_active(self):
         b = self.banc()
-        r = self.lance(b, "--oui")      # --oui : pas de terminal, la question sensible vaut non
+        r = self.lance(b, "--oui")      # sans terminal, la question vaut son défaut : non
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("GARMIN_ACTIF", self.reglages(b))
         self.assertEqual(self.lances(), "")
@@ -76,7 +76,7 @@ class InstallGarmin(unittest.TestCase):
         src = (REPO / "install.sh").read_text()
         m = re.search(r'ask "\$\(t "Tableau de bord Santé Garmin[^\n]*', src)
         self.assertIsNotNone(m)
-        self.assertRegex(m.group(0), r'\)" n sensible')
+        self.assertRegex(m.group(0), r'\)" n && GARMIN=1')   # non par défaut, non sensible (contrat)
 
 
 class ResumeSource(unittest.TestCase):
