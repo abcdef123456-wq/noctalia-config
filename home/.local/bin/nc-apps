@@ -262,8 +262,33 @@ def cmd_launch(app_id):
         os.chdir(os.path.expanduser("~"))
     pre = [LAUNCH] if os.access(LAUNCH, os.X_OK) else []
     if shutil.which("uwsm-app"):
-        os.execvp("uwsm-app", ["uwsm-app", "--"] + pre + argv)
+        pre = ["uwsm-app", "--"] + pre
+    if lancer_par_hyprland(pre + argv):
+        return
     os.execvp((pre + argv)[0], pre + argv)
+
+
+def chaine_lua(texte):
+    """Texte en chaîne Lua entre guillemets : tout octet hors de la liste sûre devient \\ddd (décimal, 3 chiffres)."""
+    sur = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ._/:=+,-")
+    octets = texte.encode("utf-8", "surrogateescape")
+    return '"' + "".join(chr(b) if b in sur else "\\%03d" % b for b in octets) + '"'
+
+
+def lancer_par_hyprland(argv):
+    """Lance par exec_cmd de Hyprland : il pose le jeton de bureau (initial_workspace_tracking), donc l'appli s'ouvre sur le
+    bureau de départ même si on en change pendant le chargement. Faux si impossible : l'appelant lance comme avant."""
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or not shutil.which("hyprctl"):
+        return False
+    commande = "cd " + shlex.quote(os.getcwd()) + " && " + shlex.join(argv)
+    try:
+        r = subprocess.run(["hyprctl", "dispatch", "hl.dsp.exec_cmd(" + chaine_lua(commande) + ")"],
+                           capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        return True         # Hyprland a peut-être reçu la demande : relancer ici ouvrirait l'appli deux fois
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() == "ok"
 
 
 def points_de_montage(home, table="/proc/self/mountinfo"):
