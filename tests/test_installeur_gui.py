@@ -124,6 +124,17 @@ case "$NC_FAUX_MODE" in
   e '{"type":"fin","code":0}'; exit 0;;
  lent) trap 'exit 130' INT; e '{"type":"etape","n":1,"titre":"Long"}'; while :; do sleep 0.1; done;;
  commande) trap 'exit 130' INT; e '{"type":"etape","n":1,"titre":"Compilation"}'; sleep 60; exit 0;;
+ ctty)
+  { [ -t 1 ] && echo "out_tty" >> "$NC_FAUX_DIR/ctty"; [ -t 0 ] && echo "in_tty" >> "$NC_FAUX_DIR/ctty"
+    { : < /dev/tty; } 2>/dev/null && echo "ctl_tty" >> "$NC_FAUX_DIR/ctty"; }
+  e '{"type":"fin","code":0}'; exit 0;;
+ muet)
+  e '{"type":"question","id":1,"question":"Q ?","defaut":"o","sensible":false}'; a
+  bash -c 'IFS= read -r -t 1 x < /dev/tty; echo "lu:[$x]" > "$NC_FAUX_DIR/tty_lu"'
+  e '{"type":"fin","code":0}'; exit 0;;
+ sortie)
+  printf 'a\rb\rfinal\n'; head -c 200000 /dev/zero | tr '\0' x; echo
+  e '{"type":"fin","code":0}'; exit 0;;
  sans_fin) e '{"type":"info","texte":"salut"}'; exit 3;;
 esac
 '''
@@ -186,6 +197,29 @@ class Bout(Isole):
         self.assertTrue(s.termine.wait(15))
         self.assertEqual(fin, [(3, True)])
         self.assertEqual(evs[0]["texte"], "salut")
+
+    def test_terminal_de_controle(self):
+        s, d, evs, jour, fin = self.lancer("ctty")
+        self.assertTrue(s.termine.wait(15))
+        # stdout et /dev/tty sont le pty ; stdin est /dev/null
+        self.assertEqual(pathlib.Path(d, "ctty").read_text().split(), ["out_tty", "ctl_tty"])
+
+    def test_rien_ecrit_sur_le_maitre(self):
+        vrai, appels = os.write, []
+        with mock.patch("os.write", lambda fd, b: (appels.append(fd), vrai(fd, b))[1]):
+            s, d, evs, jour, fin = self.lancer("muet", lambda s, e: e["type"] == "question" and s.repondre(e["id"], True))
+            maitre = s._maitre
+            self.assertTrue(s.termine.wait(15))
+        self.assertTrue(appels)  # la réponse passe bien par la FIFO
+        self.assertNotIn(maitre, appels)
+        self.assertEqual(pathlib.Path(d, "tty_lu").read_text().strip(), "lu:[]")
+
+    def test_sortie_nettoyee_et_bornee(self):
+        s, d, evs, jour, fin = self.lancer("sortie")
+        self.assertTrue(s.termine.wait(15))
+        self.assertIn("final", jour)
+        self.assertTrue(all(len(l) <= M.LIGNE_MAX and "\r" not in l for l in jour))
+        self.assertTrue(any(l.startswith("xxxx") for l in jour))
 
 
 def _gtk_ok():
