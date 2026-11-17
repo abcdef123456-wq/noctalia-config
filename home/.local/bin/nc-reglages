@@ -344,6 +344,8 @@ class R:
                 v = "aucune"
             if self.cle == "VERROU_MESSAGE" and v.lower() == "none":
                 v = "aucun"
+            if self.cle == "PLUGINS_NC" and v and not re.fullmatch(r"nc-[a-z0-9-]+( nc-[a-z0-9-]+)*", v):
+                raise ValueError(T("noms de plugins nc-* séparés par des espaces", "nc-* plugin names separated by spaces"))
             if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
                 if not re.fullmatch(r"[a-z]{2,3}(,[a-z]{2,3})*", v) or \
                         any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
@@ -395,7 +397,7 @@ SECTIONS_EN = {
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal", "Applications": "Applications",
-    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots", "Santé Garmin": "Garmin health",
+    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots", "Santé Garmin": "Garmin health", "Composants": "Components",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
     "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System", "IA": "AI",
@@ -1633,6 +1635,10 @@ REGLAGES = [
       L("Un petit cœur et la Body Battery dans la barre ; un clic ouvre la page Garmin. Demande la santé Garmin.",
         "A small heart and the Body Battery in the bar; a click opens the Garmin page. Needs Garmin health."),
       groupe="noctalia"),
+    R("PLUGINS_NC", "Composants", L("Plugins nc activés ici", "nc plugins enabled here"), "texte", "",
+      L("Noms des plugins Noctalia nc-* activés depuis la section Composants (cachée dans la fenêtre graphique).",
+        "Names of the nc-* Noctalia plugins enabled from the Components section (hidden in the window)."),
+      groupe="noctalia"),
     R("GARMIN_RESUME_MATIN", "Santé Garmin", L("Résumé du matin", "Morning summary"), "ouinon", "non",
       L("Un résumé de ta nuit et de ta forme au premier réveil de la journée.",
         "A summary of your night and form at the first wake-up of the day.")),
@@ -2465,6 +2471,55 @@ def fin_barre(chemin):
     return re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
 
 
+def plugins_actifs(chemin):
+    """La liste « enabled » de [plugins] dans config.toml (même motif que fin_barre) ; KeyError si absente."""
+    if tomllib:
+        with open(chemin, "rb") as f:
+            return tomllib.load(f)["plugins"]["enabled"]
+    with open(chemin, encoding="utf-8") as f:
+        texte = f.read()
+    sec = re.search(r'^\[plugins\][ \t]*\n(.*?)(?=^\[|\Z)', texte, re.M | re.S)
+    m = sec and re.search(r'^enabled\s*=\s*\[(.*?)\]\s*(?:#.*)?$', sec.group(1), re.M | re.S)
+    if not m:
+        raise KeyError("enabled")
+    return re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
+
+
+PLUGIN_NOM = re.compile(r"nc-[a-z0-9-]+")
+PLUGINS_DEPOT_REL = ".local/share/noctalia/plugins"
+PLUGINS_OPTIONNELS = ("nc-garmin", "nc-ile")      # pas dans la liste de base : leur option les active, ils ne « manquent » pas
+
+
+def plugins_depot():
+    """Les dossiers nc-* du dépôt noté dans ~/.config/nc/depot (liste vide si rien n'est noté)."""
+    try:
+        with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
+            base = f.read().strip()
+        return sorted(n for n in os.listdir(os.path.join(base, "home", PLUGINS_DEPOT_REL))
+                      if PLUGIN_NOM.fullmatch(n) and os.path.isdir(os.path.join(base, "home", PLUGINS_DEPOT_REL, n)))
+    except OSError:
+        return []
+
+
+def plugins_manquants(depot, installes, actifs, ignores=PLUGINS_OPTIONNELS):
+    """Fonction pure. depot : noms nc-* du dépôt ; installes : noms de dossiers présents ; actifs : liste « enabled » de la config.
+    Renvoie les noms du dépôt dont le dossier manque ou dont « nc/<x> » n'est pas activé. Comparaison à l'identique :
+    une entrée de la config comme « ../x », « nc-a/b » ou vide n'est jamais un nom du dépôt, donc ne compte pas."""
+    res = []
+    for n in depot:
+        if not PLUGIN_NOM.fullmatch(n) or n in ignores:
+            continue
+        if n not in installes or "nc/" + n[3:] not in actifs:
+            res.append(n)
+    return res
+
+
+def plugins_actives_ici(vals):
+    """Les noms de PLUGINS_NC gardés, filtrés par le dépôt (jamais un nom hors liste)."""
+    dep = set(plugins_depot())
+    return [n for n in vals.get("PLUGINS_NC", "").split() if n in dep]
+
+
 def toml_val(v):
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -2547,6 +2602,13 @@ def appliquer_noctalia(vals):
                 i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
                 fin = fin[:i] + [PILULE_GARMIN] + fin[i:]
             mettre("bar.default", "end", fin)
+        except (OSError, KeyError, ValueError):
+            pass
+    if vals.get("PLUGINS_NC"):
+        # Le dernier .toml l'emporte : la liste écrite est la liste complète de config.toml plus les plugins activés ici
+        try:
+            base = list(plugins_actifs(os.path.join(NOCTALIA_DIR, "config.toml")))
+            mettre("plugins", "enabled", base + ["nc/" + n[3:] for n in plugins_actives_ici(vals) if "nc/" + n[3:] not in base])
         except (OSError, KeyError, ValueError):
             pass
     if vals.get("VPN_MASQUER_TRAY") == "oui":
@@ -3896,10 +3958,106 @@ def action_raccourci(d):
     raise ValueError(T("action de raccourci invalide", "invalid shortcut action"))
 
 
+def garmin_installer_argv():
+    """L'argv fixe qui installe le connecteur Garmin : dans kitty s'il est là (mot de passe tapé dans le terminal)."""
+    term = shutil.which("kitty")
+    if term:
+        return [term, "--class", "nc-reglages", "-e", "sh", "-c", 'nc-garmin installer --texte; echo; printf "%s" "$0"; read r',
+                T("Entrée pour fermer", "Press Enter to close")]
+    return ["nc-garmin", "installer", "--texte"]
+
+
+def composants(vals):
+    """Les composants optionnels : (id, nom, aide, état, bouton, argv). état : « installe », « absent » ou « desactive ».
+    Chaque argv est FIXE (choisi ici, jamais construit depuis un texte) ; le bouton est None si rien à faire."""
+    home = HOME
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local/share")
+    term = shutil.which("kitty")
+    res = []
+    venv = os.access(os.path.join(data, "nc", "garmin-venv", "bin", "python"), os.X_OK)
+    if venv and vals.get("GARMIN_ACTIF") == "oui":
+        res.append(("garmin", "Santé Garmin", "Garmin health", "installe", None, None))
+    elif venv:
+        res.append(("garmin", "Santé Garmin", "Garmin health", "desactive", "activer", ["nc-reglages", "set", "GARMIN_ACTIF", "oui"]))
+    else:
+        res.append(("garmin", "Santé Garmin", "Garmin health", "absent", "installer", garmin_installer_argv()))
+    if vals.get("NOEUD_JARVIS") == "oui":
+        res.append(("jarvis", "Nœud JARVIS", "JARVIS node", "installe", None, None))
+    else:
+        res.append(("jarvis", "Nœud JARVIS", "JARVIS node", "desactive", "activer", ["nc-reglages", "set", "NOEUD_JARVIS", "oui"]))
+    conf = os.path.isfile(os.path.join(home, ".config/nc/assistant.conf"))
+    res.append(("assistant", "Assistant distant", "Remote assistant", "installe" if conf else "absent",
+                None if conf else "installer",
+                None if conf else ([term, "--class", "nc-reglages", "-e", "nc-assistant", "configurer", "--terminal"] if term
+                                   else ["nc-assistant", "configurer", "--terminal"])))
+    for cle_v, nom_v, outil, arg in (("vpn-nord", "VPN NordVPN", "nordvpn", "nord"),
+                                      ("vpn-proton", "VPN Proton", "protonvpn-app", "proton"),
+                                      ("vpn-mullvad", "VPN Mullvad", "mullvad", "mullvad")):
+        ok = bool(shutil.which(outil))
+        res.append((cle_v, nom_v, nom_v, "installe" if ok else "absent", None if ok else "installer",
+                    None if ok else ["nc-vpn", "installer-client", arg]))
+    try:
+        with open(os.path.join(home, ".claude/settings.json"), encoding="utf-8") as f:
+            hooks = "nc-claude" in f.read()
+    except OSError:
+        hooks = False
+    if hooks and vals.get("CLAUDE_ILE") != "non":
+        res.append(("claude", "Claude Code dans l'île", "Claude Code in the island", "installe", None, None))
+    else:
+        res.append(("claude", "Claude Code dans l'île", "Claude Code in the island", "desactive" if hooks else "absent",
+                    "installer", ["nc-claude", "installer"]))
+    ff = vals.get("FIREFOX_STYLE") == "oui"
+    res.append(("firefox", "Firefox au style de l'île", "Firefox in the island style", "installe" if ff else "absent",
+                None if ff else "installer", None if ff else ["nc-firefox", "installer"]))
+    return res
+
+
+def catalogue_composants(vals):
+    """La section Composants de la fenêtre : une ligne par composant, plus les plugins nc-* qui manquent."""
+    sec = "Composants"
+    etats = {"installe": T("Installé", "Installed"), "absent": T("Absent", "Missing"), "desactive": T("Désactivé", "Disabled")}
+    boutons = {"installer": T("Installer", "Install"), "activer": T("Activer", "Enable")}
+    base = dict(section=sec, sectionNom=nom_section(sec), genre="action", defaut="", choix=[], mini=0, maxi=0, pas=1,
+                unite="", zero="", valeur="", modifie=False, groupe="", relire=True)
+    lignes = []
+    for cid, fr, en, etat, bt, argv in composants(vals):
+        lignes.append(dict(base, cle="composant:" + cid, nom=T(fr, en), aide=etats[etat],
+                           affiche=boutons[bt] if bt else etats[etat], commande=argv or []))
+    try:
+        installes = set(os.listdir(os.path.join(HOME, PLUGINS_DEPOT_REL)))
+    except OSError:
+        installes = set()
+    try:
+        actifs = plugins_actifs(os.path.join(NOCTALIA_DIR, "config.toml"))
+    except (OSError, KeyError, ValueError):
+        actifs = []
+    for n in plugins_manquants(plugins_depot(), installes, actifs):
+        lignes.append(dict(base, cle="plugin:" + n, nom=T(f"Plugin Noctalia {n}", f"Noctalia plugin {n}"),
+                           aide=T("Absent ou pas activé dans Noctalia.", "Missing or not enabled in Noctalia."),
+                           affiche=boutons["activer"], commande=["nc-reglages", "activer-plugin", n]))
+    return lignes
+
+
+def activer_plugin(vals, nom):
+    """Copie le plugin du dépôt s'il manque, puis le garde dans PLUGINS_NC. Le nom doit être EXACTEMENT un nom du dépôt."""
+    if nom not in plugins_depot():
+        raise ValueError(T(f"plugin inconnu : {nom[:40]}", f"unknown plugin: {nom[:40]}"))
+    cible = os.path.join(HOME, PLUGINS_DEPOT_REL, nom)
+    if not os.path.isdir(cible):
+        with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
+            src = os.path.join(f.read().strip(), "home", PLUGINS_DEPOT_REL, nom)
+        os.makedirs(os.path.dirname(cible), exist_ok=True)
+        shutil.copytree(src, cible)
+    gardes = [n for n in vals.get("PLUGINS_NC", "").split() if n != nom] + [nom]
+    return regler(vals, "PLUGINS_NC", " ".join(gardes))
+
+
 def catalogue(vals):
     """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
     res = []
     for r in VISIBLES:
+        if r.cle == "PLUGINS_NC":
+            continue
         v = valeur_sure(vals, r.cle)[0]
         res.append(dict(cle=r.cle, section=r.section, sectionNom=nom_section(r.section), nom=r.nom, genre=r.genre,
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
@@ -3997,14 +4155,12 @@ def catalogue(vals):
     res[fin:fin] = lignes
     # Santé Garmin : quatre actions à la fin de la section (argv fixes) ; « Installer » dans un terminal s'il y en a un
     fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Santé Garmin"), default=len(res))
-    term = shutil.which("kitty")
     lignes = []
     for cle_g, nom_g, aide_g, cmd_g, bt_g, conf_g in (
             ("GARMIN_ACTION_INSTALLER", T("Installer le connecteur", "Install the connector"),
              T("Installe le connecteur non officiel de Garmin Connect, dans un terminal.",
                "Installs the unofficial Garmin Connect connector, in a terminal."),
-             ([term, "--class", "nc-reglages", "-e", "sh", "-c", 'nc-garmin installer --texte; echo; printf "%s" "$0"; read r',
-              T("Entrée pour fermer", "Press Enter to close")] if term else ["nc-garmin", "installer", "--texte"]),
+             garmin_installer_argv(),
              T("Installer", "Install"), ""),
             ("GARMIN_ACTION_CONNECTER", T("Connecter mon compte Garmin", "Connect my Garmin account"),
              T("Te connecte à Garmin Connect (ouvre un terminal).", "Signs you in to Garmin Connect (opens a terminal)."),
@@ -4025,6 +4181,7 @@ def catalogue(vals):
             ligne.update(confirmer=conf_g, bouton=bt_g)
         lignes.append(ligne)
     res[fin:fin] = lignes
+    res += catalogue_composants(vals)
     return res + catalogue_raccourcis() + catalogue_nouveautes()
 
 
@@ -4291,6 +4448,13 @@ def cli(a):
         appliquer([g] if g else [], vals)
         r = PAR_CLE[a[1]]
         print(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(vals, a[1]))}")
+    elif a[0] == "activer-plugin" and len(a) == 2:
+        try:
+            g = activer_plugin(vals, a[1])
+        except (ValueError, OSError) as e:
+            sys.exit(T(f"nc-reglages : {e}", f"nc-settings: {e}"))
+        appliquer([g] if g else [], vals)
+        print(T(f"Plugin {a[1]} activé.", f"Plugin {a[1]} enabled."))
     elif a[0] == "reset":
         if len(a) == 2 and a[1] not in PAR_CLE:
             sys.exit(T(f"nc-reglages : réglage inconnu : {a[1]}", f"nc-settings: unknown setting: {a[1]}"))
