@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""nc-askpass : demande le mot de passe dans une petite fenêtre, pour sudo -A (SUDO_ASKPASS).
+sudo l'appelle avec l'invite en argv[1]. Valider : mot de passe + « \n » sur stdout, code 0.
+Annuler ou fermer : rien sur stdout, code 1. Le mot de passe ne va nulle part ailleurs (ni stderr, ni fichier,
+ni journal, ni environnement). gi s'importe tard : la partie sans GTK reste testable."""
+import sys
+
+
+def texte_invite(argv):
+    t = (argv[1] if len(argv) > 1 else "").strip()
+    return t or "Mot de passe"
+
+
+def ecrire_sortie(mdp, out=None):
+    out = out or sys.stdout
+    out.write(mdp + "\n")
+    out.flush()
+
+
+def demander(invite):
+    """Ouvre la fenêtre ; renvoie le mot de passe, ou None si Annuler / fermeture."""
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gtk
+    if not Gtk.init_check():
+        raise RuntimeError("pas d'écran")
+    res = {"mdp": None}
+
+    def activer(app):
+        win = Adw.ApplicationWindow(application=app, title="Mot de passe", default_width=380, resizable=False)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                      margin_top=18, margin_bottom=18, margin_start=18, margin_end=18)
+        label = Gtk.Label(label=invite, wrap=True, xalign=0)
+        entry = Gtk.PasswordEntry(show_peek_icon=True)
+        annuler = Gtk.Button(label="Annuler")
+        valider = Gtk.Button(label="Valider")
+        valider.add_css_class("suggested-action")
+        boutons = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+
+        def ok(*_):
+            res["mdp"] = entry.get_text()
+            win.close()
+
+        valider.connect("clicked", ok)
+        entry.connect("activate", ok)
+        annuler.connect("clicked", lambda *_: win.close())
+        for w in (annuler, valider):
+            boutons.append(w)
+        for w in (label, entry, boutons):
+            box.append(w)
+        win.set_content(box)
+        win.present()
+        entry.grab_focus()
+
+    app = Adw.Application(application_id="nc.askpass")
+    app.connect("activate", activer)
+    app.run([])
+    return res["mdp"]
+
+
+def main(argv):
+    try:
+        mdp = demander(texte_invite(argv))
+    except Exception as e:  # sans GTK ou sans écran ; jamais le mot de passe dans le message
+        sys.stderr.write("nc-askpass : fenêtre impossible (%s)\n" % type(e).__name__)
+        return 1
+    if mdp is None:
+        return 1
+    ecrire_sortie(mdp)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
