@@ -29,6 +29,8 @@ FAUX = {
                      '  *kbd_backlight*" set "*) for a; do n=$a; done; echo "$n" > "$NC_LEDS/test::kbd_backlight/brightness" ;; esac\nexit 0',
     "bluetoothctl": "exit 0",
     "notify-send": "exit 0",
+    # sudo -n : NC_TEST_SUDO=refus imite l'absence de règle (« a password is required », code 1) ; sinon lance la commande
+    "sudo": 'echo "sudo $*" >> "$JOURNAL"\n[ "$1" = -n ] || exit 9\n[ "${NC_TEST_SUDO:-}" = refus ] && { echo "sudo: a password is required" >&2; exit 1; }\nshift; exec "$@"',
 }
 
 
@@ -60,6 +62,11 @@ class ProfileSync(unittest.TestCase):
         self.clavier(3)
         self.batt = self.home / ".config/noctalia/zz-batterie.toml"
         self.eco = self.home / ".config/noctalia/zz-economie.toml"
+        self.env_plus = {}
+        # Faux assistant root : note sa sous-commande (le vrai est testé dans test_energie_root)
+        a = self.home / "nc-energie-root"
+        a.write_text('#!/bin/sh\necho "assistant $*" >> "$JOURNAL"\nexit 0\n')
+        a.chmod(0o755)
 
     def reglages(self, texte):
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n" + texte)
@@ -77,7 +84,8 @@ class ProfileSync(unittest.TestCase):
         self.journal.write_text("")
         env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
                    XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(config or self.home / ".config"),
-                   NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.leds), NC_TEST_PROFIL=profil)
+                   NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.leds), NC_TEST_PROFIL=profil,
+                   NC_ENERGIE_ROOT_CHEMIN=str(self.home / "nc-energie-root"), **self.env_plus)
         r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=30,
                            stdin=subprocess.DEVNULL)
         self.assertIn("flux D-Bus interrompu", r.stdout, r.stdout + r.stderr)   # un passage, puis la fin du flux
@@ -227,6 +235,51 @@ class ProfileSync(unittest.TestCase):
         self.assertGreaterEqual(self.passages(), 2, self.journal.read_text())
         self.assertIn('profil = "power-saver"', lire())
         p.kill()
+
+    # Carte Ethernet : veille permise en Économie seulement (eth-pm on), jamais ailleurs (eth-pm off) ; dès le premier
+    # passage ; une fois par changement ; sans règle sudo, ni message ni nouvel essai.
+    def appels(self):
+        return [l for l in self.journal.read_text().splitlines() if l.startswith(("assistant", "sudo"))]
+
+    def test_demarrage_deja_en_economie(self):
+        r = self.lancer("power-saver")
+        self.assertEqual(self.appels(), [f"sudo -n {self.home}/nc-energie-root eth-pm on", "assistant eth-pm on"], r.stderr)
+
+    def test_equilibre_et_performance_jamais_en_veille(self):
+        for profil in ("balanced", "performance"):
+            self.lancer(profil)
+            self.assertIn("assistant eth-pm off", self.appels(), profil)
+
+    def test_sans_regle_sudo_silencieux_un_seul_essai(self):
+        self.env_plus = {"NC_TEST_SUDO": "refus"}
+        r = self.lancer("power-saver")
+        self.assertEqual(self.appels(), [f"sudo -n {self.home}/nc-energie-root eth-pm on"], "un seul essai")
+        self.assertNotIn("password", r.stdout + r.stderr)
+        self.assertNotIn("eth", r.stdout + r.stderr)
+
+    def test_sans_assistant_rien(self):
+        (self.home / "nc-energie-root").unlink()
+        r = self.lancer("power-saver")
+        self.assertEqual(self.appels(), [])
+        self.assertNotIn("eth", r.stdout + r.stderr)
+
+    def test_une_seule_fois_par_changement(self):
+        # Deux passages dans le même processus (le second sans changement de profil) : un seul appel
+        source = SCRIPT.read_text()
+        m = source.split("rm -f \"$GPU_STATE\" \"$RTX_GUET\"\napply\n", 1)
+        self.assertEqual(len(m), 2, "le premier passage a bougé")
+        (self.home / "nc-gpu-regle").symlink_to(BIN / "nc-gpu-regle")   # cherché à côté du script
+        script = self.home / "deux-passages"
+        # Économie deux fois (un seul appel), puis Équilibré dans le même processus : « off »
+        script.write_text(m[0] + "apply\napply\nexport NC_TEST_PROFIL=balanced\napply\n")
+        self.journal.write_text("")
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
+                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.leds), NC_TEST_PROFIL="power-saver",
+                   NC_ENERGIE_ROOT_CHEMIN=str(self.home / "nc-energie-root"))
+        r = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        self.assertEqual([l for l in self.appels() if l.startswith("assistant")], ["assistant eth-pm on", "assistant eth-pm off"],
+                         r.stderr)
 
 
 class Paquets(unittest.TestCase):

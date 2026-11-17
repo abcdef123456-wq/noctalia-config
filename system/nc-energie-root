@@ -16,6 +16,7 @@
 #                                             paliers égaux ; seulement si la carte est ACTIVE (jamais réveillée pour ça)
 #   nc-energie-root wifi-ps on|off            économie d'énergie du Wi-Fi (iw)
 #   nc-energie-root usb-autosuspend on|off    mise en veille des périphériques USB, sauf ceux de saisie (clavier, souris)
+#   nc-energie-root eth-pm on|off             veille des cartes Ethernet PCI (classe 0x0200) : on = permise (auto), off = jamais
 #   nc-energie-root audio-ps on|off           économie d'énergie de la puce audio (snd_hda_intel)
 #   nc-energie-root kbd 0|1|2|3               niveau du clavier lumineux (borné au maximum du clavier)
 #   nc-energie-root sudoers UTILISATEUR       la ligne sudo exacte pour ce compte (sans rien écrire)
@@ -103,6 +104,16 @@ usbs() {
       case "$(lire "$i")" in 03|01|07|e0|E0) garde=1 ;; esac
     done
     [ "$garde" = 0 ] && printf '%s\n' "$d"
+  done
+}
+# Cartes réseau filaires PCI (classe 0x0200xx) dont la veille est réglable ; le nom doit être une adresse PCI
+# (dddd:bb:ee.f), rien d'autre (le Wi-Fi est en 0x0280 : jamais touché ici)
+eths() {
+  local d
+  for d in "$S"/bus/pci/devices/*; do
+    case "${d##*/}" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f].[0-7]) ;; *) continue ;; esac
+    [ -f "$d/power/control" ] || continue
+    case "$(lire "$d/class")" in 0x0200[0-9a-f][0-9a-f]) printf '%s\n' "$d" ;; esac
   done
 }
 politiques() { local p; for p in "$S"/devices/system/cpu/cpufreq/policy[0-9]*; do [ -d "$p" ] && printf '%s\n' "$p"; done; }
@@ -229,6 +240,15 @@ do_usb() {
   done
   [ "$n" -gt 0 ] || absent "aucun périphérique USB réglable"
 }
+do_eth() {
+  local d n=0 v=on
+  [ "$1" = on ] && v=auto
+  for d in $(eths); do
+    ecrire "$v" "$d/power/control" || echec "écriture impossible (Ethernet)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "aucune carte Ethernet PCI"
+}
 do_audio() {
   local f="$S/module/snd_hda_intel/parameters/power_save"
   [ -f "$f" ] || absent "pas de puce audio réglable"
@@ -267,6 +287,7 @@ etat() {
   [ -f "$S/module/snd_hda_intel/parameters/power_save" ] && echo "audio=$(lire "$S/module/snd_hda_intel/parameters/power_save")"
   for x in $(wifis); do echo "wifi=$x"; done
   for x in $(usbs); do echo "usb=$(lire "$x/power/control")"; done
+  for x in $(eths); do echo "eth=$(lire "$x/power/control")"; done
   for d in "$S"/class/leds/*kbd_backlight*; do
     [ -f "$d/brightness" ] && echo "kbd=$(lire "$d/brightness")/$(lire "$d/max_brightness")"
   done
@@ -287,12 +308,13 @@ sudoers() {   # la ligne exacte pour ce compte : une commande par sous-commande 
   for v in $NVPL; do liste="$liste, $bin nvidia-pl $v"; done
   for v in $ONOFF; do liste="$liste, $bin wifi-ps $v"; done
   for v in $ONOFF; do liste="$liste, $bin usb-autosuspend $v"; done
+  for v in $ONOFF; do liste="$liste, $bin eth-pm $v"; done
   for v in $ONOFF; do liste="$liste, $bin audio-ps $v"; done
   for v in $KBD; do liste="$liste, $bin kbd $v"; done
   printf '%s ALL=(root) NOPASSWD: %s\n' "$u" "$liste"
 }
 
-[ "$#" -ge 1 ] && [ "$#" -le 2 ] || refus "usage : etat | epp V | boost V | freqmax V | platform V | nvidia-pm V | nvidia-pl V | wifi-ps V | usb-autosuspend V | audio-ps V | kbd V"
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || refus "usage : etat | epp V | boost V | freqmax V | platform V | nvidia-pm V | nvidia-pl V | wifi-ps V | usb-autosuspend V | eth-pm V | audio-ps V | kbd V"
 cmd="$1"; val="${2:-}"
 case "$cmd" in
   etat)             [ "$#" = 1 ] || refus "etat n'a pas d'argument"; etat ;;
@@ -305,6 +327,7 @@ case "$cmd" in
   nvidia-pl)        valeur "$val" $NVPL; racine; do_nvidia_pl "$val" ;;
   wifi-ps)          valeur "$val" $ONOFF; racine; do_wifi "$val" ;;
   usb-autosuspend)  valeur "$val" $ONOFF; racine; do_usb "$val" ;;
+  eth-pm)           valeur "$val" $ONOFF; racine; do_eth "$val" ;;
   audio-ps)         valeur "$val" $ONOFF; racine; do_audio "$val" ;;
   kbd)              valeur "$val" $KBD; racine; do_kbd "$val" ;;
   *)                refus "sous-commande refusée" ;;

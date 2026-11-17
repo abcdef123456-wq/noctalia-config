@@ -521,7 +521,7 @@ etape_energie_root() {
     ok "$(t "Assistant des profils d'énergie poussés : déjà en place." "Advanced power profiles helper: already set up.")"
   else
     info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
-    info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
+    info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, Ethernet, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, Ethernet, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
     if [ -n "$ligne_e" ] && ! ligne_sudoers_sure "$(id -un)" nc-energie-root "$ligne_e"; then
       warn "$(t "La règle sudo fournie par l'assistant d'énergie n'a pas la forme attendue : assistant non installé." "The sudo rule given by the power helper doesn't have the expected form: helper not installed.")"
     elif [ -n "$ligne_e" ] && garde_clone_assistant && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then

@@ -166,6 +166,13 @@ def nvidia_limites():
 USB_GARDES = {"03", "01", "07", "e0"}
 
 
+def eth_reglables():
+    """Cartes Ethernet PCI (classe 0x0200xx) dont la veille est réglable : le même filtre que nc-energie-root."""
+    return [d for d in glob_(os.path.join(SYS, "bus/pci/devices/*"))
+            if re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", os.path.basename(d))
+            and os.path.isfile(os.path.join(d, "power/control")) and re.fullmatch(r"0x0200[0-9a-f]{2}", lire(os.path.join(d, "class")) or "")]
+
+
 def usb_reglables():
     """Périphériques USB dont la veille est réglable : ni saisie, ni audio, ni impression, ni Bluetooth, au niveau du
     périphérique ou d'une de ses interfaces."""
@@ -305,6 +312,8 @@ def fiche():
         caps.append("wifi")
     if usb_reglables():
         caps.append("usb")
+    if eth_reglables():
+        caps.append("eth")
     if os.path.isfile(os.path.join(SYS, "module/snd_hda_intel/parameters/power_save")):
         caps.append("audio")
     if kbd_max > 0:
@@ -405,6 +414,9 @@ def lire_actuel(cle):
     if cle == "usb_autosuspend":
         etats = {lire(os.path.join(d, "power/control")) for d in usb_reglables()}
         return "on" if etats == {"auto"} else ("off" if etats == {"on"} else None)
+    if cle == "eth_power_save":
+        etats = {lire(os.path.join(d, "power/control")) for d in eth_reglables()}
+        return "on" if etats == {"auto"} else ("off" if etats == {"on"} else None)
     if cle == "audio_power_save":
         v = entier(lire(os.path.join(SYS, "module/snd_hda_intel/parameters/power_save")))
         return None if v is None else ("on" if v > 0 else "off")
@@ -421,7 +433,7 @@ def lire_actuel(cle):
 # ── Appliquer une clé ──────────────────────────────────────────────────────────────────────────────────────────
 SOUS_COMMANDES = {"cpu_epp": "epp", "cpu_boost": "boost", "cpu_freq_max": "freqmax", "platform_profile": "platform",
                   "nvidia_pm": "nvidia-pm", "nvidia_pl": "nvidia-pl", "wifi_power_save": "wifi-ps",
-                  "usb_autosuspend": "usb-autosuspend", "audio_power_save": "audio-ps", "clavier_retro": "kbd"}
+                  "usb_autosuspend": "usb-autosuspend", "eth_power_save": "eth-pm", "audio_power_save": "audio-ps", "clavier_retro": "kbd"}
 
 
 def appliquer_cle(cle, valeur):
@@ -600,18 +612,18 @@ def regles(f):
     cours = profil("Cours / bureautique",
                    "Sobre et silencieux pour taper, lire et suivre un cours : le processeur reste économe, l'écran garde sa fréquence.",
                    False, {"profil": "balanced", "cpu_epp": ("balance_power", "power"), "cpu_boost": "on", "wifi_power_save": "on",
-                           "audio_power_save": "on", "usb_autosuspend": "on", "nvidia_pm": "auto", "clavier_retro": "1",
+                           "audio_power_save": "on", "usb_autosuspend": "on", "eth_power_save": "off", "nvidia_pm": "auto", "clavier_retro": "1",
                            "luminosite": "60", "HALO_BATTERIE": "non", "FOND_ANIME": "non", "FOND_ANIME_BATTERIE": "non",
                            "BAT_RELEVES": "oui", "HZ_BALANCED_BAT": "max"})
     jeu = profil("Jeu", "Toute la puissance : processeur et carte graphique à fond, effets gardés.",
                  False, {"profil": "performance", "cpu_epp": "performance", "cpu_boost": "on", "cpu_freq_max": "100",
                          "platform_profile": ("performance", "balanced-performance"), "nvidia_pm": "on", "nvidia_pl": "3",
-                         "wifi_power_save": "off", "audio_power_save": "off", "EFFETS": "tous", "HZ_PERFORMANCE": "max"})
+                         "wifi_power_save": "off", "eth_power_save": "off", "audio_power_save": "off", "EFFETS": "tous", "HZ_PERFORMANCE": "max"})
     film = profil("Film sur batterie",
                   "Le plus d'autonomie pour regarder un film : processeur freiné, écran à 60 Hz (confirmé avant), luminosité modérée.",
                   True, {"profil": "power-saver", "cpu_epp": "power", "cpu_boost": "off", "cpu_freq_max": "80",
                          "platform_profile": ("low-power", "quiet", "cool"), "nvidia_pm": "auto", "wifi_power_save": "on",
-                         "audio_power_save": "on", "usb_autosuspend": "on", "clavier_retro": "0", "luminosite": "40",
+                         "audio_power_save": "on", "usb_autosuspend": "on", "eth_power_save": "on", "clavier_retro": "0", "luminosite": "40",
                          "HALO_BATTERIE": "non", "FOND_ANIME": "non", "FOND_ANIME_BATTERIE": "non", "HZ_ECO": "60"})
     # Le « film » n'est marqué que s'il baisse vraiment la fréquence de l'écran
     if film["reglages"].get("HZ_ECO") != "60":

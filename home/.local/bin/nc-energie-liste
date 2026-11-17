@@ -30,7 +30,7 @@ ONOFF = ("on", "off")
 
 # Capacités (ce que la fiche détecte) : chaque clé de la liste blanche en demande au plus une
 CAPACITES = ("profil", "luminosite", "ecran", "batterie", "bluetooth", "epp", "boost", "freqmax", "platform",
-             "nvidia_pm", "nvidia_pl", "wifi", "usb", "audio", "clavier", "limite_charge")
+             "nvidia_pm", "nvidia_pl", "wifi", "usb", "eth", "audio", "clavier", "limite_charge")
 
 # cle -> (niveau, valeurs, capacité ou None, libellé français, libellé anglais). Les valeurs variables selon le PC
 # (profil, EPP, plateforme, clavier) sont resserrées par valeurs_permises() d'après la fiche.
@@ -73,6 +73,8 @@ CLES = {
     "nvidia_pl":        (2, ("0", "1", "2", "3"), "nvidia_pl", "Limite de puissance NVIDIA (0 : minimum, 3 : maximum)", "NVIDIA power limit (0: min, 3: max)"),
     "wifi_power_save":  (2, ONOFF, "wifi", "Économie d'énergie du Wi-Fi", "Wi-Fi power saving"),
     "usb_autosuspend":  (2, ONOFF, "usb", "Veille des périphériques USB (hors saisie)", "USB autosuspend (not input devices)"),
+    # « on » : veille permise ; la carte (r8169) ne s'endort que sans câble, donc rien ne coupe un film en filaire
+    "eth_power_save":   (2, ONOFF, "eth", "Veille de la carte Ethernet (sans câble)", "Ethernet card sleep (no cable)"),
     "audio_power_save": (2, ONOFF, "audio", "Économie d'énergie de la puce audio", "Audio chip power saving"),
     "clavier_retro":    (2, ("0", "1", "2", "3"), "clavier", "Rétroéclairage du clavier", "Keyboard backlight"),
     "limite_charge":    (2, ONOFF, "limite_charge", "Limite de charge de la batterie (80 %)", "Battery charge limit (80%)"),

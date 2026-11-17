@@ -17,6 +17,13 @@ class TlpBatterie(unittest.TestCase):
         self.assertRegex(conf, r"(?m)^PCIE_ASPM_ON_BAT=powersupersave\b")
         self.assertRegex(conf, r"(?m)^CPU_BOOST_ON_BAT=1\b")          # rien de visible : le turbo reste
 
+    def test_liste_noire_garde_les_defauts_de_tlp(self):
+        # Le réglage remplace la liste par défaut : l'union des défauts de TLP 1.6 à 1.11 doit y rester, plus r8169
+        conf = (REPO / "system/tlp.d/10-nc.conf").read_text()
+        m = re.findall(r'(?m)^RUNTIME_PM_DRIVER_DENYLIST="([a-z0-9_ ]+)"$', conf)
+        self.assertEqual(len(m), 1)
+        self.assertLessEqual({"amdgpu", "mei_me", "nouveau", "nvidia", "radeon", "xhci_hcd", "r8169"}, set(m[0].split()))
+
     def test_fichier_perso_conseil_sans_modification(self):
         source = (REPO / "install.sh").read_text()
         m = re.search(r"(?ms)^  tlp_conseil_perso\(\) \{.*?^  \}\n", source)

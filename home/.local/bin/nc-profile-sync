@@ -47,6 +47,8 @@ NOCTALIA_BAT="$NOCTALIA_CONF/zz-batterie.toml"   # avant zz-economie : l'Économ
 ALIM="${NC_POWER_SUPPLY:-/sys/class/power_supply}"
 LEDS="${NC_LEDS:-/sys/class/leds}"
 CFG="$HOME/.config/nc-profile.conf"
+# L'assistant root de nc-energie (règle sudo à commandes exactes) ; NC_ENERGIE_ROOT_CHEMIN : un faux, pour les tests
+ENERGIE_ROOT="${NC_ENERGIE_ROOT_CHEMIN:-/usr/local/bin/nc-energie-root}"
 # Rétroéclairage de l'écran : le même que les touches et l'île (nc-brightness : nvidia_0 en mode carte dédiée) ;
 # sans nc-brightness, le premier qui n'est pas celui de la carte NVIDIA
 BACKLIGHT=$("$HOME/.local/bin/nc-brightness" appareil 2>/dev/null) ||
@@ -94,6 +96,7 @@ on_battery() { NC_POWER_SUPPLY="$ALIM" nc_sur_batterie; }
 
 last_profile=""
 last_bat=""
+last_eth=""                                     # veille de la carte Ethernet demandée au dernier passage : on, off
 last_kbd=""                                     # état du clavier lumineux au dernier passage : normal, bas, eteint
 ECO_AUTO_FLAG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-eco-auto"   # profil d'avant l'Économie automatique
 
@@ -454,6 +457,18 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   elif [ "$profile" != power-saver ] && [ "$last_profile" = power-saver ]; then
     [ -e "$rt/nc-bt-off" ] && bluetoothctl power on >/dev/null 2>&1 && log "$(t "Bluetooth rallumé" "Bluetooth back on")"
     rm -f "$rt/nc-bt-off"
+  fi
+
+  # Carte Ethernet PCI : veille permise seulement en Économie, jamais ailleurs (sinon le câble branché n'est pas vu ;
+  # TLP ne la gère plus : system/tlp.d/10-nc.conf). Dès le premier passage (session ouverte déjà en Économie). Le pilote
+  # r8169 ne s'endort que sans câble : rien ne coupe un film en filaire ; mais en Économie, un câble branché ensuite peut
+  # ne pas être vu (le défaut de départ, voulu ici pour l'autonomie). Sans assistant, sans règle sudo ou sans carte :
+  # rien, sans message, et pas de nouvel essai avant le prochain changement de profil.
+  local eth=off
+  [ "$profile" = power-saver ] && eth=on
+  if [ "$eth" != "$last_eth" ]; then
+    [ -x "$ENERGIE_ROOT" ] && sudo -n "$ENERGIE_ROOT" eth-pm "$eth" >/dev/null 2>&1
+    last_eth=$eth
   fi
 
   # Rétroéclairage du clavier : éteint en Économie (ECO_CLAVIER), ramené au niveau 1 sur batterie hors Performance

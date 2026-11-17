@@ -94,7 +94,7 @@ class Mux(unittest.TestCase):
         """Un service : premier passage (alimentation de départ), puis les changements, puis la fin du flux D-Bus."""
         self.journal.write_text("")
         (self.alim / "AC/online").write_text("1\n" if secteur else "0\n")
-        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_ENERGIE_ROOT_CHEMIN="/nonexistent/nc-energie-root", NC_LANGUE="fr",
                    XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
                    XDG_STATE_HOME=str(self.home / "state"), NC_SYSFS=str(self.home / "sys"),
                    NC_EGL_DIR=str(self.home / "egl"), NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.home / "leds"),
@@ -122,7 +122,7 @@ class Mux(unittest.TestCase):
 
     def nc_reglages(self, *args):
         """Le vrai nc-reglages, HOME temporaire (systemctl et hyprctl : les faux)."""
-        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_ENERGIE_ROOT_CHEMIN="/nonexistent/nc-energie-root", NC_LANGUE="fr",
                    XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
                    XDG_STATE_HOME=str(self.home / "state"))
         r = subprocess.run(["python3", str(REGLAGES), *args], env=env, capture_output=True, text=True, timeout=60,

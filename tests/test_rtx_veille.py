@@ -94,7 +94,7 @@ class Base(unittest.TestCase):
         (bp / f"pci-{BUS}-card").symlink_to("../card0")
         (bp / "pci-0000:05:00.0-render").symlink_to("../renderD128")
         self.env_base = dict(
-            HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
+            HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_ENERGIE_ROOT_CHEMIN="/nonexistent/nc-energie-root", NC_LANGUE="fr", JOURNAL=str(self.journal),
             XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
             NC_SYSFS=str(self.sys), NC_PROC=str(self.proc), NC_DEV=str(self.dev), NC_EGL_DIR=str(self.egl),
             NC_TEST_PROFIL="power-saver", WAYLAND_DISPLAY="faux-wayland")

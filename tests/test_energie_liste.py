@@ -77,7 +77,7 @@ class Valides(unittest.TestCase):
     def test_niveaux(self):
         self.assertEqual({c for c, d in L.CLES.items() if d[0] == 2},
                          {"cpu_epp", "cpu_boost", "cpu_freq_max", "platform_profile", "nvidia_pm", "nvidia_pl", "wifi_power_save",
-                          "usb_autosuspend", "audio_power_save", "clavier_retro", "limite_charge"})
+                          "usb_autosuspend", "eth_power_save", "audio_power_save", "clavier_retro", "limite_charge"})
         self.assertEqual(set(L.CLES_REGLAGES) | {"profil", "luminosite"}, {c for c, d in L.CLES.items() if d[0] == 1})
 
 
@@ -114,6 +114,7 @@ class Rejets(unittest.TestCase):
         for cle, val, cap in (("cpu_epp", "power", "epp"), ("cpu_boost", "off", "boost"), ("cpu_freq_max", "80", "freqmax"),
                               ("platform_profile", "low-power", "platform"), ("nvidia_pm", "auto", "nvidia_pm"),
                               ("nvidia_pl", "1", "nvidia_pl"), ("wifi_power_save", "on", "wifi"), ("usb_autosuspend", "on", "usb"),
+                              ("eth_power_save", "on", "eth"),
                               ("audio_power_save", "on", "audio"), ("clavier_retro", "1", "clavier"),
                               ("limite_charge", "on", "limite_charge"), ("luminosite", "40", "luminosite"),
                               ("profil", "balanced", "profil"), ("HALO_BATTERIE", "non", "batterie"),

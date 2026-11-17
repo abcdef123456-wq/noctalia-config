@@ -89,7 +89,7 @@ class Refus(Base):
                      ("epp", "power", "extra"), ("boost", "1"), ("boost", "ON"), ("freqmax", "70"), ("freqmax", "100%"),
                      ("freqmax", "$(id)"), ("platform", "custom"), ("platform", "max-power"), ("platform", "/etc/passwd"),
                      ("nvidia-pl", "4"), ("nvidia-pl", "-1"), ("nvidia-pl", "250"), ("nvidia-pm", "off"), ("kbd", "9"),
-                     ("kbd", "*"), ("wifi-ps", "yes"), ("usb-autosuspend", "auto"), ("audio-ps", "1"),
+                     ("kbd", "*"), ("wifi-ps", "yes"), ("usb-autosuspend", "auto"), ("eth-pm", "auto"), ("eth-pm", "On"), ("audio-ps", "1"),
                      ("fan", "1"), ("undervolt", "-30"), ("ryzenadj", "--tctl-temp=90"), ("tdp", "65"),
                      ("ecrire", "/sys/x", "1"), ("etat", "x"), ("sudoers",), ("sudoers", "a b"), ("sudoers", "-x"),
                      ("sudoers", "alice;id")]:
@@ -206,6 +206,33 @@ class Ecritures(Base):
             self.assertEqual(self.lire(f"bus/usb/devices/{nom}/power/control"), "on", nom)
         self.assertEqual(self.lire("bus/usb/devices/1-1/power/control"), "auto")
 
+    def eth(self):
+        # Une carte Ethernet (r8169, 0x020000) et une Wi-Fi (0x028000), toutes deux en veille permise ; un faux nom
+        for nom, classe in (("0000:04:00.0", "0x020000"), ("0000:03:00.0", "0x028000"), ("pas-une-adresse", "0x020000"),
+                            ("0000:08:00.8", "0x020000"), ("0000:09:00.0", "0x02000"), ("0000:0a:00.0", "0x0200xyz")):
+            ecrire(self.sys / f"bus/pci/devices/{nom}/class", classe)
+            ecrire(self.sys / f"bus/pci/devices/{nom}/power/control", "auto")
+
+    def test_eth_seulement_les_cartes_ethernet(self):
+        self.eth()
+        self.assertEqual(self.lancer("eth-pm", "off").returncode, 0)
+        self.assertEqual(self.lire("bus/pci/devices/0000:04:00.0/power/control"), "on")
+        self.assertEqual(self.lire("bus/pci/devices/0000:03:00.0/power/control"), "auto", "Wi-Fi (0x0280) jamais touché")
+        for nom in ("pas-une-adresse", "0000:08:00.8", "0000:09:00.0", "0000:0a:00.0"):
+            self.assertEqual(self.lire(f"bus/pci/devices/{nom}/power/control"), "auto", nom)
+        for x in ("0000:01:00.0", "0000:05:00.0"):
+            self.assertEqual(self.lire(f"bus/pci/devices/{x}/power/control"), "on", "cartes graphiques jamais touchées")
+        self.assertEqual(self.lancer("eth-pm", "on").returncode, 0)
+        self.assertEqual(self.lire("bus/pci/devices/0000:04:00.0/power/control"), "auto")
+        self.assertIn("eth=auto", self.lancer("etat").stdout)
+        self.assertEqual(self.lancer("etat").stdout.count("eth="), 1)
+
+    def test_eth_sans_carte_ethernet(self):
+        # La machine générique n'a qu'un Wi-Fi : rien de tel (3), et rien n'est écrit ailleurs
+        r = self.lancer("eth-pm", "off")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(self.lire("bus/pci/devices/0000:05:00.0/power/control"), "on")
+
     def test_audio_et_clavier(self):
         self.assertEqual(self.lancer("audio-ps", "on").returncode, 0)
         self.assertEqual(self.lire("module/snd_hda_intel/parameters/power_save"), "1")
@@ -237,7 +264,7 @@ class Ecritures(Base):
         shutil.rmtree(self.sys)
         self.sys.mkdir()
         for args in (("epp", "power"), ("boost", "on"), ("freqmax", "60"), ("platform", "quiet"), ("nvidia-pm", "auto"),
-                     ("nvidia-pl", "1"), ("wifi-ps", "on"), ("usb-autosuspend", "on"), ("audio-ps", "on"), ("kbd", "1")):
+                     ("nvidia-pl", "1"), ("wifi-ps", "on"), ("usb-autosuspend", "on"), ("eth-pm", "on"), ("audio-ps", "on"), ("kbd", "1")):
             self.assertEqual(self.lancer(*args).returncode, 3, args)
         self.assertEqual(self.lancer("etat").returncode, 0)
 
@@ -377,7 +404,9 @@ class Sudoers(Base):
         self.assertNotIn("*", self.ligne())
         self.assertNotIn(f"{base},", self.ligne() + ",", "pas de commande sans argument : tout serait permis")
         self.assertNotIn("sudoers", " ".join(cmds), "la sous-commande sudoers n'est pas permise par sudo")
-        self.assertEqual(len(cmds), 1 + 4 + 2 + 3 + 6 + 2 + 4 + 2 + 2 + 2 + 4)
+        self.assertEqual(len(cmds), 1 + 4 + 2 + 3 + 6 + 2 + 4 + 2 + 2 + 2 + 2 + 4)
+        for v in ("on", "off"):
+            self.assertIn(f"{base} eth-pm {v}", cmds)
 
     def test_chaque_ligne_est_acceptee_par_l_assistant(self):
         # Sur un PC vide, une commande acceptée répond 3 (rien de tel ici), jamais 2 (refusée) : la règle sudo

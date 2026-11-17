@@ -50,7 +50,7 @@ class Base(unittest.TestCase):
         (self.home / fichier).write_text(texte)
 
     def env(self, **e):
-        base = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+        base = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_ENERGIE_ROOT_CHEMIN="/nonexistent/nc-energie-root", NC_LANGUE="fr",
                     XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
                     NC_SYSFS=str(self.sys), NC_EGL_DIR=str(self.egl))
         base.update(e)

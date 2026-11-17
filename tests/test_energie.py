@@ -241,6 +241,22 @@ class Regles(Energie):
         self.assertEqual(stat.S_IMODE((self.tmp / "config/nc/profils-energie.json").stat().st_mode), 0o600)
         self.assertEqual(r["profils"][2]["materiel"], True)
 
+    def test_ethernet_veille_seulement_en_economie(self):
+        # Une carte Ethernet (0x020000) et une Wi-Fi (0x028000) : seule la première compte ; Film (Économie) permet la
+        # veille, Cours et Jeu jamais. Puis appliquer « Film » met bien la carte Ethernet en « auto », Wi-Fi intouché.
+        for nom, classe in (("0000:04:00.0", "0x020000"), ("0000:03:00.0", "0x028000")):
+            ecrire(self.sys / f"bus/pci/devices/{nom}/class", classe)
+            ecrire(self.sys / f"bus/pci/devices/{nom}/power/control", "on")
+        self.assertIn("eth", self.json("fiche")["capacites"])
+        r = self.json("proposer", "--regles")
+        gardes = {p["id"]: p["reglages"] for p in json.loads((self.tmp / "config/nc/profils-energie.json").read_text())["profils"]}
+        self.assertEqual(r["rejets"], [])
+        self.assertEqual({k: v.get("eth_power_save") for k, v in gardes.items()},
+                         {"cours-bureautique": "off", "jeu": "off", "film-sur-batterie": "on"})
+        self.assertTrue(self.json("appliquer", "film-sur-batterie", "--oui", "--oui-hz")["applique"])
+        self.assertEqual(self.lire("bus/pci/devices/0000:04:00.0/power/control"), "auto")
+        self.assertEqual(self.lire("bus/pci/devices/0000:03:00.0/power/control"), "on")
+
     def test_ecran_sans_haute_frequence_pas_de_60hz(self):
         self.outil("hyprctl", 'echo \'[{"name":"eDP-1","availableModes":["1920x1080@60.00Hz"]}]\'\n')
         r = self.json("proposer", "--regles")
