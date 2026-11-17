@@ -592,6 +592,156 @@ ShellRoot {
                 self.assertNotIn(erreur, sortie)
 
 
+_APPS = '[{"id":"a1.desktop","name":"Alpha one","generic":"","keywords":"","icon":""},{"id":"a2.desktop","name":"Alpha two","generic":"","keywords":"","icon":""},{"id":"a3.desktop","name":"Alpha three","generic":"","keywords":"","icon":""}]'
+_ATTENTE = "if (spot.nomIA === '' || !spot.applisLues) return"
+# Corps des étapes du Timer de chaque scénario de l'audit : (corps, délai de nc-apps en secondes)
+_SCEN_ENTREE = ("""
+ if (etape === 0) { if (spot.nomIA === "") return
+  champ.text = "alpha"
+  verifier(!spot.applisLues, "nc-apps list est lent : applis pas encore lues")
+  spot.valider(0, false); verifier(spot.entreeEnAttente, "Entrée mise en attente")
+  spot.actif = false; verifier(!spot.entreeEnAttente, "fermé : l'Entrée en attente est oubliée"); etape++; return }
+ if (etape === 1) { if (!spot.applisLues) return
+  verifier(Etat.fermetures === 0, "l'Entrée en attente n'est pas rejouée après la fermeture"); Qt.quit() }
+""", 1)
+_SCEN_SELECTION = ("""
+ if (etape === 0) { @ATTENTE@
+  champ.text = "alpha"; etape++; return }
+ if (etape === 1) { verifier(spot.resultats.length >= 3, "3 applis : " + JSON.stringify(titres()))
+  spot.sel = 2; var t = spot.resultats[2].titre
+  spot.calcul = "42"; spot.chercher()
+  verifier(spot.resultats[0].titre.indexOf("= ") === 0, "le calcul arrive en tête : " + JSON.stringify(titres()))
+  verifier(spot.resultats[spot.sel].titre === t, "la sélection suit sa ligne : " + spot.sel + " " + JSON.stringify(titres()))
+  Qt.quit() }
+""", 0)
+_SCEN_SOURIS = ("""
+ if (etape === 0) { @ATTENTE@
+  champ.text = "alpha"; etape++; return }
+ if (etape === 1) { var zs = zones(spot, [])
+  verifier(zs.length >= 3, "zones de lignes : " + zs.length)
+  // survol(ligne, position dans la fenêtre) : ce que le MouseArea de chaque ligne appelle
+  spot.survol(0, {x: 50, y: 30}); verifier(spot.pointeur !== null, "la position est notée")
+  spot.sel = 1; spot.survol(2, {x: 50, y: 30})
+  verifier(spot.sel === 1, "même position fenêtre, autre ligne (la liste a défilé) : la sélection ne bouge pas : " + spot.sel)
+  spot.survol(2, {x: 55, y: 30})
+  verifier(spot.sel === 2, "un vrai déplacement fait suivre la ligne : " + spot.sel)
+  spot.survol(0, {x: 55, y: 31})
+  verifier(spot.sel === 0, "un autre déplacement : " + spot.sel)
+  Qt.quit() }
+""", 0)
+_SCEN_ZOMBIE = ("""
+ if (etape === 0) { if (spot.nomIA === "") return
+  spot.demander("veille"); etape++; return }
+ if (etape === 1) { if (!spot.reflechit) return
+  spot.actif = false; spot.actif = true
+  console.log("SIGNAUX apres reouverture : reflechit=" + spot.reflechit)
+  spot.demander("neuve"); console.log("SIGNAUX nouvelle question juste apres : reflechit=" + spot.reflechit)
+  fin = Date.now() + 3500; etape++; return }
+ if (etape === 2) { if (Date.now() < fin) return
+  console.log("SIGNAUX fin : reponse=[" + spot.reponse + "] erreur=[" + spot.erreurIA + "] reflechit=" + spot.reflechit)
+  verifier(spot.reponse === "" && spot.erreurIA === "" && spot.plan === null && spot.choixIA.length === 0, "reste de l'ancienne demande : [" + spot.reponse + "] [" + spot.erreurIA + "] " + spot.choixIA.length)
+  Qt.quit() }
+""", 0, {"nc-demander": '#!/bin/sh\ncase "$1" in\n  --ia) echo \'{"nom": "Claude (API Anthropic)", "agent": "claude", "coupee": false}\' ;;\n  --flux) trap \'echo tue > "$HOME/trap_ok"; echo "{\\"t\\": \\"reste\\", \\"choices\\": [\\"a\\"]}"; echo "{\\"erreur\\": true, \\"t\\": \\"tard\\"}"; exit 1\' TERM; sleep 4 & wait ;;\nesac\n'})
+_SCEN_REOUVERTURE = ("""
+ if (etape === 0) { if (spot.nomIA === "") return
+  spot.reponse = "x"; spot.questionPosee = "q"; spot.choixIA = [{a: 1}]; spot.erreurIA = "e"; spot.modeAgent = true; spot.modeTexte = true
+  spot.commandeIA = "c"; spot.reponseAide = "a"; spot.confirmer = 2
+  spot.actif = false; spot.actif = true; etape++; return }
+ if (etape === 1) {
+  verifier(spot.reponse === "" && spot.questionPosee === "" && spot.erreurIA === "", "textes d'IA remis à zéro")
+  verifier(spot.choixIA.length === 0 && spot.plan === null && spot.confirmer === -1, "choix, plan et confirmation remis à zéro")
+  verifier(!spot.modeAgent && !spot.modeTexte && spot.commandeIA === "" && spot.reponseAide === "", "modes remis à zéro")
+  Qt.quit() }
+""", 0)
+
+
+def _lancer(corps, delai, extra=None, mutations=()):
+    """Un vrai qs hors écran (HOME, XDG_* et TMPDIR dans un dossier jetable) qui joue les étapes `corps` sur le Spotlight.
+    `mutations` : (ancien, nouveau) appliqués à la copie de Recherche.qml, pour prouver qu'un test voit bien son correctif."""
+    with tempfile.TemporaryDirectory(prefix="nc-spotlight-audit-") as d:
+        root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+        q = root / "qml"
+        for ancien, nouveau in mutations:
+            src = (q / "Recherche.qml").read_text()
+            assert ancien in src, "mutation sans effet : " + ancien
+            (q / "Recherche.qml").write_text(src.replace(ancien, nouveau))
+        (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({}); readonly property bool iaCoupee: false\n'
+                                        ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+        (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                    ' property bool nuit: false; readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                    ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
+        (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
+        (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+        (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
+        noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+        (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+        b = root / ".local/bin"; b.mkdir(parents=True)
+        scripts = {"nc-apps": "#!/bin/sh\ncase \"$1\" in list) sleep %d; echo '%s' ;; *) exit 1 ;; esac\n" % (delai, _APPS),
+                   "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                   "nc-demander": '#!/bin/sh\ncase "$1" in\n  --ia) echo \'{"nom": "Claude (API Anthropic)", "agent": "claude", "coupee": false}\' ;;\nesac\n'}
+        scripts.update(extra or {})
+        for nom, code in scripts.items():
+            (b / nom).write_text(code); (b / nom).chmod(0o755)
+        (root / "cache/nc").mkdir(parents=True)
+        (root / "cache/nc/aide-config.json").write_text(json.dumps({"entrees": [], "vides": [], "synonymes": []}))
+        (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ property real fin: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function zones(item,out){if(item.objectName==="nc-spotlight-zone")out.push(item);for(var i=0;i<item.children.length;i++)zones(item.children[i],out);return out}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+@CORPS@
+ } }
+ Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
+}'''.replace("@CORPS@", corps.replace("@ATTENTE@", _ATTENTE)))
+        env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                   XDG_CACHE_HOME=str(root / "cache"), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
+                   XDG_STATE_HOME=str(root / "state"), TMPDIR=d, PATH=str(b) + os.pathsep + os.environ["PATH"])
+        env.pop("WAYLAND_DISPLAY", None)
+        r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=25)
+        return r.returncode, r.stdout + r.stderr
+
+
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+class SpotlightAudit(unittest.TestCase):
+    """Audit du Spotlight : un vrai qs hors écran par point."""
+    def _jouer(self, scenario):
+        code, sortie = _lancer(*scenario)
+        self.assertEqual(code, 0, sortie)
+        for erreur in ("ReferenceError", "TypeError", "is not a type", "Unable to assign"):
+            self.assertNotIn(erreur, sortie)
+
+    def test_entree_en_attente_pas_rejouee_apres_fermeture(self):
+        self._jouer(_SCEN_ENTREE)
+
+    def test_selection_suit_sa_ligne_quand_le_calcul_arrive(self):
+        self._jouer(_SCEN_SELECTION)
+
+    def test_souris_immobile_ne_vole_pas_la_selection(self):
+        self._jouer(_SCEN_SOURIS)
+        src = (QML / "Recherche.qml").read_text()
+        self.assertIn("r.survol(ligne.index, zoneLigne.mapToItem(null,", src)
+        self.assertIn("r.valider(ligne.index,", src)
+        self.assertIn("r.actionDock(ligne.index)", src)
+
+    def test_reouverture_sans_restes_d_ia(self):
+        self._jouer(_SCEN_REOUVERTURE)
+        src = (QML / "Recherche.qml").read_text()
+        self.assertIn("demandeur.running = false; agent.running = false", src[src.index("function demarrer()"):])
+
+
+    def test_ancienne_demande_ignoree(self):
+        """Un processus d'IA arrêté par la réouverture finit après coup : sa fin ne doit rien écrire."""
+        self._jouer(_SCEN_ZOMBIE)
+
+
 class SpotlightSource(unittest.TestCase):
     """Lecture du source (pas besoin de Quickshell) : ce que le bilan (constats, sortie de systemctl) met à l'écran n'est
     jamais interprété comme du HTML, et l'icône de l'en-tête est celle de l'IA du bilan."""
@@ -618,6 +768,15 @@ class SpotlightSource(unittest.TestCase):
         src = (QML / "Recherche.qml").read_text()
         self.assertIn("agent: zoneReponse.enDiag ? diag.agent : r.agentReponse", src)
         self.assertNotIn("zoneReponse.enDiag ? r.agentIA", src)
+
+    def test_bornes_et_dock_fermes(self):
+        src = (QML / "Recherche.qml").read_text()
+        res = src[src.index("onResultatsChanged:"):]
+        self.assertIn("if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)", res[:300])
+        dock = src[src.index("id: modifDock"):]
+        self.assertIn("if (!r.actif) return", dock[:dock.index("onExited")+200])
+        eff = src[src.index("id: effacerRetourDock"):]
+        self.assertIn("r.actif && r.retourDock", eff[:400])
 
 
 if __name__ == "__main__":

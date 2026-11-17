@@ -85,6 +85,14 @@ Item {
     readonly property bool reflechit: demandeur.running || agent.running
     // « @ » : le plan de l'IA (nc-ia agir --json), puis chaque action confirmée par Entrée (nc-ia executer)
     property var plan: null
+    property bool ignoreDemandeur: false
+    property bool ignoreAgent: false
+    property var pointeur: null          // dernière position de la souris dans la fenêtre (null : inconnue)
+    // Position de la souris en coordonnées de la fenêtre : la sélection ne suit que si elle a bougé
+    function survol(i, p) {
+        if (pointeur !== null && (pointeur.x !== p.x || pointeur.y !== p.y)) sel = i
+        pointeur = { x: p.x, y: p.y }
+    }
     property bool modeAgent: false
     property string porteeAgent: ""      // « Organiser ce bureau » : le plan ne peut toucher que ce bureau
     readonly property bool agentPermis: !Reglages.iaCoupee && Reglages.val("IA_ACTIONS", "non") === "confirmer"
@@ -107,6 +115,7 @@ Item {
         stdout: StdioCollector { id: sortieAgent }
         stderr: StdioCollector { id: erreurAgent }
         onExited: code => {
+            if (r.ignoreAgent) { r.ignoreAgent = false; return }
             var d = null
             try { d = JSON.parse(sortieAgent.text) } catch (e) {}
             if (code === 0 && d) { r.plan = d; r.reponse = d.reponse || Reglages.t("Plan prêt.", "Plan ready."); r.iaReponse = d.ia || r.iaReponse; r.agentReponse = d.agent || r.agentReponse }
@@ -292,13 +301,21 @@ Item {
     // Chargée à la demande : déjà active à sa création (une seule initialisation, une fois tout créé) ; rouverte avant
     // d'être déchargée : réinitialisée au changement de « actif »
     property bool cree: false
-    onActifChanged: if (actif && cree) demarrer()
+    onActifChanged: { if (!actif) entreeEnAttente = false; else if (cree) demarrer() }     // fermé : une Entrée en attente ne vaut plus
     Component.onCompleted: { cree = true; if (actif) demarrer() }
     function demarrer() {
         texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
         var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
         porteeAgent = agirTout ? Etat.agirPortee : ""; Etat.agirPortee = ""
         modeDiag = false; diag.annuler()
+        // Restes de la session d'avant (rouverte sans avoir été déchargée) : réponse, plan et questions repartent de zéro
+        // (jamais l'exécuteur ni le bilan : une réparation en cours continue)
+        // Leur fin arrive après : le résultat de l'ancien processus est ignoré (drapeaux lus par leurs gestionnaires de fin)
+        pointeur = null
+        ignoreDemandeur = demandeur.running; ignoreAgent = agent.running
+        demandeur.running = false; agent.running = false
+        reponse = ""; questionPosee = ""; plan = null; choixIA = []; erreurIA = ""; modeAgent = false; modeTexte = false
+        commandeIA = ""; reponseAide = ""; confirmer = -1
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
         retourDock = null
         applisLues = false
@@ -354,9 +371,10 @@ Item {
         id: demandeur
         onStarted: if (demandeur.stdinEnabled) { write(r.texteEnvoi); r.texteEnvoi = ""; stdinEnabled = false }
         // Le code de sortie arrive avant la fin de running : l'échec est connu quand la réponse est mise en forme
-        onExited: code => { if (code !== 0 && r.erreurIA === "") r.erreurIA = Reglages.t("L'IA a échoué (code ", "The AI failed (code ") + code + ")" }
+        onExited: code => { if (!r.ignoreDemandeur && code !== 0 && r.erreurIA === "") r.erreurIA = Reglages.t("L'IA a échoué (code ", "The AI failed (code ") + code + ")" }
         onRunningChanged: {
             if (running) { r.brut = "" }
+            else if (r.ignoreDemandeur) { r.ignoreDemandeur = false; r.brut = "" }
             else if (r.erreurIA !== "") {
                 r.reponse = (r.brut.trim() ? r.brut.trim() + "\n\n" : "") + r.erreurIA
                 r.commandeIA = ""
@@ -375,6 +393,7 @@ Item {
         }
         stdout: SplitParser {
             onRead: ligne => {
+                if (r.ignoreDemandeur) return      // l'IA arrêtée peut encore vider son tube avant sa fin
                 try {
                     let d = JSON.parse(ligne)
                     if (d.ia) { r.iaReponse = d.ia; r.agentReponse = d.agent || r.agentReponse }    // repli compris
@@ -398,7 +417,7 @@ Item {
                 r.applisLues = true
                 r.chercher()
                 // Entrée tapée avant que les applis soient chargées : validée maintenant, sur la liste complète
-                if (r.entreeEnAttente) { r.entreeEnAttente = false; r.valider(r.sel, false) }
+                if (r.entreeEnAttente) { r.entreeEnAttente = false; if (r.actif) r.valider(r.sel, false) }
             }
         }
     }
@@ -530,6 +549,7 @@ Item {
         stdout: StdioCollector { id: sortieDock }
         stderr: StdioCollector { id: erreurDock }
         onExited: code => {
+            if (!r.actif) return
             r.retourDock = code === 0
                 ? { ok: true, titre: sortieDock.text.trim().split("\n").pop() || Reglages.t("Dock mis à jour", "Dock updated") }
                 : { ok: false, titre: Reglages.t("Dock inchangé : ", "Dock unchanged: ") + modifDock.nom,
@@ -539,7 +559,7 @@ Item {
         }
     }
     // Le retour reste 3 s, puis s'efface de lui-même
-    Timer { id: effacerRetourDock; interval: 3000; onTriggered: { if (r.retourDock && r.retourDock.ok !== undefined) { r.retourDock = null; r.chercher() } } }
+    Timer { id: effacerRetourDock; interval: 3000; onTriggered: { if (r.actif && r.retourDock && r.retourDock.ok !== undefined) { r.retourDock = null; r.chercher() } } }
 
     Process {
         id: lireFenetres
@@ -1039,11 +1059,15 @@ Item {
         }
         if (retourSession) out.unshift(ligneRetour())     // une session supprimée depuis la recherche ordinaire
         if (retourDock) out.unshift(ligneRetourDock())    // une appli épinglée (ou retirée) à l'instant
+        // Sources arrivées après coup (fichiers, calcul) : la ligne choisie reste la même, même si elle change de rang
+        let choisie = sel > 0 ? resultats[sel] : null
         resultats = out
+        if (choisie) { let i = out.findIndex(x => x.titre === choisie.titre && x.sous === choisie.sous); if (i >= 0) sel = i }
         if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
     }
     // Liste refaite (sources arrivées, saisie changée) : la suppression demandée ne vaut que pour la même ligne
     onResultatsChanged: {
+        if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
         let x = confirmer >= 0 ? resultats[confirmer] : null
         if (confirmer >= 0 && (!x || !x.suppr || x.titre !== titreConfirme)) annulerSuppr()
     }
@@ -1284,9 +1308,12 @@ Item {
                 // Clic droit sur une appli : l'épingler au dock, ou l'en retirer
                 MouseArea {
                     id: zoneLigne
+                    objectName: "nc-spotlight-zone"
                     anchors.fill: parent; hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onEntered: r.sel = ligne.index
+                    // pas onEntered, et seulement si le pointeur a bougé dans la fenêtre : la souris immobile sous une liste
+                    // qui bouge ne vole pas la sélection (le 1er événement note la position)
+                    onPositionChanged: e => r.survol(ligne.index, zoneLigne.mapToItem(null, e ? e.x : 0, e ? e.y : 0))
                     onClicked: e => {
                         if (e.button === Qt.RightButton) r.actionDock(ligne.index)
                         else r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
