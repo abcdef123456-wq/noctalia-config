@@ -12,8 +12,8 @@ cesser de marcher si Garmin change son service.
   nc-garmin installer                    crée le venv et installe garminconnect (versions et hachages épinglés)
   nc-garmin desinstaller                 retire le venv, les jetons et le cache
   nc-garmin login | logout               connexion dans un terminal kitty (mot de passe et code MFA tapés là, jamais en argument) | oubli des jetons
-  nc-garmin resume                       une ligne pour le résumé du matin (vide si inactif ou pendant un partage d'écran)
-Pour les tests : HOME, XDG_*, NC_SYSFS, NC_GARMIN_REQUIREMENTS, NC_PARTAGE_ACTIF."""
+  nc-garmin resume                       une ligne pour le résumé du matin (vide si inactif ; l'île le masque en partage d'écran)
+Pour les tests : HOME, XDG_*, NC_SYSFS, NC_GARMIN_REQUIREMENTS."""
 import json
 import math
 import os
@@ -76,7 +76,8 @@ def chemins():
             "eau": os.path.join(cfg, "hydratation.json"), "demo": os.path.join(cfg, "demo"),
             "cache": os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "nc", "garmin.json"),
             "venv": os.path.join(data, "garmin-venv"),
-            "barre": os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nc-garmin-barre.json")}
+            # données de santé : jamais dans /tmp partagé ; sans XDG_RUNTIME_DIR, pas de fichier pour la barre
+            "barre": os.path.join(os.environ["XDG_RUNTIME_DIR"], "nc-garmin-barre.json") if os.environ.get("XDG_RUNTIME_DIR") else None}
 
 
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -312,10 +313,11 @@ def exiger_actif():
 # ── sous-commandes ──────────────────────────────────────────────────────────────────────────────────────────
 def cmd_etat():
     d = dict(etat(), contrat=1)
-    try:
-        write_private(chemins()["barre"], json.dumps(d, ensure_ascii=False))
-    except (OSError, Refus):
-        pass
+    if chemins()["barre"]:
+        try:
+            write_private(chemins()["barre"], json.dumps(d, ensure_ascii=False))
+        except (OSError, Refus):
+            pass
     sortie(d)
 
 
@@ -504,12 +506,9 @@ def cmd_logout():
     sortie({"connecte": False})
 
 
-def partage_actif():
-    return os.environ.get("NC_PARTAGE_ACTIF") == "1" or os.path.exists(os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nc-partage-actif"))
-
-
 def cmd_resume():
-    if not actif() or partage_actif():
+    # le partage d'écran n'est connu que de l'île (Partage.silence) : c'est elle qui masque le résumé (lot G3)
+    if not actif():
         return
     e = etat()
     if not e["pret"]:

@@ -58,7 +58,9 @@ def main():
         mdp = getpass.getpass("Mot de passe / Password : ")
         api = Garmin(courriel, mdp, prompt_mfa=lambda: input("Code MFA : ").strip())
         api.login(tokenstore=jetons)
-        api.dump(jetons)
+        api.client.dump(jetons)  # Garmin n'a pas de dump : c'est le client (0600 dans 0700, liens refusés)
+        if not os.path.isfile(os.path.join(jetons, "garmin_tokens.json")):
+            raise RuntimeError("jetons absents")
         for f in os.listdir(jetons):  # les jetons ne sont lisibles que par toi
             p = os.path.join(jetons, f)
             if stat.S_ISREG(os.lstat(p).st_mode):

@@ -22,9 +22,18 @@ class GarminConnectConnectionError(Exception):
 class GarminConnectAuthenticationError(Exception):
     pass
 
+class _Client:
+    def dump(self, path):
+        p = os.path.join(path, "garmin_tokens.json")
+        with open(p, "w") as f:
+            f.write('{"di_token": "JETON456"}')
+        os.chmod(p, 0o600)
+
+
 class Garmin:
+    # comme garminconnect 0.3.20 : pas de méthode dump sur Garmin, seulement sur Garmin.client
     def __init__(self, *a, **k):
-        pass
+        self.client = _Client()
 
     def login(self, tokenstore=None):
         with open(os.environ["FAKE_LOG"], "a") as f:
@@ -104,7 +113,6 @@ class Base(unittest.TestCase):
         e = dict(os.environ, HOME=self.home, XDG_CONFIG_HOME=self.cfg, XDG_CACHE_HOME=self.cache_dir, XDG_DATA_HOME=self.data,
                  XDG_STATE_HOME=os.path.join(self.home, ".local", "state"), XDG_RUNTIME_DIR=self.run_dir, TMPDIR=self.tmp,
                  PYTHONPATH=self.fakelib, FAKE_LOG=self.log, FAKE_URL=URL, NC_LANGUE="en")
-        e.pop("NC_PARTAGE_ACTIF", None)
         e.update(extra)
         return e
 
@@ -338,12 +346,47 @@ class TestCatalogueEtReglages(Base):
             json.dump({"version": 1, "ts": time.time(), "metriques": {"body_battery": 80, "sommeil_s": 27000, "pas": 8000}}, f)
         os.chmod(self.cache, 0o600)
         self.assertEqual(self.nc("resume").stdout.strip(), "Body Battery 80, sleep 7 h 30, 8000 steps")
-        self.assertEqual(self.nc("resume", NC_PARTAGE_ACTIF="1").stdout, "")
-        open(os.path.join(self.run_dir, "nc-partage-actif"), "w").close()
-        self.assertEqual(self.nc("resume").stdout, "")
-        os.unlink(os.path.join(self.run_dir, "nc-partage-actif"))
         self.reglages(GARMIN_ACTIF="non")
         self.assertEqual(self.nc("resume").stdout, "")
+
+
+class TestLogin(Base):
+    def login(self, entree, **extra):
+        os.makedirs(self.jetons, mode=0o700, exist_ok=True)
+        return subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.dirname(self.bin)), "libexec", "nc-garmin-login.py"),
+                               self.jetons], input=entree, capture_output=True, text=True, env=self.env(**extra), timeout=60,
+                              start_new_session=True)  # sans terminal : getpass lit stdin
+
+    def test_login_ecrit_les_jetons_sans_rien_montrer(self):
+        r = self.login("moi@example.invalid\nMOTDEPASSE789\n", GARMINTOKENS='{"di_token": "VOLE"}')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        p = os.path.join(self.jetons, "garmin_tokens.json")
+        self.assertEqual(self.mode(p), 0o600)
+        for flux in (r.stdout, r.stderr):
+            for secret in ("MOTDEPASSE789", "JETON456"):
+                self.assertNotIn(secret, flux)
+        self.assertEqual([json.loads(x)["env"] for x in open(self.log)], [None])
+
+    def test_login_erreur_traduite(self):
+        r = self.login("moi@example.invalid\nMOTDEPASSE789\n", FAKE_MODE="auth")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refused", r.stdout)
+        for flux in (r.stdout, r.stderr):
+            self.assertNotIn("SECRET123", flux)
+            self.assertNotIn("MOTDEPASSE789", flux)
+        self.assertFalse(os.path.exists(os.path.join(self.jetons, "garmin_tokens.json")))
+
+
+class TestBarre(Base):
+    def test_sans_xdg_runtime_dir_rien_dans_tmp(self):
+        e = self.env()
+        e.pop("XDG_RUNTIME_DIR")
+        avant = set(os.listdir(self.tmp))
+        r = subprocess.run([sys.executable, self.bin, "etat-json"], capture_output=True, text=True, env=e, timeout=60)
+        self.assertEqual(json.loads(r.stdout)["actif"], True, r.stderr)
+        self.assertEqual(set(os.listdir(self.tmp)), avant)
+        self.assertFalse(os.path.exists("/tmp/nc-garmin-barre.json") and os.stat("/tmp/nc-garmin-barre.json").st_uid == os.getuid()
+                         and os.path.getmtime("/tmp/nc-garmin-barre.json") > __import__("time").time() - 30)
 
 
 class TestInstaller(Base):
