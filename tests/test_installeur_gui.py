@@ -60,6 +60,8 @@ class Pur(Isole):
 
     def test_ansi_color(self):
         self.assertEqual(M.couleur_accent({"ANSI_COLOR": "38;2;23;147;209"}), "#1793d1")
+        self.assertEqual(M.couleur_accent({"ANSI_COLOR": "38;5;196"}), "#ff0000")
+        self.assertEqual(M.couleur_accent({"ANSI_COLOR": "38;5;33"}), "#0087ff")
         self.assertEqual(M.couleur_accent({"ANSI_COLOR": "0;34", "ID": "debian"}), "#3465a4")
         self.assertEqual(M.couleur_accent({"ANSI_COLOR": "n'importe quoi", "ID_LIKE": "arch"}), "#1793d1")
         self.assertEqual(M.couleur_accent({}), M.DEFAUT_ACCENT)

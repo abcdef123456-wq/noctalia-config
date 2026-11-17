@@ -38,6 +38,12 @@ T = {
         "echec": "L'installation a échoué (code {code})",
         "inattendu": "L'installation s'est arrêtée sans prévenir (code {code}).",
         "script_absent": "install.sh est introuvable.",
+        "maj_titre": "Mise à jour", "maj_go": "Mettre à jour", "maj_rien": "Aucune nouveauté lisible.",
+        "maj_reussi": "Mise à jour terminée", "maj_annulee": "Mise à jour annulée",
+        "maj_echec": "La mise à jour a échoué (code {code})",
+        "maj_c1": "Dépôt introuvable ou modifications locales : rien n'a été changé (code 1).",
+        "maj_c2": "GitHub injoignable : vérifiez la connexion, puis réessayez (code 2).",
+        "maj_script_absent": "nc-maj est introuvable.",
     },
     "en": {
         "titre": "Installation", "bienvenue": "Welcome", "go": "Start",
@@ -50,6 +56,12 @@ T = {
         "echec": "The installation failed (code {code})",
         "inattendu": "The installation stopped without warning (code {code}).",
         "script_absent": "install.sh was not found.",
+        "maj_titre": "Update", "maj_go": "Update", "maj_rien": "No readable news.",
+        "maj_reussi": "Update complete", "maj_annulee": "Update cancelled",
+        "maj_echec": "The update failed (code {code})",
+        "maj_c1": "Repository not found or local changes: nothing was changed (code 1).",
+        "maj_c2": "GitHub unreachable: check the connection, then try again (code 2).",
+        "maj_script_absent": "nc-maj was not found.",
     },
 }
 
@@ -143,9 +155,17 @@ def formater_reponse(id_, reponse):
     return "%d %s\n" % (id_, nettoyer_ligne(reponse))
 
 
-def message_fin(code, lang="fr", inattendu=False):
-    """(réussi, texte) pour la page de fin."""
+def message_fin(code, lang="fr", inattendu=False, maj=False):
+    """(réussi, texte) pour la page de fin. En mode mise à jour : 1 et 2 sont dits en clair."""
     t = T[lang]
+    if maj and not inattendu:
+        if code == 0:
+            return True, t["maj_reussi"]
+        if code in (130, 10):
+            return False, t["maj_annulee"]
+        if code in (1, 2):
+            return False, t["maj_c%d" % code]
+        return False, t["maj_echec"].format(code=code)
     if code == 0 and not inattendu:
         return True, t["reussi"]
     if code in (130, 10):
@@ -166,9 +186,32 @@ def analyser_args(args, env=None):
             mode = "files-only"
         elif a in ("--fr", "--en"):
             langue = a[2:]
+        elif a == "--maj":
+            continue  # lu par est_maj ; jamais transmis
         else:
             reste.append(a)
     return mode, langue, reste
+
+
+def est_maj(args):
+    return "--maj" in args
+
+
+def nouveautes(depot, n=10):
+    """Les derniers commits du dépôt, comme nouveautes() de nc-reglages : [(date, titre)]. Jamais d'exception."""
+    try:
+        r = subprocess.run(["git", "-C", depot, "log", "-%d" % n, "--date=format:%Y-%m-%d",
+                            "--format=%cd%x1f%s"], capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    sortie = []
+    for l in (r.stdout.splitlines() if r.returncode == 0 else []):
+        d, _, sujet = l.partition("\x1f")
+        titre = re.split(r"\s*(?::|\()", sujet, 1)[0].strip() or sujet.strip()
+        if sujet:
+            sortie.append((d, titre))
+    return sortie
 
 
 def options_install(mode, langue, reste=()):
@@ -181,11 +224,22 @@ def chemin_script(env=None):
     return env.get("NC_INSTALLEUR_SCRIPT") or os.path.join(os.path.dirname(HERE), "install.sh")
 
 
-def construire_commande(options, sortie, entree, env=None):
+def chemin_maj(env=None):
+    """nc-maj : NC_MAJ_SCRIPT (tests), sinon ~/.local/bin/nc-maj, sinon celui du dépôt."""
+    env = os.environ if env is None else env
+    if env.get("NC_MAJ_SCRIPT"):
+        return env["NC_MAJ_SCRIPT"]
+    perso = os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "bin", "nc-maj")
+    if os.path.isfile(perso):
+        return perso
+    return os.path.join(os.path.dirname(HERE), "home", ".local", "bin", "nc-maj")
+
+
+def construire_commande(options, sortie, entree, env=None, maj=False):
     """(argv, env) : une liste, jamais de shell ; les options partent telles quelles."""
     env = dict(os.environ if env is None else env)
     env.update(NC_UI="1", NC_UI_SORTIE=sortie, NC_UI_ENTREE=entree)
-    return [chemin_script(env)] + list(options), env
+    return [(chemin_maj if maj else chemin_script)(env)] + list(options), env
 
 
 # ---------- distribution ----------
@@ -212,8 +266,22 @@ def lire_os_release(env=None):
 
 _ANSI_SIMPLE = {0: "#2e3436", 1: "#cc0000", 2: "#4e9a06", 3: "#c4a000", 4: "#3465a4", 5: "#75507b", 6: "#06989a",
                 7: "#d3d7cf"}
+_ANSI_VIF = ["#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec"]
 _TABLE = {"arch": "#1793d1", "debian": "#d70a53", "fedora": "#3c6eb4", "opensuse": "#73ba25", "suse": "#73ba25"}
 DEFAUT_ACCENT = "#3584e4"
+
+
+def _ansi256(i):
+    """Palette xterm 256 : 0-7 et 8-15 (ANSI), 16-231 cube 6x6x6, 232-255 gris."""
+    if i < 8:
+        return _ANSI_SIMPLE[i]
+    if i < 16:
+        return _ANSI_VIF[i - 8]
+    if i < 232:
+        i -= 16
+        return "#%02x%02x%02x" % tuple((0, 95, 135, 175, 215, 255)[x] for x in (i // 36, i // 6 % 6, i % 6))
+    g = 8 + 10 * (i - 232)
+    return "#%02x%02x%02x" % (g, g, g)
 
 
 def couleur_accent(osr):
@@ -222,6 +290,8 @@ def couleur_accent(osr):
     n = [int(x) for x in re.findall(r"\d+", ac)] if re.fullmatch(r"[\d;]*", ac) else []
     if len(n) >= 5 and n[-5] == 38 and n[-4] == 2 and all(0 <= x <= 255 for x in n[-3:]):
         return "#%02x%02x%02x" % tuple(n[-3:])
+    if len(n) >= 3 and n[-3] == 38 and n[-2] == 5 and 0 <= n[-1] <= 255:
+        return _ansi256(n[-1])
     for c in n:
         if 30 <= c <= 37 or 90 <= c <= 97:
             return _ANSI_SIMPLE[c % 10 if c < 90 else c - 90] if (c % 10) in _ANSI_SIMPLE else DEFAUT_ACCENT
@@ -250,8 +320,8 @@ class Session:
     """Lance install.sh, lit les événements, répond. Les rappels arrivent depuis des fils : à l'appelant de passer
     au fil graphique. on_fin(code, inattendu) est appelé une fois, après le dernier événement."""
 
-    def __init__(self, options, on_evenement, on_journal, on_fin, env=None):
-        self.options, self.env = list(options), env
+    def __init__(self, options, on_evenement, on_journal, on_fin, env=None, maj=False):
+        self.options, self.env, self.maj = list(options), env, maj
         self.on_evenement, self.on_journal, self.on_fin = on_evenement, on_journal, on_fin
         self.proc = None
         self._dossier = None
@@ -269,7 +339,7 @@ class Session:
         # O_RDWR : jamais bloquant à l'ouverture, et pas de fin de fichier quand install.sh ferme son côté
         self._fd_sortie = os.open(sortie, os.O_RDWR | os.O_NONBLOCK)
         self._fd_entree = os.open(entree, os.O_RDWR)
-        argv, env = construire_commande(self.options, sortie, entree, self.env)
+        argv, env = construire_commande(self.options, sortie, entree, self.env, self.maj)
         # pseudo-terminal de contrôle : sans lui, sudo lie son ticket au pid du parent et redemande le mot de passe
         # à chaque sous-script ; avec lui, une seule demande (par nc-askpass). Rien n'est jamais écrit sur le maître.
         self._maitre, esclave = pty.openpty()
@@ -382,6 +452,7 @@ class Interface:
     def __init__(self, app, args, env=None):
         self.env = os.environ if env is None else env
         self.mode, self.langue, self.reste = analyser_args(args, self.env)
+        self.maj = est_maj(args)
         self.t = T[self.langue]
         self.osr = lire_os_release(self.env)
         self.session = None
@@ -398,7 +469,8 @@ class Interface:
         vue.set_content(self.pile)
         self.win.set_content(vue)
         self.pile.add_named(self._page_bienvenue(), "bienvenue")
-        self.pile.add_named(self._page_choix(), "choix")
+        if not self.maj:
+            self.pile.add_named(self._page_choix(), "choix")
         self.pile.add_named(self._page_install(), "install")
         self.fin_page = Adw.StatusPage()
         self.fin_bouton = Gtk.Button(label=self.t["fermer"], halign=Gtk.Align.CENTER)
@@ -411,13 +483,21 @@ class Interface:
 
     def _appliquer_accent(self):
         c = couleur_accent(self.osr)
-        css = "@define-color accent_bg_color %s;\n@define-color accent_color %s;\n" % (c, c)
+        # libadwaita 1.6+ : variable CSS --accent-bg-color sur :root (AdwStyleManager:accent-color est en lecture
+        # seule) ; @define-color en repli pour les versions plus anciennes. Source : doc libadwaita 1-latest,
+        # « Named Colors / Style Classes » et AdwStyleManager:accent-color.
+        css = (":root { --accent-bg-color: %s; --accent-color: %s; }\n"
+               "@define-color accent_bg_color %s;\n@define-color accent_color %s;\n" % (c, c, c, c))
         p = Gtk.CssProvider()
         p.load_from_string(css) if hasattr(p, "load_from_string") else p.load_from_data(css.encode())
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def _page_bienvenue(self):
         p = Adw.StatusPage(title=nom_distribution(self.osr), description=self.t["intro"])
+        if self.maj:
+            news = nouveautes(os.path.dirname(HERE))
+            p.set_title(self.t["maj_titre"])
+            p.set_description("\n".join("%s  %s" % x for x in news) or self.t["maj_rien"])
         logo, theme = self.osr.get("LOGO", ""), Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         f = fichier_logo(logo)
         if logo and re.fullmatch(r"[\w.+-]+", logo) and theme.has_icon(logo):
@@ -429,10 +509,10 @@ class Interface:
                 p.set_icon_name("system-software-install-symbolic")
         else:
             p.set_icon_name("system-software-install-symbolic")
-        b = Gtk.Button(label=self.t["go"], halign=Gtk.Align.CENTER)
+        b = Gtk.Button(label=self.t["maj_go" if self.maj else "go"], halign=Gtk.Align.CENTER)
         b.add_css_class("pill")
         b.add_css_class("suggested-action")
-        b.connect("clicked", lambda *_: self.pile.set_visible_child_name("choix"))
+        b.connect("clicked", self._lancer if self.maj else (lambda *_: self.pile.set_visible_child_name("choix")))
         p.set_child(b)
         return p
 
@@ -480,14 +560,19 @@ class Interface:
 
     # -- lancement
     def _lancer(self, *_):
-        mode = ["complet", "no-system", "files-only"][self.rang_mode.get_selected()]
-        langue = ("fr", "en")[self.rang_langue.get_selected()]
-        if not os.path.isfile(chemin_script(self.env)):
-            return self._terminer(1, False, self.t["script_absent"])
+        if self.maj:
+            mode, langue = self.mode, self.langue
+            script, absent = chemin_maj(self.env), "maj_script_absent"
+        else:
+            mode = ["complet", "no-system", "files-only"][self.rang_mode.get_selected()]
+            langue = ("fr", "en")[self.rang_langue.get_selected()]
+            script, absent = chemin_script(self.env), "script_absent"
+        if not os.path.isfile(script):
+            return self._terminer(1, False, self.t[absent])
         self.session = Session(options_install(mode, langue, self.reste),
                                lambda e: GLib.idle_add(self._evenement, e),
                                lambda l: GLib.idle_add(self._journal, l),
-                               lambda c, i: GLib.idle_add(self._terminer, c, i), self.env)
+                               lambda c, i: GLib.idle_add(self._terminer, c, i), self.env, self.maj)
         try:
             self.session.demarrer()
         except OSError as e:
@@ -537,7 +622,7 @@ class Interface:
         self.btn_annuler.set_sensitive(False)
         if not inattendu and code == 0:
             self._marquer_fait()
-        ok, msg = message_fin(code, self.langue, inattendu)
+        ok, msg = message_fin(code, self.langue, inattendu, self.maj)
         self.fin_page.set_title(texte or msg)
         self.fin_page.set_icon_name("emblem-ok-symbolic" if ok else "dialog-error-symbolic")
         self.pile.set_visible_child_name("fin")
@@ -603,7 +688,7 @@ class Interface:
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):
-        print("nc-installeur [--no-system|--files-only] [--fr|--en] [options d'install.sh]")
+        print("nc-installeur [--maj] [--no-system|--files-only] [--fr|--en] [options d'install.sh]")
         return 0
     try:
         charger_gtk()

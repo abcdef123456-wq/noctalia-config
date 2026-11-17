@@ -8,6 +8,7 @@
 #                          version ; lancé toutes les heures par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non ;
 #                          et par Telegram si « Alertes Telegram » : nc-alertes version, réessayé tant qu'il n'est pas parti)
 #   nc-maj annoncer <texte>  interne : la notification à boutons, lancée à part par verifier
+#   nc-maj --graphique     la même mise à jour dans la fenêtre de l'installeur (sans session graphique ni GTK4/libadwaita : terminal)
 #   nc-maj --help          cette aide (rien n'est récupéré ni installé) ; les autres options vont à install.sh
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -26,12 +27,20 @@ base_installee() {
   [ -n "$v" ] && git rev-parse -q --verify "$v^{commit}" 2>/dev/null || git rev-parse HEAD
 }
 
+# Ouvre l'installeur graphique en mode mise à jour (même test que le gtk_ok d'install.sh) ; ne revient que s'il est impossible
+ouvrir_graphique() {
+  [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ -f "$depot/installeur/nc-installeur" ] || return 1
+  python3 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("Adw","1"); from gi.repository import Gtk, Adw' >/dev/null 2>&1 || return 1
+  exec python3 "$depot/installeur/nc-installeur" --maj "$@"
+}
+
 # nc-maj annoncer <texte> : interne (lancé à part par « verifier »). La notification et le traitement du choix
 if [ "${1:-}" = annoncer ]; then
   choix="$(timeout 6h notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
     -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
     -- "$(t "Nouvelle version de la config" "New version of the config")" "${2:-}" 2>/dev/null || true)"
   if [ "$choix" = maj ]; then
+    ouvrir_graphique || true
     # Le terminal de nc-apps (xdg-terminal-exec, $TERMINAL, puis le premier installé) ; le chemin et le texte passent en
     # arguments du sh (jamais collés dans la commande : un HOME avec une espace ou une apostrophe resterait entier)
     cmd=()
@@ -147,7 +156,7 @@ fi
 for a in "$@"; do
   case "$a" in
     -h|--help)
-      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
       echo "$(t "Options d'install.sh (passées telles quelles) : --no-system, --files-only, --restore, --en, --fr" "install.sh options (passed as is): --no-system, --files-only, --restore, --en, --fr")"
       exit 0 ;;
   esac
@@ -158,6 +167,10 @@ if [ ! -d "$depot/.git" ]; then
   exit 1
 fi
 cd "$depot"
+args=(); graphique=0
+for a in "$@"; do if [ "$a" = --graphique ]; then graphique=1; else args+=("$a"); fi; done
+set -- ${args[@]+"${args[@]}"}
+[ "$graphique" = 1 ] && { ouvrir_graphique "$@" || true; }
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "$(t "Le dépôt $depot contient des modifications locales : mise à jour annulée pour ne pas les écraser." "The repository $depot has local changes: update cancelled so they are not overwritten.")" >&2
   echo "$(t "(git status pour les voir ; git stash pour les mettre de côté)" "(git status to see them; git stash to set them aside)")" >&2
