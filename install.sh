@@ -509,54 +509,62 @@ pname() {
 }
 
 # Anciens assistants root de l'Acer (nc-cpu-limite, nc-ventilateurs, nc-puissance, nc-gpu-limite) : remplacés par
-# nc-energie-root. On ne retire que les 4 programmes exacts, ordinaires et à root, et les fichiers sudoers qui ne citent
-# QUE ces programmes (jamais un fichier mixte, ALL, ni les nôtres). Tout est copié dans $BK/system avant ; si la copie
-# échoue, rien n'est retiré. La sauvegarde RAPL d'origine de nc-cpu-limite reste en place : aucun autre fichier n'est touché.
+# nc-energie-root. On ne retire que les 4 programmes exacts, ordinaires et à root, et les fichiers sudoers dont CHAQUE
+# règle ne cite que ces programmes (liste blanche de caractères d'abord : ni « : » d'une 2e règle, ni « \ » de suite de
+# ligne ; jamais un fichier mixte, ALL, #include, #UID, ni les nôtres), et seulement si le programme cité est retiré aussi.
+# Sauvegarde : root lit (tar), l'utilisateur écrit dans $BK/system, aucun lien posé là n'est suivi en root. Retrait des
+# règles par « .nc-retrait » (sudo ignore les noms à point) puis visudo -c ; s'il refuse, mv en retour, rien n'est lu
+# dans $BK et aucun programme n'est retiré. La sauvegarde RAPL de nc-cpu-limite reste en place : rien d'autre n'est touché.
 # NC_RACINE_MIGRATION, NC_SUDO et NC_MIGRATION_UID_ROOT (hors root seulement) servent aux tests.
 migrer_anciens_assistants() {
   local S="${NC_SUDO:-sudo}" r="${NC_RACINE_MIGRATION:-}" ur=0 noms="nc-cpu-limite|nc-ventilateurs|nc-puissance|nc-gpu-limite"
-  local f n rel l ok_f nb c p liste="" bk="${BK:-.}/system"
+  local f n rel l c ok_f nb liste="" bk="${BK:-.}/system" gardes=" "
+  local hors='[^[:alnum:]_%@.+/*,:=()[:blank:]-]' regle='^[^[:space:]=:]+[[:space:]]+[^[:space:]=:]+=\([^)]*\)[[:space:]]*((NOPASSWD|PASSWD|NOEXEC|SETENV):[[:space:]]*)*(/.*)$'
+  local cmd_ok='^/usr/local/bin/('"$noms"')([[:blank:]][^:=!(),\]*)?$'
   [ "$(id -u)" = 0 ] || ur="${NC_MIGRATION_UID_ROOT:-0}"
-  local -a progs=() regles=()
+  local -a progs=() regles=() rels=() bouges=() st=()
   for n in ${noms//|/ }; do
     f="$r/usr/local/bin/$n"
-    [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %u "$f" 2>/dev/null)" = "$ur" ] && progs+=("$f")
+    if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %u "$f" 2>/dev/null)" = "$ur" ]; then progs+=("$f")
+    elif [ -e "$f" ] || [ -L "$f" ]; then gardes="$gardes$n "; fi   # là mais pas retiré : ses règles restent
   done
   # /etc/sudoers.d est en 0750 (Arch, Fedora) : listé par sudo ; -type f exclut les liens, -uid garde ceux de root
   while IFS= read -r -d '' f; do
     n="${f##*/}"
-    case "$n" in nc-energie|nc-vpn|nc-limite-charge) continue ;; esac
+    case "$n" in nc-energie|nc-vpn|nc-limite-charge|*.*|*~) continue ;; esac   # nos règles ; à point ou ~ : ignorés par sudo
     ok_f=1; nb=0
-    while IFS= read -r l; do
+    while IFS= read -r l || [ -n "$l" ]; do
       l="${l#"${l%%[![:space:]]*}"}"
-      case "$l" in "#include"*) ok_f=0; continue ;; ""|"#"*) continue ;; esac   # #include(dir) n'est pas un commentaire
-      if [[ "$l" =~ ^[^[:space:]=]+[[:space:]]+[^[:space:]=]+=\([^\)]*\)[[:space:]]*((NOPASSWD|PASSWD|NOEXEC|SETENV):[[:space:]]*)*(/.*)$ ]]; then
-        while IFS= read -r c; do
-          c="${c#"${c%%[![:space:]]*}"}"
-          [[ "$c" =~ ^/usr/local/bin/($noms)([[:space:]].*)?$ ]] && nb=$((nb+1)) || ok_f=0
-        done < <(printf '%s\n' "${BASH_REMATCH[3]}" | sed 's/, */\n/g')
-      else ok_f=0; fi
+      case "$l" in *\\) ok_f=0; continue ;; esac                                   # suite de ligne, même en commentaire
+      case "$l" in "#include"*|"#"[0-9]*|"@"*) ok_f=0; continue ;; ""|"#"*) continue ;; esac   # #1000 = règle sur l'UID
+      if [[ "$l" =~ $hors ]] || ! [[ "$l" =~ $regle ]]; then ok_f=0; continue; fi
+      while IFS= read -r c; do
+        c="${c#"${c%%[![:space:]]*}"}"
+        if [[ "$c" =~ $cmd_ok ]] && [[ "$gardes" != *" ${BASH_REMATCH[1]} "* ]]; then nb=$((nb+1)); else ok_f=0; fi
+      done < <(printf '%s\n' "${BASH_REMATCH[3]}" | sed 's/, */\n/g')
     done < <($S cat "$f" 2>/dev/null)
     if [ "$ok_f" = 1 ] && [ "$nb" -gt 0 ]; then regles+=("$f")
     elif [ "$nb" -gt 0 ]; then info "$(t "Fichier sudoers laissé en place (il contient d'autres règles) : $f" "Sudoers file left in place (it holds other rules): $f")"; fi
   done < <($S find "$r/etc/sudoers.d" -mindepth 1 -maxdepth 1 -type f -uid "$ur" -print0 2>/dev/null)
   [ "${#progs[@]}" -gt 0 ] || [ "${#regles[@]}" -gt 0 ] || return 0
-  for f in "${progs[@]}" "${regles[@]}"; do
-    rel="${f#"$r"/}"
-    if ! mkdir -p "$bk" || ! (cd "${r:-/}" && $S cp -a --parents "$rel" "$bk/"); then
-      warn "$(t "Sauvegarde impossible dans $bk : anciens assistants root laissés en place." "Backup impossible in $bk: old root helpers left in place.")"; return 0
-    fi
-  done
-  $S chown -R "$(id -u):$(id -g)" "$bk" 2>/dev/null || :   # comme sbackup : la sauvegarde reste lisible et effaçable
-  for f in "${progs[@]}" "${regles[@]}"; do $S rm -f "$f"; liste="$liste ${f##*/}"; done
-  # visudo par sudo : /etc/sudoers n'est lisible qu'en root (et /usr/sbin manque au PATH de Debian)
-  if [ "${#regles[@]}" -gt 0 ] && ! $S visudo -c >/dev/null 2>&1; then
-    # remise par cp simple puis 0440 : le fichier redevient à root, jamais à l'utilisateur (sauvegarde à lui)
-    for f in "${regles[@]}"; do rel="${f#"$r"/}"; $S cp "$bk/$rel" "$f" && $S chmod 0440 "$f"; done
-    warn "$(t "visudo refuse la suite : les règles sudoers sont remises en place." "visudo rejects the result: the sudoers rules were put back.")"
-    liste=""; for f in "${progs[@]}"; do liste="$liste ${f##*/}"; done
-    [ -n "$liste" ] || return 0
+  for f in "${progs[@]}" "${regles[@]}"; do rels+=("${f#"$r"/}"); done
+  # root ne fait que lire (tar -c) ; le dépaquetage tourne sous l'utilisateur, dans son propre dossier
+  mkdir -p "$bk" 2>/dev/null && { $S tar -C "${r:-/}" -cf - "${rels[@]}" | tar -C "$bk" -xf - ; st=("${PIPESTATUS[@]}"); }
+  [ "${st[0]:-1}" = 0 ] && [ "${st[1]:-1}" = 0 ] || st=(1)
+  for rel in "${rels[@]}"; do [ -f "$bk/$rel" ] && [ ! -L "$bk/$rel" ] || st=(1); done
+  if [ "${st[0]}" != 0 ]; then
+    warn "$(t "Sauvegarde impossible dans $bk : anciens assistants root laissés en place." "Backup impossible in $bk: old root helpers left in place.")"; return 0
   fi
+  if [ "${#regles[@]}" -gt 0 ]; then
+    for f in "${regles[@]}"; do $S mv -f "$f" "$f.nc-retrait" && bouges+=("$f"); done
+    if ! $S visudo -c >/dev/null 2>&1; then
+      for f in "${bouges[@]}"; do $S mv -f "$f.nc-retrait" "$f"; done
+      warn "$(t "visudo refuse la suite : les règles sudoers sont remises en place, rien n'est retiré." "visudo rejects the result: the sudoers rules were put back, nothing removed.")"
+      return 0
+    fi
+    for f in "${bouges[@]}"; do $S rm -f "$f.nc-retrait"; liste="$liste ${f##*/}"; done
+  fi
+  for f in "${progs[@]}"; do $S rm -f "$f" && liste="$liste ${f##*/}"; done
   info "$(t "Anciens assistants root retirés :$liste (sauvegarde : $bk)." "Old root helpers removed:$liste (backup: $bk).")"
 }
 

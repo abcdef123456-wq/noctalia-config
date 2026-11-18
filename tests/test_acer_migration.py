@@ -33,7 +33,7 @@ class Migration(unittest.TestCase):
         self.faux.mkdir()
         sudo = self.faux / "sudo"
         self.journal = self.d / "journal"
-        sudo.write_text(f'#!/bin/bash\necho "$1" >> {self.journal}\nexec "$@"\n')
+        sudo.write_text(f'#!/bin/bash\necho "$*" >> {self.journal}\nexec "$@"\n')
         sudo.chmod(0o755)
         self.path = f"{self.faux}:/usr/bin:/bin"
 
@@ -167,6 +167,56 @@ class Migration(unittest.TestCase):
         self.visudo(0)
         p = self.lance()
         self.assertTrue(self.present("etc/sudoers.d/nc-limites"), p.stdout)
+
+    def test_regles_piegees_gardees(self):
+        """Relecture : chaque piège garde le fichier (et donc sudo pour l'utilisateur)."""
+        pieges = {
+            "deux-points": "alice ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance * : ALL=(ALL) ALL\n",
+            "suite-de-ligne": "alice ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance \\\n    , ALL\n",
+            "uid": PROPRE + "#1000 ALL=(ALL) NOPASSWD: ALL\n",
+            "negation": "alice ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance !*\n",
+            "egal": "alice ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance x=y\n",
+        }
+        self.prog("nc-puissance")
+        self.visudo(0)
+        for nom, texte in pieges.items():
+            self.sudoers(nom, texte)
+        p = self.lance()
+        for nom, texte in pieges.items():
+            with self.subTest(nom=nom):
+                self.assertTrue(self.present(f"etc/sudoers.d/{nom}"), p.stdout)
+                self.assertEqual((self.r / "etc/sudoers.d" / nom).read_text(), texte)
+
+    def test_regle_gardee_si_son_programme_reste(self):
+        p = self.prog("nc-puissance")
+        os.symlink(p, self.r / "usr/local/bin/nc-gpu-limite")   # lien : pas retiré, donc sa règle reste
+        self.sudoers("nc-gpu", "alice ALL=(root) NOPASSWD: /usr/local/bin/nc-gpu-limite *\n")
+        self.visudo(0)
+        self.lance()
+        self.assertTrue(self.present("etc/sudoers.d/nc-gpu"))
+
+    def test_visudo_refuse_mv_en_retour_sans_lire_bk(self):
+        self.prog("nc-puissance")
+        self.sudoers("nc-limites", PROPRE)
+        self.visudo(1)
+        p = self.lance()
+        self.assertEqual((self.r / "etc/sudoers.d/nc-limites").read_text(), PROPRE, p.stdout)
+        self.assertFalse(self.present("etc/sudoers.d/nc-limites.nc-retrait"))
+        self.assertTrue(self.present("usr/local/bin/nc-puissance"))   # aucun programme retiré non plus
+        appels = self.journal.read_text().splitlines()
+        self.assertIn(f"mv -f {self.r}/etc/sudoers.d/nc-limites.nc-retrait {self.r}/etc/sudoers.d/nc-limites", appels)
+        self.assertEqual([a for a in appels if str(self.bk) in a], [], "root ne lit ni n'écrit rien dans $BK")
+
+    def test_lien_dans_bk_jamais_suivi_par_root(self):
+        piege = self.d / "piege"
+        piege.mkdir()
+        (self.bk / "system").mkdir()
+        os.symlink(piege, self.bk / "system/etc")
+        self.prog("nc-puissance")
+        self.sudoers("nc-limites", PROPRE)
+        self.visudo(0)
+        p = self.lance()
+        self.assertEqual([a for a in self.journal.read_text().splitlines() if str(self.bk) in a], [], p.stdout)
 
     def test_autre_pc_aucun_message(self):
         p = self.lance()
