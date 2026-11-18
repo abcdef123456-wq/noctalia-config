@@ -29,7 +29,7 @@ FloatingWindow {
     Component.onCompleted: GarminEtat.panneauOuvert = true
     Component.onDestruction: GarminEtat.panneauOuvert = false
 
-    function nb(v) { return v === undefined || v === null ? "—" : String(v) }
+    function nb(v, unite) { return v === undefined || v === null ? "—" : String(v) + (unite || "") }
     function heures(s) { return s === undefined || s === null ? "—" : Math.floor(s / 3600) + " h " + String(Math.floor(s % 3600 / 60)).padStart(2, "0") }
     function fiche(id) {
         var m = garmin.m
@@ -37,16 +37,16 @@ FloatingWindow {
         var un = Reglages.t
         switch (id) {
         case "body_battery": return { titre: GarminEtat.nomDe(id), valeur: nb(m.body_battery), sous: "", jauge: (m.body_battery || 0) / 100, couleur: Couleurs.vert }
-        case "frequence_cardiaque": return { titre: GarminEtat.nomDe(id), valeur: nb(m.fc_repos) + " bpm", sous: un("Max ", "Max ") + nb(m.fc_max), jauge: -1, couleur: Couleurs.rouge }
+        case "frequence_cardiaque": return { titre: GarminEtat.nomDe(id), valeur: nb(m.fc_repos, " bpm"), sous: un("Max ", "Max ") + nb(m.fc_max), jauge: -1, couleur: Couleurs.rouge }
         case "sommeil": return { titre: GarminEtat.nomDe(id), valeur: heures(m.sommeil_s), sous: un("Score ", "Score ") + nb(m.sommeil_score), jauge: (m.sommeil_score || 0) / 100, couleur: Couleurs.violet }
         case "stress": return { titre: GarminEtat.nomDe(id), valeur: nb(m.stress_moyen), sous: "", jauge: (m.stress_moyen || 0) / 100, couleur: Couleurs.orange }
         case "pas": return { titre: GarminEtat.nomDe(id), valeur: nb(m.pas), sous: m.pas_objectif ? un("Objectif ", "Goal ") + m.pas_objectif : "", jauge: m.pas_objectif ? m.pas / m.pas_objectif : -1, couleur: Couleurs.bleu }
-        case "vfc": return { titre: GarminEtat.nomDe(id), valeur: nb(m.vfc_nuit) + " ms", sous: "", jauge: -1, couleur: Couleurs.rose }
+        case "vfc": return { titre: GarminEtat.nomDe(id), valeur: nb(m.vfc_nuit, " ms"), sous: "", jauge: -1, couleur: Couleurs.rose }
         case "activite": return { titre: GarminEtat.nomDe(id), valeur: m.activite_nom || "—", sous: m.activite_minutes ? m.activite_minutes + " min" : "", jauge: -1, couleur: Couleurs.vert }
-        case "calories": return { titre: GarminEtat.nomDe(id), valeur: nb(m.calories_actives) + " kcal", sous: un("Étages ", "Floors ") + nb(m.etages) + " · " + nb(m.minutes_intenses) + " min", jauge: -1, couleur: Couleurs.orange }
-        case "oxygene": return { titre: GarminEtat.nomDe(id), valeur: nb(m.spo2) + " %", sous: un("Respiration ", "Breathing ") + nb(m.respiration), jauge: (m.spo2 || 0) / 100, couleur: Couleurs.bleu }
+        case "calories": return { titre: GarminEtat.nomDe(id), valeur: nb(m.calories_actives, " kcal"), sous: un("Étages ", "Floors ") + nb(m.etages) + " · " + nb(m.minutes_intenses, " min"), jauge: -1, couleur: Couleurs.orange }
+        case "oxygene": return { titre: GarminEtat.nomDe(id), valeur: nb(m.spo2, " %"), sous: un("Respiration ", "Breathing ") + nb(m.respiration), jauge: (m.spo2 || 0) / 100, couleur: Couleurs.bleu }
         case "forme": return { titre: GarminEtat.nomDe(id), valeur: nb(m.readiness), sous: "VO2 max " + nb(m.vo2max), jauge: (m.readiness || 0) / 100, couleur: Couleurs.jaune }
-        case "hydratation": return { titre: GarminEtat.nomDe(id), valeur: nb(m.hydratation_ml) + " ml", sous: "", jauge: -1, couleur: Couleurs.bleu }
+        case "hydratation": return { titre: GarminEtat.nomDe(id), valeur: nb(m.hydratation_ml, " ml"), sous: "", jauge: -1, couleur: Couleurs.bleu }
         }
         return { titre: GarminEtat.nomDe(id), valeur: "—", sous: "", jauge: -1, couleur: Couleurs.accent }
     }
