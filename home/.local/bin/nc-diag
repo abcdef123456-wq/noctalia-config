@@ -3,6 +3,7 @@
   nc-diag            le bilan, en couleurs : ✓ ce qui va, ! ce qui manque (sans gravité), ✗ ce qui ne marche pas
   nc-diag ia         le bilan expliqué par l'IA du bureau, avec quoi faire (s'il y a quelque chose à corriger)
   nc-diag rapport    le même bilan en texte simple, copié dans le presse-papiers : à envoyer pour avoir de l'aide
+  nc-diag perf [SECONDES]  profil, limites, ventilateurs et conso de la batterie sur 5 à 120 s (15 par défaut)
   nc-diag court      seulement ce qui cloche (lancé par nc-maj après chaque mise à jour)
   nc-diag --json [--rapide]    ce qui cloche et les réparations proposées, en JSON (île, nc-ia) ; --rapide saute le plus long
   nc-diag reparer ID [--json]  une réparation proposée par --json (redémarrer un service en échec…), et rien d'autre
@@ -55,6 +56,7 @@ DOC_EN = """nc-diag: checks the whole noctalia-config installation and tells you
   nc-diag            the summary, in color: ✓ what works, ! what is missing (not serious), ✗ what does not work
   nc-diag ai         the summary explained by the desktop AI, with what to do (if something needs fixing)
   nc-diag report     the same summary as plain text, copied to the clipboard: send it when asking for help
+  nc-diag perf [SECONDS]  profile, limits, fans and battery use over 5 to 120 s (default 15)
   nc-diag short      only what is wrong (run by nc-update after each update)
   nc-diag --json [--rapide]    what is wrong and the proposed repairs, as JSON (island, nc-ai); --rapide skips the slowest
   nc-diag repair ID [--json]   one repair proposed by --json (restart a failed service…), and nothing else
@@ -1003,6 +1005,7 @@ def _energie_plateforme(b, actif, portable):
 def energie_plateforme(b, actif, portable):
     _energie_plateforme(b, actif, portable)
     _note_acer(b)
+    _note_linuwu(b)
 
 
 def _note_acer(b):
@@ -1408,6 +1411,142 @@ def reparer(args):
     return {"fait": 0, "deja": 0, "echec": 1}.get(res["resultat"], 2)
 
 
+def _lire(f):
+    try:
+        with open(f, encoding="utf-8", errors="replace") as h:
+            return h.read().strip()
+    except OSError:
+        return ""
+
+
+def _note_linuwu(b):
+    """Nitro ANV16-72 : le module linuwu-sense est chargé mais ne crée pas le profil de plateforme (erreur -5, PR #148).
+    Rien sur les autres PC ; rien n'est compilé ni installé."""
+    if not os.path.isdir(os.path.join(SYS, "module/linuwu_sense")) or os.path.exists(os.path.join(SYS, "firmware/acpi/platform_profile")):
+        return
+    if _lire(os.path.join(SYS, "class/dmi/id/product_name")) != "Nitro ANV16-72":
+        cmd = shlex.split(os.environ.get("NC_DIAG_JOURNAL_CMD", "")) or ["journalctl", "-k", "-b", "--no-pager", "-g", "Platform profile registration failed"]
+        if "Platform profile registration failed" not in sortie(cmd, 5)[0]:
+            return
+    b.avert(T("Acer : linuwu-sense est chargé mais ne crée pas le profil de plateforme (« Platform profile registration failed »). "
+              "Correctif : https://github.com/0x7375646F/Linuwu-Sense/pull/148 (rien n'est installé par nc-diag)",
+              "Acer: linuwu-sense is loaded but does not create the platform profile (“Platform profile registration failed”). "
+              "Fix: https://github.com/0x7375646F/Linuwu-Sense/pull/148 (nc-diag installs nothing)"), cle="linuwu_sense_pr148")
+
+
+PAUSE = time.sleep  # remplaçable dans les tests
+
+
+def assistant_root(nom):
+    """Chemin sûr de l'assistant root NOM, ou "" (même règle que home/.local/bin/nc-plateforme-root).
+    Dossier : NC_ROOT_BIN de ~/.config/nc/plateforme.conf (adaptateur NixOS), sinon /usr/local/bin. Sûr : chemin résolu =
+    fichier ordinaire exécutable, à root, ni groupe ni autres en écriture, dans un dossier à root dans le même cas.
+    NC_PLATEFORME_UID_ROOT : uid pris pour root dans les tests, lu seulement si on n'est pas root."""
+    dossier = "/usr/local/bin"
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".config/nc/plateforme.conf"), encoding="utf-8", errors="replace") as f:
+            for ligne in f.read().split("\n"):
+                if ligne.startswith("NC_ROOT_BIN="):
+                    v = ligne[len("NC_ROOT_BIN="):]
+                    v = (v[:-1] if v.endswith("\r") else v).strip(" \t")   # comme le sh : un \r final, puis blancs
+                    if (re.fullmatch(r"/[A-Za-z0-9._/-]{1,200}", v) and not v.endswith("/")
+                            and not {".", ".."} & set(v.split("/"))):
+                        dossier = v
+    except (OSError, ValueError):
+        pass
+    chemin = os.path.join(dossier, nom)
+    reel = os.path.realpath(chemin)
+    try:
+        uid = 0 if os.getuid() == 0 else int(os.environ.get("NC_PLATEFORME_UID_ROOT") or 0)
+        for p in (reel, os.path.dirname(reel)):
+            st = os.stat(p)
+            if st.st_uid != uid or st.st_mode & 0o022:
+                return ""
+        if not (os.path.isfile(reel) and os.access(reel, os.X_OK)):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    return chemin
+
+
+def _assistant_root():
+    # NC_ENERGIE_ROOT (essais) d'abord, sinon la règle commune (NC_ROOT_BIN de plateforme.conf, fichier à root)
+    ch = os.environ.get("NC_ENERGIE_ROOT")
+    if ch:
+        return ch if os.path.isfile(ch) else ""
+    return assistant_root("nc-energie-root")
+
+
+def _root(ch, *args):
+    """Réponse « clé=valeur » de l'assistant root par sudo -n ; {} s'il manque, refuse ou répond mal (code 5 compris)."""
+    if not ch:
+        return {}
+    texte, code = sortie(["sudo", "-n", ch, *args], 10)
+    if code != 0:
+        return {}
+    return dict(l.split("=", 1) for l in texte.splitlines() if "=" in l)
+
+
+def _batterie():
+    """(unité, valeur) de la première batterie : charge_now en mAh, sinon energy_now en mWh ; None sans batterie."""
+    for d in sorted(glob.glob(os.path.join(SYS, "class/power_supply/BAT*"))):
+        if _lire(os.path.join(d, "type")) != "Battery":
+            continue
+        for f, u in (("charge_now", "mAh"), ("energy_now", "mWh")):
+            try:
+                return u, int(_lire(os.path.join(d, f))) / 1000, int(_lire(os.path.join(d, f.replace("now", "full")))) / 1000
+            except ValueError:
+                pass
+    return None
+
+
+def perf(args):
+    n = 15
+    if args:
+        if not args[0].isdigit() or not 5 <= int(args[0]) <= 120:
+            print(T("Durée invalide : un nombre de secondes entre 5 et 120.", "Invalid duration: a number of seconds from 5 to 120."))
+            return 2
+        n = int(args[0])
+    inconnu = T("inconnu", "unknown")
+    ch = _assistant_root()
+    etat = _root(ch, "etat")
+    prof = sortie(["powerprofilesctl", "get"], 3)
+    prof = prof[0] if prof[1] == 0 and prof[0] else inconnu
+    fw = _lire(os.path.join(SYS, "firmware/acpi/platform_profile")) or inconnu
+    gpu = inconnu
+    for d in glob.glob(os.path.join(SYS, "bus/pci/devices/*")):
+        if _lire(os.path.join(d, "vendor")) == "0x10de" and _lire(os.path.join(d, "class")).startswith("0x03"):
+            gpu = _lire(os.path.join(d, "power/runtime_status")) or inconnu
+    lim = "off"
+    for l in (_lire(os.path.join(HOME, ".config/nc-profile.conf")) or "").splitlines():
+        if l.startswith("JEU_GPU_MHZ="):
+            lim = l.split("=", 1)[1].strip()
+    turbo = T("oui", "yes") if os.path.exists(os.path.join(HOME, ".config/nc/turbo")) else T("non", "no")
+    print(T("Profil : ", "Profile: ") + prof + T("  ·  firmware : ", "  ·  firmware: ") + fw)
+    print(T("Limite du processeur (RAPL, PL1/PL2) : ", "CPU limit (RAPL, PL1/PL2): ") + etat.get("rapl", inconnu))
+    print(T("Ventilateurs : ", "Fans: ") + etat.get("ventilateurs", inconnu))
+    print(T("Limite de la carte graphique : ", "GPU limit: ") + lim + T(" MHz (carte : ", " MHz (card: ") + gpu + ")")
+    print("Turbo : " + turbo)
+    bat = _batterie()
+    if not bat:
+        print(T("Pas de batterie : suivi impossible.", "No battery: tracking not possible."))
+        return 0
+    p0 = _root(ch, "puissance").get("paquet_mj")
+    PAUSE(n)
+    bat2 = _batterie()
+    p1 = _root(ch, "puissance").get("paquet_mj") if p0 else None
+    u, v0, pleine = bat
+    d = (bat2[1] if bat2 else v0) - v0
+    pc = 100 * d / pleine if pleine else 0
+    verbe = T("la batterie se charge", "the battery is charging") if d > 0 else T("la batterie se vide", "the battery is draining") if d < 0 else T("la batterie tient", "the battery holds")
+    print(f"{verbe} ({d:+.1f} {u}, {pc:+.2f} %, {n} s)")
+    try:
+        print(T("Consommation moyenne du processeur : ", "Average CPU power: ") + f"{(int(p1) - int(p0)) / 1000 / n:.1f} W")
+    except (TypeError, ValueError):
+        print(T("Consommation moyenne du processeur : inconnue", "Average CPU power: unknown"))
+    return 0
+
+
 def main():
     # L'île tourne avec le PATH du système : les outils installés pour l'utilisateur sont souvent ailleurs (comme nc-ia)
     os.environ["PATH"] = os.pathsep.join([os.path.join(HOME, d) for d in (".local/bin", "bin", ".npm-global/bin", ".bun/bin",
@@ -1415,6 +1554,8 @@ def main():
     args = sys.argv[1:]
     if args and args[0] in ("reparer", "réparer", "repair"):
         sys.exit(reparer(args[1:]))
+    if args and args[0] == "perf":
+        sys.exit(perf(args[1:]))
     if args and "--json" in args and set(args) <= {"--json", "--rapide", "--fast"}:
         print(json.dumps(bilan_json(rapide="--rapide" in args or "--fast" in args), ensure_ascii=False))
         return

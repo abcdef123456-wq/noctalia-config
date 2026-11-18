@@ -39,7 +39,8 @@ class PlateformeRoot(unittest.TestCase):
         self.uid = str(os.getuid())
         self.dossier = self.tmp / "nix-bin"
         self.dossier.mkdir(mode=0o755)
-        self.fn = {"nc-energie": fonction_python(BIN / "nc-energie"), "nc-vpn": fonction_python(BIN / "nc-vpn")}
+        self.fn = {"nc-energie": fonction_python(BIN / "nc-energie"), "nc-vpn": fonction_python(BIN / "nc-vpn"),
+                   "nc-diag": fonction_python(BIN / "nc-diag")}
 
     def assistant(self, nom=NOM, mode=0o755, dossier=None):
         f = (dossier or self.dossier) / nom
