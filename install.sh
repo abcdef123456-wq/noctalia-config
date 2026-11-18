@@ -1542,8 +1542,8 @@ while IFS= read -r -d '' src; do
   copied=$((copied + 1))
   case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
 done < <(find "$root" -type f -print0)
-fournir_jeux
 relancer_noctalia   # la copie est finie : Noctalia repart tout de suite (le reste de l'install ne la gêne plus)
+fournir_jeux        # gamemode.ini et MangoHud.conf : hors de la boucle de copie, rien n'y est écrasé
 ok "$(t "$copied fichier(s) installé(s), $same déjà à jour." "$copied file(s) installed, $same already up to date.")$([ "$copied" -gt 0 ] && echo " $(t "Sauvegarde : $BK" "Backup: $BK")")"
 # Noms anglais des commandes (nc-settings = nc-reglages…) : liens, quelle que soit la langue choisie
 # (NOMS_ANGLAIS : défini par nc-langue, lu en haut du script)
