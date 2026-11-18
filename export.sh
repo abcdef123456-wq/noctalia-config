@@ -169,6 +169,9 @@ HOME_FILES=(
   .local/bin/nc-theme-sync
   .local/bin/nc-wallpaper-colors
   .local/bin/nc-gpu-regle
+  .local/bin/nc-gpu-jeu
+  .config/gamemode.ini
+  .config/MangoHud/MangoHud.conf
   .local/bin/nc-plateforme-root
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode

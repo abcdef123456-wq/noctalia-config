@@ -1118,6 +1118,43 @@ ecrire_atomique() { # ecrire_atomique FICHIER < contenu
 # Valeur sûre dans le texte de remplacement d'un « s|…|…| » de sed (la barre oblique inverse, & et | y ont un sens)
 esc_sed() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 
+# Fusion du hook gamemode dans ~/.config/gamemode.ini sans rien écraser : ajoute seulement start= et end= de [custom]
+# s'ils manquent ; s'ils existent déjà avec autre chose, ne les change pas et le dit. Argument : le fichier, le modèle.
+fusion_gamemode() { # fusion_gamemode FICHIER MODELE
+  local f="$1" modele="$2" cle ligne val etat out
+  for cle in start end; do
+    ligne="$(grep -m1 "^$cle=" "$modele")"; val="${ligne#*=}"
+    etat="$(awk -v c="$cle" '
+      /^[[:space:]]*\[/ { s = ($0 ~ /^[[:space:]]*\[custom\]/) }
+      s && $0 ~ "^[[:space:]]*" c "[[:space:]]*=" { sub(/^[^=]*=[[:space:]]*/, ""); print "pris:" $0; trouve = 1; exit }
+      END { if (!trouve) print "absent" }' "$f")"
+    case "$etat" in
+      "pris:$val") ;;
+      pris:*) info "$(t "gamemode.ini : $cle= déjà réglé, laissé tel quel (hook nc-gpu-jeu non ajouté)." "gamemode.ini: $cle= already set, left as is (nc-gpu-jeu hook not added).")" ;;
+      absent)
+        out="$(awk -v l="$cle=$val" '
+          /^[[:space:]]*\[/ { if (s && !fait) { print l; fait = 1 } s = ($0 ~ /^[[:space:]]*\[custom\]/); vu = vu || s }
+          { print }
+          END { if (s && !fait) print l; else if (!vu) { print ""; print "[custom]"; print l } }' "$f")" || return 1
+        printf '%s\n' "$out" | ecrire_atomique "$f" || return 1 ;;
+    esac
+  done
+}
+# Fournit gamemode.ini et MangoHud.conf (seulement si gamemode / MangoHud sont installés) ; rien d'autre n'est touché
+fournir_jeux() {
+  local gm="$HOME/.config/gamemode.ini" mh="$HOME/.config/MangoHud/MangoHud.conf"
+  if have gamemoded || have gamemoderun; then
+    if [ ! -e "$gm" ]; then
+      mkdir -p "$(dirname "$gm")" && cp "$root/.config/gamemode.ini" "$gm" && echo ".config/gamemode.ini" >> "$BK/.created"
+    else
+      backup ".config/gamemode.ini"; fusion_gamemode "$gm" "$root/.config/gamemode.ini" || true
+    fi
+  fi
+  if have mangohud && [ ! -e "$mh" ]; then
+    mkdir -p "$(dirname "$mh")" && cp "$root/.config/MangoHud/MangoHud.conf" "$mh" && echo ".config/MangoHud/MangoHud.conf" >> "$BK/.created"
+  fi
+  return 0
+}
 # Modifications faites sans question (gsettings, dossiers utilisateur, signets GTK, .bashrc, notifications masquées,
 # minuteries systemd, NetworkManager) : chacune est notée ici avec sa sauvegarde ou la commande pour revenir, et le
 # résumé s'affiche à la fin (et reste dans $BK/silencieux/resume.txt)
@@ -1464,6 +1501,8 @@ while IFS= read -r -d '' src; do
   dst="$HOME/$rel"
   # assistant.conf contient la clé privée : aucun modèle du dépôt ne doit remplacer ce fichier personnel.
   case "$rel" in .config/nc/assistant.conf) continue ;; esac
+  # gamemode.ini et MangoHud.conf : fournis ou fusionnés plus bas (fournir_jeux), seulement si le programme est là
+  case "$rel" in .config/gamemode.ini | .config/MangoHud/MangoHud.conf) continue ;; esac
   # Étapes 3 et 3b (terminal, Neovim) : elles écrivent ces fichiers ; sur NixOS elles sont sautées, donc copiés ici
   if [ "$FAMILY" != nixos ] || [ "$MODE" = files ]; then
     case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*) continue ;; esac
@@ -1503,6 +1542,7 @@ while IFS= read -r -d '' src; do
   copied=$((copied + 1))
   case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
 done < <(find "$root" -type f -print0)
+fournir_jeux
 relancer_noctalia   # la copie est finie : Noctalia repart tout de suite (le reste de l'install ne la gêne plus)
 ok "$(t "$copied fichier(s) installé(s), $same déjà à jour." "$copied file(s) installed, $same already up to date.")$([ "$copied" -gt 0 ] && echo " $(t "Sauvegarde : $BK" "Backup: $BK")")"
 # Noms anglais des commandes (nc-settings = nc-reglages…) : liens, quelle que soit la langue choisie

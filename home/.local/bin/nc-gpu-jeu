@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# nc-gpu-jeu debut|fin : appelé par gamemode (~/.config/gamemode.ini, section [custom]).
+# Le GPU oublie la limite -lgc quand il s'endort (RTD3) : on la repose à chaque lancement de jeu.
+#   debut : « gpu-frequence jeu », seulement en profil performance et si JEU_GPU_MHZ n'est pas off
+#   fin   : « gpu-frequence normal », si JEU_GPU_MHZ n'est pas off, quel que soit le profil
+# Silencieux, code 0 même sans assistant ; autre argument : code 2.
+case "${1:-}" in debut|fin) ;; *) echo "usage: nc-gpu-jeu debut|fin" >&2; exit 2 ;; esac
+. "${BASH_SOURCE[0]%/*}/nc-gpu-regle" 2>/dev/null || . "$HOME/.local/bin/nc-gpu-regle" 2>/dev/null || exit 0
+. "${BASH_SOURCE[0]%/*}/nc-plateforme-root" 2>/dev/null || . "$HOME/.local/bin/nc-plateforme-root" 2>/dev/null || nc_root_bin() { return 1; }
+[ "$(nc_jeu_gpu_mhz)" = off ] && exit 0
+if [ "$1" = debut ]; then [ "$(nc_profil_courant)" = performance ] || exit 0; sous=jeu; else sous=normal; fi
+root="${NC_ENERGIE_ROOT_CHEMIN:-$(nc_root_bin nc-energie-root)}"
+[ -n "$root" ] && [ -x "$root" ] || exit 0
+sudo -n "$root" gpu-frequence "$sous" >/dev/null 2>&1 || :
+exit 0
