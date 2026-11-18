@@ -95,9 +95,11 @@ nc_jeu_gpu_mhz() {
   for _ncg_f in "$HOME/.config/nc-profile.conf" "$HOME/.config/nc/reglages.conf"; do
     [ -r "$_ncg_f" ] || continue
     while IFS='=' read -r _ncg_k _ncg_v || [ -n "$_ncg_k" ]; do
-      _ncg_v="${_ncg_v//\"/}"; _ncg_v="${_ncg_v//$'\r'/}"
+      [ "$_ncg_k" = JEU_GPU_MHZ ] || continue
+      # sh POSIX (sourcé aussi par dash) : blancs et \r (fichier édité sous Windows) des deux bouts, puis guillemets
       _ncg_v="${_ncg_v%"${_ncg_v##*[![:space:]]}"}"; _ncg_v="${_ncg_v#"${_ncg_v%%[![:space:]]*}"}"
-      [ "$_ncg_k" = JEU_GPU_MHZ ] && [[ "$_ncg_v" =~ ^(1500|off)$ ]] && _ncg_m=$_ncg_v
+      _ncg_v="${_ncg_v#\"}"; _ncg_v="${_ncg_v%\"}"
+      case "$_ncg_v" in 1500|off) _ncg_m=$_ncg_v ;; esac
     done < "$_ncg_f"
   done
   printf '%s\n' "$_ncg_m"

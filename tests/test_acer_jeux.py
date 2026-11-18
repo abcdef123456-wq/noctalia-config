@@ -2,6 +2,7 @@
 Faux sudo, faux assistant root et faux /sys seulement : rien de réel n'est lancé."""
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -108,24 +109,23 @@ class GpuJeu(Base):
         self.jeu("debut")
         self.assertEqual(self.appels()[-1], "assistant gpu-frequence jeu")
 
-    def test_coherence_avec_nc_profile_sync(self):
-        """Même DMI, même fichier de réglages : nc_jeu_gpu_mhz et nc-profile-sync lisent la même valeur."""
-        # nc-profile-sync ne fait pas d'appel gpu-frequence : on compare la valeur lue (tronc commun de ses lignes 77-97)
-        sync = (BIN / "nc-profile-sync").read_text()
+    def test_nc_jeu_gpu_mhz_valeurs(self):
+        """nc_jeu_gpu_mhz (seule lecture de JEU_GPU_MHZ) : défaut du DMI, réglage écrit, guillemets, \\r, valeur invalide ;
+        même réponse en bash et en sh POSIX (dash s'il est là : nc-gpu-regle est sourcé par des scripts sh)."""
+        coquilles = ["bash"] + [s for s in ("dash",) if shutil.which(s)] + ["sh"]
         for dmi, conf, attendu in [(NITRO, "", "1500"), ("Legion 5", "", "off"), (NITRO, "JEU_GPU_MHZ=off\n", "off"),
-                                   ("Legion 5", "JEU_GPU_MHZ=1500\n", "1500"), (NITRO, "JEU_GPU_MHZ=999\n", "1500")]:
-            with self.subTest(dmi=dmi, conf=conf):
-                self.dmi(dmi)
-                self.reglages(conf)
-                bloc = re.search(r"(?ms)^JEU_CPU=off\n.*?^done$", sync.split("# de 135 W")[1] if "# de 135 W" in sync else sync)
-                self.assertTrue(bloc, "bloc JEU_GPU_MHZ de nc-profile-sync introuvable")
-                script = ("t(){ printf '%s' \"$1\"; }\nCFG=\"$HOME/.config/nc-profile.conf\"\n" + bloc.group(0)
-                          + "\nprintf '%s\\n' \"$JEU_GPU_MHZ\"\n")
-                lu_sync = subprocess.run(["bash", "-c", script], env=self.env, capture_output=True, text=True).stdout.strip()
-                lu_jeu = subprocess.run(["bash", "-c", f'. "{BIN}/nc-gpu-regle"; nc_jeu_gpu_mhz'], env=self.env,
+                                   ("Legion 5", "JEU_GPU_MHZ=1500\n", "1500"), (NITRO, "JEU_GPU_MHZ=999\n", "1500"),
+                                   ("Legion 5", 'JEU_GPU_MHZ="1500"\r\n', "1500"), ("Legion 5", "JEU_GPU_MHZ= 1500 \n", "1500")]:
+            for c in coquilles:
+                with self.subTest(dmi=dmi, conf=conf, coquille=c):
+                    self.dmi(dmi)
+                    self.reglages(conf)
+                    lu = subprocess.run([c, "-c", f'. "{BIN}/nc-gpu-regle"; nc_jeu_gpu_mhz'], env=self.env,
                                         capture_output=True, text=True).stdout.strip()
-                self.assertEqual((lu_sync, lu_jeu), (attendu, attendu))
+                    self.assertEqual(lu, attendu)
 
+    def test_nc_profile_sync_ne_lit_plus_jeu_gpu_mhz(self):
+        self.assertNotIn("JEU_GPU_MHZ=", (BIN / "nc-profile-sync").read_text())
 
 class Fusion(Base):
     def setUp(self):

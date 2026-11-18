@@ -74,14 +74,13 @@ GPU_MUX_AVERTIR=oui
 # Mode jeu (portables Acer Nitro et semblables) : limite du processeur en Performance sur secteur, pour ne pas vider la
 # batterie sur un chargeur trop juste. Défaut : off partout, SAUF le Nitro ANV16-72 (valeurs mesurées avec son chargeur
 # de 135 W). On ne devine rien pour d'autres modèles : le budget dépend du chargeur, et sa puissance ne se lit pas de
-# façon fiable dans /sys. Un réglage écrit l'emporte toujours. JEU_GPU_MHZ est lu ici ; il sert au lot jeux (nc-gpu-jeu).
+# façon fiable dans /sys. Un réglage écrit l'emporte toujours. JEU_GPU_MHZ (limite GPU en jeu) est lu par nc-gpu-jeu (nc_jeu_gpu_mhz).
 JEU_CPU=off
-JEU_GPU_MHZ=off
 TURBO_VENTILOS=non
 dmi=""
 read -r dmi < "${NC_SYSFS:-/sys}/class/dmi/id/product_name" 2>/dev/null || true
 dmi="${dmi%"${dmi##*[![:space:]]}"}"
-[ "$dmi" = "Nitro ANV16-72" ] && { JEU_CPU=30/45; JEU_GPU_MHZ=1500; TURBO_VENTILOS=oui; }
+[ "$dmi" = "Nitro ANV16-72" ] && { JEU_CPU=30/45; TURBO_VENTILOS=oui; }
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
   [ -r "$f" ] || continue
@@ -94,7 +93,6 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
       PROFIL_SECTEUR|PROFIL_BATTERIE)
         [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       JEU_CPU) [[ "$v" =~ ^(30/45|45/65|off)$ ]] && JEU_CPU=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
-      JEU_GPU_MHZ) [[ "$v" =~ ^(1500|off)$ ]] && JEU_GPU_MHZ=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       TURBO_VENTILOS) [[ "$v" =~ ^(oui|non)$ ]] && TURBO_VENTILOS=$v ;;
       ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER|GPU_MUX_PROPOSER|GPU_MUX_AVERTIR) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
