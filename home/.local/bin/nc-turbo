@@ -1,0 +1,16 @@
+#!/bin/bash
+# nc-turbo : le mode Turbo (Performance sur secteur : profil « performance » de la plateforme et ventilateurs au maximum).
+# Usage : nc-turbo on | off | basculer | etat
+# Le drapeau est le fichier vide ~/.config/nc/turbo ; nc-profile-sync le lit et ne l'applique jamais sur batterie.
+set -u
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+F="$HOME/.config/nc/turbo"
+dire() { t "$1" "$2"; echo; }
+relance() { systemctl --user restart nc-profile-sync.service >/dev/null 2>&1 || true; }
+case "${1:-}" in
+  on)      mkdir -p "${F%/*}" && : > "$F"; relance; dire "Turbo activé (sur secteur, en Performance)." "Turbo on (on AC power, in Performance)." ;;
+  off)     rm -f "$F"; relance; dire "Turbo coupé." "Turbo off." ;;
+  basculer|toggle) if [ -e "$F" ]; then exec "$0" off; else exec "$0" on; fi ;;
+  etat)    if [ -e "$F" ]; then dire "activé" "on"; else dire "coupé" "off"; fi ;;
+  *)       dire "Usage : nc-turbo on|off|basculer|etat" "Usage: nc-turbo on|off|toggle|status" >&2; exit 2 ;;
+esac

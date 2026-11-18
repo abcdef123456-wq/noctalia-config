@@ -1009,6 +1009,19 @@ REGLAGES = [
       L("Choisi tout seul quand tu passes sur batterie.", "Chosen automatically when you switch to battery."),
       [("garder", L("Ne pas changer", "Don't change")), ("balanced", L("Équilibré", "Balanced")),
        ("power-saver", L("Économie", "Power Saver"))], groupe="energie"),
+    R("JEU_CPU", "Énergie", L("Limites du processeur en Performance sur secteur", "Processor limits in Performance on AC power"),
+      "choix", "off",
+      L("Puissance soutenue / pointe en watts, seulement en Performance sur secteur ; remis à la normale ailleurs.",
+        "Sustained / peak power in watts, only in Performance on AC power; back to normal elsewhere."),
+      [("30/45", "30 W / 45 W"), ("45/65", "45 W / 65 W"), ("off", L("Ne pas toucher", "Leave alone"))], groupe="energie"),
+    R("JEU_GPU_MHZ", "Énergie", L("Fréquence maximale de la carte graphique en Performance sur secteur",
+                                  "Maximum graphics card frequency in Performance on AC power"), "choix", "off",
+      L("Plafond en MHz de la carte graphique NVIDIA, seulement en Performance sur secteur.",
+        "NVIDIA graphics card cap in MHz, only in Performance on AC power."),
+      [("1500", "1500 MHz"), ("off", L("Ne pas toucher", "Leave alone"))], groupe="energie"),
+    R("TURBO_VENTILOS", "Énergie", L("Turbo : ventilateurs au maximum", "Turbo: fans at maximum"), "ouinon", "non",
+      L("Avec le mode Turbo (nc-turbo on), met aussi les ventilateurs au maximum, sur secteur seulement.",
+        "With Turbo mode (nc-turbo on), also puts the fans at maximum, on AC power only."), groupe="energie"),
     R("ECO_AUTO", "Énergie", L("Économie automatique, batterie sous", "Automatic Power Saver, battery below"), "entier", "0",
       L("Sur batterie, passe en Économie à ce niveau ; le profil d'avant revient quand tu branches le chargeur.",
         "On battery, switches to Power Saver at this level; the previous profile comes back when you plug in the charger."),
@@ -1723,7 +1736,7 @@ MATERIEL = {
     "LUMINOSITE_PAS": "ecran",
     **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp", "omp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
-    "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
+    "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "JEU_CPU": "batterie", "JEU_GPU_MHZ": "batterie", "TURBO_VENTILOS": "nitro", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie", "BAT_RAPPEL_80": "batterie", "BAT_RAPPEL_SEUIL": "batterie",
@@ -1793,6 +1806,8 @@ def materiel():
                                                   "noctalia/plugins/nc-verrou/musique.luau")),
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode
+            # Un Acer Nitro : le pilote nitro_sense expose les ventilateurs
+            "nitro": existe(sys_ + "/devices/platform/*/nitro_sense/fan_speed"),
             "mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*"),
             # Firefox (paquet, Flatpak, Snap ou profil déjà là), kitty (le terminal des réglages TERMINAL_*), Neovim
             # (celui du système ou celui qu'install.sh met dans ~/.local/bin)

@@ -71,6 +71,17 @@ BAT_RELEVES=oui
 BAT_CLAVIER=oui
 GPU_MUX_PROPOSER=oui
 GPU_MUX_AVERTIR=oui
+# Mode jeu (portables Acer Nitro et semblables) : limite du processeur en Performance sur secteur, pour ne pas vider la
+# batterie sur un chargeur trop juste. Défaut : off partout, SAUF le Nitro ANV16-72 (valeurs mesurées avec son chargeur
+# de 135 W). On ne devine rien pour d'autres modèles : le budget dépend du chargeur, et sa puissance ne se lit pas de
+# façon fiable dans /sys. Un réglage écrit l'emporte toujours. JEU_GPU_MHZ est lu ici ; il sert au lot jeux (nc-gpu-jeu).
+JEU_CPU=off
+JEU_GPU_MHZ=off
+TURBO_VENTILOS=non
+dmi=""
+read -r dmi < "${NC_SYSFS:-/sys}/class/dmi/id/product_name" 2>/dev/null || true
+dmi="${dmi%"${dmi##*[![:space:]]}"}"
+[ "$dmi" = "Nitro ANV16-72" ] && { JEU_CPU=30/45; JEU_GPU_MHZ=1500; TURBO_VENTILOS=oui; }
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
   [ -r "$f" ] || continue
@@ -82,6 +93,9 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
         [[ "$v" =~ ^([0-9]{1,3}|max|low)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       PROFIL_SECTEUR|PROFIL_BATTERIE)
         [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
+      JEU_CPU) [[ "$v" =~ ^(30/45|45/65|off)$ ]] && JEU_CPU=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
+      JEU_GPU_MHZ) [[ "$v" =~ ^(1500|off)$ ]] && JEU_GPU_MHZ=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
+      TURBO_VENTILOS) [[ "$v" =~ ^(oui|non)$ ]] && TURBO_VENTILOS=$v ;;
       ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER|GPU_MUX_PROPOSER|GPU_MUX_AVERTIR) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
       *) ;;                                      # autres réglages : pour d'autres parties de la config
@@ -99,6 +113,7 @@ on_battery() { NC_POWER_SUPPLY="$ALIM" nc_sur_batterie; }
 last_profile=""
 last_bat=""
 last_eth=""                                     # veille de la carte Ethernet demandée au dernier passage : on, off
+last_jeu=""                                     # réglages jeu demandés au dernier passage (voir apply)
 last_kbd=""                                     # état du clavier lumineux au dernier passage : normal, bas, eteint
 ECO_AUTO_FLAG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-eco-auto"   # profil d'avant l'Économie automatique
 
@@ -473,6 +488,42 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     [ -x "$ENERGIE_ROOT" ] && sudo -n "$ENERGIE_ROOT" eth-pm "$eth" >/dev/null 2>&1
     last_eth=$eth
   fi
+
+  # Mode jeu et Turbo (Acer Nitro) : seulement aux changements d'état. Performance sur secteur : limites RAPL du jeu, puis
+  # (après TLP, d'où le sleep) firmware balanced-performance ; avec ~/.config/nc/turbo : firmware performance et
+  # ventilateurs à fond (TURBO_VENTILOS). Ailleurs : RAPL normal, ventilateurs auto, le firmware reste à TLP. Jamais de
+  # Turbo ni de ventilateurs à fond sur batterie. Sans réglage jeu et sans nitro_sense : aucun appel. Silencieux, et pas
+  # de nouvel essai en cas d'échec avant le prochain changement.
+  local Sj="${NC_SYSFS:-/sys}" nitro=0 pp_ok=0 jeu_rapl="" jeu_pf="" jeu_vent="" etat_jeu
+  compgen -G "$Sj/devices/platform/*/nitro_sense/fan_speed" >/dev/null && nitro=1
+  [ -e "$Sj/firmware/acpi/platform_profile" ] && pp_ok=1
+  local jeu_choix=""
+  read -r jeu_choix < "$Sj/firmware/acpi/platform_profile_choices" 2>/dev/null || true
+  if [ "$profile" = performance ] && [ "$bat" = 0 ]; then
+    [ "$JEU_CPU" != off ] && jeu_rapl="jeu-${JEU_CPU/\//-}"
+    [ "$nitro" = 1 ] && jeu_vent=auto
+    # Firmware, seulement avec nitro_sense et platform_profile (sans dépendre de JEU_CPU) : Turbo -> performance,
+    # sinon balanced-performance si le noyau le propose (retirer le Turbo le remet aussitôt) ; sans nitro_sense : rien
+    if [ "$nitro" = 1 ] && [ "$pp_ok" = 1 ]; then
+      if [ -e "$HOME/.config/nc/turbo" ]; then
+        jeu_pf=performance
+        [ "$TURBO_VENTILOS" = oui ] && jeu_vent=max
+      elif [[ " $jeu_choix " == *" balanced-performance "* ]]; then
+        jeu_pf=balanced-performance
+      fi
+    fi
+  else
+    [ "$JEU_CPU" != off ] && jeu_rapl=normal
+    [ "$nitro" = 1 ] && jeu_vent=auto
+  fi
+  etat_jeu="$jeu_rapl|$jeu_pf|$jeu_vent"
+  if [ "$etat_jeu" != "||" ] && [ "$etat_jeu" != "$last_jeu" ] && [ -x "$ENERGIE_ROOT" ]; then
+    [ -n "$jeu_rapl" ] && sudo -n "$ENERGIE_ROOT" rapl "$jeu_rapl" >/dev/null 2>&1
+    [ -n "$jeu_pf" ] && sleep 1                 # TLP écrit le firmware au changement de profil : passer après lui
+    [ -n "$jeu_pf" ] && sudo -n "$ENERGIE_ROOT" platform "$jeu_pf" >/dev/null 2>&1
+    [ -n "$jeu_vent" ] && sudo -n "$ENERGIE_ROOT" ventilateurs "$jeu_vent" >/dev/null 2>&1
+  fi
+  last_jeu=$etat_jeu
 
   # Rétroéclairage du clavier : éteint en Économie (ECO_CLAVIER), ramené au niveau 1 sur batterie hors Performance
   # (BAT_CLAVIER, s'il était plus haut) ; le niveau d'avant revient en sortant. Seulement aux changements : un niveau

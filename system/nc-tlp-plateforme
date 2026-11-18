@@ -10,7 +10,8 @@
 # sans s'arrêter à la première : la dernière l'emporte. Une seule valeur, choisie ici d'après les choix du noyau,
 # donne donc le même résultat avec toutes les versions.
 #
-# Intention :  Performance -> performance, sinon balanced-performance
+# Intention :  Performance -> performance (ou balanced-performance si NC_PERF_PLATEFORME=balanced-performance et que le
+#                             noyau l'offre), sinon balanced-performance
 #              Équilibré   -> balanced
 #              Économie    -> low-power, sinon quiet, sinon cool
 # « max-power » n'est jamais choisi. Un profil sans équivalent sur ce PC n'est pas écrit (TLP garde alors son défaut,
@@ -18,6 +19,7 @@
 #
 # Sortie : le contenu du fichier (code 0), ou rien (code 3) quand le noyau n'expose aucun profil de plateforme.
 # Essais : NC_SYSFS (faux /sys) et NC_TLP_DEFAUTS (faux defaults.conf de TLP).
+# NC_PERF_PLATEFORME (environnement seulement) : performance (defaut) ou balanced-performance ; autre valeur ignoree.
 set -u
 export LC_ALL=C
 S="${NC_SYSFS:-/sys}"
@@ -47,7 +49,10 @@ else
 fi
 
 prf=""; bal=""; sav=""
-if a performance; then prf=performance; elif a balanced-performance; then prf=balanced-performance; fi
+perf_pref=performance
+case "${NC_PERF_PLATEFORME:-}" in balanced-performance) perf_pref=balanced-performance ;; esac
+if [ "$perf_pref" = balanced-performance ] && a balanced-performance; then prf=balanced-performance
+elif a performance; then prf=performance; elif a balanced-performance; then prf=balanced-performance; fi
 a balanced && bal=balanced
 if a low-power; then sav=low-power; elif a quiet; then sav=quiet; elif a cool; then sav=cool; fi
 

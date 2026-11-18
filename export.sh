@@ -172,6 +172,7 @@ HOME_FILES=(
   .local/bin/nc-plateforme-root
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode
+  .local/bin/nc-turbo
   .local/bin/nc-rtx-veille
   .local/bin/nc-energie
   .local/bin/nc-energie-liste
