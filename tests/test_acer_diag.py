@@ -81,6 +81,53 @@ class Linuwu(Base):
         self.assertEqual(self.lance(dmi="Autre PC", journal="rien"), [])
 
 
+
+class RaplJeu(Base):
+    """Limites de jeu restées sans origine (ancien nc-cpu-limite) : signalées hors Performance sur secteur, Nitro ou JEU_CPU."""
+    def lance(self, lim=("30000000", "45000000"), dmi="Nitro ANV16-72", profil="balanced", secteur=True, conf=""):
+        s = self.tmp / "sys"
+        ecrire(s / "class/powercap/intel-rapl:0/constraint_0_power_limit_uw", lim[0])
+        ecrire(s / "class/powercap/intel-rapl:0/constraint_1_power_limit_uw", lim[1])
+        ecrire(s / "class/dmi/id/product_name", dmi)
+        ecrire(s / "class/power_supply/AC/type", "Mains")
+        ecrire(s / "class/power_supply/AC/online", "1" if secteur else "0")
+        if conf:
+            ecrire(self.tmp / "home/.config/nc-profile.conf", conf)
+        base = self.mod.sortie
+        self.mod.sortie = lambda cmd, *a, **k: (profil, 0) if cmd[0] == "powerprofilesctl" else base(cmd, *a, **k)
+        b = self.mod.Bilan(False)
+        self.mod._note_rapl_jeu(b)
+        return [t for _g, t, _q in b.lignes]
+
+    def test_equilibre_signale(self):
+        t = self.lance()
+        self.assertEqual(len(t), 1)
+        self.assertIn("30/45 W", t[0])
+        self.assertIn("redémarrage", t[0])
+
+    def test_performance_sur_batterie_signale(self):
+        self.assertEqual(len(self.lance(profil="performance", secteur=False, lim=("45000000", "65000000"))), 1)
+
+    def test_rien(self):
+        self.assertEqual(self.lance(profil="performance"), [])                       # le jeu, normal
+        self.assertEqual(self.lance(lim=("70000000", "115000000")), [])             # l'origine
+        self.assertEqual(self.lance(dmi="Autre PC", lim=("45000000", "65000000")), [])   # firmware à 45/65 ailleurs
+        self.assertEqual(len(self.lance(dmi="Autre PC", conf="JEU_CPU=45/65")), 1)   # sauf avec JEU_CPU réglé
+
+
+class JeuGpu(Base):
+    def test_defaut_du_dmi_comme_nc_gpu_jeu(self):
+        """nc-diag perf lit JEU_GPU_MHZ par nc_jeu_gpu_mhz : 1500 par défaut sur le Nitro, réglage écrit sinon."""
+        (self.tmp / "home").mkdir()
+        with mock.patch.dict(os.environ, HOME=str(self.tmp / "home")):
+            ecrire(self.tmp / "sys/class/dmi/id/product_name", "Nitro ANV16-72")
+            self.assertEqual(self.mod._jeu_gpu_mhz(), "1500")
+            ecrire(self.tmp / "home/.config/nc/reglages.conf", "JEU_GPU_MHZ=off")
+            self.assertEqual(self.mod._jeu_gpu_mhz(), "off")
+            ecrire(self.tmp / "sys/class/dmi/id/product_name", "Autre PC")
+            (self.tmp / "home/.config/nc/reglages.conf").unlink()
+            self.assertEqual(self.mod._jeu_gpu_mhz(), "off")
+
 class Perf(Base):
     def prepare(self, avant=1000, apres=1000, statut="Full", unite="charge", bat=True):
         d = self.tmp / "sys/class/power_supply/BAT1"

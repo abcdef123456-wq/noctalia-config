@@ -253,7 +253,15 @@ do_rapl() {
     jeu-30-45) a=30000000; b=45000000 ;;
     jeu-45-65) a=45000000; b=65000000 ;;
     normal)
-      [ -f "$sauve" ] || absent "pas d'origine gardée : rien à remettre"
+      if [ ! -f "$sauve" ]; then
+        # Limites de jeu sans origine (posées par un ancien assistant, ou sauvegarde perdue) : aucune valeur devinée ;
+        # nc-diag le signale aussi
+        case "$(lire "$r/constraint_0_power_limit_uw") $(lire "$r/constraint_1_power_limit_uw")" in
+          "30000000 45000000"|"45000000 65000000")
+            absent "limites de jeu en place sans origine gardée : rien n'est deviné, un redémarrage remet celles du firmware" ;;
+        esac
+        absent "pas d'origine gardée : rien à remettre"
+      fi
       [ "$(grep -c '' "$sauve")" = 1 ] || refus "sauvegarde RAPL illisible"
       read -r a b x < "$sauve"
       [ -z "$x" ] && rapl_valide "$a" "$b" || refus "sauvegarde RAPL refusée"

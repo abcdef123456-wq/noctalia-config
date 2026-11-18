@@ -519,8 +519,8 @@ pname() {
 migrer_anciens_assistants() {
   local S="${NC_SUDO:-sudo}" r="${NC_RACINE_MIGRATION:-}" ur=0 noms="nc-cpu-limite|nc-ventilateurs|nc-puissance|nc-gpu-limite"
   local f n rel l c ok_f nb liste="" bk="${BK:-.}/system" gardes=" "
-  local hors='[^[:alnum:]_%@.+/*,:=()[:blank:]-]' regle='^[^[:space:]=:]+[[:space:]]+[^[:space:]=:]+=\([^)]*\)[[:space:]]*((NOPASSWD|PASSWD|NOEXEC|SETENV):[[:space:]]*)*(/.*)$'
-  local cmd_ok='^/usr/local/bin/('"$noms"')([[:blank:]][^:=!(),\]*)?$'
+  local hors='[^[:alnum:]_%@.+/*,:=()"[:blank:]-]' regle='^[^[:space:]=:]+[[:space:]]+[^[:space:]=:]+=\([^)]*\)[[:space:]]*((NOPASSWD|PASSWD|NOEXEC|SETENV):[[:space:]]*)*(/.*)$'
+  local cmd_ok='^/usr/local/bin/('"$noms"')([[:blank:]]+""|[[:blank:]][^:=!(),"\]*)?$'   # "" : aucun argument
   [ "$(id -u)" = 0 ] || ur="${NC_MIGRATION_UID_ROOT:-0}"
   local -a progs=() regles=() rels=() bouges=() st=()
   for n in ${noms//|/ }; do
@@ -568,6 +568,13 @@ migrer_anciens_assistants() {
     fi
     for f in "${bouges[@]}"; do $S rm -f "$f.nc-retrait" || :; liste="$liste ${f##*/}"; done
   fi
+  # nc-cpu-limite a pu laisser 30/45 W (nc-maj lancé en Performance) : ses valeurs d'origine d'abord, sinon le nouvel
+  # assistant ne garderait aucune origine (il ne prend jamais un préréglage de jeu pour l'origine)
+  for f in "${progs[@]}"; do
+    [ "${f##*/}" = nc-cpu-limite ] || continue
+    if $S "$f" normal >/dev/null 2>&1; then MIGRATION_RAPL=1
+    else warn "$(t "nc-cpu-limite normal a échoué : les limites du processeur restent peut-être à 30/45 W jusqu'au redémarrage." "nc-cpu-limite normal failed: the CPU limits may stay at 30/45 W until reboot.")"; fi
+  done
   for f in "${progs[@]}"; do $S rm -f "$f" && liste="$liste ${f##*/}"; done
   info "$(t "Anciens assistants root retirés :$liste (sauvegarde : $bk)." "Old root helpers removed:$liste (backup: $bk).")"
 }
@@ -576,6 +583,12 @@ migrer_anciens_assistants() {
 # des valeurs d'une liste fixe (processeur, boost, Wi-Fi, USB, audio, clavier, NVIDIA…), avec une règle sudo à commandes
 # exactes (une ligne par sous-commande et valeur, écrite par l'assistant lui-même, vérifiée par visudo). Étape
 # sensible, réponse par défaut non : sans terminal elle est refusée (--oui n'accepte pas une question dont la réponse par défaut est non). Rien n'est réappliqué tout seul au démarrage.
+# Après « nc-cpu-limite normal » : nc-profile-sync repart de zéro et repose la limite de jeu s'il faut, en gardant
+# cette fois la bonne origine (sinon il croit 30/45 déjà posé et laisse 70/115 en Performance jusqu'au prochain changement)
+relance_apres_migration() {
+  [ "${MIGRATION_RAPL:-0}" = 1 ] || return 0
+  systemctl --user try-restart nc-profile-sync.service >/dev/null 2>&1 || :
+}
 # Profils d'énergie poussés : assistant root (étape appelée par l'installation complète ET par --seulement energie)
 etape_energie_root() {
   local regle_e=/etc/sudoers.d/nc-energie
@@ -584,6 +597,7 @@ etape_energie_root() {
   if cmp -s "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root && [ -n "$ligne_e" ] && sudo grep -qxF "$ligne_e" "$regle_e" 2>/dev/null; then
     ok "$(t "Assistant des profils d'énergie poussés : déjà en place." "Advanced power profiles helper: already set up.")"
     migrer_anciens_assistants
+    relance_apres_migration
   else
     info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
     info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, Ethernet, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, Ethernet, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
@@ -598,6 +612,7 @@ etape_energie_root() {
          sudo mv -f "$regle_e.tmp" "$regle_e"; then
         ok "$(t "Assistant des profils d'énergie poussés installé." "Advanced power profiles helper installed.")"
         migrer_anciens_assistants
+        relance_apres_migration
       else
         sudo rm -f "$regle_e.tmp"
         warn "$(t "Installation de l'assistant d'énergie impossible (règle sudo refusée par visudo)." "Couldn't install the power helper (sudo rule rejected by visudo).")"

@@ -235,6 +235,88 @@ class Migration(unittest.TestCase):
             self.assertTrue(self.present(f"usr/local/bin/{n}"))
         self.assertTrue(self.present("etc/sudoers.d/nc-limites"))
 
+    # -- lot A6 : les 4 fichiers exacts de l'utilisateur de référence (nom d'utilisateur remplacé), et RAPL
+    REFERENCE = {
+        "nc-cpu-limite": "membre ALL=(root) NOPASSWD: /usr/local/bin/nc-cpu-limite\n",
+        "nc-ventilateurs": "membre ALL=(root) NOPASSWD: /usr/local/bin/nc-ventilateurs max, /usr/local/bin/nc-ventilateurs auto\n",
+        "nc-puissance": 'membre ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance ""\n',
+        "nc-gpu-limite": "membre ALL=(root) NOPASSWD: /usr/local/bin/nc-gpu-limite jeu, /usr/local/bin/nc-gpu-limite normal\n",
+    }
+
+    def test_fichiers_sudoers_de_reference_retires(self):
+        for n in ANCIENS:
+            self.prog(n)
+        for nom, texte in self.REFERENCE.items():
+            self.sudoers(nom, texte)
+        self.visudo(0)
+        p = self.lance()
+        for nom in self.REFERENCE:
+            with self.subTest(nom=nom):
+                self.assertFalse(self.present(f"etc/sudoers.d/{nom}"), p.stdout)
+                self.assertEqual((self.bk / "system/etc/sudoers.d" / nom).read_text(), self.REFERENCE[nom])
+        for n in ANCIENS:
+            self.assertFalse(self.present(f"usr/local/bin/{n}"))
+
+    def test_guillemets_seulement_vides(self):
+        self.prog("nc-puissance")
+        self.sudoers("nc-p", 'membre ALL=(root) NOPASSWD: /usr/local/bin/nc-puissance "x"\n')
+        self.visudo(0)
+        self.lance()
+        self.assertTrue(self.present("etc/sudoers.d/nc-p"))
+
+    def rapl(self, a, b):
+        r = self.d / "sys/class/powercap/intel-rapl:0"
+        r.mkdir(parents=True, exist_ok=True)
+        (r / "constraint_0_power_limit_uw").write_text(a)
+        (r / "constraint_1_power_limit_uw").write_text(b)
+        return r
+
+    def energie_root(self, *args):
+        env = {"PATH": "/usr/bin:/bin", "NC_ENERGIE_RACINE": str(self.d / "sys"), "NC_ENERGIE_LIB": str(self.d / "lib"),
+               "NC_ENERGIE_RUN": str(self.d / "run"), "NC_LANGUE": "fr"}
+        return subprocess.run(["bash", str(REPO / "system/nc-energie-root"), *args], env=env, capture_output=True,
+                              text=True, timeout=30, stdin=subprocess.DEVNULL)
+
+    def test_nc_maj_en_performance_origine_retrouvee(self):
+        """nc-maj lancé en Performance (30/45 W posés par l'ancien nc-cpu-limite) : la migration lance d'abord
+        « nc-cpu-limite normal » (70/115), puis le nouvel assistant garde cette origine et la remet en Équilibré."""
+        r = self.rapl("30000000", "45000000")
+        p = self.prog("nc-cpu-limite")
+        p.write_text(f'#!/bin/sh\necho "$1" >> {self.d}/cpu-limite\n[ "$1" = normal ] || exit 2\n'
+                     f'printf 70000000 > {r}/constraint_0_power_limit_uw\nprintf 115000000 > {r}/constraint_1_power_limit_uw\n')
+        self.sudoers("nc-cpu-limite", self.REFERENCE["nc-cpu-limite"])
+        self.visudo(0)
+        self.lance()
+        self.assertEqual((self.d / "cpu-limite").read_text(), "normal\n")
+        self.assertFalse(self.present("usr/local/bin/nc-cpu-limite"))
+        self.assertEqual(self.energie_root("rapl", "jeu-30-45").returncode, 0)   # nc-profile-sync relancé, Performance
+        self.assertEqual((self.d / "lib/rapl-origine").read_text(), "70000000 115000000\n")
+        self.assertEqual(self.energie_root("rapl", "normal").returncode, 0)       # passage en Équilibré
+        self.assertEqual(((r / "constraint_0_power_limit_uw").read_text().strip(), (r / "constraint_1_power_limit_uw").read_text().strip()),
+                         ("70000000", "115000000"))
+
+    def test_sans_la_remise_le_message_est_clair(self):
+        """Le bug d'avant (nc-cpu-limite retiré sans « normal ») : rapl normal ne devine rien et le dit."""
+        self.rapl("30000000", "45000000")
+        self.energie_root("rapl", "jeu-30-45")
+        p = self.energie_root("rapl", "normal")
+        self.assertEqual(p.returncode, 3)
+        self.assertIn("limites de jeu en place sans origine gardée", p.stderr)
+
+    def test_nc_cpu_limite_en_echec_la_migration_continue(self):
+        p = self.prog("nc-cpu-limite")
+        p.write_text("#!/bin/sh\nexit 1\n")
+        self.visudo(0)
+        r = self.lance(suite="echo SUITE\n")
+        self.assertIn("nc-cpu-limite normal a échoué", r.stdout)
+        self.assertIn("SUITE", r.stdout)
+        self.assertEqual(r.returncode, 0)
+
+    def test_relance_apres_migration(self):
+        corps = fonction("etape_energie_root")
+        self.assertEqual(corps.count("relance_apres_migration"), 2)
+        self.assertIn("try-restart nc-profile-sync.service", fonction("relance_apres_migration"))
+
     def test_autre_pc_aucun_message(self):
         p = self.lance()
         self.assertEqual((p.returncode, p.stdout, p.stderr), (0, "", ""))

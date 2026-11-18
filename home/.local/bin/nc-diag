@@ -1006,6 +1006,7 @@ def energie_plateforme(b, actif, portable):
     _energie_plateforme(b, actif, portable)
     _note_acer(b)
     _note_linuwu(b)
+    _note_rapl_jeu(b)
 
 
 def _note_acer(b):
@@ -1434,6 +1435,58 @@ def _note_linuwu(b):
               "Fix: https://github.com/0x7375646F/Linuwu-Sense/pull/148 (nc-diag installs nothing)"), cle="linuwu_sense_pr148")
 
 
+def _reglage(cle):
+    """Dernière valeur de CLE dans nc-profile.conf puis nc/reglages.conf (même ordre que nc-profile-sync), ou ""."""
+    v = ""
+    for f in (".config/nc-profile.conf", ".config/nc/reglages.conf"):
+        for l in (_lire(os.path.join(HOME, f)) or "").splitlines():
+            if l.strip().startswith(cle + "="):
+                v = l.split("=", 1)[1].strip().strip('"')
+    return v
+
+
+def _secteur():
+    for d in glob.glob(os.path.join(SYS, "class/power_supply/*")):
+        if _lire(os.path.join(d, "type")) in ("Mains", "USB", "USB_C") and _lire(os.path.join(d, "online")) == "1":
+            return True
+    return False
+
+
+def _jeu_gpu_mhz():
+    """JEU_GPU_MHZ comme nc-profile-sync et nc-gpu-jeu (défaut du DMI compris) : nc_jeu_gpu_mhz de nc-gpu-regle."""
+    regle = os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-gpu-regle")
+    if not os.path.isfile(regle):
+        regle = os.path.join(BIN, "nc-gpu-regle")
+    env = dict(os.environ, NC_SYSFS=SYS)
+    try:
+        r = subprocess.run(["sh", "-c", '. "$1"; nc_jeu_gpu_mhz', "sh", regle], capture_output=True, text=True,
+                           timeout=5, env=env, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return "off"
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() in ("1500", "off") else "off"
+
+
+def _note_rapl_jeu(b):
+    """Limites de jeu (30/45 ou 45/65 W) restées hors Performance sur secteur : l'ancien nc-cpu-limite les a posées et
+    nc-energie-root n'a aucune origine à remettre (il ne devine rien). Seulement sur le Nitro ANV16-72 ou avec JEU_CPU
+    réglé : un autre PC dont le firmware vaut 45/65 W n'est pas signalé."""
+    rapl = os.path.join(SYS, "class/powercap/intel-rapl:0")
+    lim = (_lire(os.path.join(rapl, "constraint_0_power_limit_uw")), _lire(os.path.join(rapl, "constraint_1_power_limit_uw")))
+    if lim not in (("30000000", "45000000"), ("45000000", "65000000")):
+        return
+    jeu_cpu = _reglage("JEU_CPU")
+    if _lire(os.path.join(SYS, "class/dmi/id/product_name")) != "Nitro ANV16-72" and jeu_cpu in ("", "off"):
+        return
+    prof = sortie(["powerprofilesctl", "get"], 3)
+    if prof[1] == 0 and prof[0] == "performance" and _secteur():
+        return
+    w = f"{int(lim[0]) // 1000000}/{int(lim[1]) // 1000000} W"
+    b.avert(T(f"Processeur bridé à {w} hors jeu : limites de jeu restées sans origine gardée (ancien nc-cpu-limite ?). "
+              "Rien n'est deviné : un redémarrage remet les limites du firmware.",
+              f"CPU capped at {w} outside games: game limits left with no saved original (old nc-cpu-limite?). "
+              "Nothing is guessed: a reboot restores the firmware limits."), cle="rapl_jeu_sans_origine")
+
+
 PAUSE = time.sleep  # remplaçable dans les tests
 
 
@@ -1517,10 +1570,7 @@ def perf(args):
     for d in glob.glob(os.path.join(SYS, "bus/pci/devices/*")):
         if _lire(os.path.join(d, "vendor")) == "0x10de" and _lire(os.path.join(d, "class")).startswith("0x03"):
             gpu = _lire(os.path.join(d, "power/runtime_status")) or inconnu
-    lim = "off"
-    for l in (_lire(os.path.join(HOME, ".config/nc-profile.conf")) or "").splitlines():
-        if l.startswith("JEU_GPU_MHZ="):
-            lim = l.split("=", 1)[1].strip()
+    lim = _jeu_gpu_mhz()
     turbo = T("oui", "yes") if os.path.exists(os.path.join(HOME, ".config/nc/turbo")) else T("non", "no")
     print(T("Profil : ", "Profile: ") + prof + T("  ·  firmware : ", "  ·  firmware: ") + fw)
     print(T("Limite du processeur (RAPL, PL1/PL2) : ", "CPU limit (RAPL, PL1/PL2): ") + etat.get("rapl", inconnu))

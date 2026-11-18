@@ -154,6 +154,40 @@ class Jeu(tps.ProfileSync):
             self.reglages(reglage)
             self.assertEqual([l for l in self.jeu() if "platform" in l], [], reglage)
 
+    # -- limite GPU au changement de profil (lot A6 : une partie passée en Performance la reçoit, elle part en sortant)
+    def gpu(self):
+        return [l for l in self.appels() if l.startswith("assistant gpu-frequence")]
+
+    def test_gpu_suit_le_profil(self):
+        self.plateforme(NITRO, True)        # JEU_GPU_MHZ=1500 par défaut sur ce DMI
+        self.lancer("performance")
+        self.assertEqual(self.gpu(), ["assistant gpu-frequence jeu"])
+        self.lancer("balanced")
+        self.assertEqual(self.gpu(), ["assistant gpu-frequence normal"])
+
+    def test_gpu_batterie_normal(self):
+        self.plateforme(NITRO, True)
+        self.secteur(False)
+        self.lancer("performance")
+        self.assertEqual(self.gpu(), ["assistant gpu-frequence normal"])
+
+    def test_gpu_rien_si_off_ou_autre_pc(self):
+        self.assertEqual(self.jeu("performance"), [])   # autre PC, sans réglage : ni RAPL, ni firmware, ni ventilateurs
+        self.assertEqual(self.gpu(), [])                 # ni GPU
+        self.plateforme(NITRO, True)
+        self.reglages("JEU_GPU_MHZ=off\n")
+        self.lancer("performance")
+        self.assertEqual(self.gpu(), [])
+
+    def test_gpu_dans_un_passage_et_carte_endormie(self):
+        """Performance puis Équilibré dans le même processus : jeu puis normal ; la carte endormie (code 3, « absent »)
+        n'est pas une erreur : pas de nouvel essai au passage identique suivant."""
+        self.plateforme(NITRO, True)
+        a = self.home / "nc-energie-root"
+        a.write_text('#!/bin/sh\necho "assistant $*" >> "$JOURNAL"\n[ "$1" = gpu-frequence ] && exit 3\nexit 0\n')
+        self.deux([("performance", True), ("performance", True), ("balanced", True)])
+        self.assertEqual(self.gpu(), ["assistant gpu-frequence jeu", "assistant gpu-frequence normal"])
+
 
 class Turbo(unittest.TestCase):
     def setUp(self):

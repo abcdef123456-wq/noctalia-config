@@ -491,13 +491,17 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   # (après TLP, d'où le sleep) firmware balanced-performance ; avec ~/.config/nc/turbo : firmware performance et
   # ventilateurs à fond (TURBO_VENTILOS). Ailleurs : RAPL normal, ventilateurs auto, le firmware reste à TLP. Jamais de
   # Turbo ni de ventilateurs à fond sur batterie. Sans réglage jeu et sans nitro_sense : aucun appel. Silencieux, et pas
-  # de nouvel essai en cas d'échec avant le prochain changement.
-  local Sj="${NC_SYSFS:-/sys}" nitro=0 pp_ok=0 jeu_rapl="" jeu_pf="" jeu_vent="" etat_jeu
+  # de nouvel essai en cas d'échec avant le prochain changement. Limite GPU (JEU_GPU_MHZ) aussi au changement de profil,
+  # pas seulement au lancement du jeu : une partie passée en Performance (Super+Alt+G) la reçoit, et elle part en sortant.
+  # Carte endormie : l'assistant répond « absent » sans la réveiller, c'est voulu (gamemode la repose au lancement).
+  local Sj="${NC_SYSFS:-/sys}" nitro=0 pp_ok=0 jeu_rapl="" jeu_pf="" jeu_vent="" jeu_gpu="" etat_jeu gpu_mhz
   compgen -G "$Sj/devices/platform/*/nitro_sense/fan_speed" >/dev/null && nitro=1
   [ -e "$Sj/firmware/acpi/platform_profile" ] && pp_ok=1
   local jeu_choix=""
   read -r jeu_choix < "$Sj/firmware/acpi/platform_profile_choices" 2>/dev/null || true
+  gpu_mhz="$(nc_jeu_gpu_mhz 2>/dev/null)" || gpu_mhz=off
   if [ "$profile" = performance ] && [ "$bat" = 0 ]; then
+    [ "$gpu_mhz" != off ] && jeu_gpu=jeu
     [ "$JEU_CPU" != off ] && jeu_rapl="jeu-${JEU_CPU/\//-}"
     [ "$nitro" = 1 ] && jeu_vent=auto
     # Firmware, seulement avec nitro_sense et platform_profile (sans dépendre de JEU_CPU) : Turbo -> performance,
@@ -511,15 +515,17 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
       fi
     fi
   else
+    [ "$gpu_mhz" != off ] && jeu_gpu=normal
     [ "$JEU_CPU" != off ] && jeu_rapl=normal
     [ "$nitro" = 1 ] && jeu_vent=auto
   fi
-  etat_jeu="$jeu_rapl|$jeu_pf|$jeu_vent"
-  if [ "$etat_jeu" != "||" ] && [ "$etat_jeu" != "$last_jeu" ] && [ -x "$ENERGIE_ROOT" ]; then
+  etat_jeu="$jeu_rapl|$jeu_pf|$jeu_vent|$jeu_gpu"
+  if [ "$etat_jeu" != "|||" ] && [ "$etat_jeu" != "$last_jeu" ] && [ -x "$ENERGIE_ROOT" ]; then
     [ -n "$jeu_rapl" ] && sudo -n "$ENERGIE_ROOT" rapl "$jeu_rapl" >/dev/null 2>&1
     [ -n "$jeu_pf" ] && sleep 1                 # TLP écrit le firmware au changement de profil : passer après lui
     [ -n "$jeu_pf" ] && sudo -n "$ENERGIE_ROOT" platform "$jeu_pf" >/dev/null 2>&1
     [ -n "$jeu_vent" ] && sudo -n "$ENERGIE_ROOT" ventilateurs "$jeu_vent" >/dev/null 2>&1
+    [ -n "$jeu_gpu" ] && sudo -n "$ENERGIE_ROOT" gpu-frequence "$jeu_gpu" >/dev/null 2>&1
   fi
   last_jeu=$etat_jeu
 
