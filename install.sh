@@ -549,7 +549,11 @@ migrer_anciens_assistants() {
   [ "${#progs[@]}" -gt 0 ] || [ "${#regles[@]}" -gt 0 ] || return 0
   for f in "${progs[@]}" "${regles[@]}"; do rels+=("${f#"$r"/}"); done
   # root ne fait que lire (tar -c) ; le dépaquetage tourne sous l'utilisateur, dans son propre dossier
-  mkdir -p "$bk" 2>/dev/null && { $S tar -C "${r:-/}" -cf - "${rels[@]}" | tar -C "$bk" -xf - ; st=("${PIPESTATUS[@]}"); }
+  # dans un « if » : set -e + pipefail ne quittent pas install.sh si un tar échoue (disque plein, sudo annulé)
+  st=(1)
+  if mkdir -p "$bk" 2>/dev/null; then
+    if $S tar -C "${r:-/}" -cf - "${rels[@]}" | tar -C "$bk" -xf -; then st=("${PIPESTATUS[@]}"); else st=("${PIPESTATUS[@]}"); fi
+  fi
   [ "${st[0]:-1}" = 0 ] && [ "${st[1]:-1}" = 0 ] || st=(1)
   for rel in "${rels[@]}"; do [ -f "$bk/$rel" ] && [ ! -L "$bk/$rel" ] || st=(1); done
   if [ "${st[0]}" != 0 ]; then
@@ -558,11 +562,11 @@ migrer_anciens_assistants() {
   if [ "${#regles[@]}" -gt 0 ]; then
     for f in "${regles[@]}"; do $S mv -f "$f" "$f.nc-retrait" && bouges+=("$f"); done
     if ! $S visudo -c >/dev/null 2>&1; then
-      for f in "${bouges[@]}"; do $S mv -f "$f.nc-retrait" "$f"; done
+      for f in "${bouges[@]}"; do $S mv -f "$f.nc-retrait" "$f" || :; done
       warn "$(t "visudo refuse la suite : les règles sudoers sont remises en place, rien n'est retiré." "visudo rejects the result: the sudoers rules were put back, nothing removed.")"
       return 0
     fi
-    for f in "${bouges[@]}"; do $S rm -f "$f.nc-retrait"; liste="$liste ${f##*/}"; done
+    for f in "${bouges[@]}"; do $S rm -f "$f.nc-retrait" || :; liste="$liste ${f##*/}"; done
   fi
   for f in "${progs[@]}"; do $S rm -f "$f" && liste="$liste ${f##*/}"; done
   info "$(t "Anciens assistants root retirés :$liste (sauvegarde : $bk)." "Old root helpers removed:$liste (backup: $bk).")"

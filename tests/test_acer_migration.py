@@ -54,10 +54,11 @@ class Migration(unittest.TestCase):
         p.chmod(0o440)
         return p
 
-    def lance(self, uid_root=None):
+    def lance(self, uid_root=None, suite=""):
         uid = os.getuid() if uid_root is None else uid_root
-        script = ("set -u\nt(){ printf '%s' \"$1\"; }\ninfo(){ echo \"INFO: $*\"; }\nwarn(){ echo \"WARN: $*\"; }\n"
-                  f"BK={self.bk}\n" + fonction("migrer_anciens_assistants") + "migrer_anciens_assistants\n")
+        # set -e et pipefail comme install.sh : la fonction ne doit jamais faire quitter l'installation
+        script = ("set -euo pipefail\nt(){ printf '%s' \"$1\"; }\ninfo(){ echo \"INFO: $*\"; }\nwarn(){ echo \"WARN: $*\"; }\n"
+                  f"BK={self.bk}\n" + fonction("migrer_anciens_assistants") + "migrer_anciens_assistants\n" + suite)
         env = {"PATH": self.path, "NC_LANGUE": "fr", "NC_RACINE_MIGRATION": str(self.r),
                "NC_SUDO": str(self.faux / "sudo"), "NC_MIGRATION_UID_ROOT": str(uid)}
         return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30,
@@ -217,6 +218,22 @@ class Migration(unittest.TestCase):
         self.visudo(0)
         p = self.lance()
         self.assertEqual([a for a in self.journal.read_text().splitlines() if str(self.bk) in a], [], p.stdout)
+
+    def test_tar_en_echec_l_installation_continue(self):
+        for n in ANCIENS:
+            self.prog(n)
+        self.sudoers("nc-limites", PROPRE)
+        self.visudo(0)
+        tar = self.faux / "tar"
+        tar.write_text("#!/bin/bash\nexit 2\n")
+        tar.chmod(0o755)
+        p = self.lance(suite="echo SUITE-DE-L-INSTALLATION\n")
+        self.assertIn("Sauvegarde impossible", p.stdout)
+        self.assertIn("SUITE-DE-L-INSTALLATION", p.stdout)
+        self.assertEqual(p.returncode, 0)
+        for n in ANCIENS:
+            self.assertTrue(self.present(f"usr/local/bin/{n}"))
+        self.assertTrue(self.present("etc/sudoers.d/nc-limites"))
 
     def test_autre_pc_aucun_message(self):
         p = self.lance()
