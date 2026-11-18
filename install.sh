@@ -508,6 +508,58 @@ pname() {
   esac
 }
 
+# Anciens assistants root de l'Acer (nc-cpu-limite, nc-ventilateurs, nc-puissance, nc-gpu-limite) : remplacés par
+# nc-energie-root. On ne retire que les 4 programmes exacts, ordinaires et à root, et les fichiers sudoers qui ne citent
+# QUE ces programmes (jamais un fichier mixte, ALL, ni les nôtres). Tout est copié dans $BK/system avant ; si la copie
+# échoue, rien n'est retiré. La sauvegarde RAPL d'origine de nc-cpu-limite reste en place : aucun autre fichier n'est touché.
+# NC_RACINE_MIGRATION, NC_SUDO et NC_MIGRATION_UID_ROOT (hors root seulement) servent aux tests.
+migrer_anciens_assistants() {
+  local S="${NC_SUDO:-sudo}" r="${NC_RACINE_MIGRATION:-}" ur=0 noms="nc-cpu-limite|nc-ventilateurs|nc-puissance|nc-gpu-limite"
+  local f n rel l ok_f nb c p liste="" bk="${BK:-.}/system"
+  [ "$(id -u)" = 0 ] || ur="${NC_MIGRATION_UID_ROOT:-0}"
+  local -a progs=() regles=()
+  for n in ${noms//|/ }; do
+    f="$r/usr/local/bin/$n"
+    [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %u "$f" 2>/dev/null)" = "$ur" ] && progs+=("$f")
+  done
+  # /etc/sudoers.d est en 0750 (Arch, Fedora) : listé par sudo ; -type f exclut les liens, -uid garde ceux de root
+  while IFS= read -r -d '' f; do
+    n="${f##*/}"
+    case "$n" in nc-energie|nc-vpn|nc-limite-charge) continue ;; esac
+    ok_f=1; nb=0
+    while IFS= read -r l; do
+      l="${l#"${l%%[![:space:]]*}"}"
+      case "$l" in "#include"*) ok_f=0; continue ;; ""|"#"*) continue ;; esac   # #include(dir) n'est pas un commentaire
+      if [[ "$l" =~ ^[^[:space:]=]+[[:space:]]+[^[:space:]=]+=\([^\)]*\)[[:space:]]*((NOPASSWD|PASSWD|NOEXEC|SETENV):[[:space:]]*)*(/.*)$ ]]; then
+        while IFS= read -r c; do
+          c="${c#"${c%%[![:space:]]*}"}"
+          [[ "$c" =~ ^/usr/local/bin/($noms)([[:space:]].*)?$ ]] && nb=$((nb+1)) || ok_f=0
+        done < <(printf '%s\n' "${BASH_REMATCH[3]}" | sed 's/, */\n/g')
+      else ok_f=0; fi
+    done < <($S cat "$f" 2>/dev/null)
+    if [ "$ok_f" = 1 ] && [ "$nb" -gt 0 ]; then regles+=("$f")
+    elif [ "$nb" -gt 0 ]; then info "$(t "Fichier sudoers laissé en place (il contient d'autres règles) : $f" "Sudoers file left in place (it holds other rules): $f")"; fi
+  done < <($S find "$r/etc/sudoers.d" -mindepth 1 -maxdepth 1 -type f -uid "$ur" -print0 2>/dev/null)
+  [ "${#progs[@]}" -gt 0 ] || [ "${#regles[@]}" -gt 0 ] || return 0
+  for f in "${progs[@]}" "${regles[@]}"; do
+    rel="${f#"$r"/}"
+    if ! mkdir -p "$bk" || ! (cd "${r:-/}" && $S cp -a --parents "$rel" "$bk/"); then
+      warn "$(t "Sauvegarde impossible dans $bk : anciens assistants root laissés en place." "Backup impossible in $bk: old root helpers left in place.")"; return 0
+    fi
+  done
+  $S chown -R "$(id -u):$(id -g)" "$bk" 2>/dev/null || :   # comme sbackup : la sauvegarde reste lisible et effaçable
+  for f in "${progs[@]}" "${regles[@]}"; do $S rm -f "$f"; liste="$liste ${f##*/}"; done
+  # visudo par sudo : /etc/sudoers n'est lisible qu'en root (et /usr/sbin manque au PATH de Debian)
+  if [ "${#regles[@]}" -gt 0 ] && ! $S visudo -c >/dev/null 2>&1; then
+    # remise par cp simple puis 0440 : le fichier redevient à root, jamais à l'utilisateur (sauvegarde à lui)
+    for f in "${regles[@]}"; do rel="${f#"$r"/}"; $S cp "$bk/$rel" "$f" && $S chmod 0440 "$f"; done
+    warn "$(t "visudo refuse la suite : les règles sudoers sont remises en place." "visudo rejects the result: the sudoers rules were put back.")"
+    liste=""; for f in "${progs[@]}"; do liste="$liste ${f##*/}"; done
+    [ -n "$liste" ] || return 0
+  fi
+  info "$(t "Anciens assistants root retirés :$liste (sauvegarde : $bk)." "Old root helpers removed:$liste (backup: $bk).")"
+}
+
 # Profils d'énergie poussés (nc-energie, proposés par l'IA ou par des règles) : un petit assistant root qui ne règle que
 # des valeurs d'une liste fixe (processeur, boost, Wi-Fi, USB, audio, clavier, NVIDIA…), avec une règle sudo à commandes
 # exactes (une ligne par sous-commande et valeur, écrite par l'assistant lui-même, vérifiée par visudo). Étape
@@ -519,6 +571,7 @@ etape_energie_root() {
   ligne_e="$("$REPO/system/nc-energie-root" sudoers "$(id -un)")"
   if cmp -s "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root && [ -n "$ligne_e" ] && sudo grep -qxF "$ligne_e" "$regle_e" 2>/dev/null; then
     ok "$(t "Assistant des profils d'énergie poussés : déjà en place." "Advanced power profiles helper: already set up.")"
+    migrer_anciens_assistants
   else
     info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
     info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, Ethernet, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, Ethernet, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
@@ -532,6 +585,7 @@ etape_energie_root() {
          sudo install -m0440 -o root -g root "$t_e" "$regle_e.tmp" && sudo visudo -cf "$regle_e.tmp" >/dev/null &&
          sudo mv -f "$regle_e.tmp" "$regle_e"; then
         ok "$(t "Assistant des profils d'énergie poussés installé." "Advanced power profiles helper installed.")"
+        migrer_anciens_assistants
       else
         sudo rm -f "$regle_e.tmp"
         warn "$(t "Installation de l'assistant d'énergie impossible (règle sudo refusée par visudo)." "Couldn't install the power helper (sudo rule rejected by visudo).")"
