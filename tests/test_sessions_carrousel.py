@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 
@@ -177,7 +178,7 @@ dofile(PANEL)
 
 
 def session(nom, **plus):
-    s = {"nom": nom, "date": "2026-10-19T10:00:00", "nb_fenetres": 2, "applis": ["firefox", "kitty"], "icone": "code",
+    s = {"nom": nom, "date": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3 * 86400)), "nb_fenetres": 2, "applis": ["firefox", "kitty"], "icone": "code",
          "couleur": "tertiary", "fond": None, "profil": "garder", "npd": False, "demarrage": False, "fermer_autres": "non",
          "raccourci": None, "bureaux_noms": {"1": "Code"}, "apercu": None,
          "schema": [{"ecran": "eDP-1", "bureau": 1, "largeur": 1600, "hauteur": 1000,
