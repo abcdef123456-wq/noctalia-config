@@ -7,7 +7,9 @@ After=graphical-session.target
 [Service]
 # Disposition de l'écran de verrouillage enregistrée par Noctalia retirée : il part toujours de config.toml
 ExecStartPre=-%h/.local/bin/nc-noctalia-avant
-ExecStart=/usr/bin/noctalia
+# noctalia cherché dans le PATH de la session, comme qs pour l'île : le paquet de la distribution, ou un environnement
+# Nix de l'utilisateur sur un NixOS sans root (absent alors des programmes du système)
+ExecStart=/usr/bin/env noctalia
 # Toujours relancée, même après un arrêt « propre » (SIGTERM d'un kill) : sans elle plus de barre ni de raccourcis
 # Noctalia ; systemctl --user stop l'arrête quand même pour de bon
 Restart=always

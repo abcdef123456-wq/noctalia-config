@@ -126,7 +126,51 @@ class NixosTest(unittest.TestCase):
         for u in UNITES:
             texte = (b.home / ".config/systemd/user" / u).read_text()
             self.assertNotIn("/usr/bin/", texte, u)
-        self.assertIn("/run/current-system/sw/bin/", (b.home / ".config/systemd/user/noctalia.service").read_text())
+        self.assertIn("ExecStart=/run/current-system/sw/bin/env noctalia",
+                      (b.home / ".config/systemd/user/noctalia.service").read_text(),
+                      "noctalia trouvé par le PATH : il peut venir d'un environnement Nix de l'utilisateur")
+
+    def test_sources_en_lecture_seule_fichiers_modifiables(self):
+        # Comme lancé depuis /nix/store : une copie du dépôt sans droit d'écriture
+        b = self.banc()
+        depot = b.d / "store-depot"
+        shutil.copytree(REPO, depot, ignore=shutil.ignore_patterns(".git", "__pycache__"), symlinks=True)
+        for p in [depot, *depot.rglob("*")]:
+            if not p.is_symlink():
+                p.chmod(stat.S_IMODE(p.stat().st_mode) & ~0o222)
+        self.addCleanup(lambda: [p.chmod(stat.S_IMODE(p.stat().st_mode) | 0o200)
+                                 for p in [depot, *depot.rglob("*")] if not p.is_symlink()])
+        env = b.env()
+        for _ in range(2):   # la 2e fois, les fichiers sont déjà à jour : ils restent modifiables
+            r = subprocess.run(["bash", str(depot / "install.sh"), "--oui"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, start_new_session=True, env=env, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            figes = [str(f.relative_to(b.home)) for f in (b.home / ".config").rglob("*")
+                     if f.is_file() and not f.is_symlink() and not f.stat().st_mode & stat.S_IWUSR]
+            self.assertEqual(figes, [], "fichiers installés en lecture seule")
+        # le reste des droits suit la source : un programme reste exécutable
+        self.assertTrue((b.home / ".local/bin/nc-verrou-place").stat().st_mode & stat.S_IXUSR)
+        self.assertEqual(b.appels(), "")
+
+    def test_outils_absents_sans_root(self):
+        b = self.banc(absents=("uwsm",))
+        (b.bin / "id").unlink()
+        outil(b.bin, "id", 'case "$1" in -u) echo 1000;; -nG) echo "eleves users";; *) echo 1000;; esac')
+        r = b.lance("--oui")
+        sortie = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("uwsm", sortie)
+        self.assertIn("sans root", sortie)
+        self.assertNotIn("configuration Nix", sortie)
+
+    def test_outils_absents_avec_wheel(self):
+        b = self.banc(absents=("uwsm",))
+        (b.bin / "id").unlink()
+        outil(b.bin, "id", 'case "$1" in -u) echo 1000;; -nG) echo "users wheel";; *) echo 1000;; esac')
+        r = b.lance("--oui")
+        sortie = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("configuration Nix", sortie)
 
     def test_unites_inchangees_ailleurs(self):
         for fam in ["arch", "debian", "fedora", "opensuse-tumbleweed"]:
@@ -135,7 +179,7 @@ class NixosTest(unittest.TestCase):
                 r = b.lance("--oui", "--files-only")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 texte = (b.home / ".config/systemd/user/noctalia.service").read_text()
-                self.assertIn("/usr/bin/noctalia", texte)
+                self.assertIn("ExecStart=/usr/bin/env noctalia", texte)
                 self.assertNotIn("/run/current-system", texte)
 
     def _existants(self, b):

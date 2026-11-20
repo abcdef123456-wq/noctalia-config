@@ -20,6 +20,9 @@ Item {
     readonly property color rose: Couleurs.rose
     readonly property color vert: Couleurs.vert
     readonly property var s: Etat.sys
+    // Sans NetworkManager (clé filaire de nc-ile-etat) : tuile Ethernet au lieu du Wi-Fi ; booléen pour que la liste
+    // des connexions ne soit pas refaite à chaque relecture
+    readonly property bool filaire: (s || {}).filaire !== undefined
 
     // ── Disposition ──
     // forme : grand (168 x 168), flex (le reste de la ligne, 88 au moins : dans l'île la page fait 378 points et les deux
@@ -38,7 +41,7 @@ Item {
     readonly property var defaut: ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie", "ia"]
     property var ordre: defaut
     property var masques: []
-    readonly property var visibles: ordre.filter(id => masques.indexOf(id) < 0)
+    readonly property var visibles: ordre.filter(id => masques.indexOf(id) < 0 && !(id === "energie" && Etat.profilsAbsents))
     property bool edition: false
     property int choix: 0                        // module choisi au clavier, en édition
     property bool pret: false                    // disposition gardée relue
@@ -303,15 +306,17 @@ Item {
                 anchors.fill: parent; anchors.margins: 12; spacing: 8
                 Repeater {
                     model: [
-                        { cle: "wifi", icone: "wifi", nom: "Wi-Fi", page: "reseau" },
+                        centre.filaire ? { cle: "filaire", icone: "lan", nom: "Ethernet", page: "" }
+                                       : { cle: "wifi", icone: "wifi", nom: "Wi-Fi", page: "reseau" },
                         { cle: "bluetooth", icone: "bluetooth", nom: "Bluetooth", page: "bluetooth" },
                         { cle: "dnd", icone: "dark_mode", nom: Reglages.t("Concentration", "Focus"), page: "notifications" }
                     ]
                     Item {
                         id: lc
                         required property var modelData
-                        readonly property bool actif: modelData.cle === "dnd" ? Notifs.concentration : Etat.valeur(modelData.cle, centre.s[modelData.cle]) === "on"
-                        readonly property string etat: modelData.cle === "wifi" ? (actif ? (centre.s.reseau || Reglages.t("Activé", "On")) : Reglages.t("Désactivé", "Off"))
+                        readonly property bool actif: modelData.cle === "dnd" ? Notifs.concentration : modelData.cle === "filaire" ? centre.s.filaire === "1" : Etat.valeur(modelData.cle, centre.s[modelData.cle]) === "on"
+                        readonly property string etat: modelData.cle === "filaire" ? (actif ? Reglages.t("Connecté", "Connected") : Reglages.t("Déconnecté", "Disconnected"))
+                                                    : modelData.cle === "wifi" ? (actif ? (centre.s.reseau || Reglages.t("Activé", "On")) : Reglages.t("Désactivé", "Off"))
                                                     : modelData.cle === "dnd" ? (actif ? Reglages.t("Ne pas déranger", "Do Not Disturb") : Reglages.t("Désactivée", "Off"))
                                                     : (actif ? Reglages.t("Activé", "On") : Reglages.t("Désactivé", "Off"))
                         width: parent.width; height: 41
@@ -326,7 +331,7 @@ Item {
                             taille: 36; icone: lc.modelData.icone; actif: lc.actif
                             couleur: lc.modelData.cle === "dnd" ? centre.indigo : centre.bleu
                             onAppuiLong: if (lc.modelData.cle === "dnd" && Modes.reglage) Modes.ouvrirPage()
-                            onClic: lc.modelData.cle === "dnd" ? Notifs.basculerConcentration() : Etat.inverser(lc.modelData.cle, ["noctalia", "msg", lc.modelData.cle + "-toggle"])
+                            onClic: lc.modelData.cle === "filaire" ? null : lc.modelData.cle === "dnd" ? Notifs.basculerConcentration() : Etat.inverser(lc.modelData.cle, ["noctalia", "msg", lc.modelData.cle + "-toggle"])
                         }
                         Column {
                             anchors.left: rl.right; anchors.leftMargin: 9; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter

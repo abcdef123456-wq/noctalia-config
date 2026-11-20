@@ -377,6 +377,30 @@ class VerrouPlace(Base):
         self.assertEqual(sorted(p.name for p in self.conf.iterdir()), ["config.toml", "zx-verrou.toml"])
         self.assertEqual(sorted(p.name for p in self.etat.iterdir()), ["settings.toml"])
 
+    def _ecrans(self, noms):
+        ecrans = json.dumps([{"name": n, "width": 2000 if n == "DP-1" else 800, "height": 1000, "scale": 1.0,
+                              "transform": 0} for n in noms])
+        self.faux_prog("hyprctl", f"echo '{ecrans}'")
+
+    def test_ecrans_virtuels_pas_comptes(self):
+        if sys.version_info < (3, 11):
+            self.skipTest("tomllib absent")
+        self._ecrans(["FALLBACK", "HEADLESS-2", "DP-1"])
+        r = self.lancer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        texte = (self.conf / "zx-verrou.toml").read_text()
+        self.assertIn('output = "DP-1"', texte)
+        self.assertIn("cx = 1000.0", texte, "centré sur l'écran réel, pas sur FALLBACK")
+
+    def test_seulement_des_ecrans_virtuels_rien_ecrit(self):
+        if sys.version_info < (3, 11):
+            self.skipTest("tomllib absent")
+        self._ecrans(["FALLBACK", "HEADLESS-1"])
+        r = self.lancer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.conf / "zx-verrou.toml").exists())
+        self.assertNotIn("config-reload", self.journal.read_text())
+
     def test_deux_executions_en_meme_temps(self):
         if sys.version_info < (3, 11):
             self.skipTest("tomllib absent")

@@ -9,7 +9,12 @@ import Quickshell
 Singleton {
     id: c
     property var sonde: null
-    readonly property bool enLigne: sonde ? sonde.enLigne : true
+    // Sans NetworkManager, Networking dit « None » : on se fie alors à la route par défaut (clé filaire de nc-ile-etat)
+    // (Etat peut manquer ou ne pas avoir encore lu sys : alors la sonde, comme avant)
+    readonly property bool enLigne: {
+        try { if (Etat.sys.filaire !== undefined) return Etat.sys.filaire === "1" } catch (e) {}
+        return sonde ? sonde.enLigne : true
+    }
     readonly property bool disponible: sonde !== null
 
     Component.onCompleted: {

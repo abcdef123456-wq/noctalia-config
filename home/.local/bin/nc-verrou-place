@@ -118,7 +118,8 @@ def main():
         widgets, ordre = config.get("widget", {}), config.get("widget_order", [])
     except (OSError, ValueError):
         return
-    ecrans = [e for e in ecrans if not e.get("disabled")]
+    # Écrans virtuels (FALLBACK : écran de secours de Hyprland, HEADLESS-* : partage de bureau) : jamais comptés
+    ecrans = [e for e in ecrans if not e.get("disabled") and not e.get("name", "").startswith(("FALLBACK", "HEADLESS"))]
     if not ecrans or not widgets:
         return
     e = next((e for e in ecrans if e["name"].startswith(("eDP", "LVDS", "DSI"))), ecrans[0])

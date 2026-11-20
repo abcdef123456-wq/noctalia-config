@@ -296,10 +296,14 @@ end
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
 tout()
 demander_infos()
-hl.on("monitor.added", function()
+hl.on("monitor.added", function(m)
     tout()
     demander_infos()
-    -- Écran de verrouillage recentré sur l'écran (sa taille réelle, échelle comprise)
+    -- Écran de verrouillage recentré sur l'écran (sa taille réelle, échelle comprise) ; pas pour un écran virtuel
+    -- (FALLBACK, HEADLESS-*), que nc-verrou-place ne compte pas
+    local lu, nom = pcall(function() return tostring(m.name or "") end)
+    nom = lu and nom or ""
+    if nom:find("^FALLBACK") or nom:find("^HEADLESS") then return end
     hl.exec_cmd("sleep 2; ~/.local/bin/nc-verrou-place")
 end)
 hl.on("monitor.removed", function()

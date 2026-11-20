@@ -154,6 +154,7 @@ Item {
                 Module {
                     required property var modelData
                     width: sy.width; height: 56; radius: 16; cliquable: true
+                    visible: !Etat.profilsAbsents
                     onClic: Etat.choisirProfil(modelData.p)
                     Row {
                         anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12

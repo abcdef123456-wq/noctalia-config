@@ -11,7 +11,7 @@ Module {
     id: ep
     objectName: "blocEnergie"
     radius: 18
-    visible: etat.disponible === true
+    visible: etat.disponible === true && !Etat.profilsAbsents   // sans service de profils : rien à pousser
     height: col.implicitHeight + 24
 
     property bool affichee: false                        // la page Santé est vraiment affichée

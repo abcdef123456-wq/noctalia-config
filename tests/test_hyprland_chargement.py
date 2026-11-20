@@ -113,6 +113,17 @@ print("b", last["HDMI-A-1"], last["DP-1"], nc.ecrans_perso["HDMI-A-1"] ~= nil, h
         self.assertEqual(b[1], "nil", "monitor.added non plus")
         self.assertEqual(b[3], "true")
 
+    def test_ecran_virtuel_ne_relance_pas_le_verrou(self):
+        apres = r'''
+local function n_verrou()
+  local n = 0 for _, c in ipairs(execs) do if c:find("nc%-verrou%-place") then n = n + 1 end end return n
+end
+local function ajout(m) local avant = n_verrou() for _, f in ipairs(handlers["monitor.added"]) do f(m) end return n_verrou() - avant end
+print("v", ajout({ name = "HEADLESS-2" }), ajout({ name = "FALLBACK" }), ajout({ name = "DP-1" }), ajout(nil))
+'''
+        v = self.lancer(apres).strip().splitlines()[-1].split("\t")
+        self.assertEqual(v[1:], ["0", "0", "1", "1"], "écran virtuel : rien ; écran réel ou inconnu : relancé")
+
     def test_ecran_de_perso_en_prefixe_desc(self):
         # Hyprland compare « desc:… » au DÉBUT de la description (CMonitor::matchesStaticSelector)
         perso = 'hl.monitor({ output = "desc:b", scale = 1 })\n'

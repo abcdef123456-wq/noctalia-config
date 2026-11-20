@@ -680,10 +680,10 @@ Item {
         { t: Reglages.t("Mettre en veille", "Sleep"), k: "veille suspend dormir sleep", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
         { t: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), k: "éteindre redémarrer arrêt shutdown reboot quitter session shut power off restart log out logout", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session"]) },
         { t: Reglages.t("Mode jeu", "Game Mode"), k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
-        { t: Reglages.t("Économie d'énergie", "Power saver"), k: "économie batterie eco énergie power saver low battery energy", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
-        { t: Reglages.t("Équilibré", "Balanced"), k: "équilibré énergie normal balanced power energy", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },
-        { t: "Performance", k: "performance énergie puissance nvidia power energy", g: "bolt", f: () => Etat.choisirProfil(PowerProfile.Performance) },
-        { t: Reglages.t("Activer ou couper le Wi-Fi", "Turn Wi-Fi On or Off"), k: "wifi wi-fi réseau internet network", g: "wifi", f: () => Etat.inverser("wifi", ["noctalia", "msg", "wifi-toggle"]) },
+        { t: Reglages.t("Économie d'énergie", "Power saver"), k: "économie batterie eco énergie power saver low battery energy", g: "battery_saver", ppd: true, f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
+        { t: Reglages.t("Équilibré", "Balanced"), k: "équilibré énergie normal balanced power energy", g: "battery_full", ppd: true, f: () => Etat.choisirProfil(PowerProfile.Balanced) },
+        { t: "Performance", k: "performance énergie puissance nvidia power energy", g: "bolt", ppd: true, f: () => Etat.choisirProfil(PowerProfile.Performance) },
+        { t: Reglages.t("Activer ou couper le Wi-Fi", "Turn Wi-Fi On or Off"), k: "wifi wi-fi réseau internet network", g: "wifi", wifi: true, f: () => Etat.inverser("wifi", ["noctalia", "msg", "wifi-toggle"]) },
         { t: Reglages.t("Activer ou couper le Bluetooth", "Turn Bluetooth On or Off"), k: "bluetooth", g: "bluetooth", f: () => Etat.inverser("bluetooth", ["noctalia", "msg", "bluetooth-toggle"]) },
         { t: Reglages.t("Concentration", "Do Not Disturb"), k: "concentration ne pas déranger dnd notifications focus do not disturb", g: "dark_mode", f: () => Notifs.basculerConcentration() },
         { t: Reglages.t("Nuit (tons chauds)", "Night Light (Warm Tones)"), k: "nuit night lumière bleue blue light warm shift", g: "wb_twilight", f: () => { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) } },
@@ -713,7 +713,7 @@ Item {
     readonly property var pagesIle: [
         { t: "JARVIS", k: "jarvis assistant chat ia distant conversation question", g: "chat", p: "assistant" },
         { t: Reglages.t("Son", "Sound"), k: "son volume audio sortie micro haut-parleurs casque sound output speakers headphones microphone", g: "volume_up", p: "son" },
-        { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux network networks", g: "wifi", p: "reseau" },
+        { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux network networks", g: "wifi", wifi: true, p: "reseau" },
         { t: "Bluetooth", k: "bluetooth appareils casque souris devices headphones mouse", g: "bluetooth", p: "bluetooth" },
         { t: "Notifications", k: "notifications messages", g: "notifications", p: "notifications" },
         { t: Reglages.t("Système", "System"), k: "système processeur mémoire batterie température disque énergie system cpu processor memory ram battery temperature disk power", g: "memory", p: "systeme" },
@@ -1000,7 +1000,7 @@ Item {
         // Pages de l'île et actions
         for (let p = 0; p < pagesIle.length; p++) {
             let pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
-            if (!Reglages.pageActive(pg.p)) continue
+            if (!Reglages.pageActive(pg.p) || (pg.wifi && (Etat.sys || {}).filaire !== undefined)) continue
             if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: Reglages.t("Dans l'île", "In the island"), glyphe: pg.g, s: sp - 5, page: nom }) }
         }
         // Sessions enregistrées : par leur nom (« dev » trouve la session « Dev »)
@@ -1012,6 +1012,7 @@ Item {
             let ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
             if (ac.ia && (Reglages.iaCoupee || (ac.ia !== "IA_MODE" && horsLigne) || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
             if (ac.siCoupee && !Reglages.iaCoupee) continue
+            if ((ac.ppd && Etat.profilsAbsents) || (ac.wifi && (Etat.sys || {}).filaire !== undefined)) continue
             if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }
         // Fichiers

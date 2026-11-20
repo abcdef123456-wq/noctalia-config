@@ -578,7 +578,15 @@ Singleton {
     onProfilChanged: if (!jeuEnCours) activite("profil")
     function choisirProfil(p) { PowerProfiles.profile = p }
     // Le service de profils propose Performance (sans lui, ou sans ce profil : pas de bouton Performance dans Santé)
-    readonly property bool performanceDisponible: PowerProfiles.hasPerformanceProfile
+    // Sans service de profils (ni power-profiles-daemon, ni tuned-ppd, ni tlp-pd ; lu une fois au démarrage) : les
+    // boutons de profil disparaissent, sans message
+    property bool profilsAbsents: false
+    Process {
+        running: true
+        command: [etat.bin + "nc-ile-etat", "profils"]
+        stdout: StdioCollector { onStreamFinished: etat.profilsAbsents = text.trim() === "ppd=0" }
+    }
+    readonly property bool performanceDisponible: PowerProfiles.hasPerformanceProfile && !profilsAbsents
 
     // ── Luminosité (nc-brightness, même échelle que les touches) ──
     property real luminosite: 0.5

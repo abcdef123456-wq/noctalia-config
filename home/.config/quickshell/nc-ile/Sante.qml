@@ -217,7 +217,7 @@ Item {
                 deg: sa.cpuTemp ? sa.cpuTemp.deg : 0
                 charge: sa.aCharge ? (parseInt(sa.m.cpu) || 0) : -1
                 fans: sa.fans
-                profil: { var x = sa.profils.filter(q => q.p === Etat.profil)[0]; return x ? x.nom : "" }
+                profil: { if (Etat.profilsAbsents) return ""; var x = sa.profils.filter(q => q.p === Etat.profil)[0]; return x ? x.nom : "" }
                 surBatterie: UPower.onBattery
             }
             // Dix dernières minutes : température et charge du processeur (courbes lisses, couleur selon le seuil)

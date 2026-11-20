@@ -12,6 +12,7 @@
 #                        watts) ; une carte NVIDIA en veille n'est pas réveillée pour ça (gpu=veille)
 #   nc-ile-etat sante    page Santé : charge et programme le plus gourmand, températures (processeur, carte graphique,
 #                        SSD, mémoire, Wi-Fi), ventilateurs, profil du firmware (voir sante() plus bas)
+#   nc-ile-etat profils  une fois au démarrage de l'île : ppd=0 s'il n'y a aucun service de profils d'énergie
 #   nc-ile-etat capteurs une fois au démarrage de l'île : fichier de la température du processeur, constructeur, et
 #                        s'il y a des capteurs à montrer (sinon, ni page Santé ni veille de surchauffe)
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
@@ -307,6 +308,17 @@ jeu() {
   done
 }
 
+# Service de profils d'énergie (power-profiles-daemon, tuned-ppd, tlp-pd : tous sous net.hadess.PowerProfiles) :
+# ppd=0 seulement s'il n'a pas de propriétaire ET n'est pas activable ; bus illisible ou gdbus absent : ppd=1 (rien ne change)
+profils() {
+  local own act
+  own="$(timeout 3 gdbus call --system --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+    --method org.freedesktop.DBus.NameHasOwner net.hadess.PowerProfiles 2>/dev/null)"
+  act="$(timeout 3 gdbus call --system --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+    --method org.freedesktop.DBus.ListActivatableNames 2>/dev/null)"
+  case "$own|$act" in "(false,)|"*"'net.hadess.PowerProfiles'"*) echo "ppd=1" ;; "(false,)|(["*) echo "ppd=0" ;; *) echo "ppd=1" ;; esac
+}
+
 # Noms anglais (nc-island-state media | game | system | wifi | bt | sound) ; les clés écrites restent les mêmes
 case "${1:-}" in
   media) media; exit 0 ;;
@@ -321,6 +333,7 @@ case "${1:-}" in
   sante|health) sante; exit 0 ;;
   capteurs|sensors) capteurs; exit 0 ;;
   wifi) wifi; exit 0 ;;
+  profils|profiles) profils; exit 0 ;;   # une fois au démarrage de l'île
   bt|bluetooth) bt; exit 0 ;;
   son|sound|audio) son; exit 0 ;;
 esac
@@ -332,6 +345,10 @@ case "$(timeout 3 wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)" in *MUTE
 echo "luminosite=$("$HOME/.local/bin/nc-brightness" get 2>/dev/null)"
 echo "wifi=$(noctalia msg wifi-status 2>/dev/null)"
 echo "reseau=$(timeout 3 nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep -v -e ':loopback' -e ':bridge' | head -1 | cut -d: -f1)"
+# Sans NetworkManager : filaire=1 si une route par défaut existe, 0 sinon (rien quand NM tourne).
+if ! { command -v nmcli >/dev/null 2>&1 && [ "$(timeout 3 nmcli -t -f RUNNING general 2>/dev/null)" = running ]; }; then
+  if awk 'NR>1 && $2=="00000000"{f=1} END{exit !f}' "${NC_ROUTE_FILE:-/proc/net/route}" 2>/dev/null; then echo "filaire=1"; else echo "filaire=0"; fi
+fi
 echo "bluetooth=$(noctalia msg bluetooth-status 2>/dev/null)"
 echo "dnd=$(noctalia msg notification-dnd-status 2>/dev/null)"
 echo "profil=$(gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \

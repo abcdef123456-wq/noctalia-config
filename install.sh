@@ -732,7 +732,12 @@ say "$(t "Vérifications" "Checks")"
 # NixOS : le script n'installe rien ; les outils de la session doivent déjà être déclarés dans la configuration Nix
 if [ "$FAMILY" = nixos ] && [ "$MODE" != files ]; then
   manque=(); for t in Hyprland hyprctl noctalia qs python3 jq kitty uwsm; do have "$t" || manque+=("$t"); done
+  # Cherchés dans le PATH : le système, ou un environnement Nix de l'utilisateur (nix shell, nix profile)
   if [ ${#manque[@]} -gt 0 ]; then
+    # Sans root (ni root ni groupe wheel, comme un poste partagé) : pas de configuration Nix à modifier
+    if [ "$(id -u)" != 0 ] && [[ " $(id -nG 2>/dev/null) " != *" wheel "* ]]; then
+      die "$(t "outils absents du PATH : ${manque[*]}. Sur NixOS sans root, ce script n'installe rien : fournis-les par un environnement Nix à toi (nix shell, nix profile), puis relance-le depuis cet environnement." "tools missing from PATH: ${manque[*]}. On NixOS without root, this script installs nothing: provide them through your own Nix environment (nix shell, nix profile), then run it again from that environment.")"
+    fi
     die "$(t "outils absents du PATH : ${manque[*]}. Sur NixOS ce script n'installe rien : déclare-les dans ta configuration Nix, par exemple avec le module communautaire (non officiel) $NIXOS_LIEN" "tools missing from PATH: ${manque[*]}. On NixOS this script installs nothing: declare them in your Nix configuration, for example with the community (unofficial) module $NIXOS_LIEN")"
   fi
 fi
@@ -1226,13 +1231,13 @@ fournir_jeux() {
   local gm="$HOME/.config/gamemode.ini" mh="$HOME/.config/MangoHud/MangoHud.conf"
   if have gamemoded || have gamemoderun; then
     if [ ! -e "$gm" ]; then
-      mkdir -p "$(dirname "$gm")" && cp "$root/.config/gamemode.ini" "$gm" && echo ".config/gamemode.ini" >> "$BK/.created"
+      mkdir -p "$(dirname "$gm")" && cp "$root/.config/gamemode.ini" "$gm" && chmod u+w "$gm" && echo ".config/gamemode.ini" >> "$BK/.created"
     else
       backup ".config/gamemode.ini"; fusion_gamemode "$gm" "$root/.config/gamemode.ini" || true
     fi
   fi
   if have mangohud && [ ! -e "$mh" ]; then
-    mkdir -p "$(dirname "$mh")" && cp "$root/.config/MangoHud/MangoHud.conf" "$mh" && echo ".config/MangoHud/MangoHud.conf" >> "$BK/.created"
+    mkdir -p "$(dirname "$mh")" && cp "$root/.config/MangoHud/MangoHud.conf" "$mh" && chmod u+w "$mh" && echo ".config/MangoHud/MangoHud.conf" >> "$BK/.created"
   fi
   return 0
 }
@@ -1602,7 +1607,11 @@ while IFS= read -r -d '' src; do
   if [ "$FAMILY" = nixos ]; then
     case "$rel" in .config/systemd/user/*) sed -i 's|/usr/bin/|/run/current-system/sw/bin/|g' "$tmp" ;; esac
   fi
-  if [ -f "$dst" ] && cmp -s "$tmp" "$dst"; then same=$((same + 1)); continue; fi
+  if [ -f "$dst" ] && cmp -s "$tmp" "$dst"; then
+    # Copié avant depuis /nix/store (lecture seule) : rendu modifiable ; un lien (home-manager) n'est pas suivi
+    [ -L "$dst" ] || [ -w "$dst" ] || chmod u+w "$dst" 2>/dev/null || true
+    same=$((same + 1)); continue
+  fi
   case "$rel" in
     # Jamais écrasés : tes images (fonds d'écran, photo de profil) et les fichiers régénérés automatiquement sur ce PC
     Pictures/Wallpapers/* | .face | .config/hypr/nc/couleurs.lua | .config/hypr/nc/profil.lua | .config/kdeglobals \
@@ -1619,6 +1628,7 @@ while IFS= read -r -d '' src; do
   mkdir -p "$(dirname "$dst")"
   cp "$tmp" "$dst.nc-new"
   chmod --reference="$src" "$dst.nc-new"
+  chmod u+w "$dst.nc-new"   # source en lecture seule (lancé depuis /nix/store) : le fichier installé reste modifiable
   mv -f "$dst.nc-new" "$dst"
   copied=$((copied + 1))
   case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
