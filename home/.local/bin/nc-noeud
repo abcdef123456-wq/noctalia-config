@@ -1145,7 +1145,7 @@ def adresse_ws(c):
     u = urllib.parse.urlsplit(url)
     if u.scheme == "https":
         tls = True
-    elif u.scheme == "http" and (A.hote_prive(url) or A.hote_tailscale(url)):
+    elif u.scheme == "http" and (A.hote_prive(url) or A.hote_tailscale(url)) and not (u.hostname or "").endswith("."):
         tls = False
     else:
         raise Definitif(T("Connexion ws:// refusée vers un hôte public (" + (u.hostname or "?") + ") : la clé et les "
@@ -1158,7 +1158,17 @@ def adresse_ws(c):
 async def connecter(c):
     hote, port, tls, chemin = adresse_ws(c)
     ctx = ssl.create_default_context() if tls else None
-    r, w = await asyncio.wait_for(asyncio.open_connection(hote, port, ssl=ctx, server_hostname=hote if tls else None,
+    cible = hote
+    if not tls:
+        # ws:// : chaque adresse résolue doit être privée ou Tailscale, et on se connecte à celle-là (pas de seconde
+        # résolution) ; un nom introuvable (DNS pas prêt, Tailscale coupé) : nouvel essai plus tard
+        try:
+            cible = await asyncio.get_running_loop().run_in_executor(None, A.adresse_fixee, c["URL"])
+        except A.HoteIntrouvable as e:
+            raise ConnectionError(str(e)) from None
+        except A.TransportRefuse as e:
+            raise Definitif(str(e)) from None
+    r, w = await asyncio.wait_for(asyncio.open_connection(cible, port, ssl=ctx, server_hostname=hote if tls else None,
                                                           limit=2 ** 20), 15)
     cle = base64.b64encode(os.urandom(16)).decode("ascii")
     nom_hote = f"[{hote}]" if ":" in hote else hote

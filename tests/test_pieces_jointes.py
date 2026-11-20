@@ -237,7 +237,10 @@ class PiecesJointes(unittest.TestCase):
                              ("http://100.101.102.103", True), ("http://pc.tail1234.ts.net", True), ("http://mon-pi.local", True),
                              ("http://203.0.113.5", False), ("http://exemple.test", False), ("http://172.32.0.1", False),
                              ("http://100.128.0.1", False)):
-            with self.subTest(url=url):
+            # Les noms sont résolus (adresse_fixee) : faux résolveur, aucune requête DNS
+            noms = {"pc.tail1234.ts.net": "100.101.102.104", "mon-pi.local": "192.168.1.30", "exemple.test": "203.0.113.9"}
+            faux = lambda h, port, *a, **k: [(2, 1, 6, "", (noms.get(h, h), port))]
+            with self.subTest(url=url), mock.patch.object(self.m.socket, "getaddrinfo", faux):
                 self.assertEqual(self.m.transport_sur(url), attendu)
         self.preparer()
         p = self.fichier("a.txt")
