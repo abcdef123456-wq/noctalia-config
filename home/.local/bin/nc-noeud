@@ -213,6 +213,13 @@ class Refus(Exception):
         self.decision = decision
 
 
+class AttenteLongue(Exception):
+    """Le nom se résout hors de sa plage (portail captif, DNS hostile) : rien n'est envoyé, nouvel essai dans longtemps."""
+
+
+ATTENTE_LONGUE = 300
+
+
 class Definitif(Exception):
     """Impossible de se connecter tant que la configuration ne change pas (pas de relance)."""
 
@@ -1158,18 +1165,27 @@ def adresse_ws(c):
 async def connecter(c):
     hote, port, tls, chemin = adresse_ws(c)
     ctx = ssl.create_default_context() if tls else None
-    cible = hote
+    cibles = [hote]
     if not tls:
-        # ws:// : chaque adresse résolue doit être privée ou Tailscale, et on se connecte à celle-là (pas de seconde
-        # résolution) ; un nom introuvable (DNS pas prêt, Tailscale coupé) : nouvel essai plus tard
+        # ws:// : seules les adresses résolues privées ou Tailscale sont gardées, et on se connecte à elles, dans l'ordre
+        # (pas de seconde résolution). Nom introuvable (DNS pas prêt, Tailscale coupé) : nouvel essai bientôt ; résolu
+        # hors plage (portail captif, DNS hostile) : rien n'est envoyé, nouvel essai dans longtemps
         try:
-            cible = await asyncio.get_running_loop().run_in_executor(None, A.adresse_fixee, c["URL"])
+            cibles = await asyncio.get_running_loop().run_in_executor(None, A.adresse_fixee, c["URL"])
         except A.HoteIntrouvable as e:
             raise ConnectionError(str(e)) from None
         except A.TransportRefuse as e:
-            raise Definitif(str(e)) from None
-    r, w = await asyncio.wait_for(asyncio.open_connection(cible, port, ssl=ctx, server_hostname=hote if tls else None,
-                                                          limit=2 ** 20), 15)
+            raise AttenteLongue(str(e)) from None
+    erreur = OSError("aucune adresse")
+    for cible in cibles:
+        try:
+            r, w = await asyncio.wait_for(asyncio.open_connection(cible, port, ssl=ctx, server_hostname=hote if tls else None,
+                                                                  limit=2 ** 20), 15)
+            break
+        except (OSError, asyncio.TimeoutError) as e:
+            erreur = e
+    else:
+        raise erreur
     cle = base64.b64encode(os.urandom(16)).decode("ascii")
     nom_hote = f"[{hote}]" if ":" in hote else hote
     if port != (443 if tls else 80):
@@ -2304,6 +2320,8 @@ class Noeud:
                 raison = T("connexion fermée", "connection closed")
             except Definitif:
                 raise
+            except AttenteLongue as e:
+                raison, attente = str(e), ATTENTE_LONGUE
             except (OSError, EOFError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError,
                     ssl.SSLError, ErreurWS, UnicodeError) as e:
                 raison = str(e) or type(e).__name__

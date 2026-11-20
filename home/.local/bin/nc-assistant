@@ -337,16 +337,19 @@ def _plages(h):
 
 
 def adresse_fixee(url):
-    """L'adresse où se connecter pour que des fichiers ou une clé partent vers cette URL : None en https:// (connexion
-    normale, certificat vérifié) ; en http://, le nom est résolu et CHAQUE adresse obtenue doit être dans la plage de ce
-    nom (boucle locale, réseau privé, Tailscale), sinon TransportRefuse ; un nom qui ne se résout pas : HoteIntrouvable.
-    L'appelant se connecte à l'adresse rendue, sans seconde résolution, et garde le nom dans l'en-tête Host."""
+    """Les adresses où se connecter pour que des fichiers ou une clé partent vers cette URL : None en https:// (connexion
+    normale, certificat vérifié) ; en http://, le nom est résolu et seules les adresses dans la plage de ce nom (boucle
+    locale, réseau privé, Tailscale) sont gardées, dans l'ordre du résolveur ; aucune : TransportRefuse ; un nom qui ne se
+    résout pas : HoteIntrouvable. L'appelant les essaie dans l'ordre, sans seconde résolution, et garde le nom dans Host."""
     u = urllib.parse.urlsplit(url)
     if u.scheme == "https":
         return None
     refus = TransportRefuse(T("HTTP en clair refusé : hors de ce PC, d'un réseau privé ou de Tailscale, utilise HTTPS.",
                               "Plain HTTP refused: outside this PC, a private network or Tailscale, use HTTPS."))
     h = (u.hostname or "").lower()
+    if "%" in h:
+        raise TransportRefuse(T("Adresse lien-local avec zone (%…) non prise en charge : utilise une autre adresse du serveur.",
+                                "Link-local address with a zone (%…) not supported: use another address of the server."))
     plages = _plages(h) if u.scheme == "http" else ()
     if not plages:
         raise refus
@@ -357,11 +360,12 @@ def adresse_fixee(url):
     except (socket.gaierror, UnicodeError, ValueError):
         raise HoteIntrouvable(T("Nom du serveur introuvable (DNS) : vérifie l'URL ou ta connexion (Tailscale ?).",
                                 "Server name not found (DNS): check the URL or your connection (Tailscale?).")) from None
-    adresses = [i[4][0] for i in infos]
     reseaux = [ipaddress.ip_network(n) for n in plages]
-    if not adresses or not all(_ip(a) is not None and any(_ip(a) in r for r in reseaux) for a in adresses):
+    # Seules les adresses dans la plage sont gardées (une IPv6 publique à côté d'une IPv4 privée est écartée, jamais jointe)
+    gardees = list(dict.fromkeys(a for a in (i[4][0] for i in infos) if _ip(a) is not None and any(_ip(a) in r for r in reseaux)))
+    if not gardees:
         raise refus
-    return adresses[0]
+    return gardees
 
 
 def transport_sur(url):
@@ -379,18 +383,26 @@ class ConnexionFixee(http.client.HTTPConnection):
 
     def __init__(self, host, port=None, adresse=None, **kw):
         super().__init__(host, port, **kw)
-        self.adresse = adresse
+        self.adresses = [adresse] if isinstance(adresse, str) else list(adresse or [])
 
     def connect(self):
-        self.sock = socket.create_connection((self.adresse, self.port), self.timeout, self.source_address)
+        # Les adresses vérifiées, l'une après l'autre (localhost : ::1 puis 127.0.0.1), comme socket.create_connection
+        erreur = OSError("aucune adresse")
+        for a in self.adresses:
+            try:
+                self.sock = socket.create_connection((a, self.port), self.timeout, self.source_address)
+                return
+            except OSError as e:
+                erreur = e
+        raise erreur
 
 
 class GestionnaireFixe(urllib.request.HTTPHandler):
     """urllib en http:// vers l'adresse contrôlée (remplace le gestionnaire http:// par défaut)."""
 
-    def __init__(self, adresse):
+    def __init__(self, adresses):
         super().__init__()
-        self.adresse = adresse
+        self.adresse = adresses
 
     def http_open(self, req):
         return self.do_open(lambda host, **kw: ConnexionFixee(host, adresse=self.adresse, **kw), req)

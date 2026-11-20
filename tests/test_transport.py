@@ -130,16 +130,37 @@ class Transport(unittest.TestCase):
 
     def test_local_vers_une_adresse_privee_accepte(self):
         self.resoudre({"mon-pi.local": ["192.168.1.20"]})
-        self.assertEqual(self.A.adresse_fixee("http://mon-pi.local:8000"), "192.168.1.20")
+        self.assertEqual(self.A.adresse_fixee("http://mon-pi.local:8000"), ["192.168.1.20"])
         self.resoudre({"mon-pi.local": ["8.8.8.8"]})
         with self.assertRaises(self.A.TransportRefuse):
             self.A.adresse_fixee("http://mon-pi.local:8000")
 
-    def test_deux_adresses_dont_une_publique_refuse(self):
-        self.resoudre({"pc.tail1.ts.net": ["100.64.1.2", "203.0.113.7"], "nas.lan": ["10.0.0.4", "2001:db8::1"]})
-        for url in ("http://pc.tail1.ts.net", "http://nas.lan"):
-            with self.subTest(url=url), self.assertRaises(self.A.TransportRefuse):
-                self.A.adresse_fixee(url)
+    def test_deux_adresses_dont_une_publique_seule_la_permise_est_jointe(self):
+        self.resoudre({"pc.tail1.ts.net": ["203.0.113.7", "100.64.1.2"], "nas.lan": ["2001:db8::1", "10.0.0.4"]})
+        self.assertEqual(self.A.adresse_fixee("http://pc.tail1.ts.net"), ["100.64.1.2"])
+        self.assertEqual(self.A.adresse_fixee("http://nas.lan"), ["10.0.0.4"])
+        self.assertEqual(self.envoyer(f"http://nas.lan:{self.port}"), {"ok": True})
+        self.assertEqual(self.connexions, ["10.0.0.4"])           # jamais l'IPv6 publique
+
+    def test_localhost_essaie_chaque_adresse_dans_l_ordre(self):
+        self.resoudre({"localhost": ["::1", "127.0.0.1"]})
+        refusees = []
+
+        def connexion(adresse, *a, **kw):
+            self.connexions.append(adresse[0])
+            if adresse[0] == "::1":                 # le serveur n'écoute qu'en 127.0.0.1
+                refusees.append(adresse[0])
+                raise ConnectionRefusedError("::1")
+            return VRAIE_CONNEXION(("127.0.0.1", self.port), *a, **kw)
+        with mock.patch.object(socket, "create_connection", connexion):
+            self.assertEqual(self.envoyer(f"http://localhost:{self.port}"), {"ok": True})
+        self.assertEqual((self.connexions, refusees), (["::1", "127.0.0.1"], ["::1"]))
+
+    def test_lien_local_avec_zone_refuse_clairement(self):
+        self.resoudre({})
+        with self.assertRaises(self.A.TransportRefuse) as e:
+            self.A.adresse_fixee("http://[fe80::1%25eth0]:8000")
+        self.assertIn("zone", str(e.exception))
 
     def test_point_final_refuse(self):
         self.resoudre({})
@@ -156,8 +177,8 @@ class Transport(unittest.TestCase):
     def test_inchange_https_et_boucle_locale(self):
         self.resoudre({})
         self.assertIsNone(self.A.adresse_fixee("https://jarvis.example.com"))
-        self.assertEqual(self.A.adresse_fixee("http://127.0.0.1:8000"), "127.0.0.1")
-        self.assertEqual(self.A.adresse_fixee("http://[::1]:8000"), "::1")
+        self.assertEqual(self.A.adresse_fixee("http://127.0.0.1:8000"), ["127.0.0.1"])
+        self.assertEqual(self.A.adresse_fixee("http://[::1]:8000"), ["::1"])
         self.assertEqual(self.envoyer(f"http://127.0.0.1:{self.port}"), {"ok": True})
         for url in ("http://203.0.113.5", "http://exemple.test", "http://172.32.0.1", "http://100.128.0.1",
                     "http://[::ffff:8.8.8.8]", "ftp://127.0.0.1"):
@@ -177,14 +198,17 @@ class Transport(unittest.TestCase):
         async def ouvrir(hote, port, **kw):
             ouverts.append(hote)
             raise ConnectionRefusedError("essai")
-        self.resoudre({"pc.tail1.ts.net": ["203.0.113.7"], "nas.local": ["192.168.1.4"]})
+        self.resoudre({"pc.tail1.ts.net": ["203.0.113.7"], "nas.local": ["192.168.1.4", "192.168.1.5"]})
         with mock.patch.object(asyncio, "open_connection", ouvrir):
-            with self.assertRaises(m.Definitif):
+            # Résolu hors plage (portail captif) : pas un arrêt définitif, une longue attente, et rien n'est ouvert
+            with self.assertRaises(m.AttenteLongue):
                 asyncio.run(m.connecter({"URL": "http://pc.tail1.ts.net:8000", "SECRET_KEY": "k"}))
+            self.assertFalse(issubclass(m.AttenteLongue, m.Definitif))
+            self.assertEqual(m.ATTENTE_LONGUE, 300)
             self.assertEqual(ouverts, [])
             with self.assertRaises(ConnectionError):
                 asyncio.run(m.connecter({"URL": "http://nas.local:8000", "SECRET_KEY": "k"}))
-            self.assertEqual(ouverts, ["192.168.1.4"])
+            self.assertEqual(ouverts, ["192.168.1.4", "192.168.1.5"])      # chaque adresse, dans l'ordre
             self.resoudre({})
             with self.assertRaises(ConnectionError):       # introuvable : nouvel essai plus tard, pas un arrêt
                 asyncio.run(m.connecter({"URL": "http://pc.tail1.ts.net:8000", "SECRET_KEY": "k"}))

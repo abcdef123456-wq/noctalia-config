@@ -48,9 +48,10 @@ et à lui seul : jamais à l'IA du bureau ni à un autre service. Les clés, cer
 jetons sk-, ghp_, AWS, Slack, Telegram…) mais ne voit pas tous les secrets. Les liens symboliques sont refusés, et les
 fichiers ne partent pas en HTTP clair sur Internet (HTTPS, Tailscale, réseau local ou cet ordinateur seulement) ; pour cet
 envoi, les variables `http_proxy` et `https_proxy` sont ignorées. En `http://`, la règle se vérifie sur les adresses
-obtenues : un nom `*.ts.net`, `.local` ou `.lan` doit se résoudre en adresses Tailscale ou privées (toutes), sinon rien ne
-part, et la connexion va à l'adresse vérifiée. Une adresse qui finit par un point est refusée. `nc-noeud` (`ws://`) suit
-la même règle. Le sélecteur
+obtenues : pour un nom `*.ts.net`, `.local` ou `.lan`, seules ses adresses Tailscale ou privées sont jointes, dans
+l'ordre (s'il n'y en a aucune, rien ne part). Une adresse qui finit par un point est refusée, et une adresse lien-local
+avec zone (`[fe80::…%25eth0]`) n'est pas prise en charge. `nc-noeud` (`ws://`) suit la même règle ; si le nom se résout
+hors de sa plage (portail captif), il n'envoie rien et réessaie toutes les 5 minutes. Le sélecteur
 demande `zenity` (ou `kdialog`, `yad`).
 
 Limites, de bout en bout :
