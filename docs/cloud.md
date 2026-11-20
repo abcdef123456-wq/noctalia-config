@@ -105,10 +105,14 @@ Codes de sortie :
   ou `--si-existe annuler`. Chaque nouvel appel est une nouvelle intention, avec une nouvelle clé.
 - **Ctrl + C** (ou SIGTERM) annule l'envoi sur le serveur. Si la publication a gagné la course, le succès est affiché.
 - `reprendre` regarde d'abord l'état de l'envoi : expiré, annulé ou invalidé (fichier supprimé par un autre PC), il est
-  perdu, et rien n'est relu ni envoyé. Avant de reprendre, chaque morceau déjà reçu est comparé à la source.
+  perdu, et rien n'est relu ni envoyé. Avant de reprendre, chaque morceau déjà reçu est comparé à la source. Si le
+  dossier de destination a changé depuis, l'ancien envoi est annulé et un nouvel envoi part (une fois), en le disant.
+- « Trop de demandes » (le limiteur du serveur) arrête la commande sans rien perdre : réessaie dans un instant.
 - `telecharger` n'écrase pas un fichier existant sans `--remplacer`. Il écrit d'abord dans un fichier caché du même
-  dossier (verrouillé : deux téléchargements vers le même fichier ne se mélangent pas ; refusé si ce fichier est un lien
-  ou n'est pas à toi), vérifie la taille et l'empreinte du fichier écrit, puis renomme. Après une coupure, relance la même commande : il reprend où
+  dossier (`.nc-cloud-…partiel`, nom court ; verrouillé : deux téléchargements vers le même fichier ne se mélangent pas ;
+  refusé si ce fichier est un lien ou n'est pas à toi), vérifie la taille et l'empreinte du fichier écrit, puis renomme.
+  Si le serveur l'annonce (`features.entry_by_id`), le fichier est lu par son identifiant ; sinon, il est cherché dans
+  son dossier (`--dossier`). Après une coupure, relance la même commande : il reprend où
   il s'est arrêté (`Range` et `If-Range`).
 
 ## Suppression

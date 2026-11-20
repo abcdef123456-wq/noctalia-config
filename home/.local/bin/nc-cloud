@@ -408,12 +408,18 @@ def echec_serveur(statut, obj, cle=False):
         EMPREINTE: T("Empreinte refusée par le serveur : le fichier envoyé ne correspond pas.",
                      "Fingerprint refused by the server: the uploaded file does not match."),
     }
+    if statut == 429 and err is None:
+        # Le limiteur du gateway (detail + Retry-After), pas too_many_transfers : passager, la commande s'arrête
+        return Echec(T("Trop de demandes au serveur : réessaie dans un instant.", "Too many requests to the server: try again in a moment."),
+                     HORS_LIGNE, None, obj, statut)
     if err in PERDUS:
         m = T("Cet envoi a expiré, a été annulé ou invalidé (fichier supprimé ailleurs) : dépose le fichier à nouveau.",
               "This upload expired, was cancelled or invalidated (file deleted elsewhere): upload the file again.")
     elif err == "too_many_transfers":
         m = T("Trop d'envois en cours sur ce PC (8 au plus) : attends qu'ils finissent ou annule-les.",
               "Too many uploads in progress on this PC (8 at most): wait for them or cancel them.")
+    elif err == "file_too_large":
+        m = T("Fichier trop gros pour ce serveur.", "File too large for this server.")
     elif err == "not_a_file":
         m = T("C'est un dossier, pas un fichier : rien n'est fait.", "This is a folder, not a file: nothing is done.")
     elif statut == 400 or err == "invalid_name":
@@ -913,12 +919,16 @@ def deposer_un(s, p, parent, pol, attendue, annuler):
                 raise                       # la création ou la publication a peut-être eu lieu : le manifeste reste
             if e.code in ARRET:
                 raise
-            if e.erreur == "destination_changed" and essai == 1:
-                # Un autre PC a publié dans ce dossier entre-temps : une seule intention neuve, sur la révision relue
+            if e.erreur == "destination_changed":
                 if envoi.annuler_distant():
                     return OK                   # la publication avait gagné : rien n'est renvoyé
-                effacer(envoi.cm)
-                continue
+                if essai == 1:
+                    # Un autre PC a publié dans ce dossier entre-temps : une seule intention neuve, sur la révision relue
+                    effacer(envoi.cm)
+                    continue
+                return envoi.echec(Echec(T("Le dossier a changé pendant l'envoi (un autre PC y publie) : réessaie dans un instant.",
+                                           "The folder changed during the upload (another PC is publishing there): try again in a moment."),
+                                         CONFLIT, "destination_changed"))
             if e.code == CONFLIT:
                 return envoi.conflit(e, annuler)
             if envoi.m.get("upload_id") and envoi.annuler_distant():
@@ -993,6 +1003,18 @@ def cmd_reprendre(a):
             r = envoi.creer()             # réponse de création perdue : la même clé retrouve l'envoi
         if r.get("state") in ETATS_PERDUS:
             raise perdu                   # rien n'est relu ni envoyé
+        if not envoi.publie(r) and revision_dossier(s, m["parent_id"]) != m["parent_revision"]:
+            # Le dossier a changé depuis l'intention : le commit répondrait destination_changed après tout le renvoi.
+            # La source est vérifiée, l'ancien envoi annulé, puis une intention neuve (une seule fois)
+            envoi.source_intacte()
+            if empreinte(m["source"]) != m["sha256"]:
+                raise envoi.change()
+            if envoi.annuler_distant():
+                return OK
+            effacer(cm)
+            dire(T(f"Le dossier de {envoi.nom} a changé depuis : nouvel envoi.", f"The folder of {envoi.nom} changed since: new upload."),
+                 evenement="info", fichier=m["source"])
+            return deposer_un(s, Path(m["source"]), m["parent_id"], m["policy"], m.get("expected_revision"), False)
         return envoi.mener(r, tout_lire=False)
     except Echec as e:
         if e is perdu or e.erreur in PERDUS or e.statut == 404:
@@ -1049,15 +1071,43 @@ def ouvrir_partiel(partiel, reprise):
         except OSError:
             raise Echec(T("Un autre téléchargement vers ce fichier est déjà en cours.",
                           "Another download to this file is already in progress.")) from None
+        # Toujours le fichier de ce chemin ? (un autre téléchargement a pu le renommer entre l'ouverture et le verrou)
+        try:
+            ch = os.stat(str(partiel), follow_symlinks=False)
+        except OSError:
+            ch = None
+        if ch is None or (ch.st_dev, ch.st_ino) != (st.st_dev, st.st_ino):
+            raise Echec(T("Le fichier partiel a changé pendant l'ouverture : relance la commande.",
+                          "The partial file changed while opening: run the command again."))
     except BaseException:
         os.close(fd)
         raise
     return fd, (reprise and not neuf)
 
 
+def entree(s, ident, parent, features):
+    """L'entrée d'un id : GET /entries/{id} si le serveur l'annonce (entry_by_id), sinon dans les pages du parent."""
+    if features.get("entry_by_id") is True:
+        try:
+            e = s.json("GET", "/entries/" + segment(ident))[1].get("entry")
+        except Echec as x:
+            if x.statut == 404:
+                raise Echec(T("Fichier introuvable (supprimé ?).", "File not found (deleted?).")) from None
+            raise
+        if not isinstance(e, dict):
+            raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
+        return e
+    return trouver(s, ident, parent)
+
+
+def capacites_session(s):
+    f = s.etat().get("features")
+    return f if isinstance(f, dict) else {}
+
+
 def cmd_telecharger(a):
     s = Session()
-    e = trouver(s, a.id, a.dossier or "root")
+    e = entree(s, a.id, a.dossier or "root", capacites_session(s))
     if e.get("kind") != "file" or not isinstance(e.get("size"), int) or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
         raise Echec(T("Ce n'est pas un fichier téléchargeable.", "This is not a downloadable file."))
     dest = Path(a.dest)
@@ -1071,7 +1121,8 @@ def cmd_telecharger(a):
         raise Echec(T("Dossier de destination introuvable.", "Destination folder not found."), USAGE)
     if (dest.exists() or dest.is_symlink()) and not a.remplacer:
         raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it."))
-    partiel = dest.with_name("." + dest.name + ".nc-cloud-partiel")
+    # Nom court tiré du nom final : un nom de 240 octets reste possible (255 au plus pour le partiel)
+    partiel = dest.with_name(".nc-cloud-" + hashlib.sha256(dest.name.encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".partiel")
     suivi = TELECHARGEMENTS / (hashlib.sha256(str(partiel).encode()).hexdigest()[:32] + ".json")
     note = lire_json(suivi) or {}
     reprise = note.get("id") == e["id"] and note.get("sha256") == e["sha256"] and bool(note.get("etag"))
@@ -1144,13 +1195,15 @@ def cmd_telecharger(a):
 
 def cmd_supprimer(a):
     rev = a.revision
-    if not rev or rev == "*" or '"' in rev or "," in rev or propre(rev, 256) != rev:
+    if not rev or len(rev) > 256 or rev == "*" or '"' in rev or "," in rev or not all(33 <= ord(c) <= 126 for c in rev):
         raise Echec(T("--revision : la révision exacte du fichier, telle que nc-cloud lister la montre.",
                       "--revision: the file's exact revision, as nc-cloud lister shows it."), USAGE)
     s = Session()
-    features = s.etat().get("features")
-    if not isinstance(features, dict) or features.get("file_delete") is not True:
+    features = capacites_session(s)
+    if features.get("file_delete") is not True:
         raise Echec(T("Ce serveur ne sait pas supprimer de fichier.", "This server cannot delete files."))
+    if features.get("entry_by_id") is True and entree(s, a.id, "root", features).get("kind") != "file":
+        raise Echec(T("C'est un dossier, pas un fichier : rien n'est fait.", "This is a folder, not a file: nothing is done."))
     # La même demande (fichier, révision) garde sa clé : une réponse perdue se rejoue sans risque
     deja = [x for x in manifestes(SUPPRESSIONS) if x[1].get("id") == a.id and x[1].get("revision") == rev
             and all(x[1].get(k) == s.appareil[k] for k in ("server_id", "space_id", "device_id"))]

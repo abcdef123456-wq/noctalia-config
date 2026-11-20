@@ -59,6 +59,8 @@ class Faux:
         self.limite_envois = 8
         self.revisions_vivantes = False     # b7828d5 : la révision d'un dossier change à chaque enfant
         self.suppression = False            # b7828d5 : features.file_delete
+        self.par_id = False                 # 36ce1f8 : features.entry_by_id (GET /entries/{id})
+        self.conflit_tot = False            # 36ce1f8 : features.early_create_conflict (412 dès POST /uploads)
         self.nom_refuse = None
         self.lock = threading.Lock()
 
@@ -70,8 +72,13 @@ class Faux:
         return {"api_version": 1, "server_id": self.server_id, "space_id": self.space_id}
 
     def features(self):
-        return {"file_delete": True, "delete_if_match": True, "delete_idempotency": True, "max_old_versions": 10} \
+        f = {"file_delete": True, "delete_if_match": True, "delete_idempotency": True, "max_old_versions": 10} \
             if self.suppression else {}
+        if self.par_id:
+            f["entry_by_id"] = True
+        if self.conflit_tot:
+            f["early_create_conflict"] = True
+        return f
 
     def enfant_change(self, parent_id):
         if self.revisions_vivantes:
@@ -164,6 +171,19 @@ class Gestion(http.server.BaseHTTPRequestHandler):
         if f.devices[dev]["revoque"]:
             return self.erreur(403, "device_revoked")
         ident = dict(f.ident(), device_id=dev)
+        if "limiteur" in f.pannes:            # le limiteur du gateway : detail et Retry-After, sans champ error
+            self.send_response(429)
+            corps = json.dumps({"detail": "Too many requests"}).encode()
+            self.send_header("Retry-After", "5")
+            self.send_header("Content-Length", str(len(corps)))
+            self.end_headers()
+            self.wfile.write(corps)
+            return
+        if len(p) == 2 and p[0] == "entries" and m == "GET" and f.par_id:
+            e = f.entries.get(p[1])
+            if not e:
+                return self.erreur(404, "not_found")
+            return self.repondre(200, dict(f.ident(), entry=e))
         if p == ["status"]:
             if "stockage" in f.pannes:
                 return self.erreur(503, "storage_error")
@@ -218,6 +238,10 @@ class Gestion(http.server.BaseHTTPRequestHandler):
                     return self.erreur(428, "precondition_required")
                 if f.entries[d["parent_id"]]["revision"] != d["parent_revision"]:
                     return self.erreur(409, "destination_changed")
+                if f.conflit_tot and d["policy"] == "create":
+                    pris = next((e for e in f.entries.values() if e.get("parent") == d["parent_id"] and e["name"] == d["name"]), None)
+                    if pris:
+                        return self.erreur(412, "version_conflict", current=pris)
                 uid = f.nouvel_id("u")
                 up = {"upload_id": uid, "state": "pending", "chunks": {}, "intention": d, "dev": dev, "result": None}
                 f.uploads[uid] = up
@@ -355,6 +379,10 @@ class Gestion(http.server.BaseHTTPRequestHandler):
 
 
 ETAT = {}
+
+
+def partiel_de(nom):
+    return ".nc-cloud-" + hashlib.sha256(nom.encode()).hexdigest()[:16] + ".partiel"
 
 
 def F():
@@ -601,8 +629,9 @@ elif sys.argv[1] == "clear":
         self.assertEqual(len({c[2]["Idempotency-Key"] for c in self.creations()}), 2)
         self.faux.pannes.add("publier_ailleurs_toujours")
         r = self.nc("deposer", "--si-existe", "garder", str(p), code=6)
-        self.assertEqual(len(self.creations()), 4)            # une seule relance, puis le conflit
-        self.assertTrue(any(l.get("evenement") == "conflit" for l in r.lignes))
+        self.assertEqual(len(self.creations()), 4)            # une seule relance, puis l'échec (le nom est libre)
+        self.assertEqual(r.lignes[-1]["erreur"], "destination_changed")
+        self.assertFalse(any(l.get("evenement") == "conflit" for l in r.lignes))
 
     def test_dossiers_liens_et_plus_de_8(self):
         self.associer()
@@ -817,11 +846,11 @@ elif sys.argv[1] == "clear":
         self.faux.pannes.add("contenu_faux")
         self.nc("telecharger", eid, str(dest), "--remplacer", code=12)
         self.assertEqual(dest.read_bytes(), donnees)             # rien n'est remplacé
-        self.assertEqual([x.name for x in self.d.glob(".g.bin*")], [])
+        self.assertEqual([x.name for x in self.d.glob(".nc-cloud-*")], [])
 
     def test_deux_telechargements_vers_la_meme_destination(self):
         eid, _ = self.deposer_gros()
-        partiel = self.d / ".g.bin.nc-cloud-partiel"
+        partiel = self.d / partiel_de("g.bin")
         fd = os.open(str(partiel), os.O_RDWR | os.O_CREAT, 0o600)      # un autre téléchargement tient le verrou
         self.addCleanup(os.close, fd)
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -833,15 +862,75 @@ elif sys.argv[1] == "clear":
         eid, _ = self.deposer_gros()
         autre = self.d / "autre.txt"
         autre.write_bytes(b"un autre fichier")
-        os.link(autre, self.d / ".g.bin.nc-cloud-partiel")
+        os.link(autre, self.d / partiel_de("g.bin"))
         self.nc("telecharger", eid, str(self.d / "g.bin"), code=1)
         self.assertEqual(autre.read_bytes(), b"un autre fichier")
         self.assertFalse((self.d / "g.bin").exists())
         cible = self.d / "cible.txt"
         cible.write_bytes(b"intact")
-        os.symlink(cible, self.d / ".h.bin.nc-cloud-partiel")
+        os.symlink(cible, self.d / partiel_de("h.bin"))
         self.nc("telecharger", eid, str(self.d / "h.bin"), code=1)
         self.assertEqual(cible.read_bytes(), b"intact")
+
+    def test_nom_de_240_octets_se_telecharge(self):
+        self.associer()
+        nom = "é" * 118 + ".txt"                                       # 240 octets
+        r = self.nc("deposer", str(self.fichier(nom, b"long")), code=0)
+        eid = r.lignes[-1]["entree"]["id"]
+        dest = self.d / "dl"
+        dest.mkdir()
+        self.nc("telecharger", eid, str(dest), code=0)
+        self.assertEqual((dest / nom).read_bytes(), b"long")
+
+    def test_telecharger_par_id_si_annonce(self):
+        self.faux.par_id = True
+        eid, donnees = self.deposer_gros(1000)
+        self.nc("dossier", "root", "sous", code=0)                     # l'entrée n'est pas cherchée dans les pages
+        self.nc("telecharger", eid, str(self.d / "x.bin"), code=0)
+        self.assertEqual((self.d / "x.bin").read_bytes(), donnees)
+        self.assertTrue(any(c[1].endswith("/entries/" + eid) for c in self.faux.journal))
+        self.nc("telecharger", "f999", str(self.d / "y.bin"), code=1)
+
+    def test_conflit_des_la_creation(self):
+        self.faux.conflit_tot = True
+        self.associer()
+        p = self.fichier("a.txt", b"v1")
+        self.nc("deposer", str(p), code=0)
+        self.faux.pannes.add("cacher_noms")                             # la vérification locale ne voit rien
+        r = self.nc("deposer", str(p), code=6)
+        self.assertTrue(any(l.get("evenement") == "conflit" and l["actuel"] for l in r.lignes))
+        self.assertEqual(self.morceaux_recus(), [0])                    # seul le premier envoi a eu un morceau
+        self.assertFalse(self.manifestes())
+
+    def test_limiteur_du_gateway(self):
+        self.associer()
+        self.faux.pannes.add("limiteur")
+        r = self.nc("etat", code=3)
+        self.assertIn("réessaie dans un instant", r.stdout)
+
+    def test_destination_changee_deux_fois_sans_proposer_si_existe(self):
+        self.faux.revisions_vivantes = True
+        self.associer()
+        self.faux.pannes.add("publier_ailleurs_toujours")
+        r = self.nc("deposer", str(self.fichier("a.txt", b"abc")), code=6)
+        self.assertNotIn("--si-existe", r.stdout)
+        self.assertIn("Le dossier a changé pendant l'envoi", r.stdout)
+
+    def test_reprendre_quand_le_dossier_a_change(self):
+        self.faux.revisions_vivantes = True
+        self.associer()
+        self.faux.pannes.add("couper_apres:0")
+        donnees = os.urandom(MORCEAU * 3)
+        p = self.fichier("gros.bin", donnees)
+        self.nc("deposer", str(p), code=3)
+        self.nc("dossier", "root", "autre", code=0)                     # la révision de la racine change
+        r = self.nc("reprendre", "1", code=0)
+        self.assertIn("nouvel envoi", r.stdout)
+        self.assertEqual(r.lignes[-1]["etat"], "publie")
+        etats = [u["state"] for u in self.faux.uploads.values()]
+        self.assertEqual(etats, ["cancelled", "committed"])
+        eid = next(e["id"] for e in self.faux.entries.values() if e["name"] == "gros.bin")
+        self.assertEqual(self.faux.contenus[eid], donnees)
 
     # ── Suppression ──
 
@@ -851,6 +940,8 @@ elif sys.argv[1] == "clear":
         rev = self.faux.entries[eid]["revision"]
         self.nc("supprimer", eid, code=2)                           # --revision obligatoire
         self.nc("supprimer", eid, "--revision", "*", code=2)
+        self.nc("supprimer", eid, "--revision", "révision", code=2)    # hors ASCII : refusée avant tout manifeste
+        self.assertFalse(self.manifestes("suppressions"))
         self.nc("supprimer", eid, "--revision", "ancienne", code=6)  # 412 : rien n'est supprimé
         self.assertIn(eid, self.faux.entries)
         r = self.nc("supprimer", eid, "--revision", rev, code=0)
@@ -943,7 +1034,7 @@ class DansLeProcessus(unittest.TestCase):
     def test_ipv6_sans_port(self):
         m = self.charger("http://[::1]")
         srv = m.Serveur()
-        self.assertEqual((srv.port, srv.adresse), (80, "::1"))
+        self.assertEqual((srv.port, srv.adresse), (80, ["::1"]))
         c = srv.connexion()
         self.assertEqual((c.host, c.port), ("::1", 80))
 
