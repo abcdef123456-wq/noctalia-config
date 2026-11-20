@@ -550,6 +550,12 @@ def cmd_verifier(a):
     else:
         for c in controles:
             print(("✓ " if c["ok"] else "✗ ") + c["message"])
+        # Dernière ligne : le résumé (la fenêtre des réglages n'en montre qu'une), en erreur s'il manque quelque chose
+        manque = [c["message"] for c in controles if not c["ok"]]
+        if manque:
+            print(T("À faire : ", "To do: ") + manque[0], file=sys.stderr)
+        else:
+            print(T("Tout est prêt.", "All set."))
     return code
 
 
@@ -632,6 +638,9 @@ def cmd_etat(a):
     else:
         for k, v in propres.items():
             print(f"{k} : {taille_lisible(v) if k.endswith('_bytes') and isinstance(v, int) and not isinstance(v, bool) else v}")
+        if isinstance(propres.get("used_bytes"), int) and isinstance(propres.get("quota_bytes"), int):
+            print(T(f"Utilisé : {taille_lisible(propres['used_bytes'])} sur {taille_lisible(propres['quota_bytes'])}.",
+                    f"Used: {taille_lisible(propres['used_bytes'])} of {taille_lisible(propres['quota_bytes'])}."))
     return OK
 
 

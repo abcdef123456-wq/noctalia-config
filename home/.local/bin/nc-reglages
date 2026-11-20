@@ -410,7 +410,7 @@ SECTIONS_EN = {
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal", "Applications": "Applications",
-    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots", "Santé Garmin": "Garmin health", "Composants": "Components",
+    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots", "Santé Garmin": "Garmin health", "Cloud JARVIS": "JARVIS Cloud", "Composants": "Components",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
     "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System", "IA": "AI",
@@ -1670,6 +1670,10 @@ REGLAGES = [
     R("GARMIN_JARVIS", "Santé Garmin", L("JARVIS peut lire ma santé", "JARVIS can read my health"), "ouinon", "non",
       L("Laisse l'assistant JARVIS répondre avec tes chiffres Garmin. Non : il ne les voit jamais.",
         "Lets the JARVIS assistant answer with your Garmin numbers. No: it never sees them.")),
+    # Cloud JARVIS (nc-cloud) : coupé par défaut ; oui seulement montre ses actions ici (et, plus tard, le dépôt dans l'île)
+    R("CLOUD_JARVIS", "Cloud JARVIS", L("Cloud JARVIS", "JARVIS Cloud"), "ouinon", "non",
+      L("Ton espace de fichiers sur ton serveur JARVIS. Non : aucune action ni aucun appel au serveur depuis le bureau.",
+        "Your file space on your JARVIS server. No: no action and no request to the server from the desktop.")),
     # Mises à jour
     R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "notif",
       L("Paquets des dépôts, de l'AUR (paru ou yay) et Flatpak. Notification : quand de nouvelles arrivent, avec les versions "
@@ -4202,8 +4206,53 @@ def catalogue(vals):
             ligne.update(confirmer=conf_g, bouton=bt_g)
         lignes.append(ligne)
     res[fin:fin] = lignes
+    if valeur_sure(vals, "CLOUD_JARVIS")[0] == "oui":
+        fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Cloud JARVIS"), default=len(res))
+        res[fin:fin] = catalogue_cloud()
     res += catalogue_composants(vals)
     return res + catalogue_raccourcis() + catalogue_nouveautes()
+
+
+def catalogue_cloud():
+    """Cloud JARVIS : l'association lue sur ce PC (aucun appel réseau à la lecture du catalogue), puis les actions de
+    nc-cloud, argv fixes ; leur dernière ligne s'affiche en bas de la fenêtre, puis le catalogue est relu."""
+    sec = "Cloud JARVIS"
+    base = dict(section=sec, sectionNom=nom_section(sec), defaut="", choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
+                valeur="", modifie=False, groupe="")
+    etat = Path(os.environ.get("XDG_STATE_HOME") or Path(HOME, ".local/state")) / "nc-cloud/appareil.json"
+    try:
+        nom = json.loads(etat.read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        nom = None
+    associe = etat.exists()
+    nom = "".join(c for c in nom if c.isprintable())[:64] if isinstance(nom, str) else ""
+    res = [dict(base, cle="cloud:etat-local", genre="info",
+                nom=T("Ce PC est associé", "This PC is paired") if associe else T("Ce PC n'est pas associé", "This PC is not paired"),
+                aide=nom if associe else T("Associe-le pour y déposer des fichiers.", "Pair it to drop files there."),
+                affiche="")]
+    actions = [("cloud:verifier", T("Vérifier", "Check"), T("Serveur, transport, cloud, trousseau et association.",
+                                                         "Server, transport, cloud, keyring and pairing."),
+                ["nc-cloud", "verifier"], T("Vérifier", "Check"), "")]
+    if associe:
+        actions += [("cloud:etat", T("État et quota", "Status and quota"), T("Place utilisée sur le quota du serveur.",
+                                                                           "Space used on the server's quota."),
+                     ["nc-cloud", "etat"], T("Voir", "Show"), ""),
+                    ("cloud:dissocier", T("Dissocier ce PC", "Unpair this PC"),
+                     T("Révoque ce PC sur le serveur et efface son jeton. Les fichiers du cloud restent.",
+                       "Revokes this PC on the server and erases its token. The cloud files stay."),
+                     ["nc-cloud", "dissocier"], T("Dissocier", "Unpair"),
+                     T("Dissocier ce PC du Cloud JARVIS ?", "Unpair this PC from the JARVIS Cloud?"))]
+    else:
+        actions.append(("cloud:associer", T("Associer ce PC", "Pair this PC"),
+                        T("Avec la clé de JARVIS ; le jeton de ce PC va dans le trousseau.",
+                          "With the JARVIS key; this PC's token goes into the keyring."),
+                        ["nc-cloud", "associer"], T("Associer", "Pair"), ""))
+    for cle, nom_a, aide, cmd, bouton, question in actions:
+        ligne = dict(base, cle=cle, genre="action", nom=nom_a, aide=aide, affiche=bouton, commande=cmd, relire=True)
+        if question:
+            ligne.update(confirmer=question, bouton=bouton)
+        res.append(ligne)
+    return res
 
 
 def catalogue_nouveautes():

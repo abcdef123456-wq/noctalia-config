@@ -501,6 +501,20 @@ elif sys.argv[1] == "clear":
         r = self.nc("verifier", code=0)
         self.assertTrue(r.lignes[-1]["pret"])
 
+    def test_resume_en_derniere_ligne_pour_les_reglages(self):
+        def texte(*args):
+            return subprocess.run([sys.executable, str(NC_CLOUD), *args], capture_output=True, text=True, timeout=60,
+                                  env=self.env(), stdin=subprocess.DEVNULL)
+        r = texte("verifier")
+        self.assertEqual(r.returncode, 4)
+        self.assertTrue(r.stderr.strip().splitlines()[-1].startswith("À faire : Ce PC n'est pas associé"), r.stderr)
+        self.associer()
+        r = texte("verifier")
+        self.assertEqual((r.returncode, r.stdout.strip().splitlines()[-1]), (0, "Tout est prêt."))
+        r = texte("etat")
+        self.assertEqual(r.returncode, 0)
+        self.assertRegex(r.stdout.strip().splitlines()[-1], r"^Utilisé : .+ sur .+\.$")
+
     def test_cle_du_serveur_refusee(self):
         self.url("http://127.0.0.1:%d" % self.srv.server_address[1], cle="une-autre-cle-0123456789")
         r = self.nc("associer", code=1)

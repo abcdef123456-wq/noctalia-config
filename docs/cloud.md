@@ -4,8 +4,8 @@ Le Cloud JARVIS est un espace de fichiers personnel sur **ton** serveur JARVIS. 
 tes PC à l'autre. Il n'y a pas de partage avec d'autres personnes : tous les PC associés au même serveur voient le même
 espace.
 
-`nc-cloud` est le client en terminal. L'interface (glisser un fichier sur l'île) viendra plus tard ; elle passera par
-`nc-cloud --json`.
+`nc-cloud` est le client en terminal. Les réglages ont une section « Cloud JARVIS » (ci-dessous). Le panneau et le
+dépôt d'un fichier sur l'île viendront ensuite ; ils passeront par `nc-cloud --json`.
 
 ## Activer
 
@@ -17,6 +17,12 @@ espace.
 - `IA_MODE=non` ne coupe pas le cloud : ce n'est pas une IA. Sans serveur configuré, il n'y a rien.
 
 Rien ne tourne en fond : aucun relevé, aucune file d'attente. Le serveur n'est interrogé que quand tu lances une commande.
+
+Dans les réglages (`nc-reglages`, section « Cloud JARVIS ») : `CLOUD_JARVIS` est à `non` par défaut. À `oui`, la
+section montre si ce PC est associé (lu sur ce PC, sans appel au serveur) et les boutons « Vérifier », « Associer » ou,
+une fois associé, « État et quota » et « Dissocier » (avec confirmation). Chaque bouton lance la commande `nc-cloud`
+du même nom ; sa dernière ligne (« Tout est prêt. », « À faire : … », « Utilisé : … sur … ») s'affiche en bas de la
+fenêtre.
 
 ## Associer ce PC
 
