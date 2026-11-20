@@ -452,13 +452,21 @@ Item {
             Row {
                 id: choix
                 x: 10; y: 38; width: parent.width - 20; spacing: 6
+                // Six boutons : chacun a la largeur de son texte plus une part égale de la place restante (marges égales,
+                // « Hydrogen » tient à 330 px). Pas de QtQuick.Layouts : sur Debian, c'est un paquet que l'île n'installe pas
+                readonly property real part: {
+                    var texte = 0, n = 0
+                    for (var i = 0; i < children.length; i++)
+                        if (children[i].texte !== undefined) { texte += children[i].implicitWidth - 26; n++ }
+                    return n ? (width - spacing * (n - 1) - texte) / n : 0
+                }
                 Repeater {
                     model: AssistantEtat.famillesModeles
                     JarvisBouton {
                         required property string modelData
                         objectName: "nc-jarvis-model-" + modelData.toLowerCase()
-                        width: (choix.width - choix.spacing * (AssistantEtat.famillesModeles.length - 1)) / AssistantEtat.famillesModeles.length; height: 34
-                        texte: modelData; taille: 11 // cinq boutons : « Hydrogen » doit tenir à 330 px
+                        width: implicitWidth - 26 + choix.part; height: 34   // 26 : marges de JarvisBouton autour du texte
+                        texte: modelData; taille: 11
                         primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.familleModele(AssistantEtat.modeleCourant) === modelData
                         enabled: AssistantEtat.reglagesDisponibles && !!AssistantEtat.moteurCourant.installed
                             && !!AssistantEtat.modelePourFamille(modelData) && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours

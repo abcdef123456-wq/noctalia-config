@@ -411,12 +411,13 @@ else if(etape===1){
         models = [dict(id='gemini-flash-'+e, name='Gemini Flash ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='gemini-argon-'+e, name='Gemini Argon ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='gemini-hydrogen-'+e, name='Gemini Hydrogen ('+e+')') for e in ('low','medium','high')]
+        models += [dict(id='gemini-4-neon-'+e, name='Gemini Neon ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='claude-opus-4-6-thinking',name='Claude Opus 4.6 (Thinking)'),dict(id='claude-sonnet',name='Claude Sonnet',efforts='high')]
         config=dict(session=dict(engine='agy',model='gemini-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
         recus=self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- verifier(AssistantEtat.famillesModeles.join(",")==="Flash,Argon,Hydrogen,Opus,Sonnet","familles incohérentes")
+ verifier(AssistantEtat.famillesModeles.join(",")==="Flash,Argon,Hydrogen,Neon,Opus,Sonnet","familles incohérentes")
  for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.toLowerCase()).enabled,"famille absente : "+nom)
  var bouton=trouver(page,"nc-jarvis-model-argon");clavier.mouseClick(bouton,bouton.width/2,bouton.height/2)
  verifier(AssistantEtat.modele==="gemini-argon-low","mauvais identifiant Argon")
@@ -474,6 +475,41 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
 }
 ''',configuration=config)
 
+    def test_famille_neon_niveaux_xhigh_orchestrateur_et_six_libelles(self):
+        orch=dict(id='gemini-pro-orchestrator-neon',name='Orchestrator (Neon)')
+        neon=[dict(id='gemini-4-neon-'+e,name='Gemini Neon ('+e+')') for e in ('low','medium','high','xhigh')]
+        flash=[dict(id='gemini-flash-'+e,name='Flash ('+e+')') for e in ('low','medium','high')]
+        def conf(models):
+            return dict(session=dict(engine='agy',model='gemini-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high','xhigh'])])
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var b=trouver(page,"nc-jarvis-model-neon");verifier(b.enabled,"Neon grisé alors que le catalogue l'annonce")
+ verifier(AssistantEtat.familleModele({id:"gemini-pro-orchestrator-neon",name:"Orchestrator (Neon)"})==="","l'orchestrateur compte comme Neon")
+ b.clic();verifier(AssistantEtat.modele==="gemini-4-neon-low"&&b.primaire,"Neon : "+AssistantEtat.modele)
+ for(var n of ["low","medium","high","xhigh"]){AssistantEtat.choisirEffort(n);verifier(AssistantEtat.modele==="gemini-4-neon-"+n&&AssistantEtat.effort===n,"Neon "+n+" : "+AssistantEtat.modele)}
+ verifier(trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh caché sous Neon")
+ verifier(AssistantEtat.sessionReglages.model==="gemini-flash-low"&&AssistantEtat.reglagesModifies,"Neon/xhigh envoyé avant Appliquer")
+ AssistantEtat.choisirFamille("Flash");verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sous Flash")
+ page.width=330;etape++
+}else if(etape===2){
+ var tot=0
+ for(var nom of AssistantEtat.famillesModeles){var h=trouver(page,"nc-jarvis-model-"+nom.toLowerCase()),t=null;for(var c of h.children)if(c.paintedWidth!==undefined)t=c
+  verifier(t!==null&&t.paintedWidth<=h.width-8,nom+" coupé à 330 : "+t.paintedWidth+" > "+h.width);tot+=h.width}
+ verifier(tot<=330-20,"six boutons plus larges que la page : "+tot)
+ Qt.quit()
+}
+''',configuration=conf(flash+neon+[orch]),evenements=True)
+        for models in (flash,flash+[orch]):
+            self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ verifier(!trouver(page,"nc-jarvis-model-neon").enabled,"Neon allumé sans modèle Neon")
+ verifier(trouver(page,"nc-jarvis-model-flash").enabled,"Flash grisé")
+ Qt.quit()
+}
+''',configuration=conf(models))
+
     def test_bouton_xhigh_seulement_si_le_catalogue_a_la_variante(self):
         models=[dict(id='claude-opus-5-5-'+e,name='Opus ('+e+')') for e in ('low','medium','high','xhigh')]+[dict(id='gemini-flash-'+e,name='Flash ('+e+')') for e in ('low','medium','high')]
         config=dict(session=dict(engine='agy',model='claude-opus-5-5-high',effort='high'),engines=[
@@ -499,9 +535,9 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
     def test_catalogue_du_compte_argon_actif_et_efforts_de_claude_5_5(self):
         """Issue #37 : les vrais identifiants d'agy. Argon s'active, les Claude 5.5 ont leurs efforts (pas « à réflexion fixe »),
         et les modèles passent dans « Choisir un modèle… » (la coupe à 12 cachait le dernier)."""
-        familles=('gemini-4-argon','gemini-3.8-flash','claude-opus-5-5','claude-sonnet-5-5','gemini-hydrogen')
+        familles=('gemini-4-argon','gemini-3.8-flash','claude-opus-5-5','claude-sonnet-5-5','gemini-hydrogen','gemini-4-neon')
         models=[dict(id=f+'-'+e,name=f+' ('+e+')') for f in familles for e in ('low','medium','high')]+[dict(id='gpt-oss-120b-medium',name='GPT-OSS 120B (Medium)')]
-        self.assertEqual(len(models),16)
+        self.assertEqual(len(models),19)
         config=dict(session=dict(engine='agy',model='gemini-3.8-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
         self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}

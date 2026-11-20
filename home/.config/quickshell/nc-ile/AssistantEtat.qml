@@ -114,7 +114,7 @@ Singleton {
     readonly property var efforts: reflexionFixe(modele) ? []
         : Array.isArray(modeleCourant.efforts) ? modeleCourant.efforts
         : Array.isArray(moteurCourant.efforts) ? moteurCourant.efforts : []
-    readonly property var famillesModeles: ["Flash", "Argon", "Hydrogen", "Opus", "Sonnet"]
+    readonly property var famillesModeles: ["Flash", "Argon", "Hydrogen", "Neon", "Opus", "Sonnet"]
     // Le bouton xhigh n'existe que pour agy, et si le catalogue a la variante -xhigh du modèle courant
     readonly property bool xhighDispo: {
         var s = moteur === "agy" && /-(low|medium|high|xhigh)$/.exec(modele)
@@ -122,6 +122,8 @@ Singleton {
     }
     function familleModele(item) {
         var mots = ((item.id || "") + " " + (item.name || "")).toLowerCase().split(/[^a-z0-9]+/)
+        // « Orchestrator (Neon) » est un autre modèle : il n'appartient à aucune famille, il reste choisi dans les réglages
+        if (mots.indexOf("orchestrator") >= 0) return ""
         return famillesModeles.find(nom => mots.indexOf(nom.toLowerCase()) >= 0) || ""
     }
     function modelePourFamille(nom) {

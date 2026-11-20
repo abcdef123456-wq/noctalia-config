@@ -658,9 +658,9 @@ Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et ni
 c’est la session partagée par tous, Telegram et Discord compris. Avec AGY (`64523e5`), c’est celle de ce PC : le
 client envoie sa clé (`desktop:` et le nom du PC) avec chaque réglage, chaque reprise et chaque réinitialisation, et
 `/nc/engines` répond `shared_session` vrai seulement quand la session l’est. Changer de moteur vaut pour tout le monde. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
-La carte d’accueil présente les familles **Flash, Argon, Hydrogen, Opus et Sonnet**, avec **low / medium / high** séparés, plus **xhigh** quand le catalogue d’agy propose la variante `-xhigh` du modèle.
+La carte d’accueil présente les familles **Flash, Argon, Hydrogen, Neon, Opus et Sonnet**, avec **low / medium / high** séparés, plus **xhigh** quand le catalogue d’agy propose la variante `-xhigh` du modèle.
 Les boutons utilisent uniquement les identifiants annoncés pour le moteur courant ; les familles et variantes
-absentes sont grisées. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
+absentes sont grisées (Neon : modèles `gemini-4-neon-*` ; le seul « Orchestrator (Neon) » ne l’allume ni ne le dégrise, il se choisit dans les réglages). Les six boutons se partagent la largeur selon leur texte. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
 présumé actif avant lecture de la session du serveur. Le catalogue est lu une fois à l’ouverture d’un accueil
 sans saisie en cours ; le bouton réglages permet de le charger ou de l’actualiser explicitement.
 Pour agy, le catalogue vient du compte (`agy models`) : le runner le relit en fond au démarrage s’il n’en a aucun, puis quand
