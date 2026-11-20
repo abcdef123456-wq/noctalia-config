@@ -432,6 +432,8 @@ class DocAlignee(unittest.TestCase):
         validees = deployeur[deployeur.index("VALIDATED_REVISIONS=("):]
         validees = validees[:validees.index(")")]
         self.assertIn("'17525afe78e11d4c509daac8bcf4cbb00673cd4a'", validees)
+        for acceptee in ("9617d4b6827b6e4b0467430455ccb5b2189e7af8", "6041caf630606d3b1b2deb3f3447f839e1637206"):   # issue #42
+            self.assertIn("'" + acceptee + "'", validees)
         self.assertIn("REVISION", validees)
         self.assertNotEqual(rev, "17525afe78e11d4c509daac8bcf4cbb00673cd4a")
 
