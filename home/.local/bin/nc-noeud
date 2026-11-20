@@ -218,6 +218,7 @@ class AttenteLongue(Exception):
 
 
 ATTENTE_LONGUE = 300
+DELAI_CONNEXION = 15
 
 
 class Definitif(Exception):
@@ -1152,7 +1153,9 @@ def adresse_ws(c):
     u = urllib.parse.urlsplit(url)
     if u.scheme == "https":
         tls = True
-    elif u.scheme == "http" and (A.hote_prive(url) or A.hote_tailscale(url)) and not (u.hostname or "").endswith("."):
+    elif u.scheme == "http" and (A.hote_prive(url) or A.hote_tailscale(url)) and not (u.hostname or "").endswith(".") \
+            and (A._ip(u.hostname or "") is None or A.ip_permise(u.hostname)):
+        # Une IP ÉCRITE hors des plages permises (203.0.113.x, 198.18.0.1, 0.0.0.0…) : arrêt, réessayer n'y changerait rien
         tls = False
     else:
         raise Definitif(T("Connexion ws:// refusée vers un hôte public (" + (u.hostname or "?") + ") : la clé et les "
@@ -1177,10 +1180,14 @@ async def connecter(c):
         except A.TransportRefuse as e:
             raise AttenteLongue(str(e)) from None
     erreur = OSError("aucune adresse")
-    for cible in cibles:
+    fin = time.monotonic() + DELAI_CONNEXION    # en tout, réparti sur les adresses restantes
+    for i, cible in enumerate(cibles):
+        reste = fin - time.monotonic()
+        if reste <= 0:
+            raise asyncio.TimeoutError()
         try:
             r, w = await asyncio.wait_for(asyncio.open_connection(cible, port, ssl=ctx, server_hostname=hote if tls else None,
-                                                                  limit=2 ** 20), 15)
+                                                                  limit=2 ** 20), reste / (len(cibles) - i))
             break
         except (OSError, asyncio.TimeoutError) as e:
             erreur = e

@@ -183,6 +183,8 @@ class Gestion(http.server.BaseHTTPRequestHandler):
             e = f.entries.get(p[1])
             if not e:
                 return self.erreur(404, "not_found")
+            if "autre_entree" in f.pannes:              # le serveur rend l'entrée d'un autre id
+                e = dict(e, id="f-autre")
             return self.repondre(200, dict(f.ident(), entry=e))
         if p == ["status"]:
             if "stockage" in f.pannes:
@@ -257,6 +259,8 @@ class Gestion(http.server.BaseHTTPRequestHandler):
             if m == "GET" and len(p) == 2:
                 return self.repondre(200, self.vue(up, ident))
             if m == "DELETE" and len(p) == 2:
+                if "couper_annulation" in f.pannes:
+                    return self.couper()
                 if up["state"] == "pending":
                     up["state"] = "cancelled"
                     up["chunks"] = {}
@@ -890,6 +894,29 @@ elif sys.argv[1] == "clear":
         self.assertEqual((self.d / "x.bin").read_bytes(), donnees)
         self.assertTrue(any(c[1].endswith("/entries/" + eid) for c in self.faux.journal))
         self.nc("telecharger", "f999", str(self.d / "y.bin"), code=1)
+
+    def test_entree_par_id_d_un_autre_id_refusee(self):
+        self.faux.par_id = True
+        eid, _ = self.deposer_gros(100)
+        self.faux.pannes.add("autre_entree")
+        r = self.nc("telecharger", eid, str(self.d / "x.bin"), code=1)
+        self.assertIn("Réponse du serveur invalide", r.stdout)
+        self.assertFalse((self.d / "x.bin").exists())
+
+    def test_reprendre_dossier_change_annulation_hors_ligne(self):
+        self.faux.revisions_vivantes = True
+        self.associer()
+        self.faux.pannes.add("couper_apres:0")
+        p = self.fichier("gros.bin", os.urandom(MORCEAU * 3))
+        self.nc("deposer", str(p), code=3)
+        self.nc("dossier", "root", "autre", code=0)
+        self.faux.pannes.add("couper_annulation")
+        self.nc("reprendre", "1", code=3)
+        self.assertEqual(len(self.manifestes()), 1)                     # rien n'est effacé : on pourra reprendre
+        self.assertEqual(len(self.faux.uploads), 1)
+        self.faux.pannes.discard("couper_annulation")
+        self.nc("reprendre", "1", code=0)
+        self.assertEqual([u["state"] for u in self.faux.uploads.values()], ["cancelled", "committed"])
 
     def test_conflit_des_la_creation(self):
         self.faux.conflit_tot = True

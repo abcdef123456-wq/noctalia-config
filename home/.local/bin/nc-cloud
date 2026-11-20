@@ -754,18 +754,23 @@ class Envoi:
         dire(f"{self.nom} : {e}", evenement="resultat", fichier=self.m["source"], etat="echec", code=e.code, erreur=e.erreur)
         return e.code
 
-    def annuler_distant(self):
-        """DELETE /uploads/{id} ; vrai si la publication avait déjà gagné la course (succès affiché)."""
+    def annuler_distant(self, exiger=False):
+        """DELETE /uploads/{id} ; vrai si la publication avait déjà gagné la course (succès affiché). exiger : une
+        annulation impossible (hors ligne, serveur changé…) remonte au lieu d'être ignorée, le manifeste reste."""
         if not self.m.get("upload_id"):
             try:
                 self.creer()         # retrouve l'envoi si sa création a eu lieu (même clé, même intention)
-            except Echec:
+            except Echec as e:
+                if exiger and e.code in ARRET:
+                    raise
                 return False
         if not self.m.get("upload_id"):
             return False
         try:
             _, r = self.s.json("DELETE", self.url())
-        except Echec:
+        except Echec as e:
+            if exiger and e.code in ARRET:
+                raise
             return False
         if self.publie(r):
             self.succes(r)
@@ -1009,7 +1014,7 @@ def cmd_reprendre(a):
             envoi.source_intacte()
             if empreinte(m["source"]) != m["sha256"]:
                 raise envoi.change()
-            if envoi.annuler_distant():
+            if envoi.annuler_distant(exiger=True):      # hors ligne : rien n'est effacé, on pourra reprendre
                 return OK
             effacer(cm)
             dire(T(f"Le dossier de {envoi.nom} a changé depuis : nouvel envoi.", f"The folder of {envoi.nom} changed since: new upload."),
@@ -1094,7 +1099,7 @@ def entree(s, ident, parent, features):
             if x.statut == 404:
                 raise Echec(T("Fichier introuvable (supprimé ?).", "File not found (deleted?).")) from None
             raise
-        if not isinstance(e, dict):
+        if not isinstance(e, dict) or e.get("id") != ident:
             raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
         return e
     return trouver(s, ident, parent)

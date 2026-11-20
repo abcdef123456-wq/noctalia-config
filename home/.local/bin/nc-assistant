@@ -321,6 +321,13 @@ def _ip(texte):
     return getattr(ip, "ipv4_mapped", None) or ip
 
 
+def ip_permise(texte):
+    """Vrai pour une adresse IP dans les plages permises en http:// (boucle locale, réseau privé, Tailscale). Plus strict
+    que « privée » au sens de Python : 203.0.113.x, 198.18.0.0/15, 0.0.0.0 ou 240.0.0.0/4 n'en sont pas."""
+    ip = _ip(texte)
+    return ip is not None and any(ip in ipaddress.ip_network(n) for n in BOUCLE + PRIVE + TAILSCALE)
+
+
 def _plages(h):
     """Les plages permises en http:// pour ce nom d'hôte ; () : jamais en http://."""
     if not h or h.endswith("."):
@@ -380,11 +387,7 @@ def adresse_requete(url):
     if u.scheme != "http":
         return None
     h = (u.hostname or "").lower()
-    ip = _ip(h)
-    if ip is not None:
-        local = any(ip in ipaddress.ip_network(n) for n in BOUCLE + PRIVE + TAILSCALE)
-    else:
-        local = bool(_plages(h))
+    local = ip_permise(h) if _ip(h) is not None else bool(_plages(h))
     if h.endswith(".") or "%" in h or local:
         return adresse_fixee(url)
     if HTTP_PUBLIC_REFUSE:
@@ -433,14 +436,25 @@ class ConnexionFixee(http.client.HTTPConnection):
         self.adresses = [adresse] if isinstance(adresse, str) else list(adresse or [])
 
     def connect(self):
-        # Les adresses vérifiées, l'une après l'autre (localhost : ::1 puis 127.0.0.1), comme socket.create_connection
+        # Les adresses vérifiées, l'une après l'autre (localhost : ::1 puis 127.0.0.1), comme socket.create_connection ;
+        # le délai demandé est réparti sur les adresses restantes : le total ne le dépasse pas
         erreur = OSError("aucune adresse")
-        for a in self.adresses:
+        delai = self.timeout if isinstance(self.timeout, (int, float)) else None
+        fin = time.monotonic() + delai if delai is not None else None
+        for i, a in enumerate(self.adresses):
+            part = self.timeout
+            if fin is not None:
+                reste = fin - time.monotonic()
+                if reste <= 0:
+                    raise socket.timeout("délai écoulé")
+                part = reste / (len(self.adresses) - i)
             try:
-                self.sock = socket.create_connection((a, self.port), self.timeout, self.source_address)
-                return
+                self.sock = socket.create_connection((a, self.port), part, self.source_address)
             except OSError as e:
                 erreur = e
+                continue
+            self.sock.settimeout(delai)          # la suite (envoi, réponse) garde le délai demandé, pas la part
+            return
         raise erreur
 
 

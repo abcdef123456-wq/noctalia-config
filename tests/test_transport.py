@@ -239,6 +239,51 @@ class Transport(unittest.TestCase):
         self.assertIn('m.ouvreur(c["URL"])', source)
         self.assertNotIn("build_opener", source)
 
+    def test_delai_reparti_sur_les_adresses(self):
+        parts = []
+        horloge = [100.0]           # horloge simulée : chaque essai lent consomme toute sa part
+
+        def connexion(adresse, delai, *a, **kw):
+            parts.append(delai)
+            if len(parts) < 3:
+                horloge[0] += delai
+                raise socket.timeout("lent")
+            return VRAIE_CONNEXION(("127.0.0.1", self.port), *a, **kw)
+        c = self.A.ConnexionFixee("nas.lan", 8000, adresse=["10.0.0.1", "10.0.0.2", "10.0.0.3"], timeout=6.0)
+        with mock.patch.object(socket, "create_connection", connexion), \
+                mock.patch.object(self.A.time, "monotonic", lambda: horloge[0]):
+            c.connect()
+        self.addCleanup(c.close)
+        self.assertEqual(len(parts), 3)
+        self.assertLessEqual(sum(parts), 6.0)
+        self.assertAlmostEqual(parts[0], 2.0, delta=0.1)
+        self.assertEqual(c.sock.gettimeout(), 6.0)          # la suite garde le délai demandé
+
+    def test_noeud_ip_ecrite_hors_plage_arret_definitif(self):
+        m = charger("nc_noeud_transport_ip", "nc-noeud")
+        m.A = self.A
+        for url in ("http://203.0.113.5:8000", "http://198.18.0.1:8000", "http://0.0.0.0:8000", "http://240.0.0.1:8000"):
+            with self.subTest(url=url), self.assertRaises(m.Definitif):
+                m.adresse_ws({"URL": url})
+        self.assertEqual(m.adresse_ws({"URL": "http://192.168.1.20:8000"})[2], False)
+
+    def test_noeud_delai_total_reparti(self):
+        import time
+        m = charger("nc_noeud_transport_delai", "nc-noeud")
+        m.A = self.A
+        m.DELAI_CONNEXION = 0.6
+        essais = []
+
+        async def ouvrir(hote, port, **kw):
+            essais.append(hote)
+            await asyncio.sleep(10)
+        self.resoudre({"nas.local": ["192.168.1.4", "192.168.1.5", "192.168.1.6"]})
+        debut = time.monotonic()
+        with mock.patch.object(asyncio, "open_connection", ouvrir), self.assertRaises(asyncio.TimeoutError):
+            asyncio.run(m.connecter({"URL": "http://nas.local:8000", "SECRET_KEY": "k"}))
+        self.assertEqual(essais, ["192.168.1.4", "192.168.1.5", "192.168.1.6"])
+        self.assertLess(time.monotonic() - debut, 1.5)
+
     def test_noeud_ws_vers_une_adresse_resolue_publique(self):
         m = charger("nc_noeud_transport", "nc-noeud")
         m.A = self.A
