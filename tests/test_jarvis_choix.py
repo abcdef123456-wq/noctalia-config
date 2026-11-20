@@ -438,6 +438,7 @@ class DocAlignee(unittest.TestCase):
         self.assertIn("'b7828d521c9bcdd284409ae66c927ddf8d907554'", validees)      # issue #46, suppression de fichiers
         self.assertIn("'36ce1f86a3c40821d6dd387f29dbe6d982d813c1'", validees)      # issue #46, entrée par id
         self.assertIn("'8dba70e20a318593d0d0b90fd7d638eb8b3bf56a'", validees)      # issue #46, envois concurrents
+        self.assertIn("'caa24ad79e2c0fac94602de517fe94f2cfb0934a'", validees)      # issue #46, manifeste abîmé
         self.assertNotIn("d605b224ee992f6c7fe89eec3b8b49a7f679164e", validees)     # première version du cloud : refusée
         self.assertIn("REVISION", validees)
         self.assertNotEqual(rev, "17525afe78e11d4c509daac8bcf4cbb00673cd4a")
