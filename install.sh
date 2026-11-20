@@ -337,6 +337,10 @@ esac
 # NixOS : le système se déclare dans la configuration Nix. Ce script n'y touche jamais (ni paquets, ni /etc, ni sudo) :
 # il copie seulement la session de l'utilisateur, comme --no-system.
 NIXOS_LIEN="https://github.com/RaphaelBlanc/noctalia-config-nixos"
+# Sans root, l'adaptateur peut être lancé par nix run, mais seulement à une révision relue (sha complet de 40 caractères).
+# Vide : jamais proposé. Jamais lu dans l'environnement ni dans un fichier : seulement cette ligne du script.
+ADAPTATEUR_REV=""
+ADAPTATEUR_APP="poste"   # application de la flake de l'adaptateur (nom provisoire)
 if [ "$FAMILY" = nixos ]; then
   [ "$MODE" != full ] || MODE=nosystem
   [ "$MODE" != seulement ] || die "$(t "Sur NixOS, cette partie se déclare dans ta configuration Nix (ce script n'installe rien dans le système)." "On NixOS, this part is declared in your Nix configuration (this script installs nothing system-wide).")"
@@ -736,6 +740,14 @@ if [ "$FAMILY" = nixos ] && [ "$MODE" != files ]; then
   if [ ${#manque[@]} -gt 0 ]; then
     # Sans root (ni root ni groupe wheel, comme un poste partagé) : pas de configuration Nix à modifier
     if [ "$(id -u)" != 0 ] && [[ " $(id -nG 2>/dev/null) " != *" wheel "* ]]; then
+      if [[ "$ADAPTATEUR_REV" =~ ^[0-9a-f]{40}$ ]] && have nix; then
+        adaptateur="github:${NIXOS_LIEN#https://github.com/}/$ADAPTATEUR_REV#$ADAPTATEUR_APP"
+        info "$(t "Possible sans root : lancer l'adaptateur communautaire (non officiel, pas tenu par nous) à la révision relue $ADAPTATEUR_REV, par nix run ($adaptateur). Rien n'est installé dans le système." "Possible without root: run the community adapter (unofficial, not maintained by us) at the reviewed revision $ADAPTATEUR_REV, with nix run ($adaptateur). Nothing is installed system-wide.")"
+        # Réponse par défaut non, sans « sensible » : --oui ne l'accepte jamais
+        if ask "$(t "Lancer ce code d'un dépôt communautaire ?" "Run this code from a community repository?")" n; then
+          exec nix --extra-experimental-features 'nix-command flakes' run "$adaptateur"
+        fi
+      fi
       die "$(t "outils absents du PATH : ${manque[*]}. Sur NixOS sans root, ce script n'installe rien : fournis-les par un environnement Nix à toi (nix shell, nix profile), puis relance-le depuis cet environnement." "tools missing from PATH: ${manque[*]}. On NixOS without root, this script installs nothing: provide them through your own Nix environment (nix shell, nix profile), then run it again from that environment.")"
     fi
     die "$(t "outils absents du PATH : ${manque[*]}. Sur NixOS ce script n'installe rien : déclare-les dans ta configuration Nix, par exemple avec le module communautaire (non officiel) $NIXOS_LIEN" "tools missing from PATH: ${manque[*]}. On NixOS this script installs nothing: declare them in your Nix configuration, for example with the community (unofficial) module $NIXOS_LIEN")"

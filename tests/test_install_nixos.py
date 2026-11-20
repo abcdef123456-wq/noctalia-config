@@ -66,10 +66,11 @@ class Banc:
             if w and not (self.bin / n).exists():
                 (self.bin / n).symlink_to(w)
 
-    def lance(self, *args, tty=None):
-        """tty : réponse (« o ») tapée à chaque question dans un vrai terminal ; sinon aucun terminal."""
-        env = self.env()
-        cmd = ["bash", str(REPO / "install.sh"), *args]
+    def lance(self, *args, tty=None, script=None, motif=rb"(Remplacer|Replace|On y va|Proceed)", env=None):
+        """tty : réponse (« o ») tapée aux questions qui contiennent motif, dans un vrai terminal (« n » aux autres) ;
+        sinon aucun terminal. script : une copie modifiée d'install.sh à lancer à la place du vrai."""
+        env = {**self.env(), **(env or {})}
+        cmd = ["bash", str(script or REPO / "install.sh"), *args]
         if tty is None:
             return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                                   start_new_session=True, env=env, timeout=120)
@@ -88,7 +89,7 @@ class Banc:
                     break
                 sortie += bout
                 if re.search(rb"\[[oOyY]/[nN]\] $", sortie):
-                    rep = tty if re.search(rb"(Remplacer|Replace|On y va|Proceed)[^\n]*$", sortie.rsplit(b"\n", 1)[-1]) else "n"
+                    rep = tty if re.search(motif + rb"[^\n]*$", sortie.rsplit(b"\n", 1)[-1]) else "n"
                     os.write(fd, (rep + "\n").encode())
         else:
             os.kill(pid, 9)
@@ -240,6 +241,82 @@ class NixosTest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("NixOS", r.stdout + r.stderr)
         self.assertEqual(b.appels(), "")
+
+
+REV = "0123456789abcdef0123456789abcdef01234567"
+ADAPTATEUR = "github:RaphaelBlanc/noctalia-config-nixos/" + REV + "#poste"
+
+
+class AdaptateurTest(unittest.TestCase):
+    """Sans root et sans outils : proposer l'adaptateur seulement si une révision relue est écrite dans le script."""
+
+    def banc(self, rev=None, nix=True, groupes="eleves users"):
+        b = Banc(absents=("uwsm",), groupes=groupes)
+        self.addCleanup(b.fin)
+        b.nix = b.d / "nix-args"
+        if nix:   # faux nix : note un argument par ligne
+            outil(b.bin, "nix", f'printf "%s\\n" "$@" > "{b.nix}"')
+        b.script = None
+        if rev is not None:   # copie d'install.sh avec la révision écrite dedans ; home/ reste celui du dépôt
+            depot = b.d / "depot"
+            depot.mkdir()
+            texte = (REPO / "install.sh").read_text()
+            self.assertEqual(texte.count('ADAPTATEUR_REV=""\n'), 1)
+            (depot / "install.sh").write_text(texte.replace('ADAPTATEUR_REV=""\n', f'ADAPTATEUR_REV="{rev}"\n'))
+            (depot / "home").symlink_to(REPO / "home")
+            b.script = depot / "install.sh"
+        return b
+
+    def refuse(self, b, r):
+        sortie = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fournis-les par un environnement Nix", sortie)
+        self.assertFalse(b.nix.exists(), "nix lancé")
+        self.assertEqual(b.appels(), "")
+        return sortie
+
+    def test_oui_lance_la_bonne_reference(self):
+        b = self.banc(rev=REV)
+        r = b.lance(tty="o", script=b.script, motif=rb"communautaire \?")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn(REV, r.stdout)
+        self.assertEqual(b.nix.read_text().splitlines(),
+                         ["--extra-experimental-features", "nix-command flakes", "run", ADAPTATEUR])
+
+    def test_non_arret_comme_avant(self):
+        b = self.banc(rev=REV)
+        self.refuse(b, b.lance(tty="n", script=b.script, motif=rb"communautaire \?"))
+
+    def test_oui_ne_lance_rien(self):
+        b = self.banc(rev=REV)
+        self.refuse(b, b.lance("--oui", script=b.script))
+
+    def test_revision_vide_rien_propose(self):
+        b = self.banc()
+        self.assertNotIn("communautaire", self.refuse(b, b.lance(tty="o", motif=rb"")))
+
+    def test_revision_mal_formee_comme_vide(self):
+        for rev in ("abc", REV.upper(), REV + "0", REV[:-1] + "g", "main"):
+            with self.subTest(rev=rev):
+                b = self.banc(rev=rev)
+                self.assertNotIn("communautaire", self.refuse(b, b.lance(tty="o", script=b.script, motif=rb"")))
+
+    def test_sans_nix_comme_vide(self):
+        b = self.banc(rev=REV, nix=False)
+        self.assertNotIn("communautaire", self.refuse(b, b.lance(tty="o", script=b.script, motif=rb"")))
+
+    def test_revision_de_l_environnement_ignoree(self):
+        b = self.banc()
+        r = b.lance(tty="o", motif=rb"", env={"ADAPTATEUR_REV": REV})
+        self.assertNotIn("communautaire", self.refuse(b, r))
+
+    def test_avec_wheel_jamais_propose(self):
+        b = self.banc(rev=REV, groupes="users wheel")
+        r = b.lance(tty="o", script=b.script, motif=rb"")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("configuration Nix", r.stdout)
+        self.assertNotIn("Lancer ce code", r.stdout)
+        self.assertFalse(b.nix.exists())
 
 
 if __name__ == "__main__":
