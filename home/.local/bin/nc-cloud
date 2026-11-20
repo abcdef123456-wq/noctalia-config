@@ -1,0 +1,1022 @@
+#!/usr/bin/env python3
+"""Client du Cloud JARVIS : ton espace de fichiers personnel sur ton serveur JARVIS, sans dépendance Python externe.
+
+  nc-cloud verifier                 ce qui est prêt ou manque (serveur, transport, cloud, trousseau, PC associé)
+  nc-cloud associer [NOM]           associe ce PC (clé JARVIS) ; le jeton du PC va dans le trousseau (secret-tool)
+  nc-cloud dissocier                révoque ce PC sur le serveur, puis efface son jeton
+  nc-cloud etat                     état, quota et limites
+  nc-cloud lister [ID] [--suite C]  une page d'un dossier (racine par défaut), avec la suite
+  nc-cloud dossier PARENT NOM       crée un dossier
+  nc-cloud deposer [--dans ID] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
+  nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
+  nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]
+  --json : une ligne JSON par événement (c'est ce que lit l'interface)
+
+Codes de sortie : 0 fait, 1 erreur, 2 mauvais usage, 3 hors ligne (serveur ou stockage injoignable), 4 PC non associé
+(ou révoqué), 5 pas de cloud (serveur non configuré, mode local ou option coupée), 6 conflit (rien n'est choisi tout seul :
+relance avec --si-existe), 7 quota ou disque plein, 8 annulé, 9 transport refusé (HTTP en clair sur Internet),
+10 serveur changé, 11 fichier source modifié, 12 empreinte fausse.
+
+Le serveur et la clé sont ceux de JARVIS (~/.config/nc/assistant.conf). Aucun relevé en fond : le serveur n'est
+interrogé que quand tu lances une commande. Les envois interrompus sont notés dans ~/.local/state/nc-cloud (sans jeton)."""
+import argparse
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import signal
+import socket
+import ssl
+import stat
+import subprocess
+import sys
+import time
+import unicodedata
+import urllib.parse
+import http.client
+
+
+def charger_assistant():
+    """nc-assistant (même dossier) comme module : configuration validée (0600), T, transport_sur, nom_du_pc."""
+    chemin = Path(__file__).resolve().parent / "nc-assistant"
+    l = importlib.machinery.SourceFileLoader("nc_assistant", str(chemin))
+    m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_assistant", l))
+    l.exec_module(m)
+    return m
+
+
+A = charger_assistant()
+T = A.T
+
+API = "/api/cloud/v1"
+ETAT = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "nc-cloud"
+APPAREIL = ETAT / "appareil.json"
+ENVOIS = ETAT / "envois"
+TELECHARGEMENTS = ETAT / "telechargements"
+MAX_FICHIERS = 8
+MAX_JSON = 2 * 1024 * 1024
+BLOC = 1024 * 1024
+
+OK, ERREUR, USAGE, HORS_LIGNE, NON_ASSOCIE, DESACTIVE, CONFLIT, QUOTA, ANNULE, TRANSPORT, SERVEUR_CHANGE, SOURCE, EMPREINTE = \
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+# Code d'erreur du serveur -> code de sortie
+CODES = {"cloud_disabled": DESACTIVE, "cloud_unavailable": HORS_LIGNE, "authentication_required": NON_ASSOCIE,
+         "device_revoked": NON_ASSOCIE, "quota_exceeded": QUOTA, "storage_full": QUOTA, "version_conflict": CONFLIT,
+         "precondition_required": CONFLIT, "destination_changed": CONFLIT, "integrity_error": EMPREINTE}
+
+JSON_SORTIE = False
+
+
+class Echec(Exception):
+    def __init__(self, message, code=ERREUR, erreur=None, corps=None, statut=None):
+        super().__init__(message)
+        self.code, self.erreur, self.corps, self.statut = code, erreur, corps or {}, statut
+
+
+class Annulation(BaseException):
+    """SIGINT ou SIGTERM : BaseException, pour qu'aucun « except Exception » ne l'avale."""
+
+
+def interrompre(*_):
+    raise Annulation()
+
+
+def propre(v, n=255):
+    """Un texte reçu du serveur, pour l'affichage : sans caractère de contrôle ni de mise en forme invisible."""
+    s = v if isinstance(v, str) else ("" if v is None else str(v))
+    s = "".join(c for c in s if unicodedata.category(c) not in ("Cc", "Cf", "Zl", "Zp"))
+    return s[:n]
+
+
+def entree_propre(e):
+    """Une entrée du serveur ramenée aux champs du contrat, nettoyés."""
+    if not isinstance(e, dict):
+        return None
+    r = {k: propre(e.get(k)) for k in ("id", "parent", "name", "kind", "revision", "sha256", "modified") if e.get(k) is not None}
+    if isinstance(e.get("size"), int) and not isinstance(e.get("size"), bool):
+        r["size"] = e["size"]
+    return r
+
+
+def evenement(**champs):
+    if JSON_SORTIE:
+        print(json.dumps(champs, ensure_ascii=False), flush=True)
+
+
+def dire(texte, **champs):
+    """Un message : texte lisible, ou ligne JSON avec --json."""
+    if JSON_SORTIE:
+        evenement(**champs, message=texte)
+    else:
+        print(texte, flush=True)
+
+
+def taille_lisible(n):
+    if not isinstance(n, int):
+        return "?"
+    for u in ("o", "Kio", "Mio", "Gio"):
+        if n < 1024 or u == "Gio":
+            return f"{n} {u}" if u == "o" else f"{n:.1f} {u}"
+        n /= 1024
+    return str(n)
+
+
+# ── Fichiers d'état : dossier 0700, fichiers 0600, jamais de jeton ni de clé ──────────────────────────────────────────────
+
+def dossier_prive(d):
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if d.is_symlink() or not d.is_dir():
+        raise Echec(T(f"{d} n'est pas un vrai dossier.", f"{d} is not a real directory."))
+    os.chmod(d, 0o700)
+
+
+def ecrire_json(chemin, donnees):
+    dossier_prive(chemin.parent)
+    tmp = chemin.with_name("." + chemin.name + ".tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(donnees, f, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(str(tmp), str(chemin))
+
+
+def lire_json(chemin):
+    try:
+        with open(str(chemin), encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        raise Echec(T(f"Fichier d'état illisible : {chemin}", f"Unreadable state file: {chemin}"))
+    return d if isinstance(d, dict) else None
+
+
+def effacer(chemin):
+    try:
+        chemin.unlink()
+    except FileNotFoundError:
+        pass
+
+
+# ── Trousseau (secret-tool) : le jeton passe par l'entrée et la sortie de secret-tool, jamais par ses arguments ──────────
+
+def attributs(device_id):
+    return ["service", "nc-cloud", "device", device_id]
+
+
+def env_c():
+    return dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C")
+
+
+def secret_tool():
+    return shutil.which("secret-tool") is not None
+
+
+def jeton_lire(device_id):
+    if not secret_tool():
+        return None
+    try:
+        r = subprocess.run(["secret-tool", "lookup"] + attributs(device_id), capture_output=True, timeout=30,
+                           stdin=subprocess.DEVNULL, env=env_c())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        j = r.stdout.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return j if r.returncode == 0 and jeton_valide(j) else None
+
+
+def jeton_valide(j):
+    return isinstance(j, str) and 16 <= len(j) <= 4096 and all(33 <= ord(c) <= 126 for c in j)
+
+
+def jeton_ranger(device_id, jeton):
+    try:
+        r = subprocess.run(["secret-tool", "store", "--label=Cloud JARVIS"] + attributs(device_id), input=jeton.encode("ascii"),
+                           capture_output=True, timeout=60, env=env_c())
+    except subprocess.TimeoutExpired:
+        return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def jeton_effacer(device_id):
+    try:
+        subprocess.run(["secret-tool", "clear"] + attributs(device_id), capture_output=True, timeout=30,
+                       stdin=subprocess.DEVNULL, env=env_c())
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+# ── HTTP : http.client, certificat vérifié, aucune redirection, aucun proxy ─────────────────────────────────────────────
+
+class Serveur:
+    def __init__(self):
+        try:
+            c = A.configuration()
+        except A.Erreur as e:
+            raise Echec(T("Pas de serveur JARVIS configuré (nc-assistant configurer) : pas de cloud.",
+                          "No JARVIS server configured (nc-assistant configurer): no cloud."), DESACTIVE) from e
+        self.url, self.cle, self.delai = c["URL"], c["SECRET_KEY"], min(float(c["TIMEOUT"]), 120.0)
+        # La règle de nc-assistant, en refus : rien ne part (clé, jeton, octet de fichier) vers du HTTP en clair sur Internet
+        if not A.transport_sur(self.url):
+            raise Echec(T("Transport refusé : le cloud exige HTTPS, ou HTTP vers ce PC, un réseau privé ou Tailscale.",
+                          "Transport refused: the cloud needs HTTPS, or HTTP to this PC, a private network or Tailscale."), TRANSPORT)
+        u = urllib.parse.urlsplit(self.url)
+        self.https, self.hote, self.port, self.base = u.scheme == "https", u.hostname, u.port, u.path.rstrip("/")
+
+    def connexion(self, delai=None):
+        d = delai or self.delai
+        if self.https:
+            return http.client.HTTPSConnection(self.hote, self.port, timeout=d, context=ssl.create_default_context())
+        return http.client.HTTPConnection(self.hote, self.port, timeout=d)
+
+    def envoyer(self, methode, chemin, corps=None, entetes=None, delai=None):
+        """La réponse ouverte (à lire puis fermer). Erreurs réseau : Echec HORS_LIGNE ; redirection : refusée."""
+        c = self.connexion(delai)
+        try:
+            c.request(methode, self.base + API + chemin, body=corps, headers=entetes or {})
+            r = c.getresponse()
+        except ssl.SSLError:
+            c.close()
+            raise Echec(T("Certificat TLS refusé : vérifie l'adresse HTTPS du serveur.",
+                          "TLS certificate refused: check the server's HTTPS address."), HORS_LIGNE) from None
+        except (OSError, http.client.HTTPException):
+            c.close()
+            raise Echec(T("Serveur injoignable (hors ligne, adresse ou tunnel arrêté).",
+                          "Server unreachable (offline, address or stopped tunnel)."), HORS_LIGNE) from None
+        if 300 <= r.status < 400:
+            c.close()
+            raise Echec(T("Redirection refusée : configure directement l'adresse finale du serveur.",
+                          "Redirect refused: configure the server's final address directly."), TRANSPORT)
+        r.connexion = c
+        return r
+
+    def json(self, methode, chemin, corps=None, entetes=None):
+        """(statut, objet JSON) ; un code d'erreur du serveur devient un Echec avec son code de sortie."""
+        h = dict(entetes or {})
+        donnees = None
+        if corps is not None and not isinstance(corps, bytes):
+            donnees = json.dumps(corps).encode("utf-8")
+            h["Content-Type"] = "application/json"
+        elif isinstance(corps, bytes):
+            donnees = corps
+        r = self.envoyer(methode, chemin, donnees, h)
+        try:
+            brut = r.read(MAX_JSON + 1)
+        except (OSError, http.client.HTTPException):
+            raise Echec(T("Réponse du serveur interrompue.", "Server response interrupted."), HORS_LIGNE) from None
+        finally:
+            r.connexion.close()
+        try:
+            obj = json.loads(brut) if brut and len(brut) <= MAX_JSON else {}
+        except (ValueError, UnicodeError):
+            obj = {}
+        if not isinstance(obj, dict):
+            obj = {}
+        if r.status >= 400:
+            raise echec_serveur(r.status, obj)
+        return r.status, obj
+
+
+def echec_serveur(statut, obj):
+    """Le corps d'une erreur n'est jamais affiché : seulement son code (s'il a la forme attendue)."""
+    err = obj.get("error") if isinstance(obj.get("error"), str) and re.fullmatch(r"[a-z_]{1,40}", obj.get("error")) else None
+    code = CODES.get(err)
+    if code is None and err is None:
+        code = NON_ASSOCIE if statut in (401, 403) else HORS_LIGNE if statut in (502, 503, 504) else CONFLIT if statut in (409, 412, 428) else ERREUR
+    if code is None:
+        code = ERREUR
+    messages = {
+        DESACTIVE: T("Le cloud est désactivé sur le serveur (mode local ou option coupée).",
+                     "The cloud is turned off on the server (local mode or option off)."),
+        HORS_LIGNE: T("Le stockage du cloud est injoignable pour l'instant.", "The cloud storage is unreachable for now."),
+        NON_ASSOCIE: T("Ce PC n'est pas (ou plus) associé au cloud : nc-cloud associer.",
+                       "This PC is not (or no longer) paired with the cloud: nc-cloud associer."),
+        QUOTA: T("Quota du cloud dépassé, ou disque du serveur plein.", "Cloud quota exceeded, or server disk full."),
+        CONFLIT: T("Conflit : la destination a changé ou le nom existe déjà.", "Conflict: the destination changed or the name already exists."),
+        EMPREINTE: T("Empreinte refusée par le serveur : le fichier envoyé ne correspond pas.",
+                     "Fingerprint refused by the server: the uploaded file does not match."),
+    }
+    if err in FINIS:
+        m = T("Cet envoi a expiré ou n'est plus en cours : dépose le fichier à nouveau.",
+              "This upload expired or is no longer in progress: upload the file again.")
+    else:
+        m = messages.get(code, T(f"Refus du serveur (HTTP {statut}{', ' + err if err else ''}).",
+                                 f"Server refusal (HTTP {statut}{', ' + err if err else ''})."))
+    return Echec(m, code, err, obj, statut)
+
+
+FINIS = ("upload_expired", "upload_not_pending")
+
+
+# ── Session d'un PC associé ─────────────────────────────────────────────────────────────────────────────────────────────
+
+class Session:
+    def __init__(self, srv=None):
+        self.srv = srv or Serveur()
+        self.appareil = lire_json(APPAREIL)
+        if not self.appareil or not all(isinstance(self.appareil.get(k), str) for k in ("server_id", "space_id", "device_id")):
+            raise Echec(T("Ce PC n'est pas associé au cloud : nc-cloud associer.",
+                          "This PC is not paired with the cloud: nc-cloud associer."), NON_ASSOCIE)
+        if not secret_tool():
+            raise Echec(T("secret-tool est absent : le jeton de ce PC ne peut pas être lu (paquet libsecret, libsecret-tools sur Debian).",
+                          "secret-tool is missing: this PC's token cannot be read (libsecret package, libsecret-tools on Debian)."), NON_ASSOCIE)
+        self.jeton = jeton_lire(self.appareil["device_id"])
+        if not self.jeton:
+            raise Echec(T("Jeton du cloud introuvable : trousseau fermé ? Ouvre-le, ou associe ce PC à nouveau.",
+                          "Cloud token not found: is the keyring locked? Unlock it, or pair this PC again."), NON_ASSOCIE)
+
+    def entetes(self, plus=None):
+        h = {"Authorization": "Bearer " + self.jeton}
+        h.update(plus or {})
+        return h
+
+    def identite(self, obj):
+        """Toute réponse qui annonce un autre serveur, espace ou appareil arrête l'opération."""
+        for k in ("server_id", "space_id", "device_id"):
+            if k in obj and obj[k] != self.appareil[k]:
+                raise Echec(T("Le serveur a changé (identité différente de celle de l'association) : opération arrêtée.",
+                              "The server changed (identity differs from the pairing): operation stopped."), SERVEUR_CHANGE)
+        return obj
+
+    def json(self, methode, chemin, corps=None, entetes=None):
+        try:
+            statut, obj = self.srv.json(methode, chemin, corps, self.entetes(entetes))
+        except Echec as e:
+            self.identite(e.corps)
+            raise
+        return statut, self.identite(obj)
+
+    def etat(self):
+        return self.json("GET", "/status")[1]
+
+    def page(self, parent, curseur=None):
+        q = {"parent_id": parent}
+        if curseur:
+            q["cursor"] = curseur
+        return self.json("GET", "/entries?" + urllib.parse.urlencode(q))[1]
+
+
+def segment(ident):
+    """Un identifiant dans un chemin d'URL : refusé s'il contient un caractère de contrôle, sinon échappé."""
+    if not isinstance(ident, str) or not ident or len(ident) > 256 or propre(ident, 256) != ident:
+        raise Echec(T("Identifiant invalide.", "Invalid identifier."), USAGE)
+    return urllib.parse.quote(ident, safe="")
+
+
+def nom_valide(nom):
+    return (isinstance(nom, str) and nom not in ("", ".", "..") and "/" not in nom and "\\" not in nom
+            and propre(nom) == nom and len(nom.encode("utf-8")) <= 255)
+
+
+# ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def capacites(srv):
+    _, cap = srv.json("GET", "/capabilities", entetes={"X-Secret-Key": srv.cle})
+    if cap.get("api_path") not in (None, API) or str(cap.get("api_version", "1")) != "1":
+        raise Echec(T("Version de l'API du cloud non prise en charge par ce client.",
+                      "Cloud API version not supported by this client."))
+    return cap
+
+
+def cmd_verifier(a):
+    controles = []
+
+    def note(nom, ok, message):
+        controles.append({"nom": nom, "ok": ok, "message": message})
+        return ok
+
+    code = OK
+    try:
+        srv = Serveur()
+        note("serveur", True, T("Serveur JARVIS configuré, transport sûr.", "JARVIS server configured, safe transport."))
+    except Echec as e:
+        note("serveur", False, str(e))
+        srv, code = None, e.code
+    if srv:
+        try:
+            cap = capacites(srv)
+            if cap.get("enabled") is not True:
+                note("cloud", False, T("Cloud désactivé sur le serveur (mode local ou option coupée).",
+                                       "Cloud turned off on the server (local mode or option off)."))
+                code = DESACTIVE
+            elif cap.get("state") == "unavailable":
+                note("cloud", False, T("Cloud activé, mais son stockage est injoignable.", "Cloud on, but its storage is unreachable."))
+                code = HORS_LIGNE
+            else:
+                note("cloud", True, T("Cloud annoncé par le serveur.", "Cloud announced by the server."))
+        except Echec as e:
+            note("cloud", False, str(e))
+            code = code or e.code
+    if not note("secret-tool", secret_tool(), T("secret-tool présent.", "secret-tool present.") if secret_tool() else
+                T("secret-tool absent (paquet libsecret ; libsecret-tools sur Debian, secret-tool sur openSUSE).",
+                  "secret-tool missing (libsecret package; libsecret-tools on Debian, secret-tool on openSUSE).")):
+        code = code or ERREUR
+    if not lire_json(APPAREIL):
+        note("associe", False, T("Ce PC n'est pas associé : nc-cloud associer.", "This PC is not paired: nc-cloud associer."))
+        code = code or NON_ASSOCIE
+    elif srv:
+        try:
+            s = Session(srv)
+            note("trousseau", True, T("Trousseau ouvert, jeton de ce PC présent.", "Keyring unlocked, this PC's token present."))
+            s.etat()
+            note("associe", True, T("PC associé, connexion authentifiée.", "PC paired, authenticated connection."))
+        except Echec as e:
+            note("associe", False, str(e))
+            code = code or e.code
+    if JSON_SORTIE:
+        evenement(evenement="verification", pret=code == OK, controles=controles)
+    else:
+        for c in controles:
+            print(("✓ " if c["ok"] else "✗ ") + c["message"])
+    return code
+
+
+def cmd_associer(a):
+    if lire_json(APPAREIL):
+        raise Echec(T("Ce PC est déjà associé : nc-cloud dissocier d'abord.", "This PC is already paired: nc-cloud dissocier first."))
+    if not secret_tool():
+        raise Echec(T("secret-tool est absent : le jeton ne peut être rangé nulle part. Installe libsecret (libsecret-tools sur Debian).",
+                      "secret-tool is missing: the token cannot be stored anywhere. Install libsecret (libsecret-tools on Debian)."))
+    nom = (a.nom or A.nom_du_pc() or "pc").strip()
+    if not nom_valide(nom) or len(nom) > 64:
+        raise Echec(T("Nom de PC invalide (64 caractères au plus, sans / ni caractère de contrôle).",
+                      "Invalid PC name (64 characters at most, no / and no control character)."), USAGE)
+    srv = Serveur()
+    cap = capacites(srv)
+    if cap.get("enabled") is not True:
+        raise Echec(T("Cloud désactivé sur le serveur (mode local ou option coupée).",
+                      "Cloud turned off on the server (local mode or option off)."), DESACTIVE)
+    _, r = srv.json("POST", "/devices", {"name": nom}, {"X-Secret-Key": srv.cle})
+    ident = {k: r.get(k) for k in ("server_id", "space_id", "device_id")}
+    jeton = r.get("token")
+    if not all(isinstance(v, str) and v for v in ident.values()) or not jeton_valide(jeton):
+        raise Echec(T("Réponse d'association incomplète.", "Incomplete pairing response."))
+    if cap.get("server_id") and ident["server_id"] != cap["server_id"]:
+        raise Echec(T("Le serveur a changé pendant l'association : arrêt.", "The server changed during pairing: stopped."), SERVEUR_CHANGE)
+    if not jeton_ranger(ident["device_id"], jeton):
+        # Le jeton ne s'affiche qu'une fois : sans trousseau, on révoque ce PC tout de suite, rien n'est écrit ailleurs
+        try:
+            srv.json("DELETE", "/devices/" + segment(ident["device_id"]), entetes={"X-Secret-Key": srv.cle})
+        except Echec:
+            pass
+        raise Echec(T("Le trousseau a refusé le jeton (fermé ou absent) : association annulée. Ouvre ton trousseau, puis relance.",
+                      "The keyring refused the token (locked or missing): pairing cancelled. Unlock your keyring, then try again."))
+    ecrire_json(APPAREIL, dict(ident, name=nom))
+    dire(T(f"PC associé au cloud : {nom}.", f"PC paired with the cloud: {nom}."), evenement="associe", nom=nom, device_id=ident["device_id"])
+    return OK
+
+
+def cmd_dissocier(a):
+    app = lire_json(APPAREIL)
+    if not app or not isinstance(app.get("device_id"), str):
+        raise Echec(T("Ce PC n'est pas associé.", "This PC is not paired."), NON_ASSOCIE)
+    srv = Serveur()
+    try:
+        _, r = srv.json("DELETE", "/devices/" + segment(app["device_id"]), entetes={"X-Secret-Key": srv.cle})
+        if r.get("server_id") not in (None, app.get("server_id")):
+            raise Echec(T("Le serveur a changé : PC non dissocié.", "The server changed: PC not unpaired."), SERVEUR_CHANGE)
+    except Echec as e:
+        if not (e.erreur == "device_revoked" or e.statut == 404):     # déjà révoqué : on efface quand même ici
+            raise
+    jeton_effacer(app["device_id"])
+    effacer(APPAREIL)
+    for m in manifestes():
+        effacer(m[0])
+    dire(T("PC dissocié : son jeton est effacé du trousseau.", "PC unpaired: its token is erased from the keyring."), evenement="dissocie")
+    return OK
+
+
+def cmd_etat(a):
+    st = Session().etat()
+    propres = {k: (propre(v) if isinstance(v, str) else v) for k, v in st.items()
+               if isinstance(v, (str, int, float, bool)) and k not in ("server_id", "space_id", "device_id")}
+    if JSON_SORTIE:
+        evenement(evenement="etat", etat=propres)
+    else:
+        for k, v in propres.items():
+            print(f"{propre(k, 40)} : {v}")
+    return OK
+
+
+def cmd_lister(a):
+    s = Session()
+    p = s.page(a.id or "root", a.suite)
+    entrees = [e for e in (entree_propre(x) for x in p.get("entries") or []) if e]
+    suite = propre(p.get("next_cursor"), 512) if p.get("next_cursor") else None
+    if JSON_SORTIE:
+        evenement(evenement="page", parent=entree_propre(p.get("parent")), entries=entrees, next_cursor=suite)
+    else:
+        for e in entrees:
+            genre = "📁" if e.get("kind") == "directory" else "  "
+            print(f"{genre} {e.get('name', '?')}  {taille_lisible(e.get('size')) if e.get('kind') == 'file' else ''}  [{e.get('id', '?')}]")
+        if not entrees:
+            print(T("(dossier vide)", "(empty folder)"))
+        if suite:
+            print(T(f"Suite : nc-cloud lister {a.id or 'root'} --suite {suite}", f"More: nc-cloud lister {a.id or 'root'} --suite {suite}"))
+    return OK
+
+
+def revision_dossier(s, parent):
+    p = s.page(parent).get("parent")
+    if not isinstance(p, dict) or not isinstance(p.get("revision"), str):
+        raise Echec(T("Dossier de destination introuvable.", "Destination folder not found."))
+    return p["revision"]
+
+
+def cmd_dossier(a):
+    if not nom_valide(a.nom):
+        raise Echec(T("Nom de dossier invalide.", "Invalid folder name."), USAGE)
+    s = Session()
+    _, r = s.json("POST", "/directories", {"parent_id": a.parent, "parent_revision": revision_dossier(s, a.parent), "name": a.nom})
+    e = entree_propre(r.get("entry")) or {}
+    dire(T(f"Dossier créé : {e.get('name', a.nom)}.", f"Folder created: {e.get('name', a.nom)}."), evenement="dossier", entree=e)
+    return OK
+
+
+# ── Envoi ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def empreinte(chemin):
+    h = hashlib.sha256()
+    with open(str(chemin), "rb") as f:
+        for bloc in iter(lambda: f.read(BLOC), b""):
+            h.update(bloc)
+    return h.hexdigest()
+
+
+def signature(chemin):
+    st = os.stat(str(chemin))
+    return st.st_size, st.st_mtime_ns
+
+
+def manifestes():
+    """[(chemin, manifeste)] des envois interrompus, du plus ancien au plus récent."""
+    if not ENVOIS.is_dir():
+        return []
+    r = []
+    for p in sorted(ENVOIS.glob("*.json")):
+        m = lire_json(p)
+        if m:
+            r.append((p, m))
+    return sorted(r, key=lambda x: x[1].get("cree", 0))
+
+
+def politique(si_existe):
+    """--si-existe -> (policy, expected_revision, annuler_si_conflit)."""
+    if not si_existe:
+        return "create", None, False
+    if si_existe == "garder":
+        return "keep_both", None, False
+    if si_existe == "annuler":
+        return "create", None, True
+    if si_existe.startswith("remplacer:") and si_existe[10:] and propre(si_existe[10:]) == si_existe[10:]:
+        return "replace", si_existe[10:], False
+    raise Echec(T("--si-existe : garder, remplacer:REVISION ou annuler.", "--si-existe: garder, remplacer:REVISION or annuler."), USAGE)
+
+
+class Envoi:
+    """Un fichier envoyé par morceaux, de l'intention (manifeste écrit AVANT la création) à la publication."""
+
+    def __init__(self, s, chemin_manifeste, m):
+        self.s, self.cm, self.m = s, chemin_manifeste, m
+        self.nom = propre(m.get("name"))
+
+    def intention(self):
+        return {k: self.m[k] for k in ("parent_id", "parent_revision", "name", "size", "sha256", "policy", "expected_revision")}
+
+    def creer(self):
+        """POST /uploads avec la clé d'idempotence du manifeste : la même intention retrouve le même envoi."""
+        _, r = self.s.json("POST", "/uploads", self.intention(), {"Idempotency-Key": self.m["cle"]})
+        self.lu(r)
+        return r
+
+    def lu(self, r):
+        if isinstance(r.get("upload_id"), str) and r["upload_id"] and self.m.get("upload_id") != r["upload_id"]:
+            self.m["upload_id"] = r["upload_id"]
+            ecrire_json(self.cm, self.m)
+        if isinstance(r.get("chunk_bytes"), int) and r["chunk_bytes"] > 0:
+            self.m["chunk_bytes"] = r["chunk_bytes"]
+
+    def url(self, suite=""):
+        return "/uploads/" + segment(self.m["upload_id"]) + suite
+
+    def publie(self, r):
+        return r.get("state") == "committed"
+
+    def succes(self, r):
+        e = entree_propre(r.get("result")) or {}
+        effacer(self.cm)
+        dire(T(f"Envoyé : {self.nom} → {e.get('name', self.nom)}.", f"Uploaded: {self.nom} → {e.get('name', self.nom)}."),
+             evenement="resultat", fichier=self.m["source"], etat="publie", entree=e)
+        return OK
+
+    def annuler_distant(self):
+        """DELETE /uploads/{id} ; vrai si la publication avait déjà gagné la course (succès affiché)."""
+        if not self.m.get("upload_id"):
+            try:
+                self.creer()         # retrouve l'envoi si sa création a eu lieu (même clé, même intention)
+            except Echec:
+                return False
+        try:
+            _, r = self.s.json("DELETE", self.url())
+        except Echec:
+            return False
+        if self.publie(r):
+            self.succes(r)
+            return True
+        return False
+
+    def envoyer(self, recus, tout_lire):
+        """Les morceaux manquants ; tout_lire : relit aussi les reçus pour vérifier l'empreinte du fichier entier."""
+        taille, n = self.m["size"], self.m.get("chunk_bytes")
+        if taille and not n:
+            raise Echec(T("Taille de morceau absente de la réponse du serveur.", "Chunk size missing from the server response."))
+        total = (taille + n - 1) // n if taille else 0
+        h = hashlib.sha256()
+        envoye = sum(min(n, taille - i * n) for i in recus if 0 <= i < total) if taille else 0
+        with open(self.m["source"], "rb") as f:
+            for i in range(total):
+                if i in recus and not tout_lire:
+                    continue
+                self.source_intacte()
+                f.seek(i * n)
+                morceau = f.read(n)
+                if len(morceau) != min(n, taille - i * n):
+                    raise Echec(T(f"{self.nom} a changé pendant l'envoi : dépose-le à nouveau.",
+                                  f"{self.nom} changed during the upload: upload it again."), SOURCE)
+                h.update(morceau)
+                if i in recus:
+                    continue
+                self.s.json("PUT", self.url(f"/chunks/{i}"), morceau,
+                            {"Content-Type": "application/octet-stream", "X-Content-SHA256": hashlib.sha256(morceau).hexdigest()})
+                envoye += len(morceau)
+                evenement(evenement="progression", fichier=self.m["source"], envoye=envoye, taille=taille)
+        self.source_intacte()
+        if tout_lire and h.hexdigest() != self.m["sha256"]:
+            raise Echec(T(f"{self.nom} a changé pendant l'envoi : dépose-le à nouveau.",
+                          f"{self.nom} changed during the upload: upload it again."), SOURCE)
+
+    def source_intacte(self):
+        try:
+            sig = signature(self.m["source"])
+        except OSError:
+            sig = None
+        if sig != (self.m["size"], self.m["mtime_ns"]):
+            raise Echec(T(f"{self.nom} a changé (taille ou date) : dépose-le à nouveau.",
+                          f"{self.nom} changed (size or date): upload it again."), SOURCE)
+
+    def mener(self, r, tout_lire=True, annuler_si_conflit=False):
+        """De l'envoi créé (réponse r) jusqu'au résultat ; code de sortie pour ce fichier."""
+        try:
+            if self.publie(r):
+                return self.succes(r)
+            recus = {i for i in (r.get("chunks") or []) if isinstance(i, int) and not isinstance(i, bool)}
+            self.envoyer(recus, tout_lire)
+            _, fin = self.s.json("POST", self.url("/commit"))
+            if not self.publie(fin):
+                raise Echec(T("Publication non confirmée : nc-cloud reprendre pour vérifier.",
+                              "Publication not confirmed: nc-cloud reprendre to check."))
+            return self.succes(fin)
+        except Echec as e:
+            if e.code == CONFLIT:
+                return self.conflit(e, annuler_si_conflit)
+            if e.code in (SOURCE, EMPREINTE, QUOTA) or e.erreur in FINIS:
+                if e.erreur in FINIS or not self.annuler_distant():
+                    effacer(self.cm)
+                    dire(str(e), evenement="resultat", fichier=self.m["source"], etat="echec", code=e.code)
+                    return e.code
+                return OK
+            raise                       # hors ligne, serveur changé, appareil révoqué : le manifeste reste pour reprendre
+        except Annulation:
+            self.annulation()
+
+    def annulation(self):
+        """SIGINT ou SIGTERM : l'envoi est annulé sur le serveur ; si la publication a gagné la course, c'est un succès."""
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if self.annuler_distant():
+            raise Fini(OK) from None
+        effacer(self.cm)
+        dire(T(f"Envoi annulé : {self.nom}.", f"Upload cancelled: {self.nom}."), evenement="resultat",
+             fichier=self.m["source"], etat="annule", code=ANNULE)
+        raise Fini(ANNULE) from None
+
+    def conflit(self, e, annuler):
+        """Jamais résolu tout seul : l'envoi est annulé, le conflit signalé ; un nouvel appel choisit (--si-existe)."""
+        if self.m.get("upload_id") and self.annuler_distant():
+            return OK
+        effacer(self.cm)
+        actuel = entree_propre(e.corps.get("current"))
+        if annuler:
+            dire(T(f"{self.nom} existe déjà : envoi annulé.", f"{self.nom} already exists: upload cancelled."),
+                 evenement="resultat", fichier=self.m["source"], etat="annule", code=ANNULE)
+            return OK
+        rev = (actuel or {}).get("revision")
+        dire(T(f"Conflit pour {self.nom} : {str(e)} Relance avec --si-existe garder"
+               + (f", remplacer:{rev}" if rev else "") + " ou annuler.",
+               f"Conflict for {self.nom}: {str(e)} Run again with --si-existe garder"
+               + (f", remplacer:{rev}" if rev else "") + " or annuler."),
+             evenement="conflit", fichier=self.m["source"], nom=self.nom, erreur=e.erreur, actuel=actuel)
+        return CONFLIT
+
+
+class Fini(BaseException):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def cmd_deposer(a):
+    if len(a.fichiers) > MAX_FICHIERS:
+        raise Echec(T(f"{MAX_FICHIERS} fichiers au plus par envoi.", f"{MAX_FICHIERS} files at most per upload."), USAGE)
+    pol, attendue, annuler = politique(a.si_existe)
+    if pol == "replace" and len(a.fichiers) > 1:
+        raise Echec(T("remplacer:REVISION vaut pour un seul fichier.", "remplacer:REVISION applies to a single file."), USAGE)
+    valides, code = [], OK
+    for f in a.fichiers:
+        p = Path(f)
+        try:
+            st = os.lstat(str(p))
+        except OSError:
+            st = None
+        if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or not nom_valide(p.name):
+            raison = (T("introuvable", "not found") if st is None else T("lien symbolique refusé", "symbolic link refused")
+                      if stat.S_ISLNK(st.st_mode) else T("dossier refusé", "folder refused") if stat.S_ISDIR(st.st_mode)
+                      else T("nom invalide", "invalid name") if stat.S_ISREG(st.st_mode) else T("pas un fichier ordinaire", "not a regular file"))
+            dire(f"{propre(f)} : {raison}.", evenement="resultat", fichier=propre(f), etat="refuse", code=ERREUR)
+            code = code or ERREUR
+            continue
+        valides.append(p.resolve())
+    if not valides:
+        return code
+    s = Session()
+    s.etat()                                   # connexion authentifiée avant de préparer quoi que ce soit
+    parent = a.dans or "root"
+    for p in valides:
+        rev = revision_dossier(s, parent)
+        taille, mtime = signature(p)
+        m = {"version": 1, "cle": secrets.token_urlsafe(32), "source": str(p), "mtime_ns": mtime, "cree": time.time(),
+             "parent_id": parent, "parent_revision": rev, "name": p.name, "size": taille, "sha256": empreinte(p),
+             "policy": pol, "expected_revision": attendue, "upload_id": None, "chunk_bytes": None,
+             **{k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}}
+        if signature(p) != (taille, mtime):
+            dire(T(f"{p.name} a changé pendant sa lecture : dépose-le à nouveau.", f"{p.name} changed while being read: upload it again."),
+                 evenement="resultat", fichier=str(p), etat="echec", code=SOURCE)
+            code = code or SOURCE
+            continue
+        envoi = Envoi(s, ENVOIS / (m["cle"] + ".json"), m)
+        ecrire_json(envoi.cm, m)
+        try:
+            r = envoi.creer()
+        except Echec as e:
+            if e.code == CONFLIT:
+                code = envoi.conflit(e, annuler) or code
+                continue
+            if e.code != HORS_LIGNE:       # hors ligne : la création a peut-être eu lieu, le manifeste reste pour reprendre
+                effacer(envoi.cm)
+            if e.code == QUOTA:
+                dire(str(e), evenement="resultat", fichier=str(p), etat="echec", code=QUOTA)
+                code = code or QUOTA
+                continue
+            raise
+        except Annulation:
+            envoi.annulation()
+        c = envoi.mener(r, tout_lire=True, annuler_si_conflit=annuler)
+        code = code or c
+    return code
+
+
+def cmd_reprendre(a):
+    liste = manifestes()
+    if not a.envoi:
+        if not liste:
+            dire(T("Aucun envoi interrompu.", "No interrupted upload."), evenement="envois", envois=[])
+            return OK
+        envois = [{"numero": i, "cle": m.get("cle"), "fichier": m.get("source"), "nom": propre(m.get("name")), "taille": m.get("size")}
+                  for i, (_, m) in enumerate(liste, 1)]
+        if JSON_SORTIE:
+            evenement(evenement="envois", envois=envois)
+        else:
+            for e in envois:
+                print(f"{e['numero']}. {e['nom']}  {taille_lisible(e['taille'])}  ({e['fichier']})")
+            print(T("Reprendre : nc-cloud reprendre N", "Resume: nc-cloud reprendre N"))
+        return OK
+    choisi = [x for i, x in enumerate(liste, 1) if a.envoi in (str(i), x[1].get("cle"))]
+    if not choisi:
+        raise Echec(T("Envoi interrompu introuvable : nc-cloud reprendre pour la liste.",
+                      "Interrupted upload not found: nc-cloud reprendre for the list."), USAGE)
+    cm, m = choisi[0]
+    s = Session()
+    if any(m.get(k) != s.appareil[k] for k in ("server_id", "space_id", "device_id")):
+        raise Echec(T("Cet envoi a été préparé pour un autre serveur ou un autre appareil : pas de reprise.",
+                      "This upload was prepared for another server or device: no resume."), SERVEUR_CHANGE)
+    envoi = Envoi(s, cm, m)
+    try:
+        if m.get("upload_id"):
+            _, r = s.json("GET", envoi.url())
+            envoi.lu(r)
+        else:
+            r = envoi.creer()             # réponse de création perdue : la même clé retrouve l'envoi
+    except Echec as e:
+        if e.erreur in FINIS or e.statut == 404:
+            effacer(cm)
+            raise Echec(T(f"L'envoi de {envoi.nom} a expiré ou a été annulé : dépose-le à nouveau.",
+                          f"The upload of {envoi.nom} expired or was cancelled: upload it again."))
+        raise
+    if envoi.publie(r):
+        return envoi.succes(r)        # publication réussie, réponse perdue : rien n'est renvoyé
+    try:
+        envoi.source_intacte()
+        if empreinte(m["source"]) != m["sha256"]:
+            raise Echec(T(f"{envoi.nom} a changé : dépose-le à nouveau.", f"{envoi.nom} changed: upload it again."), SOURCE)
+    except (Echec, OSError) as e:
+        envoi.annuler_distant()
+        effacer(cm)
+        raise Echec(str(e) if isinstance(e, Echec) else T(f"{envoi.nom} est illisible.", f"{envoi.nom} is unreadable."), SOURCE) from None
+    return envoi.mener(r, tout_lire=False)
+
+
+# ── Téléchargement ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def trouver(s, ident, parent):
+    curseur = None
+    for _ in range(1000):
+        p = s.page(parent, curseur)
+        for e in p.get("entries") or []:
+            if isinstance(e, dict) and e.get("id") == ident:
+                return e
+        curseur = p.get("next_cursor")
+        if not curseur:
+            break
+    raise Echec(T("Fichier introuvable dans ce dossier (--dossier PARENT si ce n'est pas la racine).",
+                  "File not found in this folder (--dossier PARENT if it is not the root)."))
+
+
+def cmd_telecharger(a):
+    s = Session()
+    e = trouver(s, a.id, a.dossier or "root")
+    if e.get("kind") != "file" or not isinstance(e.get("size"), int) or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
+        raise Echec(T("Ce n'est pas un fichier téléchargeable.", "This is not a downloadable file."))
+    dest = Path(a.dest)
+    if dest.is_dir() and not dest.is_symlink():
+        nom = os.path.basename(propre(e.get("name")))
+        if nom in ("", ".", ".."):
+            raise Echec(T("Nom de fichier du serveur refusé : donne un nom de destination.",
+                          "Server file name refused: give a destination name."))
+        dest = dest / nom
+    if not dest.parent.is_dir():
+        raise Echec(T("Dossier de destination introuvable.", "Destination folder not found."), USAGE)
+    if (dest.exists() or dest.is_symlink()) and not a.remplacer:
+        raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it."))
+    partiel = dest.with_name("." + dest.name + ".nc-cloud-partiel")
+    suivi = TELECHARGEMENTS / (hashlib.sha256(str(partiel).encode()).hexdigest()[:32] + ".json")
+    note = lire_json(suivi) or {}
+    deja = 0
+    if note.get("id") == e["id"] and note.get("sha256") == e["sha256"] and note.get("etag") and partiel.is_file() and not partiel.is_symlink():
+        deja = partiel.stat().st_size
+    h = hashlib.sha256()
+    entetes = {}
+    if 0 < deja < e["size"]:
+        entetes = {"Range": f"bytes={deja}-", "If-Range": note["etag"]}
+    r = s.srv.envoyer("GET", "/files/" + segment(e["id"]) + "/content", entetes=s.entetes(entetes), delai=60)
+    try:
+        if r.status >= 400:
+            try:
+                obj = json.loads(r.read(MAX_JSON) or b"{}")
+            except (ValueError, OSError, http.client.HTTPException):
+                obj = {}
+            raise echec_serveur(r.status, obj if isinstance(obj, dict) else {})
+        if r.status != 206:
+            deja = 0
+        etag = r.getheader("ETag")
+        if etag and propre(etag, 512) == etag:
+            ecrire_json(suivi, {"id": e["id"], "sha256": e["sha256"], "etag": etag})
+        fd = os.open(str(partiel), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "r+b") as f:
+            f.truncate(deja)
+            for bloc in iter(lambda: f.read(BLOC), b""):
+                h.update(bloc)
+            f.seek(deja)
+            recu = deja
+            try:
+                for bloc in iter(lambda: r.read(BLOC), b""):
+                    recu += len(bloc)
+                    if recu > e["size"]:
+                        break
+                    f.write(bloc)
+                    h.update(bloc)
+                    evenement(evenement="progression", fichier=str(dest), recu=recu, taille=e["size"])
+            except (OSError, http.client.HTTPException):
+                recu = -1
+            f.flush()
+            os.fsync(f.fileno())
+            if recu < e["size"]:           # coupure (recu = -1 sur une erreur de lecture) : le partiel reste pour reprendre
+                raise Echec(T("Téléchargement interrompu : relance la même commande pour reprendre.",
+                              "Download interrupted: run the same command again to resume."), HORS_LIGNE)
+    except Annulation:
+        dire(T("Téléchargement annulé : relance la même commande pour reprendre.", "Download cancelled: run the same command again to resume."),
+             evenement="resultat", fichier=str(dest), etat="annule", code=ANNULE)
+        return ANNULE
+    finally:
+        r.connexion.close()
+    if recu != e["size"] or h.hexdigest() != e["sha256"]:
+        effacer(partiel)
+        effacer(suivi)
+        raise Echec(T("Empreinte fausse : fichier téléchargé effacé, rien n'est remplacé.",
+                      "Wrong fingerprint: downloaded file erased, nothing is replaced."), EMPREINTE)
+    if a.remplacer:
+        os.replace(str(partiel), str(dest))
+    else:
+        try:
+            os.link(str(partiel), str(dest))       # échoue si dest est apparu entre-temps : jamais d'écrasement
+        except FileExistsError:
+            raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it.")) from None
+        except OSError:
+            if dest.exists() or dest.is_symlink():
+                raise Echec(T(f"{dest} existe déjà.", f"{dest} already exists.")) from None
+            os.replace(str(partiel), str(dest))
+        effacer(partiel)
+    effacer(suivi)
+    dire(T(f"Téléchargé : {dest}", f"Downloaded: {dest}"), evenement="resultat", fichier=str(dest), etat="telecharge")
+    return OK
+
+
+# ── Entrée ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def analyseur():
+    p = argparse.ArgumentParser(prog="nc-cloud", description=T("Client du Cloud JARVIS.", "JARVIS Cloud client."))
+    p.add_argument("--json", action="store_true")
+    sous = p.add_subparsers(dest="commande", required=True)
+    sous.add_parser("verifier", aliases=["check"]).set_defaults(f=cmd_verifier)
+    x = sous.add_parser("associer", aliases=["pair"])
+    x.add_argument("nom", nargs="?")
+    x.set_defaults(f=cmd_associer)
+    sous.add_parser("dissocier", aliases=["unpair"]).set_defaults(f=cmd_dissocier)
+    sous.add_parser("etat", aliases=["status"]).set_defaults(f=cmd_etat)
+    x = sous.add_parser("lister", aliases=["list"])
+    x.add_argument("id", nargs="?")
+    x.add_argument("--suite")
+    x.set_defaults(f=cmd_lister)
+    x = sous.add_parser("dossier", aliases=["mkdir"])
+    x.add_argument("parent")
+    x.add_argument("nom")
+    x.set_defaults(f=cmd_dossier)
+    x = sous.add_parser("deposer", aliases=["upload"])
+    x.add_argument("--dans")
+    x.add_argument("--si-existe", dest="si_existe")
+    x.add_argument("fichiers", nargs="+")
+    x.set_defaults(f=cmd_deposer)
+    x = sous.add_parser("reprendre", aliases=["resume"])
+    x.add_argument("envoi", nargs="?")
+    x.set_defaults(f=cmd_reprendre)
+    x = sous.add_parser("telecharger", aliases=["download"])
+    x.add_argument("id")
+    x.add_argument("dest")
+    x.add_argument("--dossier")
+    x.add_argument("--remplacer", action="store_true")
+    x.set_defaults(f=cmd_telecharger)
+    return p
+
+
+def main(argv=None):
+    global JSON_SORTIE
+    argv = sys.argv[1:] if argv is None else argv
+    # --json accepté avant ou après la sous-commande
+    JSON_SORTIE = "--json" in argv
+    a = analyseur().parse_args([x for x in argv if x != "--json"])
+    signal.signal(signal.SIGINT, interrompre)
+    signal.signal(signal.SIGTERM, interrompre)
+    try:
+        return a.f(a)
+    except Fini as f:
+        return f.code
+    except Echec as e:
+        if JSON_SORTIE:
+            evenement(evenement="erreur", code=e.code, message=str(e))
+        else:
+            print(str(e), file=sys.stderr)
+        return e.code
+    except Annulation:
+        dire(T("Annulé.", "Cancelled."), evenement="erreur", code=ANNULE)
+        return ANNULE
+    except Exception:
+        # Jamais de trace : elle pourrait citer un en-tête ou une réponse du serveur
+        m = T("Erreur locale inattendue (droits, disque ?).", "Unexpected local error (permissions, disk?).")
+        if JSON_SORTIE:
+            evenement(evenement="erreur", code=ERREUR, message=m)
+        else:
+            print(m, file=sys.stderr)
+        return ERREUR
+
+
+if __name__ == "__main__":
+    sys.exit(main())

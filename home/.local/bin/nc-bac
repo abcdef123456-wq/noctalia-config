@@ -90,7 +90,9 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
                  # migrate » fait, ses dossiers XDG
                  ".omp", ".omp/agent", ".local/share/omp", ".local/state/omp", ".cache/omp",
                  # l'état de nc-ia (son journal, les dossiers laissés par une version précédente)
-                 ".local/state/nc-ia"]
+                 ".local/state/nc-ia",
+                 # nc-cloud : l'association de ce PC et les envois interrompus (chemins de tes fichiers, sans jeton)
+                 ".local/state/nc-cloud"]
 
 # Variables qui déplacent des dossiers de ces listes : (variable, préfixe relatif à ~ qu'elle remplace). Un chemin de la
 # liste est alors interdit aux DEUX endroits (le défaut et le dossier déplacé : tous les programmes ne lisent pas la
