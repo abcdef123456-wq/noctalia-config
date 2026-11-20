@@ -36,7 +36,7 @@ def outil(dossier, nom, corps):
 class Banc:
     """Un HOME, un PATH de faux outils et un os-release jetables."""
 
-    def __init__(self, famille="nixos", absents=()):
+    def __init__(self, famille="nixos", absents=(), groupes=None):
         self.d = Path(tempfile.mkdtemp(prefix="nc-nixos-"))
         self.home = self.d / "home"
         self.bin = self.d / "bin"
@@ -57,6 +57,10 @@ class Banc:
                                'clone|fetch|pull|push|submodule|init|remote|checkout|reset|merge|config|am|apply) break;; esac; done; '
                                f'echo "git $*" >> "{self.journal}"; exit 1')
         outil(self.bin, "fc-match", 'echo "MaterialSymbolsRounded.ttf: Material Symbols Rounded"')
+        # Groupes de l'utilisateur toujours faux (install.sh change de message selon « wheel ») : jamais ceux du compte
+        # qui lance les tests. NC_TEST_GROUPES change le défaut (contrôle : le fichier passe avec et sans wheel)
+        groupes = groupes or os.environ.get("NC_TEST_GROUPES", "users wheel")
+        outil(self.bin, "id", f'case "$1" in -nG|-Gn) echo "{groupes}";; *) exec "{shutil.which("id")}" "$@";; esac')
         for n in BASE:
             w = shutil.which(n)
             if w and not (self.bin / n).exists():
@@ -153,9 +157,7 @@ class NixosTest(unittest.TestCase):
         self.assertEqual(b.appels(), "")
 
     def test_outils_absents_sans_root(self):
-        b = self.banc(absents=("uwsm",))
-        (b.bin / "id").unlink()
-        outil(b.bin, "id", 'case "$1" in -u) echo 1000;; -nG) echo "eleves users";; *) echo 1000;; esac')
+        b = self.banc(absents=("uwsm",), groupes="eleves users")
         r = b.lance("--oui")
         sortie = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0)
@@ -164,9 +166,7 @@ class NixosTest(unittest.TestCase):
         self.assertNotIn("configuration Nix", sortie)
 
     def test_outils_absents_avec_wheel(self):
-        b = self.banc(absents=("uwsm",))
-        (b.bin / "id").unlink()
-        outil(b.bin, "id", 'case "$1" in -u) echo 1000;; -nG) echo "users wheel";; *) echo 1000;; esac')
+        b = self.banc(absents=("uwsm",), groupes="users wheel")
         r = b.lance("--oui")
         sortie = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0)
@@ -225,7 +225,7 @@ class NixosTest(unittest.TestCase):
         self.assertEqual(cible.read_text(), "du store\n")
 
     def test_outil_manquant_arret_avant_copie(self):
-        b = self.banc(absents=["kitty"])
+        b = self.banc(absents=["kitty"], groupes="users wheel")   # avec root possible : lien vers l'adaptateur
         r = b.lance("--oui")
         sortie = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0)
