@@ -436,6 +436,7 @@ class DocAlignee(unittest.TestCase):
             self.assertIn("'" + acceptee + "'", validees)
         self.assertIn("'ca985cc11a0cf3644088bfc6d1badeeb2ed2417b'", validees)      # issue #46, après ses correctifs
         self.assertIn("'b7828d521c9bcdd284409ae66c927ddf8d907554'", validees)      # issue #46, suppression de fichiers
+        self.assertIn("'36ce1f86a3c40821d6dd387f29dbe6d982d813c1'", validees)      # issue #46, entrée par id
         self.assertNotIn("d605b224ee992f6c7fe89eec3b8b49a7f679164e", validees)     # première version du cloud : refusée
         self.assertIn("REVISION", validees)
         self.assertNotEqual(rev, "17525afe78e11d4c509daac8bcf4cbb00673cd4a")
