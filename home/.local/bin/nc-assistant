@@ -368,6 +368,53 @@ def adresse_fixee(url):
     return gardees
 
 
+# Le jour où l'on refuse aussi http:// vers une adresse publique (aujourd'hui : un avertissement), c'est ici, une ligne
+HTTP_PUBLIC_REFUSE = False
+
+
+def adresse_requete(url):
+    """Pour TOUT appel au serveur JARVIS : None en https:// ; en http:// vers un nom ou une adresse de boucle locale,
+    de réseau privé ou Tailscale, les adresses vérifiées (adresse_fixee) ; en http:// public, None (connexion normale,
+    avertissement à la configuration), sauf si HTTP_PUBLIC_REFUSE. Un point final est toujours refusé en http://."""
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != "http":
+        return None
+    h = (u.hostname or "").lower()
+    ip = _ip(h)
+    if ip is not None:
+        local = any(ip in ipaddress.ip_network(n) for n in BOUCLE + PRIVE + TAILSCALE)
+    else:
+        local = bool(_plages(h))
+    if h.endswith(".") or "%" in h or local:
+        return adresse_fixee(url)
+    if HTTP_PUBLIC_REFUSE:
+        raise TransportRefuse(T("HTTP en clair refusé : utilise HTTPS.", "Plain HTTP refused: use HTTPS."))
+    avertir_une_fois(url)
+    return None
+
+
+_AVERTI = set()
+
+
+def avertir_une_fois(url):
+    """La clé part en clair vers une adresse publique (décision de l'utilisateur : avertir, ne pas bloquer) : le texte de
+    la configuration, sur la sortie d'erreur (la sortie --json reste intacte), une fois par commande."""
+    if url not in _AVERTI:
+        _AVERTI.add(url)
+        print(T("HTTP en clair : hors du réseau local, utilise HTTPS.", "Plain HTTP: outside the local network, use HTTPS."),
+              file=sys.stderr, flush=True)
+
+
+def ouvreur(url, adresse=None):
+    """L'ouvreur urllib de tout appel au serveur : aucune redirection suivie, aucun proxy de l'environnement, et en
+    http:// local, privé ou Tailscale, connexion aux adresses vérifiées."""
+    adresses = adresse if adresse is not None else adresse_requete(url)
+    gestionnaires = [SansRedirection(), urllib.request.ProxyHandler({})]
+    if adresses:
+        gestionnaires.append(GestionnaireFixe(adresses))
+    return urllib.request.build_opener(*gestionnaires)
+
+
 def transport_sur(url):
     """Vrai si des fichiers peuvent partir vers cette URL : HTTPS, ou HTTP vers cet ordinateur, un réseau privé ou
     Tailscale, vérifié sur les adresses résolues (adresse_fixee), jamais du HTTP en clair sur Internet."""
@@ -506,12 +553,11 @@ def api(c, endpoint, payload=None, sans_proxy=False, adresse=None):
     req = urllib.request.Request(c["URL"] + endpoint, data=corps,
                                  headers={"Content-Type": "application/json", "X-Secret-Key": c["SECRET_KEY"]},
                                  method="GET" if payload is None else "POST")
+    # Tout appel passe par ouvreur : aucun proxy de l'environnement (sans_proxy n'est plus qu'un rappel), et en http://
+    # local, privé ou Tailscale, les adresses vérifiées (celles des fichiers, déjà contrôlées, ou celles d'adresse_requete)
+    o = ouvreur(c["URL"], adresse)
     try:
-        # sans_proxy (fichiers joints) : http_proxy et https_proxy de l'environnement sont ignorés, la requête va droit au serveur
-        gestionnaires = [urllib.request.ProxyHandler({})] if sans_proxy else []
-        if adresse:          # http:// vers l'adresse déjà contrôlée par adresse_fixee, jamais par un proxy
-            gestionnaires = [urllib.request.ProxyHandler({}), GestionnaireFixe(adresse)]
-        with urllib.request.build_opener(SansRedirection(), *gestionnaires).open(req, timeout=c["TIMEOUT"] if corps else 10) as r:
+        with o.open(req, timeout=c["TIMEOUT"] if corps else 10) as r:
             contenu = r.read(MAX_RESPONSE + 1)
     except urllib.error.HTTPError as e:
         if 300 <= e.code < 400:

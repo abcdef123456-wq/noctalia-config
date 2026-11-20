@@ -465,7 +465,8 @@ def _transmettre(m, T, fichier):
         adresse = c["URL"].rstrip("/") + "/api/transcribe?" + urllib.parse.urlencode({"language": langue_dictee(m)})
         req = urllib.request.Request(adresse, data=fichier.read_bytes(),
                                      headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
-        with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
+        # Même ouvreur que nc-assistant : aucun proxy, aucune redirection, adresses vérifiées en http:// local ou Tailscale
+        with m.ouvreur(c["URL"]).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
             resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))
         if not isinstance(resultat, dict):
             raise ValueError

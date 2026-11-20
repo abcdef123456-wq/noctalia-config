@@ -46,8 +46,10 @@ aussi avec `nc-assistant demander -f fichier`. **Les fichiers joints sont envoy�
 et à lui seul : jamais à l'IA du bureau ni à un autre service. Les clés, certificats, fichiers `.env`, dossiers de secrets
 (`~/.ssh`, `~/.gnupg`, navigateurs…) et fichiers contenant une clé privée ou une clé d'API sont refusés. Ce contrôle n'est qu'une aide, pas une garantie : il reconnaît les motifs de clés les plus courants (clés privées,
 jetons sk-, ghp_, AWS, Slack, Telegram…) mais ne voit pas tous les secrets. Les liens symboliques sont refusés, et les
-fichiers ne partent pas en HTTP clair sur Internet (HTTPS, Tailscale, réseau local ou cet ordinateur seulement) ; pour cet
-envoi, les variables `http_proxy` et `https_proxy` sont ignorées. En `http://`, la règle se vérifie sur les adresses
+fichiers ne partent pas en HTTP clair sur Internet (HTTPS, Tailscale, réseau local ou cet ordinateur seulement). Pour tout
+appel à JARVIS (questions, briefing, gestion, dictée, fichiers), les variables `http_proxy` et `https_proxy` sont
+ignorées. Une adresse publique en `http://` reste permise sans fichier, avec l'avertissement « HTTP en clair » une fois par
+commande. En `http://` vers un nom ou une adresse locale, privée ou Tailscale, tout appel suit la règle qui suit. En `http://`, la règle se vérifie sur les adresses
 obtenues : pour un nom `*.ts.net`, `.local` ou `.lan`, seules ses adresses Tailscale ou privées sont jointes, dans
 l'ordre (s'il n'y en a aucune, rien ne part). Une adresse qui finit par un point est refusée, et une adresse lien-local
 avec zone (`[fe80::…%25eth0]`) n'est pas prise en charge. `nc-noeud` (`ws://`) suit la même règle ; si le nom se résout

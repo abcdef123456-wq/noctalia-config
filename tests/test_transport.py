@@ -190,6 +190,55 @@ class Transport(unittest.TestCase):
         with self.assertRaises(self.A.TransportRefuse):
             self.A.adresse_fixee("http://localhost:8000")
 
+    # ── T2 : tous les appels au serveur (api() sans fichier, nc-dictee) ──
+
+    def api(self, url):
+        c = {"URL": url, "SECRET_KEY": "cle-de-test-0123456789", "USER_ID": "u", "TIMEOUT": 5.0}
+        return self.A.api(c, "/api/status", {"q": 1})
+
+    def test_api_sans_fichier_suit_les_adresses_verifiees(self):
+        self.resoudre({"pc.tail1.ts.net": ["203.0.113.7"], "nas.lan": ["2001:db8::9", "10.0.0.4"]})
+        with self.assertRaises(self.A.TransportRefuse):
+            self.api(f"http://pc.tail1.ts.net:{self.port}")              # DNS hostile : rien ne part
+        self.assertEqual((self.connexions, Compteur.connexions), ([], 0))
+        self.assertEqual(self.api(f"http://nas.lan:{self.port}"), {"ok": True})
+        self.assertEqual(self.connexions, ["10.0.0.4"])
+        with self.assertRaises(self.A.TransportRefuse):
+            self.api(f"http://nas.lan.:{self.port}")
+
+    def test_aucun_proxy_de_l_environnement(self):
+        proxy = Compteur(("127.0.0.1", 0), Faux)
+        threading.Thread(target=proxy.serve_forever, daemon=True).start()
+        self.addCleanup(proxy.server_close)
+        self.addCleanup(proxy.shutdown)
+        adresse = "http://127.0.0.1:%d" % proxy.server_address[1]
+        self.resoudre({})
+        with mock.patch.dict(os.environ, {k: adresse for k in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy")}):
+            for url in (f"http://10.1.2.3:{self.port}", f"http://203.0.113.5:{self.port}"):
+                with self.subTest(url=url):
+                    self.assertEqual(self.api(url), {"ok": True})
+            o = self.A.ouvreur("https://jarvis.example.com")
+        self.assertEqual(Faux.recus and [r[1] for r in Faux.recus], [f"10.1.2.3:{self.port}", f"203.0.113.5:{self.port}"])
+        # https : aucun proxy non plus (ProxyHandler({}) remplace celui de l'environnement et n'ouvre rien)
+        self.assertFalse(any(isinstance(h, self.A.urllib.request.ProxyHandler) and h.proxies for h in o.handlers))
+        self.assertFalse(any(hasattr(h, "https_open") and type(h).__name__ == "ProxyHandler" for h in o.handlers))
+
+    def test_adresse_publique_en_http_avertie_une_fois(self):
+        import io
+        self.A._AVERTI.clear()
+        erreur = io.StringIO()
+        self.resoudre({})
+        with mock.patch.object(self.A.sys, "stderr", erreur):
+            for _ in range(3):
+                self.assertEqual(self.api(f"http://203.0.113.5:{self.port}"), {"ok": True})
+            self.api(f"http://127.0.0.1:{self.port}")
+        self.assertEqual(erreur.getvalue().count("HTTP en clair"), 1, erreur.getvalue())
+
+    def test_dictee_passe_par_le_meme_ouvreur(self):
+        source = (BIN / "nc-dictee").read_text()
+        self.assertIn('m.ouvreur(c["URL"])', source)
+        self.assertNotIn("build_opener", source)
+
     def test_noeud_ws_vers_une_adresse_resolue_publique(self):
         m = charger("nc_noeud_transport", "nc-noeud")
         m.A = self.A
