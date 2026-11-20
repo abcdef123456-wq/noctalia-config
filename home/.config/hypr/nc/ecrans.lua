@@ -9,6 +9,8 @@
 --
 -- Forcer une échelle ou un mode : dans ~/.config/hypr/perso.lua, par exemple
 --   hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
+-- perso.lua garde le matériel de l'écran (mode, échelle, rotation…) ; la projection (Super + O) garde le placement
+-- (côté, miroir, éteint), mais seulement si elle a une entrée pour cet écran. Sans entrée, perso.lua passe tel quel.
 
 local MIN_W, MIN_H = 1600, 900
 nc.ecrans_infos = nc.ecrans_infos or {}         -- Hyprland 0.55 : modes, taille, réservé (lus par hyprctl, plus bas)
@@ -220,14 +222,18 @@ local function externe_allume(p)
 end
 
 local function regle(m)
-    -- Écran réglé à la main dans perso.lua (hl.monitor avec son nom, ou « desc:… ») : on n'y touche plus
+    -- Écran réglé à la main dans perso.lua (hl.monitor avec son nom, ou « desc:… »).
     -- Comme Hyprland, « desc:… » désigne un écran dont la description COMMENCE par ce texte
     local desc = m.description or ""
-    for cle in pairs(nc.ecrans_perso or {}) do
-        if cle == m.name then return end
+    local perso
+    for cle, spec in pairs(nc.ecrans_perso or {}) do
         local d = cle:match("^desc:%s*(.-)%s*$")
-        if d and d ~= "" and desc:sub(1, #d) == d then return end
+        if cle == m.name or (d and d ~= "" and desc:sub(1, #d) == d) then perso = spec; break end
     end
+    -- Sans entrée dans ecrans.conf (l'écran du PC n'en a jamais : sauf s'il doit s'éteindre), perso.lua passe tel quel
+    if perso and not proj.ecrans[desc ~= "" and desc or m.name]
+       and not (m.name == principal() and externe_seul(m.name))
+       and not (est_interne(m) and couvercle_ferme() and externe_allume(m.name)) then return end
     local interne = est_interne(m)
     local p = principal()
     local spec = {
@@ -247,6 +253,16 @@ local function regle(m)
         else spec.position = COTES[r.cote] or "auto-right" end
     end
     if interne and couvercle_ferme() and externe_allume(m.name) then spec = { output = m.name, disabled = true } end
+    if perso then      -- le matériel vient de perso.lua, le placement de la projection
+        local final = {}
+        for k, v in pairs(spec) do final[k] = v end
+        if not spec.disabled then
+            for k, v in pairs(perso) do
+                if k ~= "output" and k ~= "position" and k ~= "mirror" and k ~= "disabled" then final[k] = v end
+            end
+        end
+        spec = final
+    end
     hl.monitor(spec)
 end
 
@@ -257,6 +273,9 @@ local function tout()
     table.sort(liste, function(a, b) return (a.name == p) and b.name ~= p end)
     for _, m in ipairs(liste) do regle(m) end
 end
+
+-- Rappelé par hyprland.lua après perso.lua : la projection se superpose alors aux écrans qu'il règle
+nc.ecrans_appliquer = tout
 
 -- Hyprland 0.55 : modes, taille physique et place réservée lus en arrière-plan par « hyprctl monitors -j » (jamais
 -- pendant le chargement de la config), puis tout réappliqué ; dès 0.56, Hyprland les donne directement

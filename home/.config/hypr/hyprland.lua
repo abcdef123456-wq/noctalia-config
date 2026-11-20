@@ -124,7 +124,8 @@ for _, nom in ipairs({
 end
 nc.charger("nc.zones")          -- la disposition des bureaux rangés par l'IA (hl.layout.register, si Hyprland l'a)
 
--- Tes réglages personnels, s'il y en a. Les écrans que tu y règles (hl.monitor) ne sont plus réappliqués par nc/ecrans.lua.
+-- Tes réglages personnels, s'il y en a. Pour un écran que tu y règles (hl.monitor), perso.lua garde le matériel (mode, échelle…) et la projection
+-- (Super + O) le placement, si elle a une entrée pour cet écran ; sinon perso.lua s'applique tel quel.
 local perso = os.getenv("HOME") .. "/.config/hypr/perso.lua"
 local f = io.open(perso, "r")
 if f then
@@ -135,11 +136,12 @@ if f then
     hl.monitor = function(spec, ...)
         local ok, res = pcall(monitor, spec, ...)
         if not ok then error(res, 0) end        -- spec invalide : rien de noté, l'écran garde la règle normale
-        if type(spec) == "table" and spec.output and spec.output ~= "" then nc.ecrans_perso[spec.output] = true end
+        if type(spec) == "table" and spec.output and spec.output ~= "" then nc.ecrans_perso[spec.output] = spec end
         return res
     end
     nc.charger("perso")
     hl.monitor = monitor
+    if next(nc.ecrans_perso) and nc.ecrans_appliquer then nc.ecrans_appliquer() end   -- la projection se superpose à perso.lua
 end
 
 nc.signaler_echecs()

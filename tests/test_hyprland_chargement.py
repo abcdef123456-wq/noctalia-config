@@ -18,7 +18,7 @@ local mons = {
   { name = "DP-1", width = 3840, height = 2160, scale = 1, x = 0, y = 0, description = "a", physical_width = 600, physical_height = 340 },
   { name = "HDMI-A-1", width = 3840, height = 2160, scale = 1, x = 3840, y = 0, description = "b", physical_width = 600, physical_height = 340 },
 }
-last, handlers, notifs, execs, nbinds = {}, {}, {}, {}, 0
+last, specs, handlers, notifs, execs, nbinds = {}, {}, {}, {}, {}, 0
 hl = {
   version = function() return "0.55.2" end, config = function() end, env = function() end,
   on = function(e, f) handlers[e] = handlers[e] or {}; table.insert(handlers[e], f) end,
@@ -28,7 +28,7 @@ hl = {
     nbinds = nbinds + 1
     return {}
   end,
-  monitor = function(s) if s.output == "PIEGE" then error("spec invalide") end last[s.output] = s.scale end,
+  monitor = function(s) if s.output == "PIEGE" then error("spec invalide") end last[s.output] = s.scale; specs[s.output] = s end,
   get_monitors = function() return mons end, get_active_monitor = function() return mons[1] end,
   get_windows = function() return {} end, get_active_window = function() end, get_active_workspace = function() end,
   get_config = function() return nil end, curve = function() end, animation = function() end, window_rule = function() end,
@@ -43,7 +43,7 @@ if os.getenv("NOTIF") == "exec" then hl.notification = nil end
 
 @unittest.skipUnless(shutil.which("lua"), "Lua requis")
 class Chargement(unittest.TestCase):
-    def lancer(self, apres, perso=None, env=None, conf=None):
+    def lancer(self, apres, perso=None, env=None, conf=None, ecrans=None):
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
             cfg = home / ".config/hypr"
@@ -51,8 +51,11 @@ class Chargement(unittest.TestCase):
             (cfg / "hyprland.lua").symlink_to(HYPR / "hyprland.lua")
             (cfg / "nc").symlink_to(HYPR / "nc")
             if conf:
-                (home / ".config/nc").mkdir(parents=True)
+                (home / ".config/nc").mkdir(parents=True, exist_ok=True)
                 (home / ".config/nc/raccourcis.conf").write_text(conf)
+            if ecrans:
+                (home / ".config/nc").mkdir(parents=True, exist_ok=True)
+                (home / ".config/nc/ecrans.conf").write_text(ecrans)
             if perso:
                 (cfg / "perso.lua").write_text(perso)
             e = dict(os.environ, HOME=str(home), CFG=str(cfg), XDG_CONFIG_HOME=str(home / ".config"), NC_LANGUE="fr")
@@ -101,7 +104,7 @@ nc.ecrans_infos_poser({ ["HDMI-A-1"] = { modes = { "3840x2160@60.00Hz" }, pw = 6
 print("a", last["HDMI-A-1"], last["DP-1"])
 last["HDMI-A-1"] = nil
 for _, f in ipairs(handlers["monitor.added"]) do f() end
-print("b", last["HDMI-A-1"], last["DP-1"], nc.ecrans_perso["HDMI-A-1"], hl.monitor ~= nil)
+print("b", last["HDMI-A-1"], last["DP-1"], nc.ecrans_perso["HDMI-A-1"] ~= nil, hl.monitor ~= nil)
 '''
         out = self.lancer(apres, perso=perso).strip().splitlines()
         a = out[-2].split("\t"); b = out[-1].split("\t")
@@ -133,6 +136,57 @@ print("a", last["HDMI-A-1"] ~= nil)
         perso2 = 'pcall(hl.monitor, { output = "HDMI-A-1", scale = 1, bidon = true }) pcall(function() hl.monitor({ output = "PIEGE" }) end)\n'
         out = self.lancer(apres, perso=perso2).strip().splitlines()[-1].split("\t")
         self.assertEqual(out[1], "false", "contrôle : HDMI-A-1 posé par perso est bien sauté")
+
+    # ── perso.lua garde le matériel, la projection (ecrans.conf) garde le placement ──
+    PERSO_HW = 'hl.monitor({ output = "%s", mode = "1920x1080@60", position = "9999x9999", scale = 1.5, transform = 1 })\n'
+    SPEC = 'local s = specs["HDMI-A-1"] print("s", s.mode, s.scale, s.transform, s.position, s.mirror, s.disabled, s.output)'
+
+    def spec_hdmi(self, perso, ecrans, apres=""):
+        out = self.lancer(apres + 'print("fin")\nnc.ecrans_infos_poser({})\n' + self.SPEC, perso=perso, ecrans=ecrans)
+        return out.strip().splitlines()[-1].split("\t")[1:]
+
+    def test_projection_sur_ecran_de_perso_chaque_cote_et_mode(self):
+        for cote, auto in (("droite", "auto-right"), ("gauche", "auto-left"), ("haut", "auto-up"), ("bas", "auto-down")):
+            with self.subTest(cote=cote):
+                s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", f"ECRAN\tetendre\t{cote}\tb\n")
+                self.assertEqual(s, ["1920x1080@60", "1.5", "1", auto, "nil", "nil", "HDMI-A-1"])
+        s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", "ECRAN\tmiroir\tdroite\tb\n")
+        self.assertEqual(s[:3] + s[4:], ["1920x1080@60", "1.5", "1", "DP-1", "nil", "HDMI-A-1"])
+        self.assertNotEqual(s[3], "9999x9999")
+        s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", "ECRAN\tpc\tdroite\tb\n")
+        self.assertEqual(s[4:], ["nil", "true", "HDMI-A-1"], "éteint : plus de matériel")
+
+    def test_projection_reconnait_nom_et_desc_dans_les_deux_sens(self):
+        for sortie in ("HDMI-A-1", "desc:b"):
+            with self.subTest(sortie=sortie):    # ecrans.conf retient par description (b)
+                s = self.spec_hdmi(self.PERSO_HW % sortie, "ECRAN\tetendre\tgauche\tb\n")
+                self.assertEqual(s[:4], ["1920x1080@60", "1.5", "1", "auto-left"])
+
+    def test_projection_par_nom_quand_pas_de_description(self):
+        apres = 'for _, m in ipairs(hl.get_monitors()) do m.description = "" end\n'
+        s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", "ECRAN\tetendre\tbas\tHDMI-A-1\n", apres)
+        self.assertEqual(s[:4], ["1920x1080@60", "1.5", "1", "auto-down"])
+
+    def test_sans_entree_perso_passe_tel_quel_position_comprise(self):
+        s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", "ECRAN\tetendre\tbas\tautre\n")
+        self.assertEqual(s[:4], ["1920x1080@60", "1.5", "1", "9999x9999"])
+        s = self.spec_hdmi(self.PERSO_HW % "HDMI-A-1", None)
+        self.assertEqual(s[:4], ["1920x1080@60", "1.5", "1", "9999x9999"])
+
+    def test_meme_resultat_au_premier_chargement_et_au_rechargement(self):
+        perso = self.PERSO_HW % "HDMI-A-1"
+        ecrans = "ECRAN\tetendre\thaut\tb\n"
+        premier = self.spec_hdmi(perso, ecrans)
+        recharge = self.spec_hdmi(perso, ecrans, 'for k in pairs(package.loaded) do if k:match("^nc%.") or k == "perso" then package.loaded[k] = nil end end\n'
+                                   'last, specs = {}, {}\ndofile(os.getenv("CFG") .. "/hyprland.lua")\n')
+        self.assertEqual(premier, recharge)
+        self.assertEqual(premier[3], "auto-up")
+
+    def test_spec_invalide_de_perso_ne_note_rien_et_la_projection_s_applique(self):
+        s = self.spec_hdmi('hl.monitor({ output = "PIEGE" })\n', "ECRAN\tetendre\thaut\tb\n")
+        self.assertEqual(s[3], "auto-up")
+        self.assertEqual(self.lancer('print("n", next(nc.ecrans_perso))', perso='pcall(hl.monitor, { output = "PIEGE" })\n')
+                         .strip().splitlines()[-1].split("\t")[1], "nil")
 
     def test_change_invalide_ne_casse_pas_raccourcis(self):
         conf = "change\t64:code:36\tBIDON + x\n"
@@ -175,7 +229,7 @@ class PleinEcranEpinglee(unittest.TestCase):
             " move = function(t) return { 'place', t.x, t.y } end }, { __index = function() return proxy end }) },"
             " { __index = function() return proxy end }),"
             " dispatch = function(a) if type(a) == 'table' and a[1] then faits[#faits + 1] = table.concat(a, ' ', 1, #a) end end,")
-        entete = entete.replace("last, handlers, notifs, execs, nbinds = {}, {}, {}, {}, 0", "last, handlers, notifs, execs, nbinds, faits = {}, {}, {}, {}, 0, {}")
+        entete = entete.replace("last, specs, handlers, notifs, execs, nbinds = {}, {}, {}, {}, {}, 0", "last, handlers, notifs, execs, nbinds, faits = {}, {}, {}, {}, 0, {}")
         apres = r'''
 local f = touches["SUPER + code:41"]
 assert(type(f) == "function", "Super + F est une fonction")
@@ -214,7 +268,7 @@ for _, r in ipairs(refus) do print("REFUS " .. r) end
 '''
 
     def lancer(self, saisie):
-        entete = ENTETE.replace("last, handlers, notifs, execs, nbinds = {}, {}, {}, {}, 0",
+        entete = ENTETE.replace("last, specs, handlers, notifs, execs, nbinds = {}, {}, {}, {}, {}, 0",
                                 "last, handlers, notifs, execs, nbinds, vus, refus = {}, {}, {}, {}, 0, {}, {}").replace(
             "  bind = function(k)\n",
             "  bind = function(k, f, o)\n"
