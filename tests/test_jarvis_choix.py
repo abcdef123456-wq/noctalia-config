@@ -434,6 +434,8 @@ class DocAlignee(unittest.TestCase):
         self.assertIn("'17525afe78e11d4c509daac8bcf4cbb00673cd4a'", validees)
         for acceptee in ("9617d4b6827b6e4b0467430455ccb5b2189e7af8", "6041caf630606d3b1b2deb3f3447f839e1637206"):   # issue #42
             self.assertIn("'" + acceptee + "'", validees)
+        self.assertIn("'ca985cc11a0cf3644088bfc6d1badeeb2ed2417b'", validees)      # issue #46, après ses correctifs
+        self.assertNotIn("d605b224ee992f6c7fe89eec3b8b49a7f679164e", validees)     # première version du cloud : refusée
         self.assertIn("REVISION", validees)
         self.assertNotEqual(rev, "17525afe78e11d4c509daac8bcf4cbb00673cd4a")
 

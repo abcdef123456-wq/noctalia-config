@@ -51,6 +51,9 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # 9617d4b et 6041caf (issue #42) : acceptées pour un backend déjà cloné, REVISION ne change pas. Leur catalogue agy
 # (agy_catalogue.py, nc_engines.py d'amont) n'est jamais chargé ici : l'overlay garde le sien (nc_runner.py le vérifie),
 # et main.py n'appelle que des méthodes que notre nc_engines a déjà. La relecture forcée au démarrage ne s'applique donc pas.
+# ca985cc (issue #46) : cloud de fichiers optionnel (mode server seulement), acceptée pour un backend déjà cloné après deux
+# relectures ; d605b22, sa première version, n'est PAS acceptée (corps non borné avant authentification, clé interne chez
+# le runner). Son « deploy.sh cloud configure|up|status|down » est le seul usage permis de deploy.sh chez nous.
 REVISION='e1448c824b49e2e291be7c8a8cd2acbacf3f3006'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
                      '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
@@ -58,7 +61,10 @@ VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f117
                      'f522291ca02af08903cbebd32203e14013dc80a6','4ecc57a8351fee610185b699b12c4b15092fe5ff',
                      '94a3a930efae59dbfd7758be5af6f883ab34b9df','ffb19b94f9c98ed98723500efbaa5c2c7f832821',
                      '17525afe78e11d4c509daac8bcf4cbb00673cd4a','9617d4b6827b6e4b0467430455ccb5b2189e7af8',
-                     '6041caf630606d3b1b2deb3f3447f839e1637206',REVISION)
+                     '6041caf630606d3b1b2deb3f3447f839e1637206','ca985cc11a0cf3644088bfc6d1badeeb2ed2417b',REVISION)
+# Secrets du cloud : seulement dans gateway/.env. Avec cette clé, le port local du stockage donne les droits
+# d'administration : elle ne doit jamais arriver dans le .env racine ni dans celui du runner (IA).
+GATEWAY_SEUL=('CLOUD_INTERNAL_KEY','CLOUD_INTERNAL_URL')
 
 
 def ask(message, default=False):
@@ -107,8 +113,9 @@ def private_write(path, text):
         if os.path.exists(name):os.unlink(name)
 
 
-def merge_env(path, values):
+def merge_env(path, values, sans=()):
     before=read_env(path);before.update(values)
+    for k in sans:before.pop(k,None)
     private_write(path,'\n'.join(k+'='+json.dumps(v,ensure_ascii=False) for k,v in before.items())+'\n')
 
 
@@ -154,6 +161,7 @@ def configure(backend, mode):
     for config in reversed(configs):current.update(config)
     changes={'SECRET_KEY':next(iter(keys),secrets.token_hex(32)), 'DEPLOY_MODE':mode,
              'HOME_SERVER_URL':current.get('HOME_SERVER_URL','http://127.0.0.1:8080')}
+    if mode=='local':changes['CLOUD_ENABLED']='0'   # le cloud n'existe qu'en mode server
     print('\nÉtape 2 sur 4 : les réglages.\n'
           'D’abord le moteur : c’est l’IA qui répondra à tes messages (agy, codex, claude ou opencode).\n'
           'Tu peux appuyer sur Entrée pour garder le choix proposé entre crochets ; tu pourras le changer plus tard.')
@@ -195,7 +203,7 @@ def configure(backend, mode):
             backup=path.with_name(path.name+'.backup-'+stamp);shutil.copy2(path,backup);backup.chmod(0o600)
         # Les valeurs propres à chaque composant restent en place.
         values=dict(current);values.update(read_env(path));values.update(changes)
-        merge_env(path,values)
+        merge_env(path,values,() if path==backend/'gateway/.env' else GATEWAY_SEUL)
     return changes['SECRET_KEY']
 
 

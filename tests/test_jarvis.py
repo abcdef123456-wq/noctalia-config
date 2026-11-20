@@ -81,6 +81,38 @@ class Deploiement(unittest.TestCase):
         self.assertNotIn('assistant-runner.service',units['assistant-runner.service'])
         self.assertIn('home-runner',units['assistant-runner.service'])
 
+    def test_cle_du_cloud_seulement_chez_le_gateway(self):
+        """Issue #46 : la clé interne du cloud reste dans gateway/.env ; une vieille copie ailleurs est retirée ; en mode
+        local le cloud est coupé, en mode server le choix du serveur est gardé."""
+        for mode,attendu in (('local','0'),('server','1')):
+            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as d:
+                backend=Path(d)
+                for dossier in ('home-runner','gateway','core/tools'):(backend/dossier).mkdir(parents=True)
+                (backend/'core/tools/base.py').write_text('class ToolRegistry:\n    list_tools=staticmethod(lambda:[])\n')
+                (backend/'core/tools/definitions.py').write_text('')
+                (backend/'.env').write_text('SECRET_KEY="cle-de-test-0123456789"\nCLOUD_INTERNAL_KEY="vieille-copie"\n')
+                (backend/'home-runner/.env').write_text('SECRET_KEY="cle-de-test-0123456789"\nPERSO_RUNNER=garde\n')
+                (backend/'gateway/.env').write_text('SECRET_KEY="cle-de-test-0123456789"\nCLOUD_ENABLED=1\n'
+                                                    'CLOUD_INTERNAL_KEY="'+'k'*64+'"\nCLOUD_INTERNAL_URL=http://127.0.0.1:8091\n')
+                chemins=list(sys.path);modules=set(sys.modules)
+                try:
+                    with patch('builtins.input',return_value=''),patch.object(self.d.getpass,'getpass',return_value=''), \
+                         patch.object(self.d,'ask',return_value=False),contextlib.redirect_stdout(io.StringIO()):
+                        self.d.configure(backend,mode)
+                finally:
+                    sys.path[:]=chemins
+                    for nom in set(sys.modules)-modules:del sys.modules[nom]
+                gateway=self.d.read_env(backend/'gateway/.env')
+                self.assertEqual(gateway['CLOUD_INTERNAL_KEY'],'k'*64)
+                self.assertEqual(gateway['CLOUD_INTERNAL_URL'],'http://127.0.0.1:8091')
+                for autre in ('.env','home-runner/.env'):
+                    valeurs=self.d.read_env(backend/autre)
+                    self.assertNotIn('CLOUD_INTERNAL_KEY',valeurs);self.assertNotIn('CLOUD_INTERNAL_URL',valeurs)
+                    self.assertNotIn('k'*64,(backend/autre).read_text());self.assertNotIn('vieille-copie',(backend/autre).read_text())
+                    self.assertEqual(valeurs['DEPLOY_MODE'],mode);self.assertEqual(valeurs['CLOUD_ENABLED'],attendu)
+                self.assertEqual(gateway['CLOUD_ENABLED'],attendu)
+                self.assertEqual(self.d.read_env(backend/'home-runner/.env')['PERSO_RUNNER'],'garde')
+
     def test_env_merge_preserves_personal_fields_private_mode_and_symlinks(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'.env';p.write_text('DISCORD_TOKEN="keep-private"\nPERSONAL=preserve\n')
