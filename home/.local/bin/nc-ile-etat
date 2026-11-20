@@ -344,11 +344,16 @@ case "$v" in *MUTED*) echo "muet=1" ;; *) echo "muet=0" ;; esac
 case "$(timeout 3 wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)" in *MUTED*) echo "micro_muet=1" ;; *) echo "micro_muet=0" ;; esac
 echo "luminosite=$("$HOME/.local/bin/nc-brightness" get 2>/dev/null)"
 echo "wifi=$(noctalia msg wifi-status 2>/dev/null)"
-echo "reseau=$(timeout 3 nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep -v -e ':loopback' -e ':bridge' | head -1 | cut -d: -f1)"
-# Sans NetworkManager : filaire=1 si une route par défaut existe, 0 sinon (rien quand NM tourne).
-if ! { command -v nmcli >/dev/null 2>&1 && [ "$(timeout 3 nmcli -t -f RUNNING general 2>/dev/null)" = running ]; }; then
-  if awk 'NR>1 && $2=="00000000"{f=1} END{exit !f}' "${NC_ROUTE_FILE:-/proc/net/route}" 2>/dev/null; then echo "filaire=1"; else echo "filaire=0"; fi
-fi
+nm="$(timeout 3 nmcli -t -f NAME,TYPE con show --active 2>/dev/null)"; nm_code=$?
+echo "reseau=$(grep -v -e ':loopback' -e ':bridge' <<<"$nm" | head -1 | cut -d: -f1)"
+# Sans NetworkManager (nmcli : 8 = NetworkManager arrêté ; timeout : 127 = nmcli absent), aucun appel de plus :
+# filaire=1 si la route par défaut passe par une carte filaire, 0 sans route ; par une carte Wi-Fi (iwd seul) : rien
+case "$nm_code" in
+  8|127)
+    if_route="$(awk 'NR>1 && $2=="00000000"{print $1; exit}' "${NC_ROUTE_FILE:-/proc/net/route}" 2>/dev/null)"
+    if [ -z "$if_route" ]; then echo "filaire=0"
+    elif [ ! -d "${NC_SYSFS:-/sys}/class/net/$if_route/wireless" ]; then echo "filaire=1"; fi ;;
+esac
 echo "bluetooth=$(noctalia msg bluetooth-status 2>/dev/null)"
 echo "dnd=$(noctalia msg notification-dnd-status 2>/dev/null)"
 echo "profil=$(gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \

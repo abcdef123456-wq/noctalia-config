@@ -25,31 +25,56 @@ class IleEtatPoste(unittest.TestCase):
         f.write_text("#!/bin/sh\n" + corps)
         f.chmod(0o755)
 
-    def cles(self, *args):
+    def cles(self, *args, path=None):
         # Aucun bus de la session ni écran : rien de la vraie session n'est lu ; faux outils devant ceux du système
-        env = {"HOME": str(self.tmp / "home"), "PATH": f"{self.bin}:/usr/bin:/bin", "LANG": "C",
-               "NC_ROUTE_FILE": str(self.tmp / "route"), "XDG_RUNTIME_DIR": str(self.tmp),
+        env = {"HOME": str(self.tmp / "home"), "PATH": path or f"{self.bin}:/usr/bin:/bin", "LANG": "C",
+               "NC_ROUTE_FILE": str(self.tmp / "route"), "XDG_RUNTIME_DIR": str(self.tmp), "NC_SYSFS": str(self.tmp / "sys"),
                "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(self.tmp / "pas-de-bus"),
                "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=" + str(self.tmp / "pas-de-bus")}
-        r = subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60)
+        r = subprocess.run([shutil.which("bash"), str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60)
         return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
 
     def gdbus(self, proprietaire, activables):
         self.faux("gdbus", f'case "$*" in *NameHasOwner*) echo "({proprietaire},)" ;; '
                            f'*ListActivatableNames*) echo "([{activables}],)" ;; esac\n')
 
-    def test_sans_nmcli_avec_route_filaire_1(self):
-        self.faux("nmcli", "exit 1\n")                      # NetworkManager absent ou arrêté
+    def nmcli(self, code, sortie=""):
+        # faux nmcli qui note chaque appel ; code 8 : NetworkManager arrêté (man nmcli, « Exit status »)
+        self.faux("nmcli", f'echo "$*" >> "{self.tmp}/appels-nmcli"\nprintf "{sortie}"\nexit {code}\n')
+
+    def appels_nmcli(self):
+        f = self.tmp / "appels-nmcli"
+        return f.read_text().splitlines() if f.exists() else []
+
+    def test_networkmanager_arrete_avec_route_filaire_1(self):
+        self.nmcli(8)
         self.assertEqual(self.cles()["filaire"], "1")
 
-    def test_sans_nmcli_sans_route_filaire_0(self):
-        self.faux("nmcli", "exit 1\n")
+    def test_nmcli_absent_avec_route_filaire_1(self):
+        # PATH réduit à quelques outils, sans nmcli : timeout répond 127 (commande introuvable)
+        for n in ("timeout", "awk", "grep", "head", "cut", "cat", "sed"):
+            w = shutil.which(n)
+            if w:
+                os.symlink(w, self.bin / n)
+        self.assertEqual(self.cles(path=str(self.bin))["filaire"], "1")
+
+    def test_sans_route_filaire_0(self):
+        self.nmcli(8)
         (self.tmp / "route").write_text("Iface\tDestination\n")
         self.assertEqual(self.cles()["filaire"], "0")
 
-    def test_avec_nmcli_pas_de_cle_filaire(self):
-        self.faux("nmcli", 'case "$*" in *RUNNING*) echo running ;; esac\n')
+    def test_route_par_le_wifi_rien(self):
+        # iwd seul, sans NetworkManager : la route passe par une carte Wi-Fi, l'île reste comme avant
+        self.nmcli(8)
+        (self.tmp / "sys/class/net/eth0/wireless").mkdir(parents=True)
         self.assertNotIn("filaire", self.cles())
+
+    def test_avec_networkmanager_un_seul_appel_et_rien_de_nouveau(self):
+        self.nmcli(0, "Maison:802-11-wireless\\nlo:loopback\\n")
+        c = self.cles()
+        self.assertNotIn("filaire", c)
+        self.assertEqual(c["reseau"], "Maison")
+        self.assertEqual(self.appels_nmcli(), ["-t -f NAME,TYPE con show --active"], "un seul nmcli, comme avant")
 
     def test_sans_demon_de_profils_ppd_0(self):
         self.gdbus("false", "'org.freedesktop.DBus', 'org.freedesktop.NetworkManager'")
