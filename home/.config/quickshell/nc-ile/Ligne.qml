@@ -7,6 +7,7 @@ Rectangle {
     property string icone: ""
     property string titre: ""
     property string sous: ""
+    property bool sousAlerte: false     // sous-titre en orange (batterie faible)
     property bool actif: false
     property string droite: ""          // nom d'icône à droite (check, lock…)
     property color couleurDroite: Couleurs.texteSec
@@ -32,7 +33,7 @@ Rectangle {
         Column {
             anchors.verticalCenter: parent.verticalCenter
             Texte { text: l.titre; font.pixelSize: 14; font.weight: Font.Medium; width: Math.min(implicitWidth, l.width - 110) }
-            Texte { text: l.sous; secondaire: true; font.pixelSize: 12; visible: l.sous !== ""; width: Math.min(implicitWidth, l.width - 110) }
+            Texte { text: l.sous; secondaire: true; color: l.sousAlerte ? Couleurs.orange : Couleurs.texteSec; font.pixelSize: 12; visible: l.sous !== ""; width: Math.min(implicitWidth, l.width - 110) }
         }
     }
     Ico {

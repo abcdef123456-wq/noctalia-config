@@ -39,6 +39,8 @@ Item {
         return i.indexOf("audio") >= 0 ? "headphones" : (i.indexOf("phone") >= 0 ? "smartphone" : (i.indexOf("mouse") >= 0 ? "mouse"
              : (i.indexOf("keyboard") >= 0 ? "keyboard" : (i.indexOf("gaming") >= 0 ? "sports_esports" : "bluetooth"))))
     }
+    // « · 40 % » après « Connecté » pour un appareil qui donne sa batterie (CasqueBatterie.qml, UPower) ; rien sinon
+    function niveauBt(f) { var v = CasqueBatterie.niveauAppareil(f[1], f[0]); return v > 0 ? " · " + v + Reglages.t(" %", "%") : "" }
     function connecterWifi(f) {
         if (f[0] === "1") return
         if (f[3] === "1" && f[4] !== "1") { saisie = f[1]; return }
@@ -183,7 +185,8 @@ Item {
                 model: !p.wifi && p.allume ? p.connectes : []
                 Ligne {
                     required property var modelData
-                    titre: modelData.champs[1]; sous: Reglages.t("Connecté", "Connected")
+                    titre: modelData.champs[1]; sous: Reglages.t("Connecté", "Connected") + p.niveauBt(modelData.champs)
+                    sousAlerte: { var v = CasqueBatterie.niveauAppareil(modelData.champs[1], modelData.champs[0]); return v > 0 && v <= 20 }
                     icone: p.iconeBt(modelData.champs)
                     actif: modelData.champs[2] === "1"
                     attente: p.attente[modelData.champs[0]] === true

@@ -34,6 +34,14 @@ class Source(unittest.TestCase):
         self.assertNotIn("bluetoothctl", self.etat)
         self.assertNotIn("lireBatterieBt", self.etat)
 
+    def test_peripheriques_page_bluetooth(self):
+        self.assertRegex(self.code, r"UPowerDeviceType\.Mouse[\s\S]*UPowerDeviceType\.Keyboard[\s\S]*UPowerDeviceType\.GamingInput")
+        self.assertIn("function niveauAppareil(nom, adresse)", self.cb)
+        liste = (QML / "PageListe.qml").read_text()
+        self.assertIn("CasqueBatterie.niveauAppareil(f[1], f[0])", liste)
+        self.assertIn("<= 20", liste)
+        self.assertIn("Couleurs.orange", (QML / "Ligne.qml").read_text())
+
     def test_reaction_de_3_secondes_et_page_son(self):
         self.assertIn('activite("casque", 3000)', self.etat)
         self.assertIn("CasqueBatterie.niveauPour(casqueNom)", self.etat)
@@ -89,6 +97,37 @@ class HorsEcran(unittest.TestCase):
                 verifier(CasqueBatterie.niveauPour("Casque") === 0, "casque sans niveau : 0")
                 Reglages.faux = []
                 verifier(CasqueBatterie.niveauPour("Casque") === 0, "aucun casque : 0")
+                console.log("FINI")
+                Qt.exit(0)
+            } }
+        ''')
+
+    def test_peripheriques(self):
+        self.lancer('''
+            Timer { interval: 200; running: true; onTriggered: {
+                Reglages.faux = [
+                    { type: UPowerDeviceType.Mouse, isPresent: true, model: "MX Master", percentage: 0.4, nativePath: "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01" },
+                    { type: UPowerDeviceType.Keyboard, isPresent: true, model: "K380", percentage: 15, nativePath: "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_02" },
+                    { type: UPowerDeviceType.GamingInput, isPresent: true, model: "Pad", percentage: 0.9, nativePath: "" },
+                    { type: UPowerDeviceType.Mouse, isPresent: true, model: "Sans niveau", percentage: 0 },
+                    { type: UPowerDeviceType.Battery, isPresent: true, model: "BAT0", percentage: 0.5 }]
+                verifier(CasqueBatterie.niveauAppareil("MX Master", "AA:BB:CC:DD:EE:01") === 40, "souris par adresse")
+                verifier(CasqueBatterie.niveauAppareil("Autre", "aa:bb:cc:dd:ee:02") === 15, "clavier par adresse, nom différent")
+                verifier(CasqueBatterie.niveauAppareil("Pad", "11:22:33:44:55:66") === 90, "manette par nom unique")
+                verifier(CasqueBatterie.niveauAppareil("Sans niveau", "") === 0, "sans niveau : rien")
+                verifier(CasqueBatterie.niveauAppareil("BAT0", "") === 0, "la batterie du PC n'est pas un périphérique")
+                verifier(CasqueBatterie.niveauAppareil("Inconnu", "11:22:33:44:55:66") === 0, "inconnu : rien")
+                // Deux appareils de même nom : l'adresse décide, sans adresse connue on ne devine pas
+                Reglages.faux = [
+                    { type: UPowerDeviceType.Mouse, isPresent: true, model: "Souris BT", percentage: 0.3, nativePath: "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01" },
+                    { type: UPowerDeviceType.Mouse, isPresent: true, model: "Souris BT", percentage: 0.7, nativePath: "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_02" }]
+                verifier(CasqueBatterie.niveauAppareil("Souris BT", "AA:BB:CC:DD:EE:02") === 70, "même nom : par adresse")
+                verifier(CasqueBatterie.niveauAppareil("Souris BT", "AA:BB:CC:DD:EE:09") === 0, "même nom, adresse inconnue : rien")
+                Reglages.faux = []
+                verifier(CasqueBatterie.niveauAppareil("Souris BT", "AA:BB:CC:DD:EE:02") === 0, "UPower vide : rien")
+                Reglages.faux = [{ type: UPowerDeviceType.Mouse, isPresent: true, model: "M", percentage: 0.5 }]
+                Reglages.valeurs = { ILE_CASQUE_BATTERIE: "non" }
+                verifier(CasqueBatterie.niveauAppareil("M", "") === 0, "réglage coupé : rien")
                 console.log("FINI")
                 Qt.exit(0)
             } }

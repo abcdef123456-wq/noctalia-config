@@ -258,6 +258,8 @@ l'île Quickshell.
 - **Batterie des casques Bluetooth** (`nc-reglages` → Île, réglage `ILE_CASQUE_BATTERIE`) : à la connexion d'écouteurs ou
   d'un casque qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau pendant 3 s, puis la page Son
   l'affiche à côté du casque. Le niveau vient d'UPower (aucun processus, aucun sondage) ; rien si le casque ne le donne pas.
+  Souris, claviers, manettes et pavés tactiles sans fil : la page Bluetooth montre « Connecté · 40 % » (en orange à 20 %
+  ou moins), reconnus par leur adresse, sinon par leur nom s'il est unique ; rien s'ils ne donnent pas leur niveau.
 - **VPN** (**Super + Alt + V**, `nc-vpn`) : les connexions VPN et WireGuard que NetworkManager connaît déjà, dans un panneau de
   l'île : tous les tunnels montés (plusieurs à la fois) avec un bouton « Déconnecter » chacun, « Tout déconnecter », un clic sur
   une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
