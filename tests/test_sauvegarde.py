@@ -561,5 +561,101 @@ class CodeEtLimites(Base):
         self.assertEqual(list((home / "Pictures/Wallpapers").glob(".nc-restauration-*")), [])
 
 
+
+class PourLeCloud(Base):
+    """I3 : la version qui part sur le Cloud JARVIS. Aucun secret (clé de JARVIS, jeton, export de shell ou de Lua, clé
+    ajoutée à la main, commande avec Authorization) dans l'archive envoyée, ni dans son contenu décompressé."""
+    SECRETS = ("CLE-JARVIS-7f3a9", "JETON-TROUSSEAU-51bc", "X_TOKEN_VALEUR-zz81", "LUA_TOKEN-qq42", "MA_CLE_API_VAL-ww07",
+               "Bearer-AUTH-hh63", "COMMENTAIRE-SECRET-kk11", "VILLE-PRIVEE-Tarascon")
+
+    def preparer_home(self):
+        home, env = self.maison("cloud")
+        (home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        (home / ".config/nc/assistant.conf").write_text("SECRET_KEY=CLE-JARVIS-7f3a9\n")
+        (home / ".local/share/keyrings").mkdir(parents=True)
+        (home / ".local/share/keyrings/login.keyring").write_text("JETON-TROUSSEAU-51bc")
+        (home / ".zshrc.perso").write_text("export X_TOKEN=X_TOKEN_VALEUR-zz81\n")
+        (home / ".config/hypr").mkdir(parents=True)
+        (home / ".config/hypr/perso.lua").write_text('hl.env("LUA", "LUA_TOKEN-qq42")\n')
+        (home / ".config/nc/reglages.conf").write_text(
+            "LANGUE=fr\nTHEME=sombre\nMA_CLE_API=MA_CLE_API_VAL-ww07\nmon_password=x\nLONG=" + "a" * 600 + "\n"
+            "# COMMENTAIRE-SECRET-kk11\nMETEO_VILLE=VILLE-PRIVEE-Tarascon\nIA_MODE=non\n")
+        (home / ".config/nc/raccourcis.conf").write_text(
+            "ajout\tSUPER + B\tappli\tfirefox\tNavigateur\n"
+            "ajout\tSUPER + K\tcommande\tcurl -H 'Authorization: Bearer-AUTH-hh63' x\tAppel\n# COMMENTAIRE-SECRET-kk11\n")
+        (home / ".config/nc/style.conf").write_text("STYLE=verre\n")
+        (home / ".config/noctalia/palettes").mkdir(parents=True)
+        (home / ".config/noctalia/palettes/a.json").write_text("{}")
+        (home / ".config/noctalia/palettes/lien.json").symlink_to(home / ".zshrc.perso")
+        (home / ".face").write_bytes(b"\x89PNG\r\n\x1a\nimage")
+        return home, env
+
+    def test_aucun_secret_contenu_exact_entetes_anonymes(self):
+        home, env = self.preparer_home()
+        sortie = self.r / "envoi.tar.gz"
+        r = self.lancer(env, "creer", "--pour-le-cloud", "--sortie", str(sortie))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        brut = sortie.read_bytes()
+        decompresse = gzip.decompress(brut)
+        for x in self.SECRETS:
+            self.assertNotIn(x.encode(), brut, x)
+            self.assertNotIn(x.encode(), decompresse, x)
+        with tarfile.open(sortie) as t:
+            noms = sorted(m.name for m in t)
+            self.assertEqual(noms, [".config/nc/raccourcis.conf", ".config/nc/reglages.conf", ".config/nc/style.conf",
+                                    ".config/noctalia/palettes", ".config/noctalia/palettes/a.json", ".face"])
+            for m in t.getmembers():
+                self.assertEqual((m.uid, m.gid, m.uname, m.gname), (0, 0, "", ""), m.name)
+            regl = t.extractfile(".config/nc/reglages.conf").read().decode()
+            racc = t.extractfile(".config/nc/raccourcis.conf").read().decode()
+        self.assertEqual(regl, "LANGUE=fr\nTHEME=sombre\n")
+        self.assertEqual(racc, "ajout\tSUPER + B\tappli\tfirefox\tNavigateur\n")
+        self.assertIn("6 ligne(s) de réglages écartée(s)", r.stdout)     # clé, password, longue, commentaire, 2 de ce PC
+        self.assertIn("2 ligne(s) de raccourcis écartée(s)", r.stdout)
+        self.assertEqual(oct(sortie.stat().st_mode & 0o777), oct(0o600))      # umask de l'appelant ; ici mkstemp
+        # La reprise de cette archive : rien de nouveau ne vient du code, et voir la lit
+        r = self.lancer(env, "voir", "--pour-le-cloud", str(sortie))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("~/.config/nc/reglages.conf", r.stdout)
+
+    def test_usage_strict(self):
+        home, env = self.preparer_home()
+        for args in (("creer", "--pour-le-cloud"), ("creer", "--pour-le-cloud", "--sortie", "x", "--avec-code"),
+                     ("creer", "--pour-le-cloud", "--sortie", "x", "--fonds"), ("restaurer", "--pour-le-cloud", "--avec-code", "x")):
+            with self.subTest(args=args):
+                r = self.lancer(env, *args)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertFalse((home / "x").exists())
+
+    def test_bornes_d_une_archive_venue_du_cloud(self):
+        home, env = self.maison("borne")
+        # Trop de membres pour le cloud (mais pas pour une sauvegarde ordinaire)
+        with tarfile.open(self.r / "membres.tar.gz", "w:gz") as t:
+            for i in range(501):
+                t.addfile(tarfile.TarInfo(f".config/noctalia/palettes/{i}.json"))
+        for cmd in ("voir", "restaurer"):
+            r = self.lancer(env, cmd, "--pour-le-cloud", str(self.r / "membres.tar.gz"))
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("trop d'éléments", r.stderr)
+        self.assertEqual(self.lancer(env, "voir", str(self.r / "membres.tar.gz")).returncode, 0)
+        # Tailles annoncées cumulées au-delà de 64 Mio : arrêt AVANT de lire leurs données
+        mod = self.module()
+        mod.POUR_LE_CLOUD = True
+        gros = [tarfile.TarInfo(".face") for _ in range(2)]
+        for g in gros:
+            g.size = 40 * 1024 ** 2
+        with self.assertRaises(SystemExit) as e:
+            mod.lire_membres(iter(gros), None, False)
+        self.assertRegex(str(e.exception), "annonce plus de|announces over")
+        # Fichier de plus de 32 Mio : refusé sans être lu
+        f = self.r / "gros.tar.gz"
+        with open(f, "wb") as o:
+            o.truncate(33 * 1024 ** 2)
+        r = self.lancer(env, "voir", "--pour-le-cloud", str(f))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusée sans être lue", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

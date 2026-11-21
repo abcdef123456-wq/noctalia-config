@@ -131,6 +131,23 @@ Le centre de contrôle de l'île a un module « Cloud » : la place utilisée su
 n'existe qu'avec Cloud JARVIS actif et ce PC associé. La valeur est demandée à l'ouverture du centre, au plus une fois
 par 10 minutes, et gardée en mémoire ; île fermée, rien n'est demandé. Hors ligne, la dernière valeur reste, en gris.
 Un clic ouvre le panneau. Comme les autres modules, il se masque et se déplace (le crayon).
+### Mon bureau me suit
+
+Dans les réglages, section Cloud JARVIS, deux boutons, chacun en deux temps :
+
+- « Sauvegarder mes réglages dans le cloud » prépare d'abord, sur ce PC, la version pour le cloud de `nc-sauvegarde`
+  (`nc-sauvegarde creer --pour-le-cloud`). Elle contient tes réglages, tes raccourcis d'applications, ton style, tes
+  palettes et ta photo de profil, et rien d'autre. La liste de ce qui partira s'affiche ; « Envoyer » la dépose dans le
+  dossier « Bureau » du cloud, sous un nom daté. Si le serveur sait supprimer, les 5 dernières sont gardées ; sinon
+  rien n'est effacé, et c'est dit.
+- « Reprendre mes réglages depuis le cloud » télécharge la plus récente dans un dossier privé et montre ce qu'elle
+  contient ; « Remettre » la restaure, toujours SANS `--avec-code`.
+
+Ce qui ne part jamais : aucun fichier qui lance du code (`perso.lua`, `.zshrc.perso`, `perso.conf` de kitty,
+animations, réglages de Noctalia), aucun raccourci avec une commande, aucun commentaire, aucun réglage propre à ce PC
+(veille, verrou, IA, ville de la météo…), aucune clé dont le nom parle d'un secret (KEY, TOKEN, SECRET, PASS, MDP,
+CLE_, JETON), aucune valeur de plus de 512 caractères, aucun fond d'écran. Les en-têtes de l'archive ne portent pas ton
+nom d'utilisateur. Une archive venue du cloud est lue avec des bornes serrées (32 Mio, 500 éléments, 64 Mio annoncés).
 
 ### Récents
 
@@ -184,6 +201,7 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud dossier PARENT NOM` | crée un dossier (`root` pour la racine) |
 | `nc-cloud deposer [--dans ID \| --racine NOM] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
 | `nc-cloud recents [--effacer]` | les 5 derniers fichiers envoyés ou ouverts par ce PC (liste locale) |
+| `nc-cloud bureau preparer\|envoyer\|telecharger\|restaurer\|oublier` | tes réglages dans « Bureau » du cloud, en deux temps |
 | `nc-cloud note` | enregistre le texte lu sur l'entrée standard dans « Notes » (64 Kio au plus) |
 | `nc-cloud examiner FICHIER…` | taille, fichier caché ou refusé, de chaque fichier ; n'envoie rien |
 | `nc-cloud reprendre [N]` | liste les envois interrompus ; avec N, reprend celui-là |

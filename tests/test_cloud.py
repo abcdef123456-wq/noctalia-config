@@ -1318,6 +1318,69 @@ elif sys.argv[1] == "clear":
             with self.subTest(args=args):
                 self.nc("deposer", *args, "--", str(a), code=2)
 
+    def test_bureau_sauvegarder_garder_5_puis_reprendre_sans_code(self):
+        import gzip
+        self.associer()
+        self.faux.suppression = True
+        cfg = self.home / ".config/nc"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "reglages.conf").write_text("LANGUE=fr\nTHEME=sombre\nMA_CLE_API=SECRET-API-91\n")
+        (cfg / "raccourcis.conf").write_text("ajout\tSUPER + K\tcommande\tcurl -H 'Authorization: SECRET-AUTH-22'\tX\n")
+        (self.home / ".zshrc.perso").write_text("export X_TOKEN=SECRET-ZSH-33\n")
+        (self.home / ".config/hypr").mkdir(parents=True, exist_ok=True)
+        (self.home / ".config/hypr/perso.lua").write_text("-- SECRET-LUA-44\n")
+        for i in range(6):
+            self.nc("deposer", "--racine", "Bureau", "--", str(self.fichier(f"nc-bureau-2026-01-0{i + 1}-000000.tar.gz", b"x")), code=0)
+        n = len(self.faux.journal)
+        r = self.nc("bureau", "preparer", code=0)
+        self.assertEqual(len(self.faux.journal), n)                                       # préparer : rien ne part
+        lignes = json.loads((self.home / ".local/state/nc-cloud/bureau/pret.json").read_text())["lignes"]
+        self.assertIn("photo de profil", lignes[0])
+        self.assertTrue(any("~/.config/nc/reglages.conf" in x for x in lignes), lignes)
+        self.assertTrue(any("écartée" in x for x in lignes), lignes)
+        self.nc("bureau", "restaurer", code=2)                                             # une archive à envoyer ne se « remet » pas
+        self.nc("bureau", "envoyer", code=0)
+        bureau = next(e["id"] for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Bureau")
+        noms = sorted(e["name"] for e in self.faux.entries.values() if e.get("parent") == bureau)
+        self.assertEqual(len(noms), 5, noms)
+        self.assertEqual(noms[:4], [f"nc-bureau-2026-01-0{i}-000000.tar.gz" for i in (3, 4, 5, 6)])  # les 2 plus vieilles retirées
+        nouvelle = next(e for e in self.faux.entries.values() if e.get("parent") == bureau and not e["name"].startswith("nc-bureau-2026-01"))
+        brut = self.faux.contenus[nouvelle["id"]]
+        for x in (b"SECRET-API-91", b"SECRET-AUTH-22", b"SECRET-ZSH-33", b"SECRET-LUA-44"):
+            self.assertNotIn(x, brut)
+            self.assertNotIn(x, gzip.decompress(brut))
+        self.assertFalse((self.home / ".local/state/nc-cloud/bureau").exists())             # rien ne reste en local
+        # Reprendre : télécharger et montrer, puis remettre (jamais de code)
+        (cfg / "reglages.conf").write_text("LANGUE=fr\nTHEME=clair\n")
+        (self.home / ".zshrc.perso").write_text("export LOCAL=1\n")
+        self.nc("bureau", "telecharger", code=0)
+        p = json.loads((self.home / ".local/state/nc-cloud/bureau/pret.json").read_text())
+        self.assertEqual((p["sens"], p["fichier"]), ("reprise", nouvelle["name"]))
+        self.assertEqual((cfg / "reglages.conf").read_text(), "LANGUE=fr\nTHEME=clair\n")    # rien n'est remis avant
+        self.nc("bureau", "restaurer", code=0)
+        self.assertIn("THEME=sombre", (cfg / "reglages.conf").read_text())
+        self.assertEqual((self.home / ".zshrc.perso").read_text(), "export LOCAL=1\n")
+        self.assertFalse((self.home / ".local/state/nc-cloud/bureau").exists())
+        self.nc("bureau", "restaurer", code=2)                                             # plus rien de prêt
+        # Serveur sans suppression : rien n'est effacé, et c'est dit
+        self.faux.suppression = False
+        time.sleep(1.1)                                                                    # un nom daté à la seconde, nouveau
+        self.nc("bureau", "preparer", code=0)
+        r = self.nc("bureau", "envoyer", code=0)
+        self.assertIn("ne sait pas supprimer", r.lignes[-1]["message"])
+        self.assertEqual(len([e for e in self.faux.entries.values() if e.get("parent") == bureau]), 6)
+
+    def test_bureau_archive_trop_grosse_ou_absente(self):
+        self.associer()
+        r = self.nc("bureau", "telecharger", code=1)
+        self.assertIn("Aucune sauvegarde", r.lignes[-1]["message"])
+        self.nc("deposer", "--racine", "Bureau", "--", str(self.fichier("nc-bureau-2026-01-01-000000.tar.gz", b"x")), code=0)
+        e = next(e for e in self.faux.entries.values() if e["name"].startswith("nc-bureau-"))
+        e["size"] = 33 * 1024 ** 2
+        r = self.nc("bureau", "telecharger", code=1)
+        self.assertIn("trop grosse", r.lignes[-1]["message"])
+        self.assertFalse((self.home / ".local/state/nc-cloud/bureau").exists())
+
     def test_note_trop_longue_vide_ou_illisible_rien_ne_part(self):
         self.associer()
         for entree, mot in ((b"a" * (100 * 1024), "trop longue"), (b"  \n ", "vide"), (b"\xff\xfe", "UTF-8")):

@@ -12,6 +12,8 @@
   nc-cloud recents [--effacer]      les 5 derniers fichiers envoyés ou ouverts par ce PC (liste locale)
   nc-cloud corbeille [--remettre COPIE]
                                     les copies gardées ; --remettre la redépose au même endroit (nouvel identifiant)
+  nc-cloud bureau preparer|envoyer|telecharger|restaurer|oublier
+                                    tes réglages dans « Bureau » du cloud (nc-sauvegarde, sans code ni clé) ; en deux temps
   nc-cloud note                     le texte de l'entrée standard devient un .txt du dossier « Notes » (64 Kio au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
   nc-cloud telecharger ID [DEST] [--dossier PARENT] [--remplacer]   (DEST : le dossier Téléchargements par défaut)
@@ -1274,6 +1276,119 @@ def cmd_recents(a):
             print(f"{x['nom']}  ({x['id']})")
         if not l:
             print(T("Aucun fichier récent.", "No recent file."))
+    return OK
+
+
+# ── « Mon bureau me suit » : nc-sauvegarde, version pour le cloud, dans le dossier « Bureau » ─────────────────────────────
+# En deux temps, pour que la fenêtre des réglages montre AVANT ce qui part ou ce qui revient : preparer (local) puis
+# envoyer ; telecharger puis restaurer (SANS --avec-code : jamais de code remis depuis le cloud). L'état du moment est
+# BUREAU/pret.json (le sens, le fichier, les lignes à montrer), lu par nc-reglages sans réseau.
+BUREAU = ETAT / "bureau"
+BUREAU_PRET = BUREAU / "pret.json"
+DOSSIER_BUREAU = "Bureau"
+BUREAU_GARDER = 5
+BUREAU_NOM = re.compile(r"nc-bureau-\d{4}-\d{2}-\d{2}-\d{6}\.tar\.gz")
+BUREAU_MAX = 32 * 1024 ** 2          # comme CLOUD_MAX_ARCHIVE de nc-sauvegarde
+
+
+def sauvegarde(*args):
+    """nc-sauvegarde (même dossier), argv fixe, sans shell ; (code, lignes de sortie nettoyées)."""
+    r = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve().parent / "nc-sauvegarde"), *args],
+                       capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
+                       env={**os.environ, "NC_LANGUE": "en" if A.T("fr", "en") == "en" else "fr"})
+    return r.returncode, [propre(l, 300) for l in (r.stdout + r.stderr).splitlines() if l.strip()][:80]
+
+
+def bureau_vider():
+    if BUREAU.is_dir() and not BUREAU.is_symlink():
+        shutil.rmtree(BUREAU, ignore_errors=True)
+
+
+def bureau_pret(sens):
+    p = lire_json(BUREAU_PRET) or {}
+    f = BUREAU / str(p.get("fichier", ""))
+    if p.get("sens") != sens or not BUREAU_NOM.fullmatch(str(p.get("fichier", ""))) or not f.is_file() or f.is_symlink():
+        raise Echec(T("Rien de prêt : relance depuis le début.", "Nothing ready: start again."), USAGE)
+    return f
+
+
+def cmd_bureau(a):
+    if a.action == "oublier":
+        bureau_vider()
+        dire(T("Annulé : rien n'est envoyé ni remis.", "Cancelled: nothing sent or restored."), evenement="bureau", etat="vide")
+        return OK
+    if a.action == "preparer":                 # local : rien ne part
+        bureau_vider()
+        dossier_prive(BUREAU)
+        nom = time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz")
+        code, creer = sauvegarde("creer", "--pour-le-cloud", "--sortie", str(BUREAU / nom))
+        if code != 0:
+            raise Echec(creer[-1] if creer else T("nc-sauvegarde a échoué.", "nc-backup failed."))
+        _, voir = sauvegarde("voir", "--pour-le-cloud", str(BUREAU / nom))
+        lignes = [T("Partiront : tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta photo de profil.",
+                    "Will be sent: your settings, your app shortcuts, your style, your palettes and your profile picture.")]
+        lignes += [l for l in creer if "écart" in l or "left out" in l] + voir
+        ecrire_json(BUREAU_PRET, {"version": 1, "sens": "envoi", "fichier": nom, "lignes": lignes})
+        dire(T("Sauvegarde prête : vérifie ce qui part, puis envoie-la.", "Backup ready: check what is sent, then send it."),
+             evenement="bureau", etat="pret", sens="envoi", lignes=lignes)
+        return OK
+    if a.action == "envoyer":
+        f = bureau_pret("envoi")
+        s = Session()
+        features = s.etat().get("features") or {}
+        code = deposer_un(s, f, dossier_des_notes(s, DOSSIER_BUREAU), "create", None, False)
+        if code != OK:
+            return code
+        bureau_vider()
+        # Les 5 dernières gardées, seulement si le serveur sait supprimer ; sinon rien n'est effacé, et c'est dit
+        sur_place = sorted((e for e in s.pages(dossier_des_notes(s, DOSSIER_BUREAU))
+                            if e.get("kind") == "file" and BUREAU_NOM.fullmatch(str(e.get("name")))), key=lambda e: e["name"], reverse=True)
+        vieilles = sur_place[BUREAU_GARDER:]
+        if vieilles and (features.get("file_delete") is True or features.get("directory_delete") is True):
+            for e in vieilles:
+                with contextlib.suppress(Echec):
+                    cmd_supprimer(argparse.Namespace(id=e["id"], revision=e.get("revision"), recursif=False, arbre=None, copie=False, dossier=None))
+            dire(T(f"Envoyée. Les {BUREAU_GARDER} dernières sauvegardes sont gardées dans « {DOSSIER_BUREAU} ».",
+                   f"Sent. The last {BUREAU_GARDER} backups are kept in “{DOSSIER_BUREAU}”."), evenement="bureau", etat="envoye")
+        else:
+            dire(T(f"Envoyée dans « {DOSSIER_BUREAU} »." + (" Le serveur ne sait pas supprimer : les anciennes restent, rien n'est effacé."
+                                                            if vieilles else ""),
+                   f"Sent to “{DOSSIER_BUREAU}”." + (" The server cannot delete: the old ones stay, nothing is erased." if vieilles else "")),
+                 evenement="bureau", etat="envoye")
+        return OK
+    if a.action == "telecharger":
+        s = Session()
+        dossier = next((e["id"] for e in s.pages("root") if e.get("kind") == "directory" and e.get("name") == DOSSIER_BUREAU
+                        and isinstance(e.get("id"), str)), None)
+        l = sorted((e for e in (s.pages(dossier) if dossier else []) if e.get("kind") == "file"
+                    and BUREAU_NOM.fullmatch(str(e.get("name")))), key=lambda e: e["name"], reverse=True)
+        if not l:
+            raise Echec(T(f"Aucune sauvegarde dans « {DOSSIER_BUREAU} ».", f"No backup in “{DOSSIER_BUREAU}”."))
+        e = l[0]
+        if not isinstance(e.get("size"), int) or e["size"] > BUREAU_MAX:
+            raise Echec(T("Sauvegarde du cloud trop grosse (plus de 32 Mio) : refusée sans être téléchargée.",
+                          "Cloud backup too big (over 32 MiB): refused without being downloaded."))
+        bureau_vider()
+        dossier_prive(BUREAU)
+        cmd_telecharger(argparse.Namespace(id=e["id"], dest=str(BUREAU / e["name"]), dossier=dossier, remplacer=False))
+        code, voir = sauvegarde("voir", "--pour-le-cloud", str(BUREAU / e["name"]))
+        if code != 0:
+            bureau_vider()
+            raise Echec(voir[-1] if voir else T("Sauvegarde illisible.", "Unreadable backup."))
+        lignes = [T(f"Sauvegarde du cloud : {e['name']}. Les fichiers qui lancent du code ne sont jamais remis, et les "
+                    "réglages de sécurité restent ceux de ce PC.", f"Cloud backup: {e['name']}. Files that run code are never "
+                    "restored, and security settings stay those of this PC.")] + voir
+        ecrire_json(BUREAU_PRET, {"version": 1, "sens": "reprise", "fichier": e["name"], "lignes": lignes})
+        dire(T("Sauvegarde téléchargée : vérifie ce qu'elle contient, puis remets-la.", "Backup downloaded: check what it contains, then restore it."),
+             evenement="bureau", etat="pret", sens="reprise", lignes=lignes)
+        return OK
+    # restaurer : jamais --avec-code
+    f = bureau_pret("reprise")
+    code, sortie = sauvegarde("restaurer", "--pour-le-cloud", str(f))
+    bureau_vider()
+    if code != 0:
+        raise Echec(sortie[-1] if sortie else T("Restauration interrompue.", "Restore interrupted."))
+    dire(sortie[0] if sortie else T("Réglages remis.", "Settings restored."), evenement="bureau", etat="remis", lignes=sortie)
     return OK
 
 
@@ -2863,6 +2978,9 @@ def analyseur():
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_deposer)
     sous.add_parser("note").set_defaults(f=cmd_note)
+    x = sous.add_parser("bureau", aliases=["desktop"])
+    x.add_argument("action", choices=["preparer", "envoyer", "telecharger", "restaurer", "oublier"])
+    x.set_defaults(f=cmd_bureau)
     x = sous.add_parser("recents", aliases=["recent"])
     x.add_argument("--effacer", "--clear", action="store_true")
     x.set_defaults(f=cmd_recents)

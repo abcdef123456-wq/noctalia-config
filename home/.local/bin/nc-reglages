@@ -4237,6 +4237,17 @@ def catalogue_cloud():
         actions += [("cloud:etat", T("État et quota", "Status and quota"), T("Place utilisée sur le quota du serveur.",
                                                                            "Space used on the server's quota."),
                      ["nc-cloud", "etat"], T("Voir", "Show"), ""),
+                    ("cloud:bureau-sauver", T("Sauvegarder mes réglages dans le cloud", "Back up my settings to the cloud"),
+                     T("Prépare d'abord, sur ce PC : tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta "
+                       "photo de profil (jamais de code ni de clé). Tu vois ce qui part avant de l'envoyer.",
+                       "Prepares first, on this PC: your settings, your app shortcuts, your style, your palettes and your profile "
+                       "picture (never code or keys). You see what is sent before sending it."),
+                     ["nc-cloud", "bureau", "preparer"], T("Préparer", "Prepare"), ""),
+                    ("cloud:bureau-reprendre", T("Reprendre mes réglages depuis le cloud", "Restore my settings from the cloud"),
+                     T("Télécharge la dernière sauvegarde et montre ce qu'elle contient ; rien n'est remis avant ta confirmation, "
+                       "et jamais de code.", "Downloads the latest backup and shows what it contains; nothing is restored before "
+                       "you confirm, and never code."),
+                     ["nc-cloud", "bureau", "telecharger"], T("Télécharger", "Download"), ""),
                     ("cloud:dissocier", T("Dissocier ce PC", "Unpair this PC"),
                      T("Révoque ce PC sur le serveur et efface son jeton. Les fichiers du cloud restent.",
                        "Revokes this PC on the server and erases its token. The cloud files stay."),
@@ -4247,12 +4258,53 @@ def catalogue_cloud():
                         T("Avec la clé de JARVIS ; le jeton de ce PC va dans le trousseau.",
                           "With the JARVIS key; this PC's token goes into the keyring."),
                         ["nc-cloud", "associer"], T("Associer", "Pair"), ""))
+    pret = bureau_pret_local() if associe else None
+    if pret:
+        envoi = pret["sens"] == "envoi"
+        res.append(dict(base, cle="cloud:bureau-liste", genre="rapport",
+                        nom=T("Ce qui partira sur le cloud", "What will be sent to the cloud") if envoi
+                        else T("Contenu de la sauvegarde du cloud", "Contents of the cloud backup"),
+                        aide=T("Tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta photo de profil ; jamais de "
+                               "code ni de clé. Lis le détail avant de confirmer.", "Your settings, your app shortcuts, your style, your "
+                               "palettes and your profile picture; never code or keys. Read the details before confirming.") if envoi
+                        else T("Les fichiers qui lancent du code ne sont jamais remis, et les réglages de sécurité restent ceux de "
+                               "ce PC. Lis le détail avant de confirmer.", "Files that run code are never restored, and security "
+                               "settings stay those of this PC. Read the details before confirming."), details=pret["lignes"], ia="",
+                        affiche=T("Détails", "Details")))
+        actions += [("cloud:bureau-envoyer", T("Envoyer cette sauvegarde", "Send this backup"),
+                     T("Dans le dossier « Bureau » du cloud.", "To the cloud's “Bureau” folder."), ["nc-cloud", "bureau", "envoyer"],
+                     T("Envoyer", "Send"), T("Envoyer ces réglages sur le cloud ?", "Send these settings to the cloud?"))
+                    if envoi else
+                    ("cloud:bureau-restaurer", T("Remettre ces réglages", "Restore these settings"),
+                     T("Ce qui est remplacé est gardé dans ~/.cache/nc/avant-restauration ; aucun code n'est remis.",
+                       "What is replaced is kept in ~/.cache/nc/avant-restauration; no code is restored."),
+                     ["nc-cloud", "bureau", "restaurer"], T("Remettre", "Restore"),
+                     T("Remettre les réglages de cette sauvegarde sur ce PC ?", "Restore this backup's settings on this PC?")),
+                    ("cloud:bureau-oublier", T("Annuler", "Cancel"), T("Efface ce qui a été préparé ou téléchargé ici.",
+                                                                       "Erases what was prepared or downloaded here."),
+                     ["nc-cloud", "bureau", "oublier"], T("Annuler", "Cancel"), "")]
     for cle, nom_a, aide, cmd, bouton, question in actions:
         ligne = dict(base, cle=cle, genre="action", nom=nom_a, aide=aide, affiche=bouton, commande=cmd, relire=True)
         if question:
             ligne.update(confirmer=question, bouton=bouton)
         res.append(ligne)
     return res
+
+
+def bureau_pret_local():
+    """Ce que « nc-cloud bureau » a préparé ou téléchargé (fichier local, aucun appel réseau) : {sens, lignes} ou None.
+    Les lignes viennent en partie d'une archive du cloud : texte imprimable seulement, bornées."""
+    f = Path(os.environ.get("XDG_STATE_HOME") or Path(HOME, ".local/state")) / "nc-cloud/bureau/pret.json"
+    try:
+        if f.is_symlink() or f.stat().st_size > 256 * 1024:
+            return None
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or d.get("sens") not in ("envoi", "reprise") or not isinstance(d.get("lignes"), list):
+        return None
+    lignes = ["".join(c for c in x if c.isprintable())[:300] for x in d["lignes"] if isinstance(x, str)][:60]
+    return {"sens": d["sens"], "lignes": lignes}
 
 
 def catalogue_nouveautes():

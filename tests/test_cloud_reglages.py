@@ -50,12 +50,38 @@ class CloudReglages(unittest.TestCase):
         app.parent.mkdir(parents=True)
         app.write_text(json.dumps({"device_id": "d1", "name": "mon-pc\u0007\u202e" + "x" * 100}))
         l = self.lignes({"CLOUD_JARVIS": "oui"})
-        self.assertEqual(list(l), ["CLOUD_JARVIS", "cloud:etat-local", "cloud:verifier", "cloud:etat", "cloud:dissocier"])
+        self.assertEqual(list(l), ["CLOUD_JARVIS", "cloud:etat-local", "cloud:verifier", "cloud:etat", "cloud:bureau-sauver",
+                                   "cloud:bureau-reprendre", "cloud:dissocier"])
         self.assertEqual(l["cloud:etat"]["commande"], ["nc-cloud", "etat"])
         self.assertEqual(l["cloud:dissocier"]["commande"], ["nc-cloud", "dissocier"])
         self.assertTrue(l["cloud:dissocier"]["confirmer"])
         nom = l["cloud:etat-local"]["aide"]
         self.assertTrue(nom.startswith("mon-pc") and nom.isprintable() and len(nom) <= 64, nom)
+
+    def test_bureau_en_deux_temps_liste_avant_confirmation(self):
+        app = self.home / ".local/state/nc-cloud/appareil.json"
+        app.parent.mkdir(parents=True)
+        app.write_text(json.dumps({"device_id": "d1", "name": "pc"}))
+        l = self.lignes({"CLOUD_JARVIS": "oui"})
+        self.assertEqual(l["cloud:bureau-sauver"]["commande"], ["nc-cloud", "bureau", "preparer"])
+        self.assertEqual(l["cloud:bureau-reprendre"]["commande"], ["nc-cloud", "bureau", "telecharger"])
+        self.assertIn("photo de profil", l["cloud:bureau-sauver"]["aide"])
+        self.assertNotIn("cloud:bureau-envoyer", l)
+        pret = self.home / ".local/state/nc-cloud/bureau/pret.json"
+        pret.parent.mkdir()
+        for sens, cle, cmd in (("envoi", "cloud:bureau-envoyer", "envoyer"), ("reprise", "cloud:bureau-restaurer", "restaurer")):
+            with self.subTest(sens):
+                pret.write_text(json.dumps({"sens": sens, "fichier": "x", "lignes": ["• ~/.face\u001b[31m\u202e", "y" * 400] + ["z"] * 100}))
+                l = self.lignes({"CLOUD_JARVIS": "oui"})
+                d = l["cloud:bureau-liste"]["details"]
+                self.assertTrue(all(x.isprintable() and len(x) <= 300 for x in d) and len(d) == 60, d[:2])
+                self.assertEqual(l[cle]["commande"], ["nc-cloud", "bureau", cmd])
+                self.assertTrue(l[cle]["confirmer"])
+                self.assertEqual(l["cloud:bureau-oublier"]["commande"], ["nc-cloud", "bureau", "oublier"])
+                self.assertNotIn("--avec-code", " ".join(x for v in l.values() for x in v.get("commande") or []))
+        for mauvais in ("[1", json.dumps({"sens": "autre", "lignes": []}), json.dumps({"sens": "envoi", "lignes": "x"})):
+            pret.write_text(mauvais)
+            self.assertNotIn("cloud:bureau-liste", self.lignes({"CLOUD_JARVIS": "oui"}))
 
     def test_appareil_illisible_reste_associe_sans_nom(self):
         app = self.home / ".local/state/nc-cloud/appareil.json"
