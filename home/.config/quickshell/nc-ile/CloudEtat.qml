@@ -29,6 +29,8 @@ Singleton {
     property bool lu: false
     property var etat: ({})
     property var features: ({})
+    property bool fichiersPossible: false          // gi et le moteur WebDAV de GVfs présents (nc-cloud etat) : « Ouvrir dans Fichiers »
+    function ouvrirFichiers() { if (fichiersPossible) lancer(["fichiers"], "fichiers") }
     property string message: ""
     property string erreur: ""
     property string aRemplacer: ""                 // id d'un fichier dont la destination existe déjà (conflit au téléchargement)
@@ -319,7 +321,7 @@ Singleton {
         try { d = JSON.parse(texte) } catch (x) { return }
         if (!d || typeof d !== "object") return
         var q = enCours ? enCours.quoi : ""
-        if (d.evenement === "etat") { etat = d.etat || ({}); features = d.features || ({}) }
+        if (d.evenement === "etat") { etat = d.etat || ({}); features = d.features || ({}); fichiersPossible = d.fichiers === true }
         else if (d.evenement === "page") {
             // Seuls les ids sûrs (root ou 32 hex) : un id qui commencerait par un tiret serait lu comme une option
             var l = Array.isArray(d.entries) ? d.entries.filter(x => x && typeof x.id === "string" && /^(root|[0-9a-f]{32})$/.test(x.id)

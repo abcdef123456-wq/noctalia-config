@@ -28,7 +28,7 @@ echo "$*" >> "@ROOT@/journal"
 [ "$1" = "--json" ] && shift
 for dernier; do :; done      # l'id ou le dossier : toujours le dernier argument, après « -- »
 case "$1" in
-  etat) printf '%s\n' '{"evenement": "etat", "etat": {"used_bytes": 1048576, "quota_bytes": 21474836480}, "features": @FEAT@}' ;;
+  etat) printf '%s\n' '{"evenement": "etat", "etat": {"used_bytes": 1048576, "quota_bytes": 21474836480}, "features": @FEAT@, "fichiers": @FICHIERS@}' ;;
   lister) if [ "$dernier" = root ]; then cat "@ROOT@/racine.json"; elif [ -f "@ROOT@/sous.json" ]; then cat "@ROOT@/sous.json"
           else printf '%s\n' '{"evenement": "page", "entries": [], "next_cursor": null}'; fi ;;
   telecharger) case "$*" in *--remplacer*) printf '%s\n' '{"evenement": "resultat", "message": "Téléchargé."}' ;;
@@ -169,7 +169,7 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None):
+    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -178,7 +178,8 @@ class HorsEcran(unittest.TestCase):
             bin_.mkdir(parents=True)
             f = features if features is not None else {"file_delete": suppression, "entry_by_id": True}
             (bin_ / "nc-cloud").write_text(FAUX.replace("@ROOT@", str(root)).replace("@FEAT@", json.dumps(f))
-                                           .replace("@ARBRE1@", ARBRE1).replace("@ARBRE2@", ARBRE2))
+                                           .replace("@ARBRE1@", ARBRE1).replace("@ARBRE2@", ARBRE2)
+                                           .replace("@FICHIERS@", "true" if fichiers else "false"))
             (bin_ / "nc-cloud").chmod(0o755)
             H.faux(root, "nc-reglages")
             if notifier:
@@ -621,6 +622,22 @@ class HorsEcran(unittest.TestCase):
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertNotIn("deplacer", " ".join(j))
+
+    def test_ouvrir_dans_fichiers_seulement_si_possible(self):
+        for possible in (False, True):
+            with self.subTest(possible=possible):
+                j = self.lancer(self.OUVRIR + '''
+                    Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                        if (etape === 0) { ouvrir(); etape++; return }
+                        if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                        if (etape === 1) {
+                            verifier(vu(fen.contentItem, "nc-cloud-fichiers") === CloudEtat.fichiersPossible, "bouton selon la présence de gi et WebDAV")
+                            if (CloudEtat.fichiersPossible) trouver(fen.contentItem, "nc-cloud-fichiers").clic(); else CloudEtat.ouvrirFichiers()
+                            etape++; return }
+                        console.log("FINI"); Qt.exit(0)
+                    } }
+                ''', reglages={"CLOUD_JARVIS": "oui"}, fichiers=possible)
+                self.assertEqual("--json fichiers" in j, possible, j)
 
     def test_sans_suppression_annoncee_aucun_bouton(self):
         j = self.lancer(self.OUVRIR + '''

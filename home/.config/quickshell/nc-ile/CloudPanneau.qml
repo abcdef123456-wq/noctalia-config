@@ -96,6 +96,9 @@ FloatingWindow {
                     }
                     Row {
                         anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; spacing: 8
+                        CloudBouton { visible: cloud.pret && CloudEtat.fichiersPossible; objectName: "nc-cloud-fichiers"
+                                      texte: Reglages.t("Ouvrir dans Fichiers", "Open in Files"); enabled: !CloudEtat.occupe
+                                      onClic: CloudEtat.ouvrirFichiers() }
                         CloudBouton { visible: cloud.pret; objectName: "nc-cloud-actualiser"; texte: Reglages.t("Actualiser", "Refresh")
                                       enabled: !CloudEtat.occupe; onClic: CloudEtat.actualiser() }
                         BoutonReglages { section: "Cloud JARVIS" }

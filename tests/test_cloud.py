@@ -586,7 +586,7 @@ elif sys.argv[1] == "clear":
         c.chmod(0o600)
 
     def env(self):
-        return {"HOME": str(self.home), "PATH": str(self.bin), "TMPDIR": str(self.d), "NC_LANGUE": "fr",
+        return {**getattr(self, "plus", {}), "HOME": str(self.home), "PATH": str(self.bin), "TMPDIR": str(self.d), "NC_LANGUE": "fr",
                 "XDG_CONFIG_HOME": str(self.home / ".config"), "XDG_STATE_HOME": str(self.home / ".local/state"),
                 "XDG_DATA_HOME": str(self.home / ".local/share"), "XDG_CACHE_HOME": str(self.home / ".cache"),
                 "XDG_RUNTIME_DIR": str(self.d)}
@@ -1046,6 +1046,122 @@ elif sys.argv[1] == "clear":
             b.chmod(0o600)                 # le tearDown relit chaque fichier
         etats = {x["fichier"]: x["etat"] for x in r.lignes if x.get("evenement") == "resultat"}
         self.assertEqual(etats, {str(a): "publie", str(b): "refuse", str(c): "publie"})
+
+    # ── C3 : Fichiers (GVfs, faux module gi) ──
+    def faux_gi(self, mode="ok"):
+        g = self.d / "fauxgi" / "gi" / "repository"
+        g.mkdir(parents=True, exist_ok=True)
+        (g.parent / "__init__.py").write_text(FAUX_GI_INIT)
+        (g / "__init__.py").write_text(FAUX_GI_REPO)
+        self.journal_gi = self.d / "gi.journal"
+        self.plus = {"PYTHONPATH": str(self.d / "fauxgi"), "FAUX_GI": mode, "FAUX_GI_JOURNAL": str(self.journal_gi)}
+
+    def gi_vu(self):
+        return [json.loads(l) for l in self.journal_gi.read_text().splitlines()] if self.journal_gi.exists() else []
+
+    def favoris(self):
+        return self.home / ".config/gtk-3.0/bookmarks"
+
+    def test_fichiers_monte_par_l_adresse_verifiee_jeton_seulement_dans_la_mount_operation(self):
+        self.associer()
+        self.faux_gi()
+        self.favoris().parent.mkdir(parents=True)
+        self.favoris().write_text("file:///home/user/Documents Documents\nsftp://nas/partage")    # sans fin de ligne
+        os.chmod(self.favoris(), 0o640)
+        r = self.nc("fichiers", code=0)
+        port = self.srv.server_address[1]
+        adresse = f"dav://127.0.0.1:{port}/cloud/dav/"
+        vu = self.gi_vu()
+        self.assertEqual([x["uri"] for x in vu if x["evt"] == "monter"], [adresse])
+        jeton = self.trousseau.read_text()
+        app = json.loads((self.home / ".local/state/nc-cloud/appareil.json").read_text())
+        rep = [x for x in vu if x["evt"] == "reponse"]
+        self.assertEqual(rep, [{"evt": "reponse", "r": "repondu", "u": app["device_id"], "mdp": hashlib.sha256(jeton.encode()).hexdigest(),
+                                "save": "jamais"}])
+        self.assertIn({"evt": "ouvrir", "uris": [adresse]}, vu)
+        self.assertIn({"evt": "appli", "type": "inode/directory"}, vu)
+        self.assertEqual(self.favoris().read_text(),
+                         f"file:///home/user/Documents Documents\nsftp://nas/partage\n{adresse} Cloud JARVIS\n")
+        self.assertEqual(stat.S_IMODE(os.stat(self.favoris()).st_mode), 0o640)
+        ev = r.lignes[-1]
+        self.assertEqual((ev["evenement"], ev["adresse"], ev["ecriture"]), ("fichiers", adresse, False))
+        self.assertIn("lecture seule", ev["message"])
+        # Le jeton : ni dans l'adresse, ni dans une sortie, ni dans un fichier du HOME, ni dans les arguments de secret-tool
+        self.assertNotIn(jeton, r.stdout + r.stderr + adresse + self.args_st.read_text())
+        for f in self.home.rglob("*"):
+            if f.is_file() and not f.is_symlink():
+                self.assertNotIn(jeton.encode(), f.read_bytes(), f)
+        self.nc("fichiers", code=0)                                 # une seconde fois : jamais deux favoris
+        self.assertEqual(self.favoris().read_text().count("Cloud JARVIS"), 1)
+        # demonter : notre ligne seulement
+        self.faux_gi("deja")
+        self.nc("demonter", code=0)
+        self.assertEqual(self.favoris().read_text(), "file:///home/user/Documents Documents\nsftp://nas/partage\n")
+        self.assertIn({"evt": "demonter", "uri": adresse}, self.gi_vu())
+
+    def test_fichiers_http_par_le_nom_local_monte_sur_l_ip(self):
+        self.url("http://localhost:%d" % self.srv.server_address[1])
+        self.associer()
+        self.faux_gi()
+        self.nc("fichiers", code=0)
+        uri = [x["uri"] for x in self.gi_vu() if x["evt"] == "monter"][0]
+        self.assertEqual(uri, "dav://127.0.0.1:%d/cloud/dav/" % self.srv.server_address[1])
+        self.assertNotIn("localhost", uri)
+
+    def test_fichiers_http_public_refuse_rien_n_est_monte(self):
+        self.associer()
+        self.faux_gi()
+        self.url("http://8.8.8.8:9")
+        self.nc("fichiers", code=9)
+        self.assertEqual(self.gi_vu(), [])
+
+    def test_fichiers_question_de_gvfs_et_jeton_refuse(self):
+        self.associer()
+        self.favoris().parent.mkdir(parents=True)
+        for mode, code, reponses in (("question", 9, ["refuse"]), ("mdp_refuse", 4, ["repondu", "refuse"]), ("erreur", 3, ["repondu"])):
+            with self.subTest(mode):
+                self.faux_gi(mode)
+                if self.journal_gi.exists():
+                    self.journal_gi.unlink()
+                r = self.nc("fichiers", code=code)
+                self.assertEqual([x["r"] for x in self.gi_vu() if x["evt"] == "reponse"], reponses)
+                self.assertFalse(self.favoris().exists(), "aucun favori sans montage")
+                self.assertNotIn("\x1b", r.stdout)
+                self.assertNotIn("\\u001b", r.stdout)
+
+    def test_fichiers_sans_gi_ou_sans_webdav_code_distinct_et_paquet_dit(self):
+        self.associer()
+        for mode, mot in (("absent", "gi"), ("sans_gio", "gi"), ("sans_dav", "WebDAV")):
+            with self.subTest(mode):
+                self.faux_gi(mode)
+                r = self.nc("fichiers", code=13)
+                m = r.lignes[-1]["message"]
+                self.assertIn(mot, m)
+                self.assertTrue(any(p in m for p in ("python-gobject", "python3-gi", "gvfs-dnssd", "gvfs-backends", "python3-gobject")), m)
+                self.assertFalse([x for x in self.gi_vu() if x["evt"] == "monter"])
+                self.assertIs(self.nc("etat", code=0).lignes[-1]["fichiers"], False)
+        self.faux_gi()
+        self.assertIs(self.nc("etat", code=0).lignes[-1]["fichiers"], True)       # ce que lit CloudEtat.qml (d.fichiers)
+        self.assertIn("fichiersPossible = d.fichiers === true", (REPO / "home/.config/quickshell/nc-ile/CloudEtat.qml").read_text())
+
+    def test_favori_lien_refuse_dossier_absent_rien_cree_et_dissocier_le_retire(self):
+        self.associer()
+        self.faux_gi()
+        self.nc("fichiers", code=0)
+        self.assertFalse(self.favoris().exists(), "dossier gtk-3.0 absent : rien n'est créé")
+        self.favoris().parent.mkdir(parents=True)
+        cible = self.d / "ailleurs"
+        cible.write_text("x\n")
+        self.favoris().symlink_to(cible)
+        self.nc("fichiers", code=1)
+        self.assertEqual(cible.read_text(), "x\n")
+        self.favoris().unlink()
+        self.nc("fichiers", code=0)
+        self.assertIn("Cloud JARVIS", self.favoris().read_text())
+        self.faux_gi("deja")
+        self.nc("dissocier", code=0)
+        self.assertEqual(self.favoris().read_text(), "")
+        self.assertTrue([x for x in self.gi_vu() if x["evt"] == "demonter"])
 
     def test_noms_a_tiret_apres_double_tiret(self):
         """« -x » et « --json » tapés comme noms, placés après « -- », restent des noms (le panneau passe ainsi)."""
@@ -1765,6 +1881,112 @@ class DansLeProcessus(unittest.TestCase):
 
 
 
+# Un faux module gi (Gio, GLib), injecté par PYTHONPATH : rien n'est monté. FAUX_GI choisit le cas ; tout est noté dans
+# FAUX_GI_JOURNAL (le mot de passe reçu par la MountOperation seulement en empreinte SHA-256)
+FAUX_GI_INIT = """import os
+if os.environ.get("FAUX_GI") == "absent":
+    raise ImportError("faux : pas de gi")
+def require_version(nom, version):
+    if os.environ.get("FAUX_GI") == "sans_gio":
+        raise ValueError("Namespace Gio not available")
+"""
+FAUX_GI_REPO = r'''import hashlib, json, os
+MODE = os.environ.get("FAUX_GI", "ok")
+_rappels = []
+def note(**k):
+    with open(os.environ["FAUX_GI_JOURNAL"], "a") as f:
+        f.write(json.dumps(k) + "\n")
+class _Erreur(Exception):
+    def __init__(self, code, message):
+        super().__init__(message); self.code, self.message = code, message
+    def matches(self, quark, code):
+        return self.code == code
+class GLib:
+    Error = _Erreur
+    class MainLoop:
+        def run(self):
+            while _rappels:
+                _rappels.pop(0)()
+        def quit(self):
+            pass
+    @staticmethod
+    def timeout_add_seconds(n, f):
+        note(evt="delai", n=n)
+class _Montage:
+    def __init__(self, u): self.u = u
+    def unmount_with_operation(self, flags, op, annuler, rappel):
+        note(evt="demonter", uri=self.u); _rappels.append(lambda: rappel(self, None))
+    def unmount_with_operation_finish(self, res):
+        pass
+class _Fichier:
+    def __init__(self, u): self.u = u
+    def find_enclosing_mount(self, annuler):
+        if MODE == "deja":
+            return _Montage(self.u)
+        raise _Erreur(0, "pas monté")
+    def mount_enclosing_volume(self, flags, op, annuler, rappel):
+        note(evt="monter", uri=self.u)
+        def jouer():
+            if MODE == "question":
+                op.h["ask-question"](op, "Certificat inconnu, continuer ?", ["Oui", "Non"])
+            else:
+                for _ in range(2 if MODE == "mdp_refuse" else 1):
+                    op.h["ask-password"](op, "Mot de passe", "", "Cloud", 0)
+            rappel(self, None)
+        _rappels.append(jouer)
+    def mount_enclosing_volume_finish(self, res):
+        if MODE in ("question", "mdp_refuse"):
+            raise _Erreur(19, "annulé")
+        if MODE == "erreur":
+            raise _Erreur(1, "Hôte injoignable\x1b[31m")
+class _Vfs:
+    def get_supported_uri_schemes(self):
+        return ["file", "sftp"] if MODE == "sans_dav" else ["file", "sftp", "dav", "davs"]
+class _Appli:
+    def launch_uris(self, uris, contexte):
+        note(evt="ouvrir", uris=uris); return True
+class Gio:
+    class PasswordSave:
+        NEVER, FOR_SESSION, PERMANENTLY = "jamais", "session", "toujours"
+    class MountOperationResult:
+        HANDLED, ABORTED = "repondu", "refuse"
+    class MountMountFlags:
+        NONE = 0
+    class MountUnmountFlags:
+        NONE = 0
+    class IOErrorEnum:
+        ALREADY_MOUNTED = 17
+    @staticmethod
+    def io_error_quark():
+        return 0
+    class Cancellable:
+        def cancel(self):
+            note(evt="annule")
+    class Vfs:
+        @staticmethod
+        def get_default():
+            return _Vfs()
+    class File:
+        @staticmethod
+        def new_for_uri(u):
+            return _Fichier(u)
+    class AppInfo:
+        @staticmethod
+        def get_default_for_type(t, local):
+            note(evt="appli", type=t); return _Appli()
+    class MountOperation:
+        def __init__(self):
+            self.h, self.u, self.p, self.save = {}, None, None, None
+        def connect(self, signal, f):
+            self.h[signal] = f
+        def set_username(self, u): self.u = u
+        def set_password(self, p): self.p = p
+        def set_password_save(self, s): self.save = s
+        def reply(self, r):
+            note(evt="reponse", r=r, u=self.u, mdp=hashlib.sha256(self.p.encode()).hexdigest() if self.p else None, save=self.save)
+'''
+
+
 DBUS_DAEMON = shutil.which("dbus-daemon")        # lu avant que les tests ne changent PATH
 
 
@@ -1977,6 +2199,19 @@ class Selecteur(unittest.TestCase):
         ev = json.loads(sortie.getvalue().splitlines()[-1])
         self.assertEqual((ev["fichier"], ev["etat"]), ("/home/user/b.txt", "refuse"))
 
+    def test_adresse_dav_https_par_le_nom_et_ipv6_entre_crochets(self):
+        class Srv:
+            https, hote, port, base, adresse = True, "cloud.exemple.org", 443, "", None
+        self.assertEqual(self.m.adresse_dav(Srv), "davs://cloud.exemple.org/cloud/dav/")
+        Srv.port, Srv.base = 8443, "/jarvis"
+        self.assertEqual(self.m.adresse_dav(Srv), "davs://cloud.exemple.org:8443/jarvis/cloud/dav/")
+        Srv.https, Srv.adresse, Srv.port, Srv.base = False, ["fd00::1"], 80, ""
+        with mock.patch.object(self.m.socket, "create_connection", side_effect=OSError):
+            self.assertEqual(self.m.adresse_dav(Srv), "dav://[fd00::1]:80/cloud/dav/")
+        Srv.adresse = []
+        with self.assertRaises(self.m.Echec):
+            self.m.adresse_dav(Srv)
+
     def test_nc_diag_sait_si_un_portail_choisit_des_fichiers(self):
         l = importlib.machinery.SourceFileLoader("nc_diag_choix", str(NC_CLOUD.parent / "nc-diag"))
         d = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_diag_choix", l))
@@ -1989,6 +2224,13 @@ class Selecteur(unittest.TestCase):
                                                     "Interfaces=org.freedesktop.impl.portal.FileChooser; org.freedesktop.impl.portal.Settings;\n")
         self.assertTrue(d.selecteur_fichiers())
         self.assertIn('cle="portail_fichiers_absent"', (NC_CLOUD.parent / "nc-diag").read_text())
+        # « Ouvrir dans Fichiers » : contrôle local, sans réseau ; gi absent, puis sans WebDAV, puis tout là
+        with mock.patch.object(d, "sortie", return_value=("file sftp dav davs", 0)):
+            self.assertEqual(d.fichiers_cloud_manque(), "")
+        with mock.patch.object(d, "sortie", return_value=("", 1)):
+            self.assertIn("gi", d.fichiers_cloud_manque())
+        with mock.patch.object(d, "sortie", return_value=("file sftp", 0)):
+            self.assertIn("WebDAV", d.fichiers_cloud_manque())
 
     @unittest.skipUnless(DBUS_DAEMON, "dbus-daemon absent")
     def test_vrai_bus_prive_sans_portail(self):

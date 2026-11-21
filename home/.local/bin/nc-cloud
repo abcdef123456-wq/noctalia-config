@@ -81,6 +81,7 @@ MORCEAU_MIN, MORCEAU_MAX = 64 * 1024, 64 * 1024 * 1024
 
 OK, ERREUR, USAGE, HORS_LIGNE, NON_ASSOCIE, DESACTIVE, CONFLIT, QUOTA, ANNULE, TRANSPORT, SERVEUR_CHANGE, SOURCE, EMPREINTE = \
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+DEPENDANCE = 13          # nc-cloud fichiers : le module gi (Gio) ou le moteur WebDAV de GVfs manque
 # Ces codes arrêtent toute la commande ; les autres ne touchent que le fichier en cours
 ARRET = (HORS_LIGNE, NON_ASSOCIE, DESACTIVE, TRANSPORT, SERVEUR_CHANGE)
 # Code d'erreur du serveur -> code de sortie
@@ -583,13 +584,18 @@ def cmd_verifier(a):
         except Echec as e:
             note("associe", False, str(e))
             code = code or e.code
+    # Facultatif, sans effet sur le code : « Ouvrir dans Fichiers » (gi et le moteur WebDAV de GVfs)
+    manque_f = manque_fichiers(charger_gio(), "davs" if srv is None or srv.https else "dav")
+    controles.append({"nom": "fichiers", "ok": manque_f is None, "facultatif": True,
+                      "message": manque_f or T("« Ouvrir dans Fichiers » possible (gi et WebDAV de GVfs présents).",
+                                               "“Open in Files” available (gi and GVfs WebDAV present).")})
     if JSON_SORTIE:
         evenement(evenement="verification", pret=code == OK, controles=controles)
     else:
         for c in controles:
-            print(("✓ " if c["ok"] else "✗ ") + c["message"])
+            print(("✓ " if c["ok"] else "· " if c.get("facultatif") else "✗ ") + c["message"])
         # Dernière ligne : le résumé (la fenêtre des réglages n'en montre qu'une), en erreur s'il manque quelque chose
-        manque = [c["message"] for c in controles if not c["ok"]]
+        manque = [c["message"] for c in controles if not c["ok"] and not c.get("facultatif")]
         if manque:
             print(T("À faire : ", "To do: ") + manque[0], file=sys.stderr)
         else:
@@ -658,6 +664,7 @@ def cmd_dissocier(a):
     except Echec as e:
         if not (e.erreur == "device_revoked" or e.statut == 404):     # déjà révoqué : on efface quand même ici
             raise
+    demonter_et_oublier(srv)
     jeton_effacer(app["device_id"])
     effacer(APPAREIL)
     for d in (ENVOIS, SUPPRESSIONS):
@@ -678,7 +685,8 @@ def cmd_etat(a):
     f = st.get("features") if isinstance(st.get("features"), dict) else {}
     if JSON_SORTIE:
         # features : seulement ce que l'interface lit, en vrais booléens
-        evenement(evenement="etat", etat=propres, features={k: f.get(k) is True for k in FEATURES_PANNEAU})
+        evenement(evenement="etat", etat=propres, features={k: f.get(k) is True for k in FEATURES_PANNEAU},
+                  fichiers=fichiers_possibles())
     else:
         for k, v in propres.items():
             print(f"{k} : {taille_lisible(v) if k.endswith('_bytes') and isinstance(v, int) and not isinstance(v, bool) else v}")
@@ -1826,6 +1834,283 @@ def cmd_ouvrir(a):
     return OK
 
 
+# ── Fichiers : le cloud dans le gestionnaire de fichiers, monté par GVfs en WebDAV ──────────────────────────────────────
+# Authentification Basic : utilisateur = device_id, mot de passe = jeton de ce PC. Le jeton ne passe QUE par la
+# Gio.MountOperation, dans ce processus : jamais dans l'adresse, argv, un fichier ni l'environnement, et jamais gardé
+# par GVfs (password_save = NEVER). Toute question de GVfs (certificat inconnu…) reçoit un refus.
+FAVORI = "Cloud JARVIS"
+MONTAGE_DELAI = 120
+# Les paquets qui donnent gi avec Gio, puis le moteur WebDAV de GVfs (lus dans les dépôts de chaque distribution)
+PAQUETS_FICHIERS = {"arch": ("python-gobject glib2", "gvfs-dnssd"),
+                    "debian": ("python3-gi gir1.2-glib-2.0", "gvfs-backends"),
+                    "fedora": ("python3-gobject-base glib2", "gvfs"),
+                    "suse": ("python3-gobject typelib-1_0-Gio-2_0", "gvfs-backends")}
+
+
+def famille_distribution():
+    ids = []
+    try:
+        for l in open("/etc/os-release", encoding="utf-8", errors="replace"):
+            k, _, v = l.strip().partition("=")
+            if k in ("ID", "ID_LIKE"):
+                ids += v.strip('"').lower().split()
+    except OSError:
+        pass
+    for f, noms in (("arch", ("arch",)), ("debian", ("debian", "ubuntu")), ("fedora", ("fedora", "rhel")),
+                    ("suse", ("opensuse", "suse", "opensuse-tumbleweed"))):
+        if any(i in noms or i.startswith("opensuse") and f == "suse" for i in ids):
+            return f
+    return None
+
+
+def charger_gio():
+    """(Gio, GLib), ou None si le module gi ou sa typelib Gio manque."""
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+    except (ImportError, ValueError, AttributeError):
+        return None
+    return Gio, GLib
+
+
+def manque_fichiers(gio, schema):
+    """Le message de ce qui manque pour « Ouvrir dans Fichiers », ou None si tout est là."""
+    f = famille_distribution()
+    def paquets(i):
+        if f:
+            return PAQUETS_FICHIERS[f][i]
+        return " ; ".join(f"{n} : {p[i]}" for n, p in (("Arch", PAQUETS_FICHIERS["arch"]), ("Debian", PAQUETS_FICHIERS["debian"]),
+                                                       ("Fedora", PAQUETS_FICHIERS["fedora"]), ("openSUSE", PAQUETS_FICHIERS["suse"])))
+    if gio is None:
+        return T(f"Module Python gi (Gio) absent : installe {paquets(0)}.", f"Python module gi (Gio) missing: install {paquets(0)}.")
+    try:
+        schemas = set(gio[0].Vfs.get_default().get_supported_uri_schemes() or [])
+    except Exception:          # un Gio cassé : comme absent
+        schemas = set()
+    if schema not in schemas:
+        return T(f"Moteur WebDAV de GVfs absent : installe {paquets(1)}, puis déconnecte-toi et reconnecte-toi.",
+                 f"GVfs WebDAV backend missing: install {paquets(1)}, then log out and back in.")
+    return None
+
+
+def hote_joignable(srv):
+    """La première adresse vérifiée (adresse_fixee) qui accepte une connexion : « localhost » peut donner ::1 avant
+    127.0.0.1, et GVfs ne réessaie pas une autre adresse. Aucune : la première (GVfs dira qu'il ne joint pas)."""
+    for ip in srv.adresse:
+        try:
+            socket.create_connection((ip, srv.port), timeout=5).close()
+            return ip
+        except OSError:
+            continue
+    return srv.adresse[0]
+
+
+def adresse_dav(srv):
+    """dav(s)://… du cloud, SANS identifiants : en https, par le nom (GVfs vérifie le certificat) ; en http, sur la
+    première adresse vérifiée par adresse_fixee (GVfs résoudrait le nom lui-même, sans notre contrôle)."""
+    if srv.https:
+        hote = srv.hote
+    else:
+        if not srv.adresse:
+            raise Echec(T("Transport refusé : le cloud exige HTTPS, ou HTTP vers ce PC, un réseau privé ou Tailscale.",
+                          "Transport refused: the cloud needs HTTPS, or HTTP to this PC, a private network or Tailscale."), TRANSPORT)
+        hote = hote_joignable(srv)
+    if not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", hote or ""):
+        raise Echec(T("Adresse du serveur inattendue.", "Unexpected server address."), TRANSPORT)
+    netloc = f"[{hote}]" if ":" in hote else hote
+    if srv.https:
+        netloc += f":{srv.port}" if srv.port != 443 else ""
+    else:
+        netloc += f":{srv.port}"
+    chemin = urllib.parse.quote(srv.base, safe="/") + "/cloud/dav/"
+    return ("davs://" if srv.https else "dav://") + netloc + chemin
+
+
+def favoris_chemin():
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "gtk-3.0" / "bookmarks"
+
+
+def favori_changer(adresse=None):
+    """Retire la ligne « Cloud JARVIS » (dav:// ou davs://) des favoris GTK, puis l'ajoute pour adresse si donnée. Les
+    autres lignes ne bougent pas ; écriture atomique, droits gardés ; un lien symbolique est refusé ; le fichier n'est
+    créé que si son dossier existe. Vrai si le fichier a été écrit."""
+    f = favoris_chemin()
+    try:
+        st = os.lstat(f)
+    except FileNotFoundError:
+        st = None
+    if st is not None and not stat.S_ISREG(st.st_mode):
+        raise Echec(T("Favoris GTK : ce n'est pas un fichier ordinaire (lien refusé), rien n'est changé.",
+                      "GTK bookmarks: not a regular file (link refused), nothing changed."))
+    if st is None and (adresse is None or not f.parent.is_dir()):
+        return False
+    lignes = f.read_text(encoding="utf-8", errors="surrogateescape").splitlines(keepends=True) if st else []
+    def notre(l):
+        u, _, nom = l.rstrip("\n").partition(" ")
+        return nom == FAVORI and u.startswith(("dav://", "davs://"))
+    gardees = [l for l in lignes if not notre(l)]
+    if gardees and not gardees[-1].endswith("\n"):
+        gardees[-1] += "\n"
+    nouvelles = gardees + ([f"{adresse} {FAVORI}\n"] if adresse else [])
+    if nouvelles == lignes:
+        return False
+    fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix=".bookmarks-nc-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as o:
+            o.write("".join(nouvelles))
+        os.chmod(tmp, stat.S_IMODE(st.st_mode) if st else 0o644)
+        os.replace(tmp, f)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    return True
+
+
+def monter(gio, adresse, utilisateur, jeton):
+    """Monte adresse par GVfs (déjà monté : rien). Le jeton ne sert qu'à répondre à ask-password, une fois."""
+    Gio, GLib = gio
+    f = Gio.File.new_for_uri(adresse)
+    try:
+        f.find_enclosing_mount(None)
+        return False
+    except GLib.Error:
+        pass
+    op = Gio.MountOperation()
+    etat = {"essais": 0, "refus": None, "erreur": None}
+    annuler = Gio.Cancellable()
+
+    def mot_de_passe(o, *_):
+        etat["essais"] += 1
+        if etat["essais"] > 1:                     # refusé une fois : jeton faux ou révoqué, on ne boucle pas
+            etat["refus"] = "jeton"
+            o.reply(Gio.MountOperationResult.ABORTED)
+            return
+        o.set_username(utilisateur)
+        o.set_password(jeton)
+        o.set_password_save(Gio.PasswordSave.NEVER)
+        o.reply(Gio.MountOperationResult.HANDLED)
+
+    def question(o, *_):                           # certificat inconnu, autre domaine… : jamais oui tout seul
+        etat["refus"] = "question"
+        o.reply(Gio.MountOperationResult.ABORTED)
+
+    op.connect("ask-password", mot_de_passe)
+    op.connect("ask-question", question)
+    boucle = GLib.MainLoop()
+
+    def fini(source, res):
+        try:
+            source.mount_enclosing_volume_finish(res)
+        except GLib.Error as e:
+            etat["erreur"] = e
+        boucle.quit()
+
+    def trop_long():
+        etat["refus"] = etat["refus"] or "delai"
+        annuler.cancel()
+        return False
+
+    GLib.timeout_add_seconds(MONTAGE_DELAI, trop_long)
+    f.mount_enclosing_volume(Gio.MountMountFlags.NONE, op, annuler, fini)
+    boucle.run()
+    e = etat["erreur"]
+    if e is not None and e.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
+        return False
+    if etat["refus"] == "question":
+        raise Echec(T("GVfs a posé une question (certificat inconnu ?) : refusée, rien n'est monté.",
+                      "GVfs asked a question (unknown certificate?): refused, nothing mounted."), TRANSPORT)
+    if etat["refus"] == "jeton":
+        raise Echec(T("Le serveur refuse le jeton de ce PC pour WebDAV : associe ce PC à nouveau.",
+                      "The server refuses this PC's token for WebDAV: pair this PC again."), NON_ASSOCIE)
+    if etat["refus"] == "delai":
+        raise Echec(T("Montage trop long : serveur injoignable ?", "Mount took too long: server unreachable?"), HORS_LIGNE)
+    if e is not None:
+        raise Echec(T(f"Montage refusé par GVfs : {propre(e.message, 200)}", f"Mount refused by GVfs: {propre(e.message, 200)}"), HORS_LIGNE)
+    return True
+
+
+def demonter_si_monte(gio, adresse):
+    """Démonte adresse si GVfs la garde ; faux si rien n'était monté. Les erreurs sont tues (démontage de courtoisie)."""
+    Gio, GLib = gio
+    try:
+        m = Gio.File.new_for_uri(adresse).find_enclosing_mount(None)
+    except GLib.Error:
+        return False
+    boucle = GLib.MainLoop()
+
+    def fini(source, res):
+        with contextlib.suppress(GLib.Error):
+            source.unmount_with_operation_finish(res)
+        boucle.quit()
+
+    m.unmount_with_operation(Gio.MountUnmountFlags.NONE, Gio.MountOperation(), None, fini)
+    boucle.run()
+    return True
+
+
+def cmd_fichiers(a):
+    s = Session()
+    adresse = adresse_dav(s.srv)
+    gio = charger_gio()
+    manque = manque_fichiers(gio, adresse.split(":", 1)[0])
+    if manque:
+        raise Echec(manque, DEPENDANCE)
+    st = s.etat()
+    if st.get("webdav") not in ("read_only", "read_write"):
+        raise Echec(T("WebDAV n'est pas ouvert sur ce serveur.", "WebDAV is not open on this server."), DESACTIVE)
+    f = st.get("features") if isinstance(st.get("features"), dict) else {}
+    ecriture = f.get("webdav_write") is True
+    monter(gio, adresse, s.appareil["device_id"], s.jeton)
+    favori_changer(adresse)
+    Gio = gio[0]
+    appli = Gio.AppInfo.get_default_for_type("inode/directory", False)
+    ouvert = False
+    if appli is not None:
+        with contextlib.suppress(Exception):
+            ouvert = bool(appli.launch_uris([adresse], None))
+    mode = T("lecture et écriture", "read and write") if ecriture else T("lecture seule", "read only")
+    dire(T(f"Cloud JARVIS dans Fichiers ({mode}) : favori « {FAVORI} »." + ("" if ouvert else " Ouvre-le depuis ton gestionnaire de fichiers."),
+           f"JARVIS Cloud in Files ({mode}): “{FAVORI}” bookmark." + ("" if ouvert else " Open it from your file manager.")),
+         evenement="fichiers", adresse=adresse, ecriture=ecriture, ouvert=ouvert)
+    return OK
+
+
+def demonter_et_oublier(srv):
+    """Démontage (si gi est là) et favori retiré ; pour demonter et dissocier. Rien n'échoue pour si peu."""
+    try:
+        adresse = adresse_dav(srv)
+    except Echec:
+        adresse = None
+    gio = charger_gio()
+    monte = False
+    if adresse and gio is not None:
+        with contextlib.suppress(Exception):
+            monte = demonter_si_monte(gio, adresse)
+    retire = False
+    with contextlib.suppress(Echec, OSError):
+        retire = favori_changer(None)
+    return monte, retire
+
+
+def cmd_demonter(a):
+    monte, retire = demonter_et_oublier(Serveur())
+    dire(T("Cloud JARVIS démonté, favori retiré." if monte or retire else "Rien à démonter.",
+           "JARVIS Cloud unmounted, bookmark removed." if monte or retire else "Nothing to unmount."),
+         evenement="demonte", demonte=monte, favori_retire=retire)
+    return OK
+
+
+def fichiers_possibles():
+    """Pour le panneau : « Ouvrir dans Fichiers » n'apparaît que si gi et le moteur WebDAV sont là (rien n'est monté)."""
+    try:
+        srv = Serveur()
+        return manque_fichiers(charger_gio(), "davs" if srv.https else "dav") is None
+    except Echec:
+        return False
+
+
 # ── Sélecteur de fichiers (portail du bureau) ───────────────────────────────────────────────────────────────────────────
 # org.freedesktop.portal.FileChooser.OpenFile : le portail répond par un signal Response envoyé à l'appelant SEUL ; un
 # « gdbus monitor » à côté ne le verrait pas. D'où ce petit client D-Bus (bus de session, bibliothèque standard) : une
@@ -2198,6 +2483,8 @@ def analyseur():
     x.set_defaults(f=cmd_ouvrir)
     sous.add_parser("fenetre", aliases=["window"]).set_defaults(f=cmd_fenetre)
     sous.add_parser("choisir", aliases=["pick"]).set_defaults(f=cmd_choisir)
+    sous.add_parser("fichiers", aliases=["files"]).set_defaults(f=cmd_fichiers)
+    sous.add_parser("demonter", aliases=["unmount"]).set_defaults(f=cmd_demonter)
     return p
 
 

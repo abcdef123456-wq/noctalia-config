@@ -47,6 +47,29 @@ ramène à un dossier parent.
   aperçu, nouvelle question.
 - Chaque action n'apparaît que si le serveur annonce sa capacité (déplacer, aperçu, suppression de dossier).
 
+### Ouvrir dans Fichiers
+
+« Ouvrir dans Fichiers » (en haut du panneau) ou `nc-cloud fichiers` monte le cloud par GVfs en WebDAV, ajoute un favori
+« Cloud JARVIS » à la barre latérale du gestionnaire de fichiers, puis l'ouvre. C'est le serveur qui décide de la
+lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni à la connexion, ni en fond.
+
+- Identifiants : l'identifiant de ce PC et son jeton, donnés à GVfs dans le processus de nc-cloud seulement (jamais dans
+  l'adresse, la ligne de commande, un fichier ni l'environnement), et jamais enregistrés par GVfs. Toute question de GVfs
+  (certificat inconnu…) est refusée.
+- En `https://`, le montage vise le nom du serveur (certificat vérifié par GVfs) ; en `http://` (ce PC, réseau privé,
+  Tailscale), il vise l'adresse IP vérifiée par nc-cloud, jamais le nom ; `http://` vers Internet est refusé.
+- Le favori est une ligne du fichier `~/.config/gtk-3.0/bookmarks`, sans identifiants ; les autres lignes ne bougent
+  pas. `nc-cloud demonter` et `nc-cloud dissocier` démontent et le retirent.
+- Il faut deux paquets facultatifs, qu'`install.sh` n'installe pas : sans eux, le bouton n'apparaît pas, et
+  `nc-cloud verifier` comme `nc-diag` disent lequel manque.
+
+| Distribution | gi (Gio) | WebDAV de GVfs |
+| --- | --- | --- |
+| Arch | `python-gobject`, `glib2` | `gvfs-dnssd` |
+| Debian 13 | `python3-gi`, `gir1.2-glib-2.0` | `gvfs-backends` |
+| Fedora | `python3-gobject-base`, `glib2` | `gvfs` |
+| openSUSE | `python3-gobject`, `typelib-1_0-Gio-2_0` | `gvfs-backends` |
+
 ### Envoyer des fichiers
 
 - Un petit nuage dans la pilule (à côté de l'heure, avec `CLOUD_JARVIS=oui` et ce PC associé) : un clic ouvre le
@@ -97,6 +120,8 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud associer [NOM]` | associe ce PC ; refusé s'il l'est déjà |
 | `nc-cloud dissocier` | révoque ce PC, efface son jeton et ses envois interrompus |
 | `nc-cloud etat` | état, quota et limites annoncés par le serveur |
+| `nc-cloud fichiers` | monte le cloud dans le gestionnaire de fichiers (WebDAV), pose le favori « Cloud JARVIS », l'ouvre |
+| `nc-cloud demonter` | démonte et retire le favori (à lancer aussi si tu coupes `CLOUD_JARVIS`) |
 | `nc-cloud choisir` | le sélecteur de fichiers du bureau (portail) ; écrit les fichiers choisis, n'envoie rien |
 | `nc-cloud lister [ID] [--suite CURSEUR]` | une page d'un dossier (la racine par défaut), avec la commande de la suite |
 | `nc-cloud dossier PARENT NOM` | crée un dossier (`root` pour la racine) |
@@ -222,7 +247,7 @@ plus de 24 h sont retirées au prochain `ouvrir`.
 ## Limites et ce qui n'est pas fait
 
 - Pas de dossier entier, pas de partage avec d'autres personnes, pas de synchronisation automatique.
-- Pas d'ouverture dans le gestionnaire de fichiers (WebDAV en lecture seule).
+- Fichiers : la fin de session et les coupures réseau sont l'affaire de GVfs ; un montage perdu se refait par le bouton.
 - Une association dont la réponse se perd en route laisse un appareil sans jeton côté serveur : révoque-le depuis le
   serveur. Si Ctrl + C ou le trousseau interrompt l'association, ce PC est révoqué tout de suite ; si cette révocation
   échoue, le message donne l'identifiant de l'appareil à révoquer.

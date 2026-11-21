@@ -538,6 +538,12 @@ def verifier(b):
                   "it comes with xdg-desktop-portal-hyprland (or hyprland-qtutils depending on the distribution)"),
                 cle="share_picker_absent")
     # Cloud JARVIS, « Importer des fichiers… » : il faut un portail qui sait choisir des fichiers (pas celui de Hyprland)
+    if _reglage("CLOUD_JARVIS") == "oui":
+        manque = fichiers_cloud_manque()
+        if manque:
+            b.avert(T("« Ouvrir dans Fichiers » du Cloud JARVIS indisponible : ", "JARVIS Cloud “Open in Files” unavailable: ") + manque,
+                    T("installe le paquet indiqué (rien n'est installé tout seul)", "install the package shown (nothing is installed on its own)"),
+                    cle="cloud_fichiers_absent")
     if _reglage("CLOUD_JARVIS") == "oui" and not selecteur_fichiers():
         b.avert(T("aucun sélecteur de fichiers (portail) : « Importer des fichiers… » du Cloud JARVIS ne marche pas, dépose les fichiers sur l'île",
                   "no file picker (portal): “Import files…” of the JARVIS Cloud does not work, drop the files on the island"),
@@ -1450,6 +1456,17 @@ def _reglage(cle):
             if l.strip().startswith(cle + "="):
                 v = l.split("=", 1)[1].strip().strip('"')
     return v
+
+
+def fichiers_cloud_manque():
+    """Ce qui manque à « nc-cloud fichiers » (gi avec Gio, moteur WebDAV de GVfs), vérifié sur place sans réseau, ou ""."""
+    r, code = sortie([sys.executable, "-c", "import gi; gi.require_version('Gio', '2.0'); from gi.repository import Gio; "
+                      "print(' '.join(Gio.Vfs.get_default().get_supported_uri_schemes() or []))"], 20)
+    if code != 0:
+        return T("module Python gi (Gio) absent (nc-cloud verifier dit le paquet)", "Python module gi (Gio) missing (nc-cloud verifier names the package)")
+    if not {"dav", "davs"} & set(r.split()):
+        return T("moteur WebDAV de GVfs absent (nc-cloud verifier dit le paquet)", "GVfs WebDAV backend missing (nc-cloud verifier names the package)")
+    return ""
 
 
 def selecteur_fichiers():
