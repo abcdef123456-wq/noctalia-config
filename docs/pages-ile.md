@@ -102,5 +102,5 @@ veut dire demain. La ligne montre l'heure comprise avant que tu valides (Entrée
 n'est créé. Le texte reste tel quel (200 caractères au plus, jamais interprété), 50 rappels au plus. `rappels` les
 liste, Entrée sur l'un le supprime. À l'heure, une notification sort (bouton « Reporter » comme les autres) ; un rappel
 échu pendant que l'île ou le PC était éteint s'affiche une fois au démarrage. Les rappels sont gardés dans un fichier
-privé. Attention : `1h30` collé veut dire 01:30 ; pour une durée, écris `dans 1h30` ou `1 h 30`. Limite : l'île n'a
-pas de signal de veille ; si le PC dort, le rappel est montré à son réveil, un peu en retard.
+privé. Attention : `1h30` collé veut dire 01:30 ; pour une durée, écris `dans 1h30` ou `1 h 30`. Limite : un rappel échu
+pendant la veille s'affiche au retour de l'écran (écran rallumé ou session déverrouillée).

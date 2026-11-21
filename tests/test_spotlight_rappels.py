@@ -129,6 +129,7 @@ singleton Rappels 1.0 Rappels.qml
 singleton Memo 1.0 Memo.qml
 singleton Notifs 1.0 Notifs.qml
 singleton Reglages 1.0 Reglages.qml
+singleton Etat 1.0 Etat.qml
 """
 FAUX = {
     "Memo.qml": """pragma Singleton
@@ -141,6 +142,9 @@ QtObject {
     "Notifs.qml": """pragma Singleton
 import QtQuick
 QtObject { function rappeler(texte) { console.log("RAPPEL " + texte) } }""",
+    "Etat.qml": """pragma Singleton
+import QtQuick
+QtObject { property bool ecranVu: false }""",
     "Reglages.qml": """pragma Singleton
 import QtQuick
 QtObject { property bool en: false }""",
@@ -160,6 +164,11 @@ ShellRoot {
             console.log("CREE " + Rappels.creer(a.texte, a.due) + " " + Rappels.nombre)
             Rappels.supprimer("b")
             console.log("APRES " + Rappels.nombre + " " + Rappels.liste.map(x => x.texte).join("|"))
+            // veille simulée : l'échu reste dans la liste (minuteur non tiré) ; au retour de l'écran il est montré une seule fois
+            Rappels.liste = [{ id: "v", texte: "echu en veille", due: Date.now() - 1000 }]
+            console.log("AVANT " + Rappels.nombre)
+            Etat.ecranVu = true; Etat.ecranVu = false; Etat.ecranVu = true
+            console.log("APRESVEILLE " + Rappels.nombre)
             Qt.quit()
         }
     }
@@ -187,6 +196,9 @@ class Singleton(unittest.TestCase):
         self.assertIn("ANALYSE true sortir", sortie)
         self.assertIn("CREE true 2", sortie)
         self.assertIn("APRES 1 sortir", sortie)
+        self.assertIn("AVANT 1", sortie)                                              # échu avec l'écran éteint : pas perdu
+        self.assertEqual(sortie.count("RAPPEL echu en veille"), 1, sortie)            # montré une seule fois au retour de l'écran
+        self.assertIn("APRESVEILLE 0", sortie)
 
 
 if __name__ == "__main__":

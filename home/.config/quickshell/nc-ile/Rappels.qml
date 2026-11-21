@@ -2,8 +2,8 @@ pragma Singleton
 // Rappels locaux (Spotlight « rappel 15h appeler le garage », « rappels ») : la liste { id, texte, due } est gardée par
 // Memo (« rappels », fichier privé) et survit aux redémarrages. UN SEUL minuteur, non répétitif, visé sur la prochaine
 // échéance, et armé seulement s'il y a un rappel en attente. Au tir on compare à l'heure réelle puis on réarme.
-// Limite connue : pas de signal de veille ni de déverrouillage dans l'île ; un PC mis en veille retarde un rappel
-// jusqu'à son réveil (le minuteur ne compte pas la veille), il est alors montré au tir suivant (au plus à la reprise du minuteur).
+// Limite connue : le minuteur ne compte pas la veille ; un rappel échu pendant la veille s'affiche au retour de l'écran
+// (Etat.ecranVu repasse à vrai : écran rallumé ou session déverrouillée).
 import QtQuick
 import Quickshell
 import "Rappels.js" as R
@@ -52,5 +52,6 @@ Singleton {
         minuteur.interval = R.delai(p.prochaine, Date.now())
         minuteur.restart()
     }
+    Connections { target: Etat; function onEcranVuChanged() { if (Etat.ecranVu && r.lance) r.verifier() } }
     Timer { id: minuteur; repeat: false; onTriggered: r.verifier() }
 }
