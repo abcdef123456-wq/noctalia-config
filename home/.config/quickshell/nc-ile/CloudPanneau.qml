@@ -37,6 +37,11 @@ FloatingWindow {
     }
 
     Connections { target: CloudEtat; function onRedemander(id) { cloud.aSupprimer = id } }
+    function finirGlisser() {
+        if (fantome.Drag.active) fantome.Drag.cancel()
+        fantome.Drag.active = false
+        fantome.entree = null
+    }
     Component.onCompleted: CloudEtat.panneauOuvert = true
     Component.onDestruction: CloudEtat.panneauOuvert = false
 
@@ -57,6 +62,8 @@ FloatingWindow {
         Rectangle { anchors.fill: parent; color: Qt.alpha(Couleurs.fond, cloud.verre ? 0.62 : 0.92) }
 
         // L'aperçu sous le pointeur pendant un glisser (Drag interne au panneau : rien ne sort de la fenêtre)
+        // La page relue pendant un glisser (Actualiser, autre dossier) : le glisser est annulé
+        Connections { target: CloudEtat; function onEntreesChanged() { cloud.finirGlisser() } }
         Rectangle {
             id: fantome
             objectName: "nc-cloud-fantome"
@@ -235,10 +242,13 @@ FloatingWindow {
                                 required property string modelData
                                 required property int index
                                 readonly property var ex: CloudEtat.examen[modelData]
-                                width: recus.width; height: 18
+                                width: recus.width; height: Math.max(18, cheminRecu.implicitHeight)
+                                // Le chemin en entier (texte brut, à la ligne n'importe où) : deux chemins qui ne diffèrent
+                                // qu'au milieu restent distincts
                                 Texte {
+                                    id: cheminRecu
                                     objectName: "nc-cloud-recu-" + index
-                                    width: parent.width - tailleRecu.implicitWidth - 10; elide: Text.ElideMiddle; font.pixelSize: 12
+                                    width: parent.width - tailleRecu.implicitWidth - 10; wrapMode: Text.WrapAnywhere; font.pixelSize: 12
                                     text: CloudEtat.court(parent.modelData)
                                     color: parent.ex && parent.ex.refus ? Couleurs.rouge : parent.ex && parent.ex.cache ? Couleurs.orange : Couleurs.texte
                                 }
@@ -404,7 +414,8 @@ FloatingWindow {
                             border.width: cibleLigne.containsDrag ? 2 : (choisie ? 1 : 0); border.color: Couleurs.accent
                             // Un clic choisit, un double-clic ouvre ; les actions s'ajoutent SOUS le nom, la ligne ne bouge pas.
                             // Glisser (au-delà du seuil de Qt) : l'aperçu suit le pointeur ; lâché sur un dossier ou sur ↑, on déplace
-                            MouseArea { id: zoneLigne; anchors.fill: parent; hoverEnabled: true; z: -1; cursorShape: Qt.PointingHandCursor
+                            MouseArea { id: zoneLigne; objectName: "nc-cloud-zone-" + ligne.modelData.id
+                                        anchors.fill: parent; hoverEnabled: true; z: -1; cursorShape: Qt.PointingHandCursor
                                         readonly property bool glissable: CloudEtat.peutDeplacer && !!ligne.modelData.revision
                                                                           && !ligne.renommage && !CloudEtat.deplacement
                                         drag.target: glissable ? fantome : null
@@ -414,11 +425,12 @@ FloatingWindow {
                                         function placer(m) { var p = zoneLigne.mapToItem(fantome.parent, m.x, m.y); fantome.x = p.x - 16; fantome.y = p.y - 17 }
                                         onPressed: m => placer(m)
                                         onPositionChanged: m => { if (drag.active) placer(m) }
+                                        // Qt émet released AVANT de couper le glisser : seul un vrai relâchement dépose. Une saisie
+                                        // perdue (canceled) coupe le glisser sans relâchement : il est annulé, rien ne bouge
+                                        onReleased: if (drag.active && fantome.Drag.active) { fantome.Drag.drop(); cloud.finirGlisser() }
                                         drag.onActiveChanged: {
                                             if (drag.active) { fantome.entree = ligne.modelData; fantome.Drag.active = true; return }
-                                            fantome.Drag.drop()
-                                            fantome.Drag.active = false
-                                            fantome.entree = null
+                                            cloud.finirGlisser()
                                         }
                                         onClicked: CloudEtat.choisir(ligne.modelData)
                                         onDoubleClicked: CloudEtat.ouvrirEntree(ligne.modelData) }

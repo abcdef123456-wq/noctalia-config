@@ -583,6 +583,39 @@ class HorsEcran(unittest.TestCase):
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertEqual(j.count("--json choisir"), 3, j)
 
+    def test_glisser_sans_relacher_ou_page_relue_ne_deplace_rien(self):
+        j = self.lancer(self.OUVRIR + '''
+            readonly property string f: "nc-cloud-entree-ffffffffffffffffffffffffffffffff"
+            readonly property string d: "nc-cloud-entree-dddddddddddddddddddddddddddddddd"
+            function glisser(de, vers) {
+                souris.mousePress(de, 60, 20); souris.mouseMove(de, 70, 24); souris.mouseMove(de, 90, 30); souris.mouseMove(vers, 12, 12)
+            }
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) { glisser(trouver(corps, f), trouver(corps, d)); etape++; return }
+                if (etape === 2) {
+                    verifier(trouver(corps, "nc-cloud-cible-dddddddddddddddddddddddddddddddd").containsDrag, "au-dessus de Photos")
+                    var z = trouver(corps, "nc-cloud-zone-ffffffffffffffffffffffffffffffff")
+                    z.visible = false
+                    z.visible = true                          // saisie perdue, sans relâchement
+                    verifier(!vu(corps, "nc-cloud-fantome"), "glisser annulé")
+                    souris.mouseRelease(trouver(corps, d), 12, 12); etape++; return }
+                if (etape === 3) { glisser(trouver(corps, f), trouver(corps, d)); etape++; return }
+                if (etape === 4) {
+                    verifier(vu(corps, "nc-cloud-fantome"), "second glisser")
+                    CloudEtat.actualiser()                                          // la page est relue pendant le glisser
+                    verifier(!vu(corps, "nc-cloud-fantome") && trouver(corps, "nc-cloud-fantome").entree === null, "annulé à la relecture")
+                    etape++; return }
+                if (etape === 5) {
+                    ticks++; if (ticks < 3) return
+                    souris.mouseRelease(trouver(corps, d), 12, 12)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, features={"entry_move": True, "file_delete": True})
+        self.assertFalse([x for x in j if "deplacer" in x], j)
+
     def test_glisser_sur_un_dossier_sur_soi_meme_puis_vers_le_parent(self):
         sous = {"evenement": "page", "parent": {"id": "dddddddddddddddddddddddddddddddd"}, "next_cursor": None,
                 "entries": [{"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "photo.png", "kind": "file", "size": 3, "revision": "r5", "parent": "dddddddddddddddddddddddddddddddd"}]}

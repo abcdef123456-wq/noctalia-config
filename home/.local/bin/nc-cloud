@@ -31,6 +31,7 @@ Le serveur et la clé sont ceux de JARVIS (~/.config/nc/assistant.conf). Aucun r
 interrogé que quand tu lances une commande. Les envois interrompus sont notés dans ~/.local/state/nc-cloud (sans jeton)."""
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import importlib.machinery
@@ -55,6 +56,10 @@ import time
 import unicodedata
 import urllib.parse
 import http.client
+
+
+# nc-assistant, nc-bac… chargés comme modules : aucun __pycache__ laissé à côté d'eux dans ~/.local/bin
+sys.dont_write_bytecode = True
 
 
 def charger_assistant():
@@ -758,6 +763,35 @@ def signature(chemin):
     return st.st_size, st.st_mtime_ns
 
 
+def ouvrir_controle(p, controle=None):
+    """Le fichier ouvert UNE fois, sans suivre de lien (O_NOFOLLOW), et le même que celui du contrôle (périphérique,
+    inode, taille, date) : l'empreinte et l'envoi passent par ce descripteur, jamais par le chemin rouvert."""
+    try:
+        fd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0))
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise Echec(T(f"{propre(p.name)} est devenu un lien symbolique : non envoyé.",
+                          f"{propre(p.name)} became a symbolic link: not uploaded."), SOURCE) from None
+        raise
+    st = os.fstat(fd)
+    vu = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if not stat.S_ISREG(st.st_mode) or (controle is not None and vu != (controle.st_dev, controle.st_ino, controle.st_size, controle.st_mtime_ns)):
+        os.close(fd)
+        raise Echec(T(f"{propre(p.name)} a été remplacé depuis le contrôle : non envoyé.",
+                      f"{propre(p.name)} was replaced since the check: not uploaded."), SOURCE)
+    return fd
+
+
+def empreinte_fd(fd):
+    h, pos = hashlib.sha256(), 0
+    while True:
+        bloc = os.pread(fd, BLOC, pos)
+        if not bloc:
+            return h.hexdigest()
+        h.update(bloc)
+        pos += len(bloc)
+
+
 def politique(si_existe):
     """--si-existe -> (policy, expected_revision, annuler_si_conflit)."""
     if not si_existe:
@@ -879,7 +913,7 @@ class Envoi:
         taille, n, total = self.morceaux()
         h = hashlib.sha256()
         envoye = sum(min(n, taille - i * n) for i in recus if 0 <= i < total) if taille else 0
-        with open(self.m["source"], "rb") as f:
+        with self.lire() as f:
             for i in range(total):
                 if i in recus and not tout_lire:
                     continue
@@ -899,9 +933,21 @@ class Envoi:
         if tout_lire and h.hexdigest() != self.m["sha256"]:
             raise self.change()
 
+    def lire(self):
+        """La source à lire : le descripteur ouvert au contrôle s'il y en a un (premier envoi), sinon le chemin (reprise)."""
+        if getattr(self, "fd", None) is not None:
+            f = os.fdopen(os.dup(self.fd), "rb")
+            f.seek(0)
+            return f
+        return open(self.m["source"], "rb")
+
     def source_intacte(self):
         try:
-            sig = signature(self.m["source"])
+            if getattr(self, "fd", None) is not None:
+                st = os.fstat(self.fd)
+                sig = (st.st_size, st.st_mtime_ns)
+            else:
+                sig = signature(self.m["source"])
         except OSError:
             sig = None
         if sig != (self.m["size"], self.m["mtime_ns"]):
@@ -959,26 +1005,39 @@ class Envoi:
         return CONFLIT
 
 
-def preparer(s, p, parent, pol, attendue):
-    """Une intention neuve pour ce fichier : révision du dossier relue, empreinte lue en flux, nouvelle clé."""
+def preparer(s, p, parent, pol, attendue, controle=None):
+    """Une intention neuve pour ce fichier : ouvert une fois (le même que celui du contrôle), révision du dossier relue,
+    empreinte lue en flux par ce descripteur, nouvelle clé."""
+    fd = ouvrir_controle(p, controle)
+    try:
+        return preparer_fd(s, p, parent, pol, attendue, fd)
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def preparer_fd(s, p, parent, pol, attendue, fd):
     rev = revision_dossier(s, parent)
-    taille, mtime = signature(p)
+    st = os.fstat(fd)
+    taille, mtime = st.st_size, st.st_mtime_ns
     m = {"version": 1, "cle": secrets.token_urlsafe(32), "source": str(p), "mtime_ns": mtime, "cree": time.time(),
          "parent_id": parent, "parent_revision": rev, "name": unicodedata.normalize("NFC", p.name), "size": taille,
-         "sha256": empreinte(p), "policy": pol, "expected_revision": attendue, "upload_id": None, "chunk_bytes": None,
+         "sha256": empreinte_fd(fd), "policy": pol, "expected_revision": attendue, "upload_id": None, "chunk_bytes": None,
          **{k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}}
     envoi = Envoi(s, ENVOIS / (m["cle"] + ".json"), m)
-    if signature(p) != (taille, mtime):
+    envoi.fd = fd
+    st = os.fstat(fd)
+    if (st.st_size, st.st_mtime_ns) != (taille, mtime):
         raise envoi.change()
     return envoi
 
 
-def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
+def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False, controle=None):
     """Un fichier : code de sortie pour lui. Les codes d'ARRET remontent (toute la commande s'arrête)."""
     for essai in (1, 2):
         envoi = None
         try:
-            envoi = preparer(s, p, parent, pol, attendue)
+            envoi = preparer(s, p, parent, pol, attendue, controle)
             envoi.pour_creer = pour_creer
             if pol == "create":
                 # Le serveur ne refuse un nom pris qu'au commit : on regarde avant, pour ne pas tout envoyer pour rien
@@ -1004,7 +1063,8 @@ def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
             if envoi is None:
                 if e.code in ARRET:
                     raise
-                dire(f"{propre(p.name)} : {e}", evenement="resultat", fichier=str(p), etat="echec", code=e.code)
+                dire(f"{propre(p.name)} : {e}", evenement="resultat", fichier=str(p),
+                     etat="refuse" if e.code == SOURCE else "echec", code=e.code)
                 return e.code
             if e.code == HORS_LIGNE:
                 raise                       # la création ou la publication a peut-être eu lieu : le manifeste reste
@@ -1025,6 +1085,10 @@ def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
             if envoi.m.get("upload_id") and envoi.annuler_distant():
                 return OK
             return envoi.echec(e)
+        finally:
+            if envoi is not None and getattr(envoi, "fd", None) is not None:
+                os.close(envoi.fd)
+                envoi.fd = None
     return CONFLIT
 
 
@@ -1041,7 +1105,7 @@ def examiner_un(f):
     p = Path(f)
     nom = propre(p.name or f)
     if not chemin_normal(f):
-        return T(f"{propre(f)} : chemin inattendu (/, . ou .. en trop) : non envoyé.", f"{propre(f)}: unexpected path (extra /, . or ..): not uploaded."), None, False
+        return T(f"{propre(f)} : chemin inattendu (/, . ou .. en trop) : non envoyé.", f"{propre(f)}: unexpected path (extra /, . or ..): not uploaded."), None, False, None
     try:
         st = os.lstat(f)
     except OSError:
@@ -1051,30 +1115,34 @@ def examiner_un(f):
                   if stat.S_ISLNK(st.st_mode) else T("dossier refusé", "folder refused") if stat.S_ISDIR(st.st_mode)
                   else T("nom invalide (240 octets au plus, sans caractère de contrôle)", "invalid name (240 bytes at most, no control character)")
                   if stat.S_ISREG(st.st_mode) else T("pas un fichier ordinaire", "not a regular file"))
-        return f"{propre(f)} : {raison}.", None, False
+        return f"{propre(f)} : {raison}.", None, False, None
     reel = os.path.realpath(f)
     try:
         protege = A.fichier_refuse(f, reel) is not None
     except A.Erreur:
         protege = True                 # protections incalculables : par prudence, rien ne part
     if protege:
-        return T(f"{nom} : fichier protégé, non envoyé.", f"{nom}: protected file, not uploaded."), st.st_size, False
+        return T(f"{nom} : fichier protégé, non envoyé.", f"{nom}: protected file, not uploaded."), st.st_size, False, None
     try:
         with open(f, "rb"):
             pass
     except OSError:
-        return T(f"{nom} : illisible, non envoyé.", f"{nom}: unreadable, not uploaded."), st.st_size, False
-    home = os.path.realpath(str(Path.home()))
-    absolu = os.path.abspath(f)
-    rel = os.path.relpath(absolu, home) if absolu.startswith(home + "/") else ""
-    return None, st.st_size, any(x.startswith(".") for x in Path(rel).parts) if rel else False
+        return T(f"{nom} : illisible, non envoyé.", f"{nom}: unreadable, not uploaded."), st.st_size, False, None
+    # Caché : sous le dossier personnel, comparé sous ses deux formes (il peut passer par un lien symbolique)
+    maison = str(Path.home())
+    cache = False
+    for h in {os.path.abspath(maison), os.path.realpath(maison)}:
+        for x in {os.path.abspath(f), reel}:
+            if x.startswith(h.rstrip("/") + "/"):
+                cache = cache or any(seg.startswith(".") for seg in Path(os.path.relpath(x, h)).parts)
+    return None, st.st_size, cache, st
 
 
 def cmd_examiner(a):
     """Pour le panneau, avant « Envoyer ici » : chemin, taille, caché ou refusé, de chaque fichier. Rien ne part."""
     l = []
     for f in a.fichiers[:MAX_FICHIERS]:
-        raison, taille, cache = examiner_un(f)
+        raison, taille, cache, _ = examiner_un(f)
         l.append({"fichier": f, "taille": taille, "cache": cache, "refus": raison})
     if JSON_SORTIE:
         evenement(evenement="examen", fichiers=l)
@@ -1092,19 +1160,19 @@ def cmd_deposer(a):
         raise Echec(T("remplacer:REVISION vaut pour un seul fichier.", "remplacer:REVISION applies to a single file."), USAGE)
     valides, code = [], OK
     for f in a.fichiers:
-        raison, _, _ = examiner_un(f)
+        raison, _, _, st = examiner_un(f)
         if raison:
             dire(raison, evenement="resultat", fichier=propre(f), etat="refuse", code=ERREUR)
             code = code or ERREUR
             continue
         # Le chemin donné (absolu), pas le chemin résolu : les lignes du panneau s'y associent exactement
-        valides.append(Path(os.path.abspath(f)))
+        valides.append((Path(os.path.abspath(f)), st))
     if not valides:
         return code
     s = Session()
     s.etat()                                   # connexion authentifiée avant de préparer quoi que ce soit
-    for p in valides:
-        code = deposer_un(s, p, a.dans or "root", pol, attendue, annuler) or code
+    for p, st in valides:
+        code = deposer_un(s, p, a.dans or "root", pol, attendue, annuler, controle=st) or code
     return code
 
 
@@ -2028,6 +2096,8 @@ def monter(gio, adresse, utilisateur, jeton):
         d = int(drapeaux)
         if etat["jeton_donne"]:                    # une seconde demande : on ne boucle pas, rien n'est redonné
             return refuser(o, "apres_jeton")
+        if etat["refus"]:                          # une demande déjà refusée : toutes les suivantes aussi
+            return refuser(o, etat["refus"])
         if not d & int(F.NEED_PASSWORD) or d & int(F.NEED_DOMAIN) or "proxy" in str(message or "").lower():
             return refuser(o, "inattendue")
         etat["jeton_donne"] = True
@@ -2074,6 +2144,11 @@ def monter(gio, adresse, utilisateur, jeton):
     if refus == "question":
         if montage_exact(gio, adresse) is not None:        # monté malgré le refus : on ne le garde pas
             demonter_si_monte(gio, adresse)
+        if etat["jeton_donne"]:
+            raise Echec(T("Le montage a échoué après l'envoi du jeton (GVfs a ensuite posé une question, refusée) : vérifie avec "
+                          "nc-cloud verifier ; si le doute persiste, dissocie puis associe ce PC.",
+                          "The mount failed after the token was sent (GVfs then asked a question, refused): check with "
+                          "nc-cloud verifier; if in doubt, unpair then pair this PC again."), TRANSPORT)
         raise Echec(T("GVfs a posé une question (certificat inconnu ?) : refusée, rien n'est monté.",
                       "GVfs asked a question (unknown certificate?): refused, nothing mounted."), TRANSPORT)
     if refus == "inattendue":
@@ -2150,7 +2225,10 @@ def demonter_et_oublier(srv):
     """Démontage (si gi est là) et favori retiré ; pour demonter et dissocier. Rien n'échoue pour si peu. L'adresse est
     celle notée au montage ; sans elle, en https seulement, celle du nom (en http, refaire la sonde pourrait viser une
     autre adresse)."""
-    note = lire_json(MONTAGE) or {}
+    try:
+        note = lire_json(MONTAGE) or {}
+    except Echec:                                  # note illisible : ignorée (dissocier doit aller jusqu'au bout)
+        note = {}
     adresse = note.get("adresse") if isinstance(note.get("adresse"), str) else None
     if adresse is None or not re.fullmatch(r"davs?://[A-Za-z0-9.:\[\]-]{1,260}/[!-~]{0,2000}", adresse):
         adresse = None
@@ -2161,7 +2239,8 @@ def demonter_et_oublier(srv):
     if adresse and gio is not None:
         with contextlib.suppress(Exception):
             monte = demonter_si_monte(gio, adresse)
-    effacer(MONTAGE)
+    with contextlib.suppress(OSError):
+        effacer(MONTAGE)
     retire = False
     with contextlib.suppress(Echec, OSError):
         retire = favori_changer(None)
@@ -2426,9 +2505,10 @@ def cmd_choisir(a):
     jeton = "nc_cloud_" + secrets.token_hex(8)
     attendu = "/org/freedesktop/portal/desktop/request/" + bus.nom.lstrip(":").replace(".", "_") + "/" + jeton
     # Le portail démarré s'il le faut, puis son nom unique : seule SA réponse compte (un autre pair du bus peut en forger)
-    try:
+    with contextlib.suppress(Echec):        # ServiceUnknown alors qu'un portail tourne sans fichier .service : on demande quand même
         bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "StartServiceByName", "org.freedesktop.DBus", "su",
                   ("org.freedesktop.portal.Desktop", 0))
+    try:
         portail = bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", "org.freedesktop.DBus", "s",
                             ("org.freedesktop.portal.Desktop",))[0]
     except (Echec, IndexError):

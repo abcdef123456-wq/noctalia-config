@@ -258,6 +258,9 @@ plus de 24 h sont retirées au prochain `ouvrir`.
 - Fichiers : aucun vrai montage GVfs n'a été essayé ici (tests avec un faux module `gi`). Pas vérifié : ce que gvfsd-dav
   fait de « jamais enregistrer », s'il suit une redirection vers un autre hôte, son invite exacte. Le premier essai réel
   est à faire avec un vrai serveur.
+- Fichiers : le contrôle du proxy lit l'environnement de nc-cloud et les réglages du bureau ; un proxy posé seulement
+  dans l'environnement du service de GVfs n'est pas vu. Le refus d'une demande qui parle de « proxy » dépend de la
+  langue de GVfs : la vraie protection est le contrôle fait avant le montage.
 - Une association dont la réponse se perd en route laisse un appareil sans jeton côté serveur : révoque-le depuis le
   serveur. Si Ctrl + C ou le trousseau interrompt l'association, ce PC est révoqué tout de suite ; si cette révocation
   échoue, le message donne l'identifiant de l'appareil à révoquer.

@@ -152,6 +152,10 @@ CAPACITES = ["exec", "read_file", "write_file", "list_files", "screenshot", "loc
              "media", "notify"]
 MEDIA = {"play", "pause", "play-pause", "next", "previous", "stop", "status", "metadata", "volume"}
 
+# nc-assistant, nc-bac… chargés comme modules : aucun __pycache__ laissé à côté d'eux dans ~/.local/bin
+sys.dont_write_bytecode = True
+
+
 def charger_bac():
     """nc-bac (même dossier) comme module : les listes de chemins secrets et la commande systemd-run du bac."""
     chemin = Path(__file__).resolve().parent / "nc-bac"

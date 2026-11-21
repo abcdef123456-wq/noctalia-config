@@ -1119,7 +1119,8 @@ elif sys.argv[1] == "clear":
         self.associer()
         self.favoris().parent.mkdir(parents=True)
         for mode, code, reponses in (("question", 9, ["refuse"]), ("mdp_refuse", 1, ["repondu", "refuse"]), ("erreur", 1, ["repondu"]),
-                                     ("domaine", 15, ["refuse"]), ("msg_proxy", 15, ["refuse"]), ("sans_mdp", 15, ["refuse"])):
+                                     ("domaine", 15, ["refuse"]), ("msg_proxy", 15, ["refuse"]), ("sans_mdp", 15, ["refuse"]),
+                                     ("refus_puis_mdp", 15, ["refuse", "refuse"]), ("mdp_puis_question", 9, ["repondu", "refuse"])):
             with self.subTest(mode):
                 self.faux_gi(mode)
                 if self.journal_gi.exists():
@@ -1129,7 +1130,7 @@ elif sys.argv[1] == "clear":
                 self.assertEqual([x["r"] for x in vus], reponses)
                 # Tout refus : l'opération est vidée AVANT la réponse (le jeton n'y reste pas)
                 self.assertTrue(all(x["mdp"] is None and not x["u"] for x in vus if x["r"] == "refuse"), vus)
-                if mode in ("mdp_refuse", "erreur"):           # le jeton est parti : message honnête, plus « refuse le jeton »
+                if mode in ("mdp_refuse", "erreur", "mdp_puis_question"):           # le jeton est parti : message honnête, plus « refuse le jeton »
                     self.assertIn("après l'envoi du jeton", r.lignes[-1]["message"])
                     self.assertIn("dissocie puis associe", r.lignes[-1]["message"])
                 self.assertFalse(self.favoris().exists(), "aucun favori sans montage")
@@ -1170,6 +1171,21 @@ elif sys.argv[1] == "clear":
         r = self.nc("fichiers", code=9)
         self.assertTrue([x for x in self.gi_vu() if x["evt"] == "demonter"])
         self.assertFalse(Path(str(self.journal_gi) + ".monte").exists())
+
+    def test_note_de_montage_illisible_dissocier_va_jusqu_au_bout(self):
+        self.associer()
+        self.faux_gi()
+        self.nc("fichiers", code=0)
+        note = self.home / ".local/state/nc-cloud/montage.json"
+        for contenu in ("{", "[1, 2]", "\xff"):
+            with self.subTest(contenu=contenu):
+                note.write_text(contenu)
+                self.nc("demonter", code=0)
+                self.assertFalse(note.exists())
+        note.write_text("{")
+        self.nc("dissocier", code=0)
+        self.assertFalse((self.home / ".local/state/nc-cloud/appareil.json").exists())
+        self.assertFalse(note.exists())
 
     def test_demonter_par_l_adresse_notee_au_montage(self):
         self.associer()
@@ -1973,8 +1989,8 @@ class GLib:
     @staticmethod
     def timeout_add_seconds(n, f):
         note(evt="delai", n=n)
-        if MODE == "jamais":               # le délai se joue vraiment : GVfs, lui, ne rappelle jamais
-            _rappels.append(f)
+        if MODE == "jamais":               # le délai se joue vraiment (un tour plus tard) : GVfs, lui, ne rappelle jamais
+            _rappels.append(lambda: _rappels.append(f))
 class _Racine:
     def __init__(self, u): self.u = u
     def get_uri(self): return self.u
@@ -2005,6 +2021,12 @@ class _Fichier:
                 op.h["ask-password"](op, "Enter PROXY password for proxy.example:3128", "", "", 1 | 2)
             elif MODE == "sans_mdp":
                 op.h["ask-password"](op, "Nom d'utilisateur", "", "", 2)
+            elif MODE == "refus_puis_mdp":            # refusée, puis une demande ordinaire : refusée aussi
+                op.h["ask-password"](op, "Nom d'utilisateur", "", "", 2)
+                op.h["ask-password"](op, "Mot de passe", "", "Cloud", 1 | 2)
+            elif MODE == "mdp_puis_question":
+                op.h["ask-password"](op, "Mot de passe", "", "Cloud", 1 | 2)
+                op.h["ask-question"](op, "Certificat inconnu, continuer ?", ["Oui", "Non"])
             elif MODE not in ("deja_autre",):
                 for _ in range(2 if MODE == "mdp_refuse" else 1):
                     op.h["ask-password"](op, "Mot de passe", "", "Cloud", 1 | 2)
@@ -2018,7 +2040,7 @@ class _Fichier:
     def mount_enclosing_volume_finish(self, res):
         if MODE == "deja_autre":
             raise _Erreur(17, "déjà monté")
-        if MODE in ("question", "mdp_refuse", "domaine", "msg_proxy", "sans_mdp"):
+        if MODE in ("question", "mdp_refuse", "domaine", "msg_proxy", "sans_mdp", "refus_puis_mdp", "mdp_puis_question"):
             raise _Erreur(19, "annulé")
         if MODE == "erreur":
             raise _Erreur(1, "Hôte injoignable\x1b[31m")
@@ -2134,6 +2156,9 @@ class FauxBus(threading.Thread):
                     self.envoyer(2, [(5, ("u", serie)), (6, ("s", ":1.42"))], sig, corps)
                 if membre == "Hello":
                     rep("s", (":1.42",))
+                elif membre == "StartServiceByName" and self.mode == "sans_service":
+                    self.envoyer(3, [(4, ("s", "org.freedesktop.DBus.Error.ServiceUnknown")), (5, ("u", serie)), (6, ("s", ":1.42"))],
+                                 "s", ("Le nom n'est fourni par aucun fichier .service",))
                 elif membre == "StartServiceByName":
                     rep("u", (2,))
                 elif membre == "GetNameOwner":
@@ -2145,13 +2170,14 @@ class FauxBus(threading.Thread):
                     rep("o", (poignee,))
                     rp = [(1, ("o", poignee)), (2, ("s", "org.freedesktop.portal.Request")), (3, ("s", "Response")),
                           (6, ("s", ":1.42")), (7, ("s", ":1.7"))]
-                    if self.mode in ("choisi", "annule"):
+                    if self.mode in ("choisi", "annule", "sans_service"):
                         # D'abord une réponse pour une AUTRE demande, puis une forgée par un autre pair, puis une d'une autre
                         # interface : toutes ignorées
                         self.envoyer(4, [(1, ("o", poignee + "x"))] + rp[1:], "ua{sv}", (0, {"uris": ("as", ["file:///piege"])}))
                         self.envoyer(4, rp[:4] + [(7, ("s", ":1.99"))], "ua{sv}", (0, {"uris": ("as", ["file:///forge"])}))
                         self.envoyer(4, [rp[0], (2, ("s", "org.exemple.Autre"))] + rp[2:], "ua{sv}", (0, {"uris": ("as", ["file:///autre"])}))
-                        self.envoyer(4, rp, "ua{sv}", (0 if self.mode == "choisi" else 1, {"uris": ("as", self.uris)} if self.mode == "choisi" else {}))
+                        choisi = self.mode in ("choisi", "sans_service")
+                        self.envoyer(4, rp, "ua{sv}", (0 if choisi else 1, {"uris": ("as", self.uris)} if choisi else {}))
                 elif membre == "Close":
                     self.fini.set()
                     return
@@ -2252,6 +2278,15 @@ class Selecteur(unittest.TestCase):
         self.assertEqual(b.journal[5][1], "/org/freedesktop/portal/desktop")
         self.assertIs(b.journal[5][2][2]["multiple"], True)
 
+    def test_portail_sans_fichier_service_mais_present(self):
+        b = self.faux_bus("sans_service", ["file:///home/user/c.txt"])
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
+                           env=self.env(self.d / "bus"), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout.splitlines()[-1]), {"evenement": "choisis", "fichiers": ["file:///home/user/c.txt"]})
+        b.join(10)
+        self.assertIn("GetNameOwner", [x[0] for x in b.journal])
+
     def test_annule_aucune_adresse(self):
         self.faux_bus("annule")
         r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
@@ -2301,6 +2336,87 @@ class Selecteur(unittest.TestCase):
                 self.assertEqual(ecrit, apres is not None)
                 if apres is None:
                     self.assertEqual(f.stat().st_mtime_ns, 1)                               # pas réécrit
+
+    def test_aucun_pycache_laisse_a_cote_des_scripts(self):
+        """nc-cloud et nc-noeud chargent nc-assistant et nc-bac comme modules : rien ne doit s'écrire dans ~/.local/bin."""
+        b = self.d / "bin"
+        b.mkdir()
+        for n in ("nc-cloud", "nc-noeud", "nc-assistant", "nc-bac", "nc-ia"):
+            shutil.copy(NC_CLOUD.parent / n, b / n)
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+        for n in ("nc-cloud", "nc-noeud"):
+            with self.subTest(n):
+                subprocess.run([sys.executable, str(b / n), "--help"], capture_output=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
+                self.assertEqual(sorted(x.name for x in b.iterdir()), ["nc-assistant", "nc-bac", "nc-cloud", "nc-ia", "nc-noeud"])
+
+    def test_deposer_ouvre_une_fois_le_fichier_du_controle(self):
+        d = self.home / "docs"
+        d.mkdir()
+        f = d / "a.txt"
+        f.write_bytes(b"public")
+        secret = self.home / "secret.bin"
+        secret.write_bytes(b"cle!!!")
+        raison, _, _, st = self.m.examiner_un(str(f))
+        self.assertIsNone(raison)
+        # Remplacé par un lien entre le contrôle et l'ouverture : refusé, rien n'est lu (aucun appel au serveur : s=None)
+        f.unlink()
+        f.symlink_to(secret)
+        with self.assertRaises(self.m.Echec) as e:
+            self.m.preparer(None, f, "root", "create", None, st)
+        self.assertEqual(e.exception.code, self.m.SOURCE)
+        self.assertIn("lien", str(e.exception))
+        # Remplacé par un autre fichier ordinaire de même taille : refusé aussi
+        f.unlink()
+        f.write_bytes(b"autre!")
+        os.utime(f, ns=(st.st_mtime_ns + 10**9, st.st_mtime_ns + 10**9))
+        with self.assertRaises(self.m.Echec) as e:
+            self.m.preparer(None, f, "root", "create", None, st)
+        self.assertIn("remplacé", str(e.exception))
+        # Ouvert : l'empreinte et la lecture de l'envoi passent par le descripteur, même si le chemin change ensuite
+        _, _, _, st = self.m.examiner_un(str(f))
+        fd = self.m.ouvrir_controle(f, st)
+        self.addCleanup(os.close, fd)
+        f.rename(d / "ancien")
+        f.symlink_to(secret)
+        self.assertEqual(self.m.empreinte_fd(fd), hashlib.sha256(b"autre!").hexdigest())
+        envoi = self.m.Envoi.__new__(self.m.Envoi)
+        envoi.fd, envoi.m = fd, {"source": str(f), "size": 6, "mtime_ns": st.st_mtime_ns}
+        with envoi.lire() as lu:
+            self.assertEqual(lu.read(), b"autre!")
+        envoi.source_intacte()                 # par le descripteur : le lien posé sur le chemin n'y change rien
+        # L'empreinte de l'intention vient aussi du descripteur, pas du chemin rouvert (qui mène maintenant au secret)
+        s = mock.Mock(appareil={"server_id": "s", "space_id": "e", "device_id": "d"})
+        with mock.patch.object(self.m, "revision_dossier", return_value="r1"):
+            e = self.m.preparer_fd(s, f, "root", "create", None, fd)
+        self.assertEqual(e.m["sha256"], hashlib.sha256(b"autre!").hexdigest())
+
+    def test_cmd_deposer_passe_le_controle_a_l_envoi(self):
+        f = self.home / "a.txt"
+        f.write_bytes(b"x")
+        vus = []
+        with mock.patch.object(self.m, "Session"), \
+                mock.patch.object(self.m, "deposer_un", side_effect=lambda *a, **k: vus.append(k.get("controle")) or 0):
+            self.m.cmd_deposer(self.m.argparse.Namespace(fichiers=[str(f)], si_existe=None, dans=None))
+        self.assertEqual((vus[0].st_ino, vus[0].st_dev), (f.stat().st_ino, f.stat().st_dev))
+
+    def test_fichier_cache_quand_le_dossier_personnel_est_un_lien(self):
+        vrai = self.d / "vrai-home"
+        (vrai / ".notes").mkdir(parents=True)
+        (vrai / ".notes/a.txt").write_bytes(b"x")
+        (vrai / "b.txt").write_bytes(b"x")
+        lien = self.d / "home-lien"
+        lien.symlink_to(vrai)
+        ailleurs = self.d / "disque"
+        ailleurs.mkdir()
+        (ailleurs / "c.txt").write_bytes(b"x")
+        (vrai / ".cache").symlink_to(ailleurs)          # un dossier caché qui pointe hors du dossier personnel
+        for maison in (str(lien), str(vrai)):
+            for base in (str(lien), str(vrai)):
+                with self.subTest(maison=maison, base=base), mock.patch.dict(os.environ, {"HOME": maison}):
+                    self.assertTrue(self.m.examiner_un(base + "/.notes/a.txt")[2])
+                    self.assertFalse(self.m.examiner_un(base + "/b.txt")[2])
+                    if base == maison:
+                        self.assertTrue(self.m.examiner_un(base + "/.cache/c.txt")[2])
 
     def test_illisible_entre_examen_et_empreinte_ce_fichier_seulement(self):
         with mock.patch.object(self.m, "preparer", side_effect=PermissionError("refusé")):
