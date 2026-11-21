@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""nc-qr : le QR code d'un texte, en PNG, pour la page Presse-papiers de l'île.
+
+  nc-qr < TEXTE     affiche le chemin du PNG ($XDG_RUNTIME_DIR/nc-qr/, dossier 0700, fichier 0600, nom aléatoire)
+
+Le texte est lu sur l'entrée standard et passé à qrencode par son entrée standard : jamais dans une liste d'arguments
+(un texte copié peut être un mot de passe). 2000 caractères au plus. Les anciens PNG du dossier sont retirés.
+Nécessite le paquet qrencode. Le texte n'est jamais journalisé."""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+MAX = 2000
+
+
+def main():
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ("-h", "--help", "aide"):
+            print(__doc__.split("\n\n")[0])
+            return 0
+        print("usage : nc-qr < texte  (le texte vient de l'entrée standard)", file=sys.stderr)
+        return 2
+    run = os.environ.get("XDG_RUNTIME_DIR")
+    if not run or not os.path.isabs(run):
+        print("nc-qr : XDG_RUNTIME_DIR absent, refus (jamais dans /tmp)", file=sys.stderr)
+        return 1
+    if not shutil.which("qrencode"):
+        print("nc-qr : qrencode absent, installe le paquet qrencode", file=sys.stderr)
+        return 3
+    donnees = sys.stdin.buffer.read(MAX * 4 + 1)
+    texte = donnees.decode("utf-8", "replace")
+    if not texte.strip():
+        print("nc-qr : rien à encoder", file=sys.stderr)
+        return 1
+    if len(texte) > MAX:
+        print(f"nc-qr : texte trop long ({MAX} caractères au plus, au-delà un QR se lit mal)", file=sys.stderr)
+        return 4
+    dossier = Path(run) / "nc-qr"
+    dossier.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(dossier, 0o700)
+    for ancien in dossier.glob("*.png"):
+        ancien.unlink(missing_ok=True)
+    fd, nom = tempfile.mkstemp(suffix=".png", prefix="qr-", dir=dossier)  # 0600, nom aléatoire
+    os.close(fd)
+    r = subprocess.run(["qrencode", "-o", nom, "-s", "8", "-m", "2"], input=donnees, capture_output=True)
+    if r.returncode != 0:
+        os.unlink(nom)
+        print("nc-qr : qrencode a échoué", file=sys.stderr)
+        return 1
+    print(nom)
+    return 0
+
+
+sys.exit(main())

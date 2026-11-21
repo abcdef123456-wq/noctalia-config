@@ -148,6 +148,7 @@ HOME_FILES=(
   .local/bin/nc-ile-etat
   .local/bin/nc-ile-memo
   .local/bin/nc-presse-capture
+  .local/bin/nc-qr
   .local/bin/nc-verrou-media
   .local/bin/nc-media
   .local/bin/nc-touches

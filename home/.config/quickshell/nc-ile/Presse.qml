@@ -12,6 +12,7 @@ Item {
     readonly property bool enLigne: Connexion.enLigne
     // Pendant un partage d'écran (Partage.silence : dès le premier début), les aperçus sont cachés : ni texte ni miniature
     readonly property bool masque: Partage.silence
+    property string qrTexte: ""              // non vide : la vue QR de ce texte est ouverte (PresseQr.qml)
     property string recherche: ""
     property string filtre: "tout"           // tout, textes, images
     property int choix: -1                   // carte choisie au clavier
@@ -25,11 +26,12 @@ Item {
     function apercu(e) { return e.texte.replace(/\s+/g, " ").trim() }
     function longue(e) { return e.genre === "texte" && (e.texte.length > 160 || e.texte.split("\n").length > 2) }
     function deplier(e) { var d = Object.assign({}, deplies); if (d[e.id]) delete d[e.id]; else d[e.id] = true; deplies = d }
-    onVisibleChanged: { if (visible) { choix = -1; forceActiveFocus(); PressePapiers.purger() } }
+    onVisibleChanged: { if (!visible) qrTexte = ""; if (visible) { PresseAnalyse.demandeQr = true; choix = -1; forceActiveFocus(); PressePapiers.purger() } }
     onVisiblesChanged: if (choix >= visibles.length) choix = visibles.length - 1
 
     Keys.onPressed: e => {
-        if (e.key === Qt.Key_Down && visibles.length) { choix = Math.min(visibles.length - 1, choix + 1); e.accepted = true }
+        if (qrTexte !== "") { if (e.key === Qt.Key_Escape) qrTexte = ""; e.accepted = true }
+        else if (e.key === Qt.Key_Down && visibles.length) { choix = Math.min(visibles.length - 1, choix + 1); e.accepted = true }
         else if (e.key === Qt.Key_Up && visibles.length) { choix = Math.max(0, choix - 1); e.accepted = true }
         else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && choix >= 0 && choix < visibles.length) { PressePapiers.recopier(visibles[choix]); e.accepted = true }
         else if (e.key === Qt.Key_Delete && !champ.activeFocus && choix >= 0 && choix < visibles.length) { PressePapiers.supprimer(visibles[choix]); e.accepted = true }
@@ -103,7 +105,7 @@ Item {
         Column {
             id: liste
             width: p.width; spacing: 6
-            readonly property real voulue: 34 + (outils.visible ? 40 : 0) + 10 + implicitHeight
+            readonly property real voulue: Math.max(p.qrTexte !== "" ? 360 : 0, 34 + (outils.visible ? 40 : 0) + 10 + implicitHeight)
             onVoulueChanged: Etat.annoncerHauteur("presse", voulue)
             Component.onCompleted: Etat.annoncerHauteur("presse", voulue)
 
@@ -166,6 +168,7 @@ Item {
                                 { id: "epingler", icone: "push_pin", aide: el.modelData.epingle ? Reglages.t("Désépingler", "Unpin") : Reglages.t("Épingler", "Pin"), visible: true, fixe: el.modelData.epingle },
                                 { id: "ia", icone: "auto_awesome", aide: el.image ? Reglages.t("Expliquer l'image avec l'IA", "Explain the image with AI") : Reglages.t("L'IA sur ce texte (résumer, traduire…)", "AI on this text (summarize, translate…)"),
                                   visible: !Reglages.iaCoupee && p.enLigne && Reglages.val(el.image ? "IA_CAPTURE" : "IA_TEXTE", "oui") !== "non", fixe: false },
+                                { id: "qr", icone: "qr_code_2", aide: Reglages.t("QR code de ce texte", "QR code of this text"), visible: !el.image && PresseAnalyse.qrDispo === 1, fixe: false },
                                 { id: "coller", icone: "keyboard_return", aide: Reglages.t("Coller en texte brut dans la fenêtre active", "Paste as plain text in the active window"), visible: !el.image, fixe: false },
                                 { id: "supprimer", icone: "close", aide: Reglages.t("Supprimer", "Delete"), visible: true, fixe: false }
                             ]
@@ -183,6 +186,7 @@ Item {
                                         if (action.modelData.id === "deplier") p.deplier(el.modelData)
                                         else if (action.modelData.id === "epingler") PressePapiers.epingler(el.modelData)
                                         else if (action.modelData.id === "coller") PressePapiers.coller(el.modelData)
+                                        else if (action.modelData.id === "qr") p.qrTexte = el.modelData.texte
                                         else if (action.modelData.id === "ia") PressePapiers.demanderIA(el.modelData)
                                         else PressePapiers.supprimer(el.modelData)
                                     }
@@ -206,4 +210,6 @@ Item {
             }
         }
     }
+
+    PresseQr { anchors.fill: parent; z: 20; texte: p.qrTexte; masque: p.masque; onFermer: p.qrTexte = "" }
 }

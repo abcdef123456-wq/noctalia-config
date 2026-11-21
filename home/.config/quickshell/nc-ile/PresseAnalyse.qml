@@ -19,6 +19,15 @@ Singleton {
         onExited: code => pa.qalcDispo = code === 0 ? 1 : 0
     }
 
+    // qrencode installé ? (action « QR » des textes) : une seule sonde, à la première ouverture de la page
+    property int qrDispo: -1
+    property bool demandeQr: false
+    Process {
+        command: ["sh", "-c", "command -v qrencode >/dev/null 2>&1"]
+        running: pa.demandeQr && pa.qrDispo < 0
+        onExited: code => pa.qrDispo = code === 0 ? 1 : 0
+    }
+
     function deuxChiffres(n) { return Math.max(0, Math.min(255, n)) }
     function hex2(n) { var h = deuxChiffres(n).toString(16); return h.length < 2 ? "0" + h : h }
     // r, g, b (0 à 255) → { hex, rgb, hsl }

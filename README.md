@@ -242,6 +242,11 @@ l'île Quickshell.
   commandes sont lancées en argv, et seulement sur ton clic. Le calcul d'aperçu n'accepte que des chiffres et des opérateurs
   (aucun taux de change n'est cherché en ligne), est borné à 2 s et ne se lance qu'à l'affichage de la carte. Tout est caché
   pendant un partage d'écran.
+- **QR code d'un texte copié** (page Presse-papiers, bouton « QR » sur un texte) : affiche le QR code du texte dans la page,
+  avec son début en dessous et « Retour » (ou Échap) ; `nc-qr` lit le texte sur l'entrée standard (jamais en argument), 2000
+  caractères au plus, PNG privé dans `$XDG_RUNTIME_DIR/nc-qr/`, retiré en quittant la vue. Demande le paquet **`qrencode`**
+  (facultatif : `pacman -S qrencode`, `apt install qrencode`, `dnf install qrencode` ou `zypper install qrencode`) ; sans
+  lui, le bouton n'apparaît pas. Caché pendant un partage d'écran. Les paquets facultatifs sont listés dans `install.sh`.
 - **Fond du jour et fond de la nuit** (`nc-reglages` → Fonds d'écran, réglage `FONDS_JOUR_NUIT`, désactivé par défaut) : crée les sous-dossiers
   `jour` et `nuit` dans le dossier des fonds d'écran ; le fond change à 7 h et à 19 h (`nc-fond-jour-nuit`, par `noctalia msg wallpaper-set`,
   donc les couleurs suivent). Il passe devant le changement automatique de fond, coupé alors. Un seul minuteur systemd de session est posé
