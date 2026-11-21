@@ -142,13 +142,17 @@ function nc.mode_jeu()
     end
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
     local q = nc.guillemets
+    -- « Ne pas déranger » d'avant le jeu (oui/non), noté une seule fois : l'île muette ne laisse rien, donc on coupe comme avant
+    local dnd = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-dnd"
     local appli = q(nc.t("Mode jeu", "Game Mode"))
     if actif then
-        hl.exec_cmd("hyprctl reload; notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu activé", "Game Mode on")) .. " "
+        hl.exec_cmd("[ -e " .. dnd .. " ] || { e=$(timeout 2 qs -c nc-ile ipc call ile concentrationEtat 2>/dev/null) && [ -n \"$e\" ] && echo \"$e\" > " .. dnd .. "; };"
+            .. " hyprctl reload; notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu activé", "Game Mode on")) .. " "
             .. q(nc.t("Effets coupés, notifications en pause, profil Performance.", "Effects off, notifications paused, Performance profile.")) .. ";"
-            .. " sleep 2.6; qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
+            .. " sleep 2.6; timeout 2 qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
     else
-        hl.exec_cmd("{ qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; }; hyprctl reload;"
+        hl.exec_cmd("[ \"$(cat " .. dnd .. " 2>/dev/null)\" = oui ] || { timeout 2 qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; };"
+            .. " rm -f " .. dnd .. "; hyprctl reload;"
             .. " notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu désactivé", "Game Mode off")) .. " "
             .. q(nc.t("Effets et notifications rétablis.", "Effects and notifications restored.")))
     end

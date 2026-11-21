@@ -130,7 +130,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Historique du presse-papiers · émojis | **Super + Maj + V** · **Super + .** |
 | Lumière de nuit · ne pas déranger | **Super + N** · **Super + Maj + N** |
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
-| Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause, pointeur sans accélération (réglage `JEU_SOURIS_PLATE`) | **Super + Alt + G** (même touche pour sortir) |
+| Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause, pointeur sans accélération (réglage `JEU_SOURIS_PLATE`) | **Super + Alt + G** (même touche pour sortir ; « ne pas déranger » revient à l'état d'avant la partie) |
 | VPN : les tunnels VPN et WireGuard de NetworkManager dans un panneau de l'île (plusieurs tunnels à la fois, « Déconnecter » par tunnel, « Tout déconnecter », import d'un `.ovpn` ou `.conf` refusé s'il fait exécuter un script) ; un bouclier et « Fournisseur · pays » dans la pilule quand un tunnel est monté ; en terminal : `nc-vpn` | **Super + Alt + V** |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
