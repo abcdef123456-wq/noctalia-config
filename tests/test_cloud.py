@@ -1324,13 +1324,18 @@ elif sys.argv[1] == "clear":
         self.faux.suppression = True
         cfg = self.home / ".config/nc"
         cfg.mkdir(parents=True, exist_ok=True)
-        (cfg / "reglages.conf").write_text("LANGUE=fr\nTHEME=sombre\nMA_CLE_API=SECRET-API-91\n")
+        (cfg / "reglages.conf").write_text("LANGUE=fr\nDOCK=non\nMA_CLE_API=SECRET-API-91\nPERSO=1\n")
         (cfg / "raccourcis.conf").write_text("ajout\tSUPER + K\tcommande\tcurl -H 'Authorization: SECRET-AUTH-22'\tX\n")
         (self.home / ".zshrc.perso").write_text("export X_TOKEN=SECRET-ZSH-33\n")
         (self.home / ".config/hypr").mkdir(parents=True, exist_ok=True)
         (self.home / ".config/hypr/perso.lua").write_text("-- SECRET-LUA-44\n")
         for i in range(6):
             self.nc("deposer", "--racine", "Bureau", "--", str(self.fichier(f"nc-bureau-2026-01-0{i + 1}-000000.tar.gz", b"x")), code=0)
+        # Ni un nom daté du futur, ni un fichier d'une autre forme, ni une date impossible : jamais supprimés ni choisis
+        etrangers = ["nc-bureau-2099-01-01-000000.tar.gz", "nc-bureau-2099-01-02-000000.tar.gz", "autre.txt",
+                     "nc-bureau-2026-13-01-000000.tar.gz", "copie-nc-bureau-2026-01-07-000000.tar.gz"]
+        for nom in etrangers:
+            self.nc("deposer", "--racine", "Bureau", "--", str(self.fichier(nom, b"x")), code=0)
         n = len(self.faux.journal)
         r = self.nc("bureau", "preparer", code=0)
         self.assertEqual(len(self.faux.journal), n)                                       # préparer : rien ne part
@@ -1338,27 +1343,33 @@ elif sys.argv[1] == "clear":
         self.assertIn("photo de profil", lignes[0])
         self.assertTrue(any("~/.config/nc/reglages.conf" in x for x in lignes), lignes)
         self.assertTrue(any("écartée" in x for x in lignes), lignes)
+        self.assertTrue(any("LANGUE, DOCK" in x for x in lignes), lignes)            # les noms des réglages qui partent
         self.nc("bureau", "restaurer", code=2)                                             # une archive à envoyer ne se « remet » pas
-        self.nc("bureau", "envoyer", code=0)
+        r = self.nc("bureau", "envoyer", code=0)
+        self.assertIn("2 ancienne(s) supprimée(s) ; 5 gardée(s)", r.lignes[-1]["message"])
+        self.assertIn("2 sauvegarde(s) datée(s) du futur ignorée(s)", r.lignes[-1]["message"])
         bureau = next(e["id"] for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Bureau")
-        noms = sorted(e["name"] for e in self.faux.entries.values() if e.get("parent") == bureau)
+        noms = sorted(e["name"] for e in self.faux.entries.values() if e.get("parent") == bureau and e["name"] not in etrangers)
         self.assertEqual(len(noms), 5, noms)
         self.assertEqual(noms[:4], [f"nc-bureau-2026-01-0{i}-000000.tar.gz" for i in (3, 4, 5, 6)])  # les 2 plus vieilles retirées
-        nouvelle = next(e for e in self.faux.entries.values() if e.get("parent") == bureau and not e["name"].startswith("nc-bureau-2026-01"))
+        self.assertEqual(sorted(e["name"] for e in self.faux.entries.values() if e["name"] in etrangers), sorted(etrangers))
+        nouvelle = next(e for e in self.faux.entries.values() if e.get("parent") == bureau and not e["name"].startswith("nc-bureau-2026-01")
+                        and e["name"] not in etrangers)
         brut = self.faux.contenus[nouvelle["id"]]
         for x in (b"SECRET-API-91", b"SECRET-AUTH-22", b"SECRET-ZSH-33", b"SECRET-LUA-44"):
             self.assertNotIn(x, brut)
             self.assertNotIn(x, gzip.decompress(brut))
         self.assertFalse((self.home / ".local/state/nc-cloud/bureau").exists())             # rien ne reste en local
         # Reprendre : télécharger et montrer, puis remettre (jamais de code)
-        (cfg / "reglages.conf").write_text("LANGUE=fr\nTHEME=clair\n")
+        (cfg / "reglages.conf").write_text("LANGUE=en\nDOCK=oui\nA_MOI=2\n")
         (self.home / ".zshrc.perso").write_text("export LOCAL=1\n")
         self.nc("bureau", "telecharger", code=0)
         p = json.loads((self.home / ".local/state/nc-cloud/bureau/pret.json").read_text())
         self.assertEqual((p["sens"], p["fichier"]), ("reprise", nouvelle["name"]))
-        self.assertEqual((cfg / "reglages.conf").read_text(), "LANGUE=fr\nTHEME=clair\n")    # rien n'est remis avant
+        self.assertEqual((cfg / "reglages.conf").read_text(), "LANGUE=en\nDOCK=oui\nA_MOI=2\n")    # rien n'est remis avant
+        self.assertIn("Sauvegarde du cloud du ", p["lignes"][0])                       # sa date, pas celle de 2099
         self.nc("bureau", "restaurer", code=0)
-        self.assertIn("THEME=sombre", (cfg / "reglages.conf").read_text())
+        self.assertEqual((cfg / "reglages.conf").read_text(), "LANGUE=fr\nDOCK=non\nA_MOI=2\n")   # fusion
         self.assertEqual((self.home / ".zshrc.perso").read_text(), "export LOCAL=1\n")
         self.assertFalse((self.home / ".local/state/nc-cloud/bureau").exists())
         self.nc("bureau", "restaurer", code=2)                                             # plus rien de prêt
@@ -1368,7 +1379,7 @@ elif sys.argv[1] == "clear":
         self.nc("bureau", "preparer", code=0)
         r = self.nc("bureau", "envoyer", code=0)
         self.assertIn("ne sait pas supprimer", r.lignes[-1]["message"])
-        self.assertEqual(len([e for e in self.faux.entries.values() if e.get("parent") == bureau]), 6)
+        self.assertEqual(len([e for e in self.faux.entries.values() if e.get("parent") == bureau and e["name"] not in etrangers]), 6)
 
     def test_bureau_archive_trop_grosse_ou_absente(self):
         self.associer()

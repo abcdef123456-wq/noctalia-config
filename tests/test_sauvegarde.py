@@ -579,7 +579,8 @@ class PourLeCloud(Base):
         (home / ".config/hypr/perso.lua").write_text('hl.env("LUA", "LUA_TOKEN-qq42")\n')
         (home / ".config/nc/reglages.conf").write_text(
             "LANGUE=fr\nTHEME=sombre\nMA_CLE_API=MA_CLE_API_VAL-ww07\nmon_password=x\nLONG=" + "a" * 600 + "\n"
-            "# COMMENTAIRE-SECRET-kk11\nMETEO_VILLE=VILLE-PRIVEE-Tarascon\nIA_MODE=non\n")
+            "# COMMENTAIRE-SECRET-kk11\nMETEO_VILLE=VILLE-PRIVEE-Tarascon\nIA_MODE=non\n DOCK = oui\nGARMIN_JARVIS=oui\n"
+            "VPN_KILLSWITCH=non\nDOCK_TAILLE=99999\n")
         (home / ".config/nc/raccourcis.conf").write_text(
             "ajout\tSUPER + B\tappli\tfirefox\tNavigateur\n"
             "ajout\tSUPER + K\tcommande\tcurl -H 'Authorization: Bearer-AUTH-hh63' x\tAppel\n# COMMENTAIRE-SECRET-kk11\n")
@@ -587,6 +588,10 @@ class PourLeCloud(Base):
         (home / ".config/noctalia/palettes").mkdir(parents=True)
         (home / ".config/noctalia/palettes/a.json").write_text("{}")
         (home / ".config/noctalia/palettes/lien.json").symlink_to(home / ".zshrc.perso")
+        os.link(home / ".zshrc.perso", home / ".config/noctalia/palettes/dur.json")     # lien dur : son contenu est un autre
+        (home / ".config/noctalia/palettes/.cachee.json").write_text("{}")
+        (home / ".config/noctalia/palettes/sous").mkdir()
+        (home / ".config/noctalia/palettes/sous/x.json").write_text("{}")
         (home / ".face").write_bytes(b"\x89PNG\r\n\x1a\nimage")
         return home, env
 
@@ -602,21 +607,135 @@ class PourLeCloud(Base):
             self.assertNotIn(x.encode(), decompresse, x)
         with tarfile.open(sortie) as t:
             noms = sorted(m.name for m in t)
-            self.assertEqual(noms, [".config/nc/raccourcis.conf", ".config/nc/reglages.conf", ".config/nc/style.conf",
-                                    ".config/noctalia/palettes", ".config/noctalia/palettes/a.json", ".face"])
+            self.assertEqual(noms, [".config/nc/raccourcis.conf", ".config/nc/reglages.conf", ".config/noctalia/palettes/a.json", ".face"])
             for m in t.getmembers():
-                self.assertEqual((m.uid, m.gid, m.uname, m.gname), (0, 0, "", ""), m.name)
+                self.assertEqual((m.uid, m.gid, m.uname, m.gname, m.type), (0, 0, "", "", tarfile.REGTYPE), m.name)
+                self.assertEqual(m.mode, 0o600 if m.name.startswith(".config/nc/") else 0o644, m.name)
             regl = t.extractfile(".config/nc/reglages.conf").read().decode()
             racc = t.extractfile(".config/nc/raccourcis.conf").read().decode()
-        self.assertEqual(regl, "LANGUE=fr\nTHEME=sombre\n")
+        self.assertEqual(regl, "LANGUE=fr\nDOCK=oui\n")             # la liste blanche de nc-reglages, valeurs valides
         self.assertEqual(racc, "ajout\tSUPER + B\tappli\tfirefox\tNavigateur\n")
-        self.assertIn("6 ligne(s) de réglages écartée(s)", r.stdout)     # clé, password, longue, commentaire, 2 de ce PC
+        self.assertIn("10 ligne(s) de réglages écartée(s)", r.stdout)    # 12 lignes, 2 parties
+        self.assertIn("4 palette(s) écartée(s)", r.stdout)               # lien, lien dur, cachée, dossier
         self.assertIn("2 ligne(s) de raccourcis écartée(s)", r.stdout)
         self.assertEqual(oct(sortie.stat().st_mode & 0o777), oct(0o600))      # umask de l'appelant ; ici mkstemp
         # La reprise de cette archive : rien de nouveau ne vient du code, et voir la lit
         r = self.lancer(env, "voir", "--pour-le-cloud", str(sortie))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("~/.config/nc/reglages.conf", r.stdout)
+        self.assertIn("2 réglage(s)", r.stdout)
+        self.assertIn("LANGUE, DOCK", r.stdout)
+        # Une photo qui n'est pas une image ne part pas
+        (home / ".face").write_bytes(b"#!/bin/sh\necho x\n" * 4)
+        self.assertEqual(self.lancer(env, "creer", "--pour-le-cloud", "--sortie", str(sortie)).returncode, 0)
+        with tarfile.open(sortie) as t:
+            self.assertNotIn(".face", t.getnames())
+
+    def archive_cloud(self, membres, nom="cloud.tar.gz"):
+        """Une archive au format de celles du cloud : [(nom, contenu, mode)], fichiers ordinaires."""
+        f = self.r / nom
+        with tarfile.open(f, "w:gz") as t:
+            for n, contenu, mode in membres:
+                ti = tarfile.TarInfo(n)
+                ti.size, ti.mode = len(contenu), mode
+                t.addfile(ti, io.BytesIO(contenu))
+        return f
+
+    PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+
+    def test_reprise_hostile_fusion_et_reglages_sensibles_gardes(self):
+        home, env = self.maison("hostile")
+        (home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        pc = "LANGUE=fr\nPERSO_A_MOI=1\nGARMIN_JARVIS=non\nVPN_KILLSWITCH=oui\nIA_MODE=non\n DOCK = oui\n# mon commentaire\n"
+        (home / ".config/nc/reglages.conf").write_text(pc)
+        sensibles = {"GARMIN_JARVIS": "oui", "DICTEE_SECOURS": "oui", "NOTIFS_IA": "oui", "TELEGRAM_AGENTS": "oui",
+                     "VPN_KILLSWITCH": "non", "VPN_IP_PUBLIQUE": "oui", "VPN_IP_SERVICE": "https://espion.example/ip",
+                     "CLOUD_JARVIS": "oui", "VEILLE_VERROU": "0", "IA_MODE": "cloud", "GOOGLE_INTEGRATION": "oui",
+                     "MAJ_SYSTEME": "auto", "NOEUD_JARVIS": "oui", "SESSIONS_CAPTURE": "oui", "GPU_JAMAIS_RTX": "x",
+                     "PANNES_IGNORER": "tout", "FONDS_DOSSIER": "/tmp", "X": "$(touch PWN)"}
+        regl = "LANGUE=en\nDOCK=non\n" + "".join(f"{k}={v}\n" for k, v in sensibles.items())
+        f = self.archive_cloud([(".config/nc/reglages.conf", regl.encode(), 0o644), (".face", self.PNG, 0o4755)])
+        r = self.lancer(env, "restaurer", "--pour-le-cloud", str(f))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        apres = (home / ".config/nc/reglages.conf").read_text()
+        self.assertEqual(apres, "LANGUE=en\nPERSO_A_MOI=1\nGARMIN_JARVIS=non\nVPN_KILLSWITCH=oui\nIA_MODE=non\nDOCK=non\n# mon commentaire\n")
+        for k in sensibles:
+            self.assertNotIn(k + "=" + sensibles[k], apres, k)
+        self.assertEqual(stat.S_IMODE((home / ".face").stat().st_mode), 0o644)
+        self.assertIn("non repris", r.stdout)
+        self.assertNotIn("--avec-code", r.stdout + r.stderr)
+
+    def test_reprise_refuse_tout_element_hors_liste(self):
+        home, env = self.maison("hors-liste")
+        self.reglages(home, LANGUE="fr")
+        avant = (home / ".config/nc/reglages.conf").read_text()
+        bon = (".config/nc/reglages.conf", b"LANGUE=en\n", 0o600)
+        for intrus in ((".nc-fonds-externes/a.png", self.PNG, 0o644), ("Pictures/Wallpapers/a.png", self.PNG, 0o644),
+                       (".config/nc/style.conf", b"STYLE=x\n", 0o644), (".config/nc/style-avant", b"--x\n", 0o644),
+                       (".config/noctalia/palettes/.cache.json", b"{}", 0o644), (".config/noctalia/palettes/sous/x.json", b"{}", 0o644),
+                       (".config/noctalia/palettes/\x1b[31m.json", b"{}", 0o644), (".zshrc.perso", b"touch PWN", 0o644),
+                       (".config/hypr/perso.lua", b"x", 0o644)):
+            with self.subTest(intrus=intrus[0]):
+                f = self.archive_cloud([bon, intrus])
+                for cmd in ("voir", "restaurer"):
+                    r = self.lancer(env, cmd, "--pour-le-cloud", str(f))
+                    self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                    self.assertIn("rien à faire dans une sauvegarde du cloud", r.stderr)
+                self.assertEqual((home / ".config/nc/reglages.conf").read_text(), avant)
+        # Une photo de profil qui n'est pas une image : pas remise (le reste l'est)
+        r = self.lancer(env, "restaurer", "--pour-le-cloud", str(self.archive_cloud([bon, (".face", b"#!/bin/sh\n" * 4, 0o755)])))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((home / ".face").exists())
+        self.assertIn("LANGUE=en", (home / ".config/nc/reglages.conf").read_text())
+
+    def test_vraies_bombes_refusees_avant_lecture(self):
+        home, env = self.maison("bombes")
+        def tar_brut(*blocs):
+            return b"".join(blocs) + bytes(1024)
+        def entete(nom, type_, taille):
+            ti = tarfile.TarInfo(nom)
+            ti.size = taille if type_ == tarfile.REGTYPE else 0
+            b = bytearray(ti.tobuf(tarfile.USTAR_FORMAT))
+            b[156:157] = type_
+            b[124:136] = b"%011o\0" % taille
+            b[148:156] = b"        "
+            b[148:156] = b"%06o\0 " % sum(b)
+            return bytes(b)
+        bombes = {}
+        z = io.BytesIO()                                         # bombe gzip : 100 Mio de zéros (moins de 200 Kio compressés)
+        with tarfile.open(fileobj=z, mode="w:gz") as t:
+            ti = tarfile.TarInfo(".face")
+            ti.size = 100 * 1024 ** 2
+            t.addfile(ti, io.BytesIO(bytes(ti.size)))
+        bombes["gzip"] = (z.getvalue(), "décompressée")
+        x = io.BytesIO()                                         # en-tête PAX de 1 Mio
+        with tarfile.open(fileobj=x, mode="w:gz", format=tarfile.PAX_FORMAT) as t:
+            ti = tarfile.TarInfo(".face")
+            ti.pax_headers = {"comment": "x" * 1024 ** 2}
+            ti.size = len(self.PNG)
+            t.addfile(ti, io.BytesIO(self.PNG))
+        bombes["pax"] = (x.getvalue(), "type refusé")
+        g = io.BytesIO()                                         # nom long GNU (« L »)
+        with tarfile.open(fileobj=g, mode="w:gz", format=tarfile.GNU_FORMAT) as t:
+            ti = tarfile.TarInfo(".config/noctalia/palettes/" + "p" * 200 + ".json")
+            t.addfile(ti, io.BytesIO(b""))
+        bombes["gnu"] = (g.getvalue(), "type refusé")
+        bombes["inconnu"] = (gzip.compress(tar_brut(entete(".face", b"Z", 1024 ** 3))), "type refusé")
+        bombes["taille-fausse"] = (gzip.compress(tar_brut(entete(".face", tarfile.REGTYPE, 1024 ** 2))[:-1024] + b"x" * 10), "coupée")
+        un = gzip.compress(tar_brut(entete(".face", tarfile.REGTYPE, 0)))
+        bombes["concatenee"] = (un + un, "après la fin")
+        bombes["tronquee"] = (un[:len(un) // 2], "coupée")
+        bombes["fin-gzip-absente"] = (un[:-8], "coupée")       # le tar est entier, le flux gzip non
+        for nom, (octets, raison) in bombes.items():
+            with self.subTest(nom):
+                f = self.r / (nom + ".tar.gz")
+                f.write_bytes(octets)
+                for cmd in ("voir", "restaurer"):
+                    r = self.lancer(env, cmd, "--pour-le-cloud", str(f))
+                    self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                    self.assertIn(raison, r.stderr)
+                    self.assertNotIn("Traceback", r.stderr)
+                self.assertFalse((home / ".face").exists())
 
     def test_usage_strict(self):
         home, env = self.preparer_home()

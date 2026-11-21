@@ -1287,7 +1287,7 @@ BUREAU = ETAT / "bureau"
 BUREAU_PRET = BUREAU / "pret.json"
 DOSSIER_BUREAU = "Bureau"
 BUREAU_GARDER = 5
-BUREAU_NOM = re.compile(r"nc-bureau-\d{4}-\d{2}-\d{2}-\d{6}\.tar\.gz")
+BUREAU_NOM = re.compile(r"nc-bureau-(\d{4}-\d{2}-\d{2}-\d{6})\.tar\.gz")
 BUREAU_MAX = 32 * 1024 ** 2          # comme CLOUD_MAX_ARCHIVE de nc-sauvegarde
 
 
@@ -1297,6 +1297,29 @@ def sauvegarde(*args):
                        capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
                        env={**os.environ, "NC_LANGUE": "en" if A.T("fr", "en") == "en" else "fr"})
     return r.returncode, [propre(l, 300) for l in (r.stdout + r.stderr).splitlines() if l.strip()][:80]
+
+
+def bureau_date(e):
+    """L'heure (epoch) d'une sauvegarde du dossier « Bureau », tirée de son nom, ou None : pas un fichier, nom d'une
+    autre forme, date impossible. Le nom vient du serveur : on ne s'y fie que pour trier, jamais au-delà de maintenant."""
+    m = BUREAU_NOM.fullmatch(str(e.get("name"))) if e.get("kind") == "file" and isinstance(e.get("id"), str) else None
+    try:
+        return time.mktime(time.strptime(m[1], "%Y-%m-%d-%H%M%S")) if m else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def bureau_trier(entrees):
+    """(sauvegardes de la plus récente à la plus vieille, nombre de noms datés de plus de 10 minutes dans le futur :
+    ignorés, ni « plus récente », ni comptés, ni supprimés)."""
+    l, futur = [], 0
+    for e in entrees:
+        d = bureau_date(e)
+        if d is not None and d > time.time() + 600:
+            futur += 1
+        elif d is not None:
+            l.append((d, e))
+    return [e for _, e in sorted(l, key=lambda x: x[0], reverse=True)], futur
 
 
 def bureau_vider():
@@ -1324,9 +1347,13 @@ def cmd_bureau(a):
         code, creer = sauvegarde("creer", "--pour-le-cloud", "--sortie", str(BUREAU / nom))
         if code != 0:
             raise Echec(creer[-1] if creer else T("nc-sauvegarde a échoué.", "nc-backup failed."))
-        _, voir = sauvegarde("voir", "--pour-le-cloud", str(BUREAU / nom))
-        lignes = [T("Partiront : tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta photo de profil.",
-                    "Will be sent: your settings, your app shortcuts, your style, your palettes and your profile picture.")]
+        code, voir = sauvegarde("voir", "--pour-le-cloud", str(BUREAU / nom))
+        if code != 0:                          # une archive que la reprise refuserait ne part pas
+            bureau_vider()
+            raise Echec(voir[-1] if voir else T("Sauvegarde illisible.", "Unreadable backup."))
+        lignes = [T("Partiront : les réglages listés ici, tes raccourcis d'applications, tes palettes et ta photo de profil ; "
+                    "jamais de code ni de clé.", "Will be sent: the settings listed here, your app shortcuts, your palettes "
+                    "and your profile picture; never code or keys.")]
         lignes += [l for l in creer if "écart" in l or "left out" in l] + voir
         ecrire_json(BUREAU_PRET, {"version": 1, "sens": "envoi", "fichier": nom, "lignes": lignes})
         dire(T("Sauvegarde prête : vérifie ce qui part, puis envoie-la.", "Backup ready: check what is sent, then send it."),
@@ -1336,48 +1363,72 @@ def cmd_bureau(a):
         f = bureau_pret("envoi")
         s = Session()
         features = s.etat().get("features") or {}
-        code = deposer_un(s, f, dossier_des_notes(s, DOSSIER_BUREAU), "create", None, False)
+        try:
+            code = deposer_un(s, f, dossier_des_notes(s, DOSSIER_BUREAU), "create", None, False)
+        except Echec as e:
+            if e.code != HORS_LIGNE:           # hors ligne : le fichier reste pour nc-cloud reprendre
+                bureau_vider()
+            raise
         if code != OK:
+            if code != HORS_LIGNE:
+                bureau_vider()
             return code
         bureau_vider()
-        # Les 5 dernières gardées, seulement si le serveur sait supprimer ; sinon rien n'est effacé, et c'est dit
-        sur_place = sorted((e for e in s.pages(dossier_des_notes(s, DOSSIER_BUREAU))
-                            if e.get("kind") == "file" and BUREAU_NOM.fullmatch(str(e.get("name")))), key=lambda e: e["name"], reverse=True)
-        vieilles = sur_place[BUREAU_GARDER:]
-        if vieilles and (features.get("file_delete") is True or features.get("directory_delete") is True):
+        # Les 5 plus récentes gardées, seulement si le serveur sait supprimer ; jamais celle qu'on vient d'envoyer (son
+        # nom est unique : un dépôt « create » échoue sur un nom pris), jamais un fichier d'une autre forme, jamais un
+        # nom daté du futur ; ce qui est gardé et supprimé est dit
+        tri, futur = bureau_trier(s.pages(dossier_des_notes(s, DOSSIER_BUREAU)))
+        autres = [e for e in tri if e.get("name") != f.name]
+        vieilles = autres[BUREAU_GARDER - 1:]
+        supprimees = 0
+        sait = features.get("file_delete") is True or features.get("directory_delete") is True
+        if vieilles and sait:
             for e in vieilles:
                 with contextlib.suppress(Echec):
-                    cmd_supprimer(argparse.Namespace(id=e["id"], revision=e.get("revision"), recursif=False, arbre=None, copie=False, dossier=None))
-            dire(T(f"Envoyée. Les {BUREAU_GARDER} dernières sauvegardes sont gardées dans « {DOSSIER_BUREAU} ».",
-                   f"Sent. The last {BUREAU_GARDER} backups are kept in “{DOSSIER_BUREAU}”."), evenement="bureau", etat="envoye")
-        else:
-            dire(T(f"Envoyée dans « {DOSSIER_BUREAU} »." + (" Le serveur ne sait pas supprimer : les anciennes restent, rien n'est effacé."
-                                                            if vieilles else ""),
-                   f"Sent to “{DOSSIER_BUREAU}”." + (" The server cannot delete: the old ones stay, nothing is erased." if vieilles else "")),
-                 evenement="bureau", etat="envoye")
+                    cmd_supprimer(argparse.Namespace(id=e["id"], revision=e.get("revision"), recursif=False, arbre=None,
+                                                     copie=False, dossier=None))
+                    supprimees += 1
+        msg = [T(f"Envoyée dans « {DOSSIER_BUREAU} ».", f"Sent to “{DOSSIER_BUREAU}”.")]
+        if supprimees:
+            msg.append(T(f"{supprimees} ancienne(s) supprimée(s) ; {1 + len(autres) - supprimees} gardée(s).",
+                         f"{supprimees} old one(s) deleted; {1 + len(autres) - supprimees} kept."))
+        if vieilles and supprimees < len(vieilles):
+            msg.append(T(f"{len(vieilles) - supprimees} ancienne(s) non supprimée(s) (" + ("refus du serveur" if sait else
+                         "le serveur ne sait pas supprimer") + ") : rien d'autre n'est effacé.",
+                         f"{len(vieilles) - supprimees} old one(s) not deleted (" + ("refused by the server" if sait else
+                         "the server cannot delete") + "): nothing else is erased."))
+        if futur:
+            msg.append(T(f"{futur} sauvegarde(s) datée(s) du futur ignorée(s) : ni gardée(s) parmi les 5, ni supprimée(s).",
+                         f"{futur} backup(s) dated in the future ignored: neither among the 5 kept, nor deleted."))
+        dire(" ".join(msg), evenement="bureau", etat="envoye", supprimees=supprimees, futur=futur)
         return OK
     if a.action == "telecharger":
         s = Session()
         dossier = next((e["id"] for e in s.pages("root") if e.get("kind") == "directory" and e.get("name") == DOSSIER_BUREAU
                         and isinstance(e.get("id"), str)), None)
-        l = sorted((e for e in (s.pages(dossier) if dossier else []) if e.get("kind") == "file"
-                    and BUREAU_NOM.fullmatch(str(e.get("name")))), key=lambda e: e["name"], reverse=True)
+        l, futur = bureau_trier(s.pages(dossier) if dossier else [])
         if not l:
-            raise Echec(T(f"Aucune sauvegarde dans « {DOSSIER_BUREAU} ».", f"No backup in “{DOSSIER_BUREAU}”."))
+            raise Echec(T(f"Aucune sauvegarde dans « {DOSSIER_BUREAU} »." + (f" ({futur} datée(s) du futur, ignorée(s).)" if futur else ""),
+                          f"No backup in “{DOSSIER_BUREAU}”." + (f" ({futur} dated in the future, ignored.)" if futur else "")))
         e = l[0]
         if not isinstance(e.get("size"), int) or e["size"] > BUREAU_MAX:
             raise Echec(T("Sauvegarde du cloud trop grosse (plus de 32 Mio) : refusée sans être téléchargée.",
                           "Cloud backup too big (over 32 MiB): refused without being downloaded."))
         bureau_vider()
         dossier_prive(BUREAU)
-        cmd_telecharger(argparse.Namespace(id=e["id"], dest=str(BUREAU / e["name"]), dossier=dossier, remplacer=False))
+        # maximum : la taille relue au téléchargement compte aussi (le flux s'arrête au-delà de la taille annoncée)
+        cmd_telecharger(argparse.Namespace(id=e["id"], dest=str(BUREAU / e["name"]), dossier=dossier, remplacer=False,
+                                           maximum=BUREAU_MAX))
         code, voir = sauvegarde("voir", "--pour-le-cloud", str(BUREAU / e["name"]))
         if code != 0:
             bureau_vider()
             raise Echec(voir[-1] if voir else T("Sauvegarde illisible.", "Unreadable backup."))
-        lignes = [T(f"Sauvegarde du cloud : {e['name']}. Les fichiers qui lancent du code ne sont jamais remis, et les "
-                    "réglages de sécurité restent ceux de ce PC.", f"Cloud backup: {e['name']}. Files that run code are never "
-                    "restored, and security settings stay those of this PC.")] + voir
+        quand = time.strftime(T("%d/%m/%Y à %H:%M", "%Y-%m-%d at %H:%M"), time.localtime(bureau_date(e)))
+        lignes = [T(f"Sauvegarde du cloud du {quand}. Seuls les réglages listés ici changent, tes autres lignes restent ; "
+                    "jamais de code.", f"Cloud backup of {quand}. Only the settings listed here change, your other lines "
+                    "stay; never code.")] + voir
+        if futur:
+            lignes.append(T(f"{futur} sauvegarde(s) datée(s) du futur ignorée(s).", f"{futur} backup(s) dated in the future ignored."))
         ecrire_json(BUREAU_PRET, {"version": 1, "sens": "reprise", "fichier": e["name"], "lignes": lignes})
         dire(T("Sauvegarde téléchargée : vérifie ce qu'elle contient, puis remets-la.", "Backup downloaded: check what it contains, then restore it."),
              evenement="bureau", etat="pret", sens="reprise", lignes=lignes)
@@ -1615,6 +1666,8 @@ def cmd_telecharger(a):
     e = entree(s, a.id, a.dossier or "root", capacites_session(s))
     if e.get("kind") != "file" or not isinstance(e.get("size"), int) or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
         raise Echec(T("Ce n'est pas un fichier téléchargeable.", "This is not a downloadable file."))
+    if e["size"] > getattr(a, "maximum", e["size"]):
+        raise Echec(T("Fichier plus gros que prévu : refusé sans être téléchargé.", "File bigger than expected: refused without being downloaded."))
     dest = Path(a.dest) if a.dest else dossier_telechargements()
     if dest.is_dir() and not dest.is_symlink():
         nom = os.path.basename(propre(e.get("name")))

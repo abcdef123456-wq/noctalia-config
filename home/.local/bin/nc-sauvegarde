@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import zlib
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
@@ -199,12 +200,17 @@ REGLAGES = ".config/nc/reglages.conf"
 MARGE_LIBRE = 100 * 1024 ** 2
 # La version pour le Cloud JARVIS (serveur à moitié de confiance) : seulement ce qu'une reprise SANS --avec-code remet,
 # filtré AVANT l'envoi ; en-têtes tar anonymes. Une archive venue du cloud est lue avec des bornes plus serrées
-CLOUD_ELEMENTS = [REGLAGES, RACCOURCIS, ".config/nc/style.conf", ".config/nc/style-avant", ".config/noctalia/palettes", ".face"]
+# (ni style.conf ni style-avant : nc-reglages appliquer les refait ; ni fonds d'écran). Une reprise du cloud n'accepte
+# QUE ces fichiers ; les réglages passent par la liste blanche de nc-reglages (pour-le-cloud), à l'envoi et à la reprise
+PALETTES = ".config/noctalia/palettes"
+CLOUD_ELEMENTS = [REGLAGES, RACCOURCIS, PALETTES, ".face"]
 NOM_SECRET = re.compile(r".*(KEY|TOKEN|SECRET|PASS|MDP|CLE_|JETON).*", re.I)
 CLOUD_VALEUR_MAX = 512
 CLOUD_MAX_ARCHIVE = 32 * 1024 ** 2                 # taille du fichier .tar.gz, avant toute lecture
 CLOUD_MAX_MEMBRES = 500
 CLOUD_MAX_OCTETS = 64 * 1024 ** 2                  # tailles annoncées, cumulées pendant la lecture des en-têtes
+CLOUD_MAX_DECOMPRESSE = 80 * 1024 ** 2             # le tar décompressé, au plus (une bombe gzip s'arrête là)
+CLOUD_MAX_ENTETE = 8 * 1024                        # un en-tête PAX, au plus
 
 
 def propre(s):
@@ -373,66 +379,116 @@ def fusion_reglages(donnees):
     return ("\n".join(sortie + locales) + "\n").encode("utf-8"), sorted(set(gardees))
 
 
+def filtre_cloud(donnees):
+    """[(CLE, valeur)] d'un reglages.conf qui partent sur le cloud ou en reviennent : la liste blanche de nc-reglages
+    (pour-le-cloud : réglage connu, section qui part, valeur valide), lancé à côté de ce script ; en plus, jamais un nom
+    de secret ni une valeur de plus de 512 caractères. Sans nc-reglages, rien ne part ni n'est remis."""
+    try:
+        r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-reglages"),
+                            "pour-le-cloud"], input=donnees[:MAX_REGLAGE], capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        r = None
+    if r is None or r.returncode != 0:
+        echec("nc-reglages ne peut pas trier les réglages : rien n'est envoyé ni remis.",
+              "nc-reglages cannot sort the settings: nothing is sent or restored.")
+    l = []
+    for x in r.stdout.decode("utf-8", "replace").splitlines():
+        mm = re.fullmatch(r"([A-Z0-9_]+)=(.*)", x)
+        if mm and not NOM_SECRET.fullmatch(mm[1]) and len(mm[2]) <= CLOUD_VALEUR_MAX:
+            l.append((mm[1], mm[2]))
+    return l
+
+
 def reglages_pour_le_cloud(donnees):
-    """reglages.conf pour le cloud : les lignes CLE=valeur seulement, sans les CLES_LOCALES (gardées sur chaque PC à la
-    reprise), sans clé dont le NOM parle d'un secret (KEY, TOKEN, SECRET, PASS, MDP, CLE_, JETON) ni valeur de plus de
-    512 caractères ; commentaires et lignes bizarres retirés. (octets, nombre de lignes écartées)"""
-    sortie, ecartees = [], 0
-    for l in donnees.decode("utf-8", "replace").splitlines():
-        mm = re.fullmatch(r"([A-Z0-9_]+)=(.*)", l)
-        if mm and not CLES_LOCALES.fullmatch(mm[1]) and not NOM_SECRET.fullmatch(mm[1]) and len(mm[2]) <= CLOUD_VALEUR_MAX:
-            sortie.append(l)
-        elif l.strip():
-            ecartees += 1
-    return ("\n".join(sortie) + "\n").encode("utf-8"), ecartees
+    """reglages.conf pour le cloud : seulement la liste blanche (filtre_cloud). (octets, lignes écartées, noms envoyés)"""
+    l = filtre_cloud(donnees)
+    lignes = sum(1 for x in donnees.decode("utf-8", "replace").splitlines() if x.strip())
+    return "".join(f"{k}={v}\n" for k, v in l).encode("utf-8"), max(0, lignes - len(l)), [k for k, _ in l]
 
 
-def anonyme(ti):
-    """En-tête tar sans nom d'utilisateur ni uid ; ni lien, ni fichier spécial (la reprise les refuse de toute façon)."""
-    if not (ti.isfile() or ti.isdir()):
+def fusion_cloud(donnees):
+    """reglages.conf venu du cloud : seuls ses réglages de la liste blanche changent ceux de ce PC, qui garde toutes ses
+    autres lignes telles quelles (fusion, pas remplacement). (octets, clés de l'archive non reprises)"""
+    venus = dict(filtre_cloud(donnees))
+    cles = set(re.findall(r"(?m)^\s*([A-Z0-9_]+)\s*=", donnees.decode("utf-8", "replace")))
+    souple = re.compile(r"\s*([A-Z0-9_]+)\s*=.*")
+    sortie, faits = [], set()
+    for l in lire_local(REGLAGES).splitlines():
+        mm = souple.fullmatch(l)
+        if mm and mm[1] in venus:
+            if mm[1] not in faits:
+                sortie.append(f"{mm[1]}={venus[mm[1]]}")
+                faits.add(mm[1])
+            continue
+        sortie.append(l)
+    sortie += [f"{k}={v}" for k, v in venus.items() if k not in faits]
+    return ("\n".join(sortie) + "\n").encode("utf-8"), sorted(cles - set(venus))
+
+
+def palette_sure(nom):
+    """Un nom de palette : un seul niveau, pas caché, imprimable (ni ESC, ni sens d'écriture inversé), 255 octets au plus."""
+    return nom != "" and "/" not in nom and not nom.startswith(".") and nom.isprintable() and len(os.fsencode(nom)) <= 255
+
+
+def nom_cloud(m):
+    """Ce qu'une archive du cloud peut contenir : ces fichiers ordinaires, rien d'autre (ni dossier, ni fond d'écran)."""
+    if not m.isfile() or "\0" in m.name:
         return None
-    if ti.isfile() and ti.size > (MAX_FACE if ti.name == ".face" else MAX_REGLAGE):
-        return None
-    ti.uid = ti.gid = 0
-    ti.uname = ti.gname = ""
-    ti.mode &= 0o755
-    return ti
+    if m.name in (REGLAGES, RACCOURCIS, ".face"):
+        return m.name
+    return m.name if m.name.startswith(PALETTES + "/") and palette_sure(m.name[len(PALETTES) + 1:]) else None
+
+
+def lire_sur(src, maxi, un_lien):
+    """(octets, stat) d'un fichier ordinaire de ce PC, jamais à travers un lien symbolique ; un_lien : refusé s'il a
+    plusieurs liens durs (son contenu serait celui d'un autre fichier) ; (None, …) sinon, ou au-delà de maxi."""
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None, None
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or (un_lien and st.st_nlink != 1) or st.st_size > maxi:
+        os.close(fd)
+        return None, st
+    with os.fdopen(fd, "rb") as f:
+        d = f.read(maxi + 1)
+    return (d if len(d) <= maxi else None), st
 
 
 def creer_pour_le_cloud(sortie):
-    """L'archive qui part sur le cloud, écrite d'un coup (temporaire du même dossier puis os.replace)."""
-    elements = [p for p in CLOUD_ELEMENTS if os.path.lexists(os.path.join(*reel(p)))]
-    if not elements:
+    """L'archive qui part sur le cloud, écrite d'un coup (temporaire du même dossier puis os.replace) : réglages de la
+    liste blanche, raccourcis d'applications, palettes (fichiers ordinaires d'un seul lien, noms sûrs), photo de profil
+    si c'est une image ; en-têtes anonymes."""
+    a_poser = []                       # (nom dans l'archive, octets, date)
+    ecartees = retirees = palettes_ecartees = 0
+    for arc, maxi, un_lien in ((REGLAGES, MAX_REGLAGE, False), (RACCOURCIS, MAX_REGLAGE, False), (".face", MAX_FACE, True)):
+        brut, st = lire_sur(os.path.join(*reel(arc)), maxi, un_lien)
+        if brut is None:
+            continue
+        if arc == REGLAGES:
+            brut, ecartees, _ = reglages_pour_le_cloud(brut)
+        elif arc == RACCOURCIS:
+            brut, retirees = sans_raccourcis_risques(brut, locales=set(), commentaires=False)
+        elif not image_valide(brut[:16]):
+            continue
+        a_poser.append((arc, brut, st.st_mtime))
+    dossier = os.path.join(*reel(PALETTES))
+    if os.path.isdir(dossier) and not os.path.islink(dossier):
+        for e in sorted(os.listdir(dossier)):
+            brut, st = lire_sur(os.path.join(dossier, e), MAX_REGLAGE, True) if palette_sure(e) else (None, None)
+            if brut is None:
+                palettes_ecartees += 1
+            else:
+                a_poser.append((PALETTES + "/" + e, brut, st.st_mtime))
+    if not a_poser:
         sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
-    dossier = os.path.dirname(os.path.abspath(sortie))
-    fd, tmp = tempfile.mkstemp(prefix=".nc-sauvegarde-", suffix=".tmp", dir=dossier)
-    ecartees = retirees = 0
-    poses = []
+    fd, tmp = tempfile.mkstemp(prefix=".nc-sauvegarde-", suffix=".tmp", dir=os.path.dirname(os.path.abspath(sortie)))
     try:
         with os.fdopen(fd, "wb") as f, tarfile.open(fileobj=f, mode="w:gz") as t:
-            for arc in elements:
-                src = os.path.join(*reel(arc))
-                if arc in (REGLAGES, RACCOURCIS):
-                    try:
-                        st = os.lstat(src)
-                        if not stat.S_ISREG(st.st_mode):
-                            continue
-                        with open(src, "rb") as e:
-                            brut = e.read(MAX_REGLAGE + 1)
-                    except OSError:
-                        continue
-                    if len(brut) > MAX_REGLAGE:
-                        continue
-                    if arc == REGLAGES:
-                        donnees, ecartees = reglages_pour_le_cloud(brut)
-                    else:
-                        donnees, retirees = sans_raccourcis_risques(brut, locales=set(), commentaires=False)
-                    ti = anonyme(tarfile.TarInfo(arc))
-                    ti.size, ti.mtime, ti.mode = len(donnees), int(st.st_mtime), 0o600
-                    t.addfile(ti, io.BytesIO(donnees))
-                else:
-                    t.add(src, arcname=arc, filter=anonyme)
-                poses.append(arc)
+            for arc, brut, date in a_poser:
+                ti = tarfile.TarInfo(arc)
+                ti.size, ti.mtime, ti.mode = len(brut), int(date), 0o600 if arc in (REGLAGES, RACCOURCIS) else 0o644
+                t.addfile(ti, io.BytesIO(brut))         # uid, gid 0 et uname, gname vides : ceux de TarInfo
         os.replace(tmp, sortie)
         tmp = None
     except (OSError, tarfile.TarError) as e:
@@ -441,18 +497,63 @@ def creer_pour_le_cloud(sortie):
         if tmp:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
-    print(T(f"Sauvegarde pour le cloud prête ({taille(os.path.getsize(sortie))}) :",
-            f"Backup for the cloud ready ({taille(os.path.getsize(sortie))}):"))
-    for arc in poses:
-        print(f"  • ~/{arc}")
+    print(T(f"Sauvegarde pour le cloud prête ({taille(os.path.getsize(sortie))}).",
+            f"Backup for the cloud ready ({taille(os.path.getsize(sortie))})."))
     if ecartees:
-        print(T(f"{ecartees} ligne(s) de réglages écartée(s) : réglages propres à ce PC, noms de clé ou de mot de passe, "
-                "valeurs très longues.", f"{ecartees} setting line(s) left out: settings specific to this PC, key or "
-                "password names, very long values."))
+        print(T(f"{ecartees} ligne(s) de réglages écartée(s) : réglages propres à ce PC (sécurité, IA, énergie, veille, "
+                "VPN, comptes…), inconnus ou invalides, commentaires.", f"{ecartees} setting line(s) left out: settings "
+                "specific to this PC (security, AI, power, sleep, VPN, accounts…), unknown or invalid, comments."))
     if retirees:
         print(T(f"{retirees} ligne(s) de raccourcis écartée(s) : commandes et commentaires (seuls les raccourcis "
                 "d'applications partent).", f"{retirees} shortcut line(s) left out: commands and comments (only app "
                 "shortcuts are sent)."))
+    if palettes_ecartees:
+        print(T(f"{palettes_ecartees} palette(s) écartée(s) : lien, dossier, nom caché ou étrange, trop grosse.",
+                f"{palettes_ecartees} palette(s) left out: link, folder, hidden or odd name, too big."))
+
+
+def tar_cloud(fichier):
+    """Le tar d'une archive du cloud, en mémoire : un seul flux gzip, décompressé avec un PLAFOND (80 Mio), puis ses
+    en-têtes vérifiés AVANT tarfile (qui lirait un en-tête PAX ou un nom long GNU en entier) : fichiers ordinaires et
+    en-têtes PAX de 8 Kio au plus, rien d'autre (ni lien, ni dossier, ni nom long GNU, ni type inconnu)."""
+    def refus(fr, en):
+        echec(f"{fichier} : sauvegarde du cloud refusée ({fr}), rien n'est écrit.",
+              f"{fichier}: cloud backup refused ({en}), nothing is written.")
+    d, bouts, total = zlib.decompressobj(16 + zlib.MAX_WBITS), [], 0
+    try:
+        with open(fichier, "rb") as f:
+            for entree in iter(lambda: f.read(1 << 16), b""):
+                while entree and not d.eof:
+                    b = d.decompress(entree, 1 << 20)
+                    total += len(b)
+                    if total > CLOUD_MAX_DECOMPRESSE:
+                        refus(f"plus de {taille(CLOUD_MAX_DECOMPRESSE)} une fois décompressée",
+                              f"over {taille(CLOUD_MAX_DECOMPRESSE)} once decompressed")
+                    bouts.append(b)
+                    entree = d.unconsumed_tail
+                if d.eof and (entree or d.unused_data):
+                    refus("données après la fin", "data after the end")
+    except zlib.error as e:
+        refus(f"abîmée : {e}", f"damaged: {e}")
+    if not d.eof:
+        refus("coupée", "truncated")
+    data, pos, n = b"".join(bouts), 0, 0
+    while True:
+        h = data[pos:pos + 512]
+        if len(h) < 512:
+            refus("coupée", "truncated")
+        if h == bytes(512):
+            return data
+        try:
+            t = int(h[124:136].strip(b"\0 ") or b"0", 8)
+        except ValueError:
+            refus("en-tête abîmé", "damaged header")
+        if h[156:157] not in (b"0", b"\0", b"x") or (h[156:157] == b"x" and t > CLOUD_MAX_ENTETE):
+            refus("élément d'un type refusé", "item of a refused type")
+        n += 1
+        if n > 2 * CLOUD_MAX_MEMBRES:
+            refus("trop d'éléments", "too many items")
+        pos += 512 + (t + 511) // 512 * 512
 
 
 def image_valide(tete):
@@ -486,7 +587,9 @@ def ecrire_membre(t, m, nom, dest, fonds_rel, avec_code, retirees, gardees):
         raise Refus(T("lien à la place du fichier", "link where the file should be"))
     # Un fond d'écran n'est jamais exécutable ; le reste : droits du membre sans setuid/setgid/sticky ni écriture
     # pour les autres, toujours lisible et modifiable par toi
-    mode = 0o644 if est_fonds(nom, fonds_rel) else (m.mode & 0o755) | 0o600
+    # Du cloud : réglages et raccourcis 0600, photo et palettes 0644 (jamais exécutables), quel que soit l'en-tête
+    mode = (0o600 if nom in (REGLAGES, RACCOURCIS) else 0o644) if POUR_LE_CLOUD else \
+        0o644 if est_fonds(nom, fonds_rel) else (m.mode & 0o755) | 0o600
     src = t.extractfile(m)
     # reglages.conf : même verrou que nc-reglages (reglages.conf.lock), pris autour de la lecture (fusion) et du os.replace,
     # pour ne pas perdre un réglage écrit au même moment
@@ -499,14 +602,21 @@ def ecrire_membre(t, m, nom, dest, fonds_rel, avec_code, retirees, gardees):
                     donnees, n = sans_raccourcis_risques(b"".join(morceaux(src)))
                     retirees.append(n)
                     out.write(donnees)
+                elif nom == REGLAGES and POUR_LE_CLOUD:
+                    donnees, cles = fusion_cloud(b"".join(morceaux(src)))
+                    gardees.extend(cles)
+                    out.write(donnees)
                 elif nom == REGLAGES and not avec_code:
                     donnees, cles = fusion_reglages(b"".join(morceaux(src)))
                     gardees.extend(cles)
                     out.write(donnees)
                 else:
+                    image = est_fonds(nom, fonds_rel) or (POUR_LE_CLOUD and nom == ".face")
+                    if POUR_LE_CLOUD and nom == ".face" and m.size < 16:
+                        raise Refus(T("ce n'est pas une image", "not an image"))
                     premier = True
                     for b in morceaux(src):
-                        if premier and est_fonds(nom, fonds_rel) and not image_valide(b[:16]):
+                        if premier and image and not image_valide(b[:16]):
                             raise Refus(T("ce n'est pas une image", "not an image"))
                         premier = False
                         out.write(b)
@@ -534,7 +644,7 @@ def ouvrir(fichier):
         echec(f"{fichier} fait plus de {taille(CLOUD_MAX_ARCHIVE)} : refusée sans être lue.",
               f"{fichier} is over {taille(CLOUD_MAX_ARCHIVE)}: refused without being read.")
     try:
-        return tarfile.open(fichier, "r:gz")
+        return tarfile.open(fileobj=io.BytesIO(tar_cloud(fichier)), mode="r:") if POUR_LE_CLOUD else tarfile.open(fichier, "r:gz")
     except (OSError, EOFError, tarfile.TarError, zlib.error) as e:
         echec(f"{fichier} n'est pas une sauvegarde lisible ({e}).", f"{fichier} is not a readable backup ({e}).")
 
@@ -576,6 +686,9 @@ def lire_membres(t, fonds_dest, avec_code):
         if POUR_LE_CLOUD and annonce > CLOUD_MAX_OCTETS:    # avant de sauter ses données (les décompresser)
             echec(f"cette archive annonce plus de {taille(CLOUD_MAX_OCTETS)} : refusée, rien n'est écrit.",
                   f"this archive announces over {taille(CLOUD_MAX_OCTETS)}: refused, nothing is written.")
+        if POUR_LE_CLOUD and nom_cloud(m) is None:          # du cloud : rien d'autre que ce qui y part
+            echec(f"« {propre(m.name)} » n'a rien à faire dans une sauvegarde du cloud : refusée, rien n'est écrit.",
+                  f"“{propre(m.name)}” does not belong in a cloud backup: refused, nothing is written.")
     return membres_surs(tous, fonds_rel_de(fonds_dest), avec_code)
 
 
@@ -614,6 +727,14 @@ def voir(fichier):
               + (T("  [contient du code]", "  [contains code]") if code else "")
               + (T("  [peut contenir des commandes]", "  [may contain commands]") if cmd else ""))
     montrer_ignores(ignores)
+    if POUR_LE_CLOUD:
+        with ouvrir(fichier) as t:
+            m = next((m for m in t if m.name == REGLAGES), None)
+            l = filtre_cloud(t.extractfile(m).read(MAX_REGLAGE)) if m else []
+        print(T(f"{len(l)} réglage(s) : apparence, île, barre et dock, fenêtres, fonds, son, clavier et souris, terminal…",
+                f"{len(l)} setting(s): appearance, island, bar and dock, windows, wallpapers, sound, keyboard and mouse, terminal…"))
+        for x in textwrap.wrap(", ".join(k for k, _ in l), 200):
+            print("  " + x)
 
 
 def lancer_si_present(cmd):
@@ -667,9 +788,13 @@ def restaurer(fichier, avec_code):
     if sum(retirees):
         print(T(f"{sum(retirees)} ligne(s) de raccourcis non remise(s), --avec-code pour les garder.",
                 f"{sum(retirees)} shortcut line(s) not restored, --with-code to keep them."))
-    if gardees:
+    g = sorted(set(gardees))
+    if g and POUR_LE_CLOUD:
+        print(T(f"{len(g)} réglage(s) de l'archive non repris (ceux de ce PC restent) : ",
+                f"{len(g)} archive setting(s) not used (this PC's stay): ") + ", ".join(g[:20]) + (" …" if len(g) > 20 else ""))
+    elif g:
         print(T("Réglages de sécurité gardés tels qu'ils sont sur ce PC (ceux de l'archive ne sont pas pris) : ",
-                "Security settings kept as they are on this PC (the archive's are not used): ") + ", ".join(sorted(set(gardees))))
+                "Security settings kept as they are on this PC (the archive's are not used): ") + ", ".join(g[:20]) + (" …" if len(g) > 20 else ""))
     if fonds_dest is None and any(est_dans(n, FONDS_EXTERNES) for _, n in membres):
         print(T("Fonds d'écran non remis : aucun dossier sûr ; règle FONDS_DOSSIER sous ton dossier personnel.",
                 "Wallpapers not restored: no safe folder; set FONDS_DOSSIER inside your home folder."))
@@ -678,7 +803,7 @@ def restaurer(fichier, avec_code):
               + ", ".join(propre(n) for n in sorted(set(non_remis))))
     # Sans --avec-code, ce qui a été filtré, en une phrase, et comment tout remettre (le cas courant : TA sauvegarde)
     filtres = len(set(non_remis)) + len(set(gardees)) + sum(retirees)
-    if filtres:
+    if filtres and not POUR_LE_CLOUD:          # du cloud : jamais de --avec-code
         print(T(f"{filtres} réglage(s) et fichier(s) gardés tels quels chez toi (sûreté). Si c'est ta propre sauvegarde : "
                 f"nc-sauvegarde restaurer --avec-code {propre(fichier)}",
                 f"{filtres} setting(s) and file(s) kept as they are on your PC (safety). If it is your own backup: "

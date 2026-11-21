@@ -135,19 +135,46 @@ Un clic ouvre le panneau. Comme les autres modules, il se masque et se déplace 
 
 Dans les réglages, section Cloud JARVIS, deux boutons, chacun en deux temps :
 
-- « Sauvegarder mes réglages dans le cloud » prépare d'abord, sur ce PC, la version pour le cloud de `nc-sauvegarde`
-  (`nc-sauvegarde creer --pour-le-cloud`). Elle contient tes réglages, tes raccourcis d'applications, ton style, tes
-  palettes et ta photo de profil, et rien d'autre. La liste de ce qui partira s'affiche ; « Envoyer » la dépose dans le
-  dossier « Bureau » du cloud, sous un nom daté. Si le serveur sait supprimer, les 5 dernières sont gardées ; sinon
-  rien n'est effacé, et c'est dit.
-- « Reprendre mes réglages depuis le cloud » télécharge la plus récente dans un dossier privé et montre ce qu'elle
-  contient ; « Remettre » la restaure, toujours SANS `--avec-code`.
+- « Sauvegarder mes réglages dans le cloud » prépare d'abord l'archive, sur ce PC (`nc-sauvegarde creer
+  --pour-le-cloud`). Tu vois le nombre et les noms des réglages qui partent. « Envoyer » la dépose dans le dossier
+  « Bureau » du cloud, sous un nom daté.
+- « Reprendre mes réglages depuis le cloud » télécharge la plus récente dans un dossier privé et montre sa date et
+  les réglages qu'elle changerait. « Remettre » la restaure, toujours SANS `--avec-code`.
 
-Ce qui ne part jamais : aucun fichier qui lance du code (`perso.lua`, `.zshrc.perso`, `perso.conf` de kitty,
-animations, réglages de Noctalia), aucun raccourci avec une commande, aucun commentaire, aucun réglage propre à ce PC
-(veille, verrou, IA, ville de la météo…), aucune clé dont le nom parle d'un secret (KEY, TOKEN, SECRET, PASS, MDP,
-CLE_, JETON), aucune valeur de plus de 512 caractères, aucun fond d'écran. Les en-têtes de l'archive ne portent pas ton
-nom d'utilisateur. Une archive venue du cloud est lue avec des bornes serrées (32 Mio, 500 éléments, 64 Mio annoncés).
+Ce qui part et revient : une liste blanche, à un seul endroit (`SECTIONS_CLOUD` de nc-reglages, commande
+`nc-reglages pour-le-cloud`), appliquée à l'envoi ET à la reprise.
+
+- Un réglage passe s'il est connu du catalogue, si sa section part, et si sa valeur est valide pour son genre.
+- Les sections qui partent : pages de l'île, île, notifications, apparence, animations, lumière nocturne, barre et
+  dock, fenêtres, fonds d'écran, son et luminosité, clavier et souris, terminal.
+- Même dans ces sections, ne partent jamais : le VPN, le verrou, les sessions, l'IA, la ville de la météo, les polices
+  et le thème du curseur, l'agent de code, l'écran (VRR), aucun texte libre, aucun dossier.
+- Restent ceux de chaque PC : énergie, veille, applications, intelligence artificielle, agents IA, Google, Garmin,
+  Cloud JARVIS, mises à jour, captures.
+- À la reprise, c'est une fusion : seuls les réglages de la liste changent, toutes tes autres lignes restent.
+
+Les autres fichiers :
+
+- Partent aussi tes raccourcis d'applications (aucune commande), tes palettes et ta photo de profil.
+- Une palette part si c'est un fichier ordinaire à un seul lien, avec un nom simple. La photo part si c'est une image.
+- Ne partent jamais : aucun fichier qui lance du code, aucun fond d'écran, ni `style.conf` ni `style-avant`
+  (`nc-reglages appliquer` les refait).
+- Les en-têtes de l'archive ne portent pas ton nom d'utilisateur.
+
+Une archive venue du cloud est refusée en entier si elle contient quoi que ce soit d'autre. Elle est lue avec des
+bornes :
+
+- 32 Mio au plus, aussi au téléchargement ;
+- un seul flux gzip, décompressé avec un plafond de 80 Mio ;
+- 500 éléments au plus ;
+- seulement des fichiers ordinaires, et des en-têtes PAX de 8 Kio au plus, vérifiés avant tarfile.
+
+Si le serveur sait supprimer, les 5 sauvegardes les plus récentes sont gardées, jamais celle qu'on vient d'envoyer.
+Un nom daté de plus de 10 minutes dans le futur est ignoré : il n'est ni choisi, ni compté, ni supprimé, et c'est dit.
+Un fichier d'une autre forme n'est jamais touché.
+
+Limite : les raccourcis remis remplacent ceux de ce PC (comme `nc-sauvegarde restaurer`). Les anciens sont gardés
+dans `~/.cache/nc/avant-restauration`.
 
 ### Récents
 

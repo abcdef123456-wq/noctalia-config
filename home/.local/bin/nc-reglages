@@ -22,6 +22,7 @@
   nc-reglages vpn-un-indicateur   un seul indicateur VPN : la pilule de la barre (les 4 réglages VPN d'affichage d'un coup)
   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
   nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
+  nc-reglages pour-le-cloud       entrée : un reglages.conf ; sortie : les seules lignes qui partent sur le cloud
 
 Dans l'écran texte : ↑ ↓ pour choisir, ← → pour changer la valeur (appliquée tout de suite), Entrée pour saisir ou
 ouvrir, r pour remettre la valeur de la config, Tab pour passer des sections aux réglages, q pour quitter.
@@ -120,6 +121,7 @@ USAGE_EN = """nc-settings (also nc-reglages): noctalia-config settings, in the i
   nc-settings vpn-single-indicator  a single VPN indicator: the bar pill (the 4 VPN display settings at once)
   nc-settings reset [KEY]         back to the config's value (every setting without KEY)
   nc-settings apply               rewrite what depends on them (run by updates)
+  nc-settings pour-le-cloud       input: a reglages.conf; output: only the lines sent to the cloud
   nc-settings news                what's new in the latest updates of the config
 
 On the text screen: ↑ ↓ to choose, ← → to change the value (applied right away), Enter to type or open,
@@ -1729,6 +1731,49 @@ REGLAGES = [
         "notification history keeps; avoid it if you sometimes read a password.")),
 ]
 PAR_CLE = {r.cle: r for r in REGLAGES}
+
+# ── « Mon bureau me suit » (nc-cloud bureau, nc-sauvegarde --pour-le-cloud) : ce qui part sur le cloud et en revient.
+# UNE seule liste, par section ; une section absente d'ici ne part pas (et test_cloud_reglages échoue). Dans une section
+# qui part : ni les clés de CLES_PAS_CLOUD, ni les genres texte et dossier (texte libre, chemins de ce PC), et la valeur
+# doit être valide pour son genre ; à l'envoi comme à la reprise (une archive du cloud ne change rien d'autre)
+SECTIONS_CLOUD = {
+    "Pages de l’île": True, "Île": True, "Notifications": True, "Apparence": True, "Animations": True,
+    "Lumière nocturne": True, "Barre et dock": True, "Fenêtres": True, "Fonds d'écran": True, "Son et luminosité": True,
+    "Clavier et souris": True, "Terminal": True,
+    "Énergie": False,                       # propre au matériel : fréquences, GPU, profils
+    "Veille": False,                        # sécurité : délais du verrou, couvercle
+    "Applications": False,                  # les applications installées sur ce PC
+    "Intelligence artificielle": False, "Agents IA (coucou)": False,   # consentements : IA, nœud, Telegram, agents
+    "Intégration Google": False, "Santé Garmin": False, "Cloud JARVIS": False,   # consentements : comptes, santé, cloud
+    "Mises à jour": False,                  # ce que ce PC installe, et quand
+    "Captures": False,                      # dossier de ce PC, son enregistré
+}
+# Dans une section qui part, restent celles de chaque PC : VPN (kill switch, adresse publique), verrou, sessions
+# (captures des fenêtres), IA, polices et thème du curseur installés, agent de code, écran (VRR)
+CLES_PAS_CLOUD = re.compile(r"VPN_.*|.*VERROU.*|SESSIONS?_.*|IA_.*|.*_IA|METEO_VILLE|POLICE|TERMINAL_POLICE|CURSEUR_THEME|"
+                            r"CODE_.*|ECRAN_VRR")
+
+
+def familles_cloud():
+    """La phrase vraie de ce qui part (et revient) et de ce qui reste propre à chaque PC, tirée de SECTIONS_CLOUD."""
+    oui = ", ".join(nom_section(x).lower() for x, v in SECTIONS_CLOUD.items() if v)
+    non = ", ".join(nom_section(x).lower() for x, v in SECTIONS_CLOUD.items() if not v)
+    return T(f"Partent et reviennent : les réglages {oui}, sauf VPN, verrou, sessions, polices et dossiers ; tes raccourcis "
+             f"d'applications, tes palettes et ta photo de profil. Restent ceux de chaque PC : {non}. Jamais de code ni de clé.",
+             f"Sent and restored: the {oui} settings, except VPN, lock, sessions, fonts and folders; your app shortcuts, "
+             f"palettes and profile picture. Each PC keeps its own: {non}. Never code or keys.")
+
+
+def pour_le_cloud(cle, v):
+    """La valeur normalisée si ce réglage part sur le cloud (ou en revient), sinon None."""
+    r = PAR_CLE.get(cle)
+    if (r is None or SECTIONS_CLOUD.get(r.section) is not True or CLES_PAS_CLOUD.fullmatch(cle)
+            or r.genre not in ("ouinon", "choix", "entier")):
+        return None
+    try:
+        return r.valider(v)
+    except ValueError:
+        return None
 
 # Réglages qui n'ont de sens qu'avec un certain matériel : cachés sur un PC qui ne l'a pas (PC de bureau : ni batterie,
 # ni couvercle, ni pavé tactile, ni écran intégré). Ils restent utilisables en ligne de commande.
@@ -4238,10 +4283,9 @@ def catalogue_cloud():
                                                                            "Space used on the server's quota."),
                      ["nc-cloud", "etat"], T("Voir", "Show"), ""),
                     ("cloud:bureau-sauver", T("Sauvegarder mes réglages dans le cloud", "Back up my settings to the cloud"),
-                     T("Prépare d'abord, sur ce PC : tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta "
-                       "photo de profil (jamais de code ni de clé). Tu vois ce qui part avant de l'envoyer.",
-                       "Prepares first, on this PC: your settings, your app shortcuts, your style, your palettes and your profile "
-                       "picture (never code or keys). You see what is sent before sending it."),
+                     T("Prépare d'abord, sur ce PC ; tu vois le nombre et les noms des réglages qui partent avant de les "
+                       "envoyer. ", "Prepares first, on this PC; you see the number and names of the settings sent before "
+                       "sending them. ") + familles_cloud(),
                      ["nc-cloud", "bureau", "preparer"], T("Préparer", "Prepare"), ""),
                     ("cloud:bureau-reprendre", T("Reprendre mes réglages depuis le cloud", "Restore my settings from the cloud"),
                      T("Télécharge la dernière sauvegarde et montre ce qu'elle contient ; rien n'est remis avant ta confirmation, "
@@ -4264,12 +4308,10 @@ def catalogue_cloud():
         res.append(dict(base, cle="cloud:bureau-liste", genre="rapport",
                         nom=T("Ce qui partira sur le cloud", "What will be sent to the cloud") if envoi
                         else T("Contenu de la sauvegarde du cloud", "Contents of the cloud backup"),
-                        aide=T("Tes réglages, tes raccourcis d'applications, ton style, tes palettes et ta photo de profil ; jamais de "
-                               "code ni de clé. Lis le détail avant de confirmer.", "Your settings, your app shortcuts, your style, your "
-                               "palettes and your profile picture; never code or keys. Read the details before confirming.") if envoi
-                        else T("Les fichiers qui lancent du code ne sont jamais remis, et les réglages de sécurité restent ceux de "
-                               "ce PC. Lis le détail avant de confirmer.", "Files that run code are never restored, and security "
-                               "settings stay those of this PC. Read the details before confirming."), details=pret["lignes"], ia="",
+                        aide=familles_cloud() + T(" Lis le détail avant de confirmer.", " Read the details before confirming.")
+                        + ("" if envoi else T(" Seuls les réglages listés changent ; tes autres lignes restent.",
+                                              " Only the listed settings change; your other lines stay.")),
+                        details=pret["lignes"], ia="",
                         affiche=T("Détails", "Details")))
         actions += [("cloud:bureau-envoyer", T("Envoyer cette sauvegarde", "Send this backup"),
                      T("Dans le dossier « Bureau » du cloud.", "To the cloud's “Bureau” folder."), ["nc-cloud", "bureau", "envoyer"],
@@ -4590,6 +4632,15 @@ def cli(a):
             ecrire(vals)
         appliquer([g for g in groupes if g], vals)
         print(T("Valeur de la config remise.", "Config value restored."))
+    elif a[0] == "pour-le-cloud" and len(a) == 1:
+        # Entrée : un reglages.conf (1 Mo au plus) ; sortie : les seules lignes CLE=valeur qui partent sur le cloud
+        garde = {}
+        for l in sys.stdin.buffer.read(1024 ** 2).decode("utf-8", "replace").splitlines():
+            m = re.fullmatch(r"\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*", l)
+            v = pour_le_cloud(m[1], m[2]) if m else None
+            if v is not None:
+                garde[m[1]] = v
+        sys.stdout.write("".join(f"{k}={v}\n" for k, v in garde.items()))
     elif a[0] in ("appliquer", "apply"):
         echecs = appliquer(["style", "veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
         if echecs:

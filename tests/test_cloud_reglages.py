@@ -83,6 +83,26 @@ class CloudReglages(unittest.TestCase):
             pret.write_text(mauvais)
             self.assertNotIn("cloud:bureau-liste", self.lignes({"CLOUD_JARVIS": "oui"}))
 
+    def test_liste_blanche_du_cloud_chaque_section_classee(self):
+        # Une section nouvelle du catalogue, non classée : ce test échoue (et elle ne part pas)
+        self.assertEqual({r.section for r in self.nc["REGLAGES"]}, set(self.nc["SECTIONS_CLOUD"]))
+        pc = self.nc["pour_le_cloud"]
+        for cle, v in (("GARMIN_JARVIS", "oui"), ("DICTEE_SECOURS", "oui"), ("NOTIFS_IA", "oui"), ("TELEGRAM_AGENTS", "oui"),
+                       ("VPN_KILLSWITCH", "non"), ("VPN_IP_PUBLIQUE", "oui"), ("VPN_IP_SERVICE", "https://x"), ("CLOUD_JARVIS", "oui"),
+                       ("VEILLE_VERROU", "0"), ("IA_MODE", "non"), ("SPOTLIGHT_IA", "jarvis"), ("IA_CHALEUR", "oui"),
+                       ("GOOGLE_INTEGRATION", "oui"), ("MAJ_SYSTEME", "auto"), ("NOEUD_JARVIS", "oui"), ("ALERTES_TELEGRAM", "oui"),
+                       ("SESSIONS_CAPTURE", "oui"), ("SESSION_DEMARRAGE", "vide"), ("VERROU_PHOTO", "oui"), ("ANIM_VERROU", "fade"),
+                       ("HZ_ECO", "60"), ("CAPTURES_COPIER", "oui"), ("APPLI_TERMINAL", "kitty"), ("CODE_AGENT", "auto"),
+                       ("ECRAN_VRR", "non"), ("POLICE", "x"), ("INCONNU", "1"), ("DOCK_TAILLE", "99999"), ("DOCK", "peut-être")):
+            self.assertIsNone(pc(cle, v), cle)
+        for r in self.nc["REGLAGES"]:                     # aucun texte libre ni dossier
+            if r.genre in ("texte", "dossier", "hz"):
+                self.assertIsNone(pc(r.cle, r.defaut), r.cle)
+        self.assertEqual((pc("LANGUE", "en"), pc("DOCK", "yes"), pc("ILE_PAGE_MUSIQUE", "non")), ("en", "oui", "non"))
+        phrase = self.nc["familles_cloud"]()
+        self.assertIn("barre et dock", phrase)
+        self.assertIn("santé garmin", phrase)
+
     def test_appareil_illisible_reste_associe_sans_nom(self):
         app = self.home / ".local/state/nc-cloud/appareil.json"
         app.parent.mkdir(parents=True)
