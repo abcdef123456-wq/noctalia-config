@@ -42,6 +42,30 @@ case "$1" in
   deplacer) printf '%s\n' '{"evenement": "resultat", "message": "Déplacé."}' ;;
   ouvrir) printf '%s\n' '{"evenement": "resultat", "message": "Ouvert : note.txt"}' ;;
   dossier) printf '%s\n' '{"evenement": "dossier", "message": "Dossier créé."}' ;;
+  deposer) apres=0
+           for a in "$@"; do
+             if [ "$apres" = 0 ]; then [ "$a" = "--" ] && apres=1; continue; fi
+             case "$a" in
+               *lent*) printf '{"evenement": "progression", "fichier": "%s", "envoye": 5, "taille": 10}\n' "$a"; exec sleep 30 ;;
+               *coupure*) printf '{"evenement": "progression", "fichier": "%s", "envoye": 5, "taille": 10}\n' "$a"
+                          printf '[{"numero": 1, "cle": "CLEabcdefghijklmnop_-", "fichier": "%s", "nom": "coupure.txt", "taille": 10}]' "$a" > "@ROOT@/envois.json"
+                          printf '%s\n' '{"evenement": "erreur", "code": 3, "message": "Hors ligne."}'; exit 3 ;;
+               *conflit*) case "$*" in
+                            *--si-existe=*) printf '{"evenement": "resultat", "fichier": "%s", "etat": "publie", "message": "Envoyé."}\n' "$a" ;;
+                            *) printf '{"evenement": "conflit", "fichier": "%s", "actuel": {"id": "e", "revision": "rv7"}, "message": "Conflit."}\n' "$a"; exit 6 ;;
+                          esac ;;
+               *) printf '{"evenement": "progression", "fichier": "%s", "envoye": 10, "taille": 10}\n' "$a"
+                  printf '{"evenement": "resultat", "fichier": "%s", "etat": "publie", "message": "Envoyé."}\n' "$a" ;;
+             esac
+           done ;;
+  reprendre) if [ "$2" = "--" ]; then printf '%s\n' '{"evenement": "resultat", "fichier": "/tmp/coupure.txt", "etat": "publie", "message": "Envoyé."}'
+             else printf '{"evenement": "envois", "envois": %s}\n' "$(cat "@ROOT@/envois.json" 2>/dev/null || echo '[]')"; fi ;;
+  choisir) n=$(cat "@ROOT@/choix" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "@ROOT@/choix"
+           case $n in
+             1) printf '%s\n' '{"evenement": "choisis", "fichiers": ["file:///tmp/1", "file:///tmp/2", "file:///tmp/3", "file:///tmp/4", "file:///tmp/5", "file:///tmp/6", "file:///tmp/7", "file:///tmp/8", "file:///tmp/9"]}' ;;
+             2) printf '%s\n' '{"evenement": "choisis", "fichiers": []}' ;;
+             *) exec sleep 30 ;;
+           esac ;;
 esac
 exit 0
 """
@@ -100,6 +124,26 @@ class Sources(unittest.TestCase):
         self.assertIn("if (ac.cloud && !(CloudEtat.actif && CloudEtat.associe)) continue", r)
         self.assertIn('"ipc", "call", "ile", "cloud"', r)
 
+    def test_pilule_indicateur_clic_survol_et_depot_sur_l_ile_fermee(self):
+        compact, ile = lire("Compact.qml"), lire("Ile.qml")
+        self.assertIn('objectName: "nc-cloud-pill"', compact)
+        self.assertIn("visible: CloudEtat.actif && CloudEtat.associe", compact)
+        self.assertIn('nom: CloudEtat.envoie ? "cloud_upload" : "cloud"', compact)          # activité discrète pendant un envoi
+        self.assertIn("color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec", compact)
+        self.assertIn("(compact.surCloud(e.x, e.y) ? CloudEtat.ouvrirPanneau()", ile)      # un clic ouvre le panneau
+        self.assertIn("if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }", ile)
+        m = re.search(r"DropArea \{\n\s*id: depotCloud(.*?)\n        \}\n", ile, re.S)
+        self.assertIsNotNone(m)
+        d = m.group(1) if m else ""
+        self.assertIn("enabled: CloudEtat.actif && CloudEtat.associe && !fen.ouverte && !fen.banniere && !fen.enCarte", d)
+        self.assertIn("drag.accept(Qt.CopyAction)", d)
+        self.assertIn("drop.accept(Qt.CopyAction)", d)
+        self.assertIn("if (CloudEtat.recevoir(drop.urls)) CloudEtat.ouvrirPanneau()", d)
+        self.assertNotIn("envoyerIci", ile)                                                   # rien ne part avant le bouton
+        self.assertIn("visible: depotCloud.containsDrag", ile)
+        # La page JARVIS garde son propre dépôt (pièces jointes)
+        self.assertIn("DropArea {", lire("Assistant.qml"))
+
     def test_actions_liees_aux_capacites(self):
         e = lire("CloudEtat.qml")
         self.assertIn("readonly property bool peutDeplacer: features.entry_move === true", e)
@@ -112,7 +156,7 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None):
+    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -124,6 +168,8 @@ class HorsEcran(unittest.TestCase):
                                            .replace("@ARBRE1@", ARBRE1).replace("@ARBRE2@", ARBRE2))
             (bin_ / "nc-cloud").chmod(0o755)
             H.faux(root, "nc-reglages")
+            if notifier:
+                H.faux(root, "notify-send")
             (root / "racine.json").write_text(json.dumps(page or PAGE_RACINE) + "\n")
             if associe:
                 (root / "state/nc-cloud").mkdir(parents=True)
@@ -210,7 +256,7 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 8) { verifier(CloudEtat.dossier === "root", "revenu à la racine"); console.log("FINI"); Qt.exit(0) }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"})
-        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json telecharger --dossier=root -- ffffffffffffffffffffffffffffffff",
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json telecharger --dossier=root -- ffffffffffffffffffffffffffffffff",
                              "--json telecharger --dossier=root --remplacer -- ffffffffffffffffffffffffffffffff", "--json supprimer --revision=r9 -- ffffffffffffffffffffffffffffffff",
                              "--json lister -- root", "--json lister -- dddddddddddddddddddddddddddddddd", "--json dossier -- dddddddddddddddddddddddddddddddd Vacances", "--json lister -- dddddddddddddddddddddddddddddddd",
                              "--json lister -- root"])
@@ -239,7 +285,7 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"})
-        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json ouvrir --dossier=root -- ffffffffffffffffffffffffffffffff", "--json lister -- dddddddddddddddddddddddddddddddd"])
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json ouvrir --dossier=root -- ffffffffffffffffffffffffffffffff", "--json lister -- dddddddddddddddddddddddddddddddd"])
 
     def test_creer_fichier_renommer_deplacer_ici(self):
         j = self.lancer(self.OUVRIR + '''
@@ -273,7 +319,7 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, features={"entry_move": True})
-        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json creer -- root vide.txt", "--json lister -- root",
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json creer -- root vide.txt", "--json lister -- root",
                              "--json renommer --revision=r9 -- ffffffffffffffffffffffffffffffff notes.md", "--json lister -- root", "--json lister -- dddddddddddddddddddddddddddddddd",
                              "--json deplacer --revision=r9 --vers=dddddddddddddddddddddddddddddddd -- ffffffffffffffffffffffffffffffff", "--json lister -- dddddddddddddddddddddddddddddddd", "--json lister -- root"])
 
@@ -304,7 +350,7 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 4) { console.log("FINI"); Qt.exit(0) }
             } }
         '''.replace("@ARBRE2@", ARBRE2), reglages={"CLOUD_JARVIS": "oui"}, features={"directory_delete": True, "delete_preview": True})
-        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json apercu -- dddddddddddddddddddddddddddddddd",
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json apercu -- dddddddddddddddddddddddddddddddd",
                              "--json supprimer --revision=r1 --recursif --arbre=" + ARBRE1 + " -- dddddddddddddddddddddddddddddddd", "--json lister -- root", "--json apercu -- dddddddddddddddddddddddddddddddd",
                              "--json supprimer --revision=r1 --recursif --arbre=" + ARBRE2 + " -- dddddddddddddddddddddddddddddddd", "--json lister -- root"])
 
@@ -324,7 +370,7 @@ class HorsEcran(unittest.TestCase):
                 console.log("FINI"); Qt.exit(0)
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, features={})
-        self.assertEqual(j, ["--json etat", "--json lister -- root"])
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre"])
 
     def test_nom_a_tiret_apres_double_tiret_et_ids_pieges_ecartes(self):
         """Un nom tapé « -x » n'est jamais lu comme une option ; un id du serveur hors de root ou 32 hex est écarté."""
@@ -342,6 +388,95 @@ class HorsEcran(unittest.TestCase):
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, page=page)
         self.assertIn("--json dossier -- root -x", j)
+
+    def test_recus_envoyer_ici_conflit_actualisation_et_effacer(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu || CloudEtat.envoie) return
+                var corps = fen.contentItem
+                if (etape === 1) {
+                    verifier(!vu(corps, "nc-cloud-recus") && !vu(corps, "nc-cloud-envois"), "rien avant le dépôt")
+                    verifier(CloudEtat.recevoir(["file:///tmp/a.txt", "file:///tmp/b%20conflit.txt", "https://x/y", "file://hote/z", "file:///tmp/a.txt"]), "reçus")
+                    verifier(CloudEtat.recus.length === 2 && CloudEtat.recus[1] === "/tmp/b conflit.txt", "fichiers locaux seulement : " + CloudEtat.recus)
+                    verifier(CloudEtat.recusRefus !== "" && vu(corps, "nc-cloud-recus"), "sélection montrée, écartés dits")
+                    verifier(CloudEtat.envois.length === 0, "rien ne part avant Envoyer ici")
+                    trouver(corps, "nc-cloud-envoyer-ici").clic(); etape++; return }
+                if (etape === 2) {
+                    verifier(CloudEtat.recus.length === 0, "sélection vidée")
+                    verifier(CloudEtat.envois[0].etat === "publie" && CloudEtat.envois[1].etat === "conflit", JSON.stringify(CloudEtat.envois))
+                    verifier(vu(corps, "nc-cloud-garder-1") && vu(corps, "nc-cloud-remplacer-envoi-1") && vu(corps, "nc-cloud-annuler-envoi-1"), "choix du conflit")
+                    verifier(!vu(corps, "nc-cloud-garder-0"), "pas de choix sans conflit")
+                    trouver(corps, "nc-cloud-garder-1").clic(); etape++; return }
+                if (etape === 3) {
+                    verifier(CloudEtat.envois[1].etat === "publie", "conservé les deux")
+                    verifier(trouver(corps, "nc-cloud-envoi-etat-1").text === "Envoyé", trouver(corps, "nc-cloud-envoi-etat-1").text)
+                    CloudEtat.resoudre(0, "garder"); CloudEtat.resoudre(0, "remplacer"); CloudEtat.reprendre(0)   // ligne publiée : rien ne part
+                    verifier(!CloudEtat.envoie, "aucun envoi relancé")
+                    CloudEtat.envois = CloudEtat.envois.concat([{ fichier: "/tmp/x", nom: "x", dans: "root", etat: "interrompu", envoye: 0, taille: 0,
+                                                                  message: "", actuel: null, fin: 0, vu: false }])
+                    trouver(corps, "nc-cloud-effacer-termines").clic()
+                    verifier(CloudEtat.envois.length === 1 && CloudEtat.envois[0].etat === "interrompu", "seuls les terminés partent")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, notifier=True)
+        self.assertEqual([x for x in j if not x.startswith("notify-send")],
+                         ["--json etat", "--json lister -- root", "--json reprendre",
+                          "--json deposer --dans=root -- /tmp/a.txt /tmp/b conflit.txt", "--json etat", "--json lister -- root",
+                          "--json deposer --dans=root --si-existe=garder -- /tmp/b conflit.txt", "--json etat", "--json lister -- root"])
+        notes = [x for x in j if x.startswith("notify-send")]
+        self.assertEqual(len(notes), 2, j)                       # une notification à la fin de chaque envoi
+        self.assertIn("1 fichier(s) envoyé(s)", notes[0])
+
+    def test_coupure_reprendre_fermer_puis_annuler(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) { CloudEtat.recevoir(["file:///tmp/coupure.txt"]); CloudEtat.envoyerIci(); etape++; return }
+                if (etape === 2 && !CloudEtat.envoie) {
+                    verifier(CloudEtat.envois[0].etat === "interrompu" && vu(corps, "nc-cloud-reprendre-0"), JSON.stringify(CloudEtat.envois))
+                    trouver(corps, "nc-cloud-reprendre-0").clic(); etape++; return }
+                if (etape === 3 && !CloudEtat.envoie) {
+                    verifier(CloudEtat.envois[0].etat === "publie", "repris : " + CloudEtat.envois[0].etat)
+                    CloudEtat.recevoir(["file:///tmp/lent.txt"]); CloudEtat.envoyerIci(); etape++; return }
+                if (etape === 4 && CloudEtat.envois[1].etat === "en_cours") {
+                    verifier(vu(corps, "nc-cloud-envois-annuler"), "Annuler l'envoi montré")
+                    CloudEtat.panneauOuvert = false; etape++; return }       // panneau fermé : l'envoi continue
+                if (etape === 5) { ticks++; if (ticks < 4) return
+                    verifier(CloudEtat.envoie && CloudEtat.envois[1].etat === "en_cours", "fermer n'arrête pas l'envoi")
+                    CloudEtat.annulerEnvois(); etape++; return }
+                if (etape === 6 && !CloudEtat.envoie) {
+                    verifier(CloudEtat.envois[1].etat === "annule", "annulé : " + CloudEtat.envois[1].etat)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json deposer --dans=root -- /tmp/coupure.txt",
+                             "--json reprendre", "--json reprendre -- CLEabcdefghijklmnop_-", "--json etat", "--json lister -- root",
+                             "--json deposer --dans=root -- /tmp/lent.txt"])
+
+    def test_selecteur_huit_au_plus_annuler_garde_et_fermer_arrete(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                if (etape === 1) { trouver(fen.contentItem, "nc-cloud-importer").clic(); etape++; return }
+                if (etape === 2 && !CloudEtat.choixOuvert) {
+                    verifier(CloudEtat.recus.length === 8 && CloudEtat.recus[7] === "/tmp/8" && CloudEtat.recusRefus !== "", "8 au plus : " + CloudEtat.recus)
+                    CloudEtat.choisirFichiers(); etape++; return }
+                if (etape === 3 && !CloudEtat.choixOuvert) {
+                    verifier(CloudEtat.recus.length === 8, "annuler garde la sélection")
+                    CloudEtat.choisirFichiers(); etape++; return }
+                if (etape === 4 && CloudEtat.choixOuvert) {
+                    verifier(!trouver(fen.contentItem, "nc-cloud-importer").enabled, "un seul sélecteur à la fois")
+                    CloudEtat.panneauOuvert = false; etape++; return }
+                if (etape === 5) {
+                    verifier(!CloudEtat.choixOuvert, "le sélecteur se ferme avec le panneau")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertEqual(j.count("--json choisir"), 3, j)
 
     def test_sans_suppression_annoncee_aucun_bouton(self):
         j = self.lancer(self.OUVRIR + '''

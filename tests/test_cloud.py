@@ -1715,5 +1715,203 @@ class DansLeProcessus(unittest.TestCase):
         self.assertEqual((c.host, c.port), ("::1", 80))
 
 
+
+DBUS_DAEMON = shutil.which("dbus-daemon")        # lu avant que les tests ne changent PATH
+
+
+class FauxBus(threading.Thread):
+    """Un bus de session en Python, juste assez pour nc-cloud choisir : authentification, Hello, AddMatch, OpenFile (et
+    Close) ; le portail répond (mode « choisi » ou « annule ») ou attend (« attente »). Tout est noté dans journal."""
+
+    def __init__(self, m, chemin, mode, uris=()):
+        super().__init__(daemon=True)
+        self.m, self.mode, self.uris, self.journal, self.serie = m, mode, list(uris), [], 100
+        self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.srv.bind(str(chemin))
+        self.srv.listen(1)
+        self.srv.settimeout(30)
+        self.fini = threading.Event()
+
+    def envoyer(self, type_, champs, sig="", corps=()):
+        c = self.m.BusEcrit()
+        for t, v in zip(self.m.bus_types(sig), corps):
+            c.valeur(t, v)
+        h = self.m.BusEcrit()
+        self.serie += 1
+        h.b += b"l" + bytes([type_, 1, 1])
+        h.valeur("u", len(c.b))
+        h.valeur("u", self.serie)
+        h.valeur("a(yv)", champs + ([(8, ("g", sig))] if sig else []))
+        h.aligner(8)
+        self.conn.sendall(bytes(h.b) + bytes(c.b))
+
+    def run(self):
+        try:
+            self.conn, _ = self.srv.accept()
+            self.conn.settimeout(30)
+            b = b""
+            while not b.endswith(b"\r\n"):
+                b += self.conn.recv(1)
+            self.journal.append(("AUTH", b))
+            self.conn.sendall(b"OK 0123456789abcdef0123456789abcdef\r\n")
+            b = b""
+            while not b.endswith(b"\r\n"):
+                b += self.conn.recv(1)
+            lecteur = self.m.Bus.__new__(self.m.Bus)
+            lecteur.sock = self.conn
+            while True:
+                _, champs, valeurs, serie = lecteur.lire()
+                membre = champs.get(3)
+                self.journal.append((membre, champs.get(1), valeurs))
+
+                def rep(sig="", corps=(), serie=serie):
+                    self.envoyer(2, [(5, ("u", serie)), (6, ("s", ":1.42"))], sig, corps)
+                if membre == "Hello":
+                    rep("s", (":1.42",))
+                elif membre == "AddMatch":
+                    rep()
+                elif membre == "OpenFile":
+                    poignee = "/org/freedesktop/portal/desktop/request/1_42/" + valeurs[2]["handle_token"]
+                    rep("o", (poignee,))
+                    rp = [(1, ("o", poignee)), (2, ("s", "org.freedesktop.portal.Request")), (3, ("s", "Response")), (6, ("s", ":1.42"))]
+                    if self.mode in ("choisi", "annule"):
+                        # D'abord une réponse pour une AUTRE demande : elle doit être ignorée
+                        self.envoyer(4, [(1, ("o", poignee + "x"))] + rp[1:], "ua{sv}", (0, {"uris": ("as", ["file:///piege"])}))
+                        self.envoyer(4, rp, "ua{sv}", (0 if self.mode == "choisi" else 1, {"uris": ("as", self.uris)} if self.mode == "choisi" else {}))
+                elif membre == "Close":
+                    self.fini.set()
+                    return
+        except (OSError, self.m.Echec):
+            pass
+        finally:
+            for x in (getattr(self, "conn", None), self.srv):
+                if x is not None:
+                    x.close()
+            self.fini.set()
+
+
+class Selecteur(unittest.TestCase):
+    """nc-cloud choisir : le sélecteur du portail, par un faux bus (partout) et par un vrai dbus-daemon privé s'il existe."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="nc-cloud-choix-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.home = self.d / "home"
+        self.home.mkdir()
+        env = mock.patch.dict(os.environ, {"HOME": str(self.home), "TMPDIR": str(self.d), "XDG_STATE_HOME": str(self.home / "st"),
+                                           "XDG_CONFIG_HOME": str(self.home / "cf"), "NC_LANGUE": "fr", "PATH": str(self.d)})
+        env.start()
+        self.addCleanup(env.stop)
+        l = importlib.machinery.SourceFileLoader("nc_cloud_choix", str(NC_CLOUD))
+        self.m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_cloud_choix", l))
+        l.exec_module(self.m)
+
+    def env(self, bus):
+        return {"HOME": str(self.home), "PATH": str(self.d), "TMPDIR": str(self.d), "NC_LANGUE": "fr", "XDG_RUNTIME_DIR": str(self.d),
+                "XDG_STATE_HOME": str(self.home / "st"), "XDG_CONFIG_HOME": str(self.home / "cf"),
+                "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(bus)}
+
+    def faux_bus(self, mode, uris=()):
+        b = FauxBus(self.m, self.d / "bus", mode, uris)
+        b.start()
+        return b
+
+    def test_marshalling_aller_retour(self):
+        sig = "ssa{sv}(ua{sv})as"
+        v = ["", "Titre é", {"handle_token": ("s", "nc_x"), "multiple": ("b", True)}, (7, {"uris": ("as", ["file:///a b"])}), ["x", ""]]
+        e = self.m.BusEcrit()
+        for t, x in zip(self.m.bus_types(sig), v):
+            e.valeur(t, x)
+        lu = self.m.BusLit(bytes(e.b))
+        r = [lu.valeur(t) for t in self.m.bus_types(sig)]
+        self.assertEqual(r, ["", "Titre é", {"handle_token": "nc_x", "multiple": True}, (7, {"uris": ["file:///a b"]}), ["x", ""]])
+        self.assertEqual(lu.p, len(e.b))
+        # Octets attendus d'une chaîne, d'un booléen et d'une variante (spécification D-Bus, petit-boutiste)
+        e = self.m.BusEcrit()
+        e.valeur("s", "ab"); e.valeur("b", True); e.valeur("v", ("s", "c"))
+        self.assertEqual(bytes(e.b), b"\x02\x00\x00\x00ab\x00\x00\x01\x00\x00\x00\x01s\x00\x00\x01\x00\x00\x00c\x00")
+        for brut in (b"\xff\xff\xff\x7f", b"\x05\x00\x00\x00ab"):           # tableau ou chaîne plus long que le message
+            with self.assertRaises(ValueError):
+                self.m.BusLit(brut).valeur("as" if brut[0] == 0xff else "s")
+
+    def test_choisis_seulement_pour_sa_demande(self):
+        b = self.faux_bus("choisi", ["file:///home/x/a%20b.png", "file:///home/x/c.txt"])
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
+                           env=self.env(self.d / "bus"), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        lignes = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
+        self.assertEqual(lignes, [{"evenement": "choisis", "fichiers": ["file:///home/x/a%20b.png", "file:///home/x/c.txt"]}])
+        b.join(10)
+        membres = [x[0] for x in b.journal]
+        self.assertEqual(membres[:4], ["AUTH", "Hello", "AddMatch", "OpenFile"], membres)   # le signal suivi AVANT l'appel
+        self.assertEqual(b.journal[0][1], b"\0AUTH EXTERNAL " + str(os.getuid()).encode().hex().encode() + b"\r\n")
+        jeton = b.journal[3][2][2]["handle_token"]
+        self.assertRegex(jeton, r"^nc_cloud_[0-9a-f]{16}$")
+        self.assertIn(f"path='/org/freedesktop/portal/desktop/request/1_42/{jeton}'", b.journal[2][2][0])
+        self.assertEqual(b.journal[3][1], "/org/freedesktop/portal/desktop")
+        self.assertIs(b.journal[3][2][2]["multiple"], True)
+
+    def test_annule_aucune_adresse(self):
+        self.faux_bus("annule")
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
+                           env=self.env(self.d / "bus"), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout.splitlines()[-1]), {"evenement": "choisis", "fichiers": []})
+
+    def test_panneau_ferme_referme_le_selecteur_sans_rien_laisser(self):
+        b = self.faux_bus("attente")
+        p = subprocess.Popen([sys.executable, str(NC_CLOUD), "--json", "choisir"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=self.env(self.d / "bus"), stdin=subprocess.DEVNULL)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        fin = time.monotonic() + 20
+        while "OpenFile" not in [x[0] for x in b.journal] and time.monotonic() < fin:
+            time.sleep(0.05)
+        p.send_signal(signal.SIGTERM)
+        self.assertEqual(p.wait(timeout=20), 8)
+        self.assertTrue(b.fini.wait(10))
+        fermes = [x for x in b.journal if x[0] == "Close"]
+        self.assertEqual(len(fermes), 1, b.journal)
+        self.assertTrue(fermes[0][1].startswith("/org/freedesktop/portal/desktop/request/1_42/nc_cloud_"), fermes)
+        p.stdout.close(); p.stderr.close()
+
+    def test_sans_bus_message_clair(self):
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
+                           env=self.env(self.d / "absent"), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("dépose les fichiers sur l'île", r.stdout.lower())
+
+    def test_nc_diag_sait_si_un_portail_choisit_des_fichiers(self):
+        l = importlib.machinery.SourceFileLoader("nc_diag_choix", str(NC_CLOUD.parent / "nc-diag"))
+        d = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_diag_choix", l))
+        l.exec_module(d)
+        d.PORTAILS = str(self.d / "portails")
+        os.mkdir(d.PORTAILS)
+        (self.d / "portails/hyprland.portal").write_text("[portal]\nInterfaces=org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.ScreenCast;\n")
+        self.assertFalse(d.selecteur_fichiers())                  # Hyprland seul ne choisit pas de fichiers
+        (self.d / "portails/gtk.portal").write_text("[portal]\nDBusName=org.freedesktop.impl.portal.desktop.gtk\n"
+                                                    "Interfaces=org.freedesktop.impl.portal.FileChooser; org.freedesktop.impl.portal.Settings;\n")
+        self.assertTrue(d.selecteur_fichiers())
+        self.assertIn('cle="portail_fichiers_absent"', (NC_CLOUD.parent / "nc-diag").read_text())
+
+    @unittest.skipUnless(DBUS_DAEMON, "dbus-daemon absent")
+    def test_vrai_bus_prive_sans_portail(self):
+        """Un vrai dbus-daemon privé, SANS dossier de services (aucun vrai portail ne peut y démarrer) : le format des
+        messages est accepté (Hello, AddMatch), et l'absence de portail dit quoi faire."""
+        conf = self.d / "bus.conf"
+        conf.write_text(f"""<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig><type>session</type><listen>unix:path={self.d / "vrai-bus"}</listen><auth>EXTERNAL</auth>
+<policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy></busconfig>
+""")
+        d = subprocess.Popen([DBUS_DAEMON, "--config-file=" + str(conf), "--nofork", "--print-address"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={"PATH": "/usr/bin:/bin"})
+        self.addCleanup(lambda: (d.kill(), d.wait(), d.stdout.close()))
+        self.assertIn(b"vrai-bus", d.stdout.readline())
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
+                           env=self.env(self.d / "vrai-bus"), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Aucun sélecteur de fichiers", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,12 @@ Item {
         var p = c.mapToItem(pastilleVpn, x, y)
         return p.x >= -4 && p.x <= pastilleVpn.width + 4 && p.y >= -6 && p.y <= pastilleVpn.height + 6
     }
+    // Sur l'indicateur Cloud JARVIS ? (le clic ouvre le panneau ; le survol n'ouvre pas l'île)
+    function surCloud(x, y) {
+        if (!pastilleCloud.visible || mode !== "repos") return false
+        var p = c.mapToItem(pastilleCloud, x, y)
+        return p.x >= -4 && p.x <= pastilleCloud.width + 4 && p.y >= -6 && p.y <= pastilleCloud.height + 6
+    }
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
@@ -83,6 +89,18 @@ Item {
             Texte { objectName: "nc-vpn-pill-texte"; anchors.verticalCenter: parent.verticalCenter; text: VpnEtat.libelle; secondaire: true
                     font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 150) }
             Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle
+        }
+        // Cloud JARVIS (CLOUD_JARVIS=oui et ce PC associé) : un petit nuage ; pendant un envoi, la flèche d'envoi en
+        // couleur d'accent, fixe (aucune animation sans fin dans la pilule : test_ile_cadence). Un clic ouvre le panneau
+        Ico {
+            id: pastilleCloud
+            objectName: "nc-cloud-pill"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: CloudEtat.actif && CloudEtat.associe
+            nom: CloudEtat.envoie ? "cloud_upload" : "cloud"; taille: 15
+            color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec
+            Accessible.role: Accessible.Button
+            Accessible.name: CloudEtat.envoie ? Reglages.t("Cloud JARVIS : envoi en cours", "JARVIS Cloud: uploading") : "Cloud JARVIS"
         }
         // Un mode Concentration actif (Modes.qml) : son icône et son nom court ; le nom est caché pendant un partage d'écran
         Row {

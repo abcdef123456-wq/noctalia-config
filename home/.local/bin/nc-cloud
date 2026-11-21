@@ -39,11 +39,14 @@ import os
 from pathlib import Path
 import re
 import secrets
+import select
 import shlex
 import shutil
 import signal
+import socket
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -1761,6 +1764,287 @@ def cmd_ouvrir(a):
     return OK
 
 
+# ── Sélecteur de fichiers (portail du bureau) ───────────────────────────────────────────────────────────────────────────
+# org.freedesktop.portal.FileChooser.OpenFile : le portail répond par un signal Response envoyé à l'appelant SEUL ; un
+# « gdbus monitor » à côté ne le verrait pas. D'où ce petit client D-Bus (bus de session, bibliothèque standard) : une
+# connexion qui appelle et attend. Aucune autre méthode n'est appelée que Hello, AddMatch, OpenFile et Request.Close.
+CHOIX_DUREE = 3600              # une heure au plus : la fenêtre peut rester ouverte longtemps, mais pas sans fin
+BUS_MESSAGE_MAX = 1 << 24
+BUS_ALIGNE = {"y": 1, "g": 1, "v": 1, "n": 2, "q": 2, "b": 4, "i": 4, "u": 4, "h": 4, "s": 4, "o": 4, "a": 4,
+              "x": 8, "t": 8, "d": 8, "(": 8, "{": 8}
+
+
+def bus_fin_type(sig, i):
+    """L'indice qui suit le type complet commençant à sig[i]."""
+    c = sig[i]
+    if c == "a":
+        return bus_fin_type(sig, i + 1)
+    if c in "({":
+        j = i + 1
+        while sig[j] not in ")}":
+            j = bus_fin_type(sig, j)
+        return j + 1
+    if c not in BUS_ALIGNE:
+        raise ValueError(sig)
+    return i + 1
+
+
+def bus_types(sig):
+    l, i = [], 0
+    while i < len(sig):
+        j = bus_fin_type(sig, i)
+        l.append(sig[i:j])
+        i = j
+    return l
+
+
+class BusEcrit:
+    def __init__(self):
+        self.b = bytearray()
+
+    def aligner(self, n):
+        self.b += b"\0" * (-len(self.b) % n)
+
+    def valeur(self, sig, v):
+        c = sig[0]
+        if c == "y":
+            self.b.append(v)
+        elif c in "bu":
+            self.aligner(4)
+            self.b += struct.pack("<I", int(v))
+        elif c in "so":
+            d = v.encode()
+            self.aligner(4)
+            self.b += struct.pack("<I", len(d)) + d + b"\0"
+        elif c == "g":
+            d = v.encode()
+            self.b += bytes([len(d)]) + d + b"\0"
+        elif c == "v":
+            self.valeur("g", v[0])
+            self.valeur(v[0], v[1])
+        elif c == "a":
+            self.aligner(4)
+            pos = len(self.b)
+            self.b += b"\0\0\0\0"
+            self.aligner(BUS_ALIGNE[sig[1]])
+            debut = len(self.b)
+            for x in (v.items() if isinstance(v, dict) else v):
+                self.valeur(sig[1:], x)
+            struct.pack_into("<I", self.b, pos, len(self.b) - debut)
+        elif c in "({":
+            self.aligner(8)
+            for t, x in zip(bus_types(sig[1:-1]), v):
+                self.valeur(t, x)
+        else:
+            raise ValueError(sig)
+
+
+class BusLit:
+    def __init__(self, b, p=0):
+        self.b, self.p = b, p
+
+    def aligner(self, n):
+        self.p += -self.p % n
+
+    def fixe(self, fmt, n):
+        self.aligner(n)
+        v = struct.unpack_from(fmt, self.b, self.p)[0]
+        self.p += n
+        return v
+
+    def valeur(self, sig, profondeur=0):
+        if profondeur > 32:
+            raise ValueError("trop profond")
+        c = sig[0]
+        if c == "y":
+            v = self.b[self.p]
+            self.p += 1
+            return v
+        if c in "nq":
+            return self.fixe("<h" if c == "n" else "<H", 2)
+        if c in "biuh":
+            v = self.fixe("<i" if c == "i" else "<I", 4)
+            return bool(v) if c == "b" else v
+        if c in "xtd":
+            return self.fixe({"x": "<q", "t": "<Q", "d": "<d"}[c], 8)
+        if c in "sog":
+            n = self.fixe("<I", 4) if c != "g" else self.valeur("y")
+            v = bytes(self.b[self.p:self.p + n]).decode("utf-8", "replace")
+            if self.p + n + 1 > len(self.b):
+                raise ValueError("chaîne coupée")
+            self.p += n + 1
+            return v
+        if c == "v":
+            t = self.valeur("g")
+            if bus_fin_type(t, 0) != len(t):
+                raise ValueError(t)
+            return self.valeur(t, profondeur + 1)
+        if c == "a":
+            n = self.fixe("<I", 4)
+            self.aligner(BUS_ALIGNE[sig[1]])
+            fin = self.p + n
+            if n > BUS_MESSAGE_MAX or fin > len(self.b):
+                raise ValueError("tableau coupé")
+            l = []
+            while self.p < fin:
+                l.append(self.valeur(sig[1:], profondeur + 1))
+            return dict(l) if sig[1] == "{" else l
+        if c in "({":
+            self.aligner(8)
+            return tuple(self.valeur(t, profondeur + 1) for t in bus_types(sig[1:-1]))
+        raise ValueError(sig)
+
+
+class Bus:
+    def __init__(self):
+        adresse = os.environ.get("DBUS_SESSION_BUS_ADDRESS") or "unix:path=" + os.path.join(
+            os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "bus")
+        self.sock, self.serie = None, 0
+        for a in adresse.split(";"):
+            if not a.startswith("unix:"):
+                continue
+            kv = dict(x.split("=", 1) for x in a[5:].split(",") if "=" in x)
+            cible = urllib.parse.unquote(kv["path"]) if "path" in kv else ("\0" + urllib.parse.unquote(kv["abstract"])
+                                                                           if "abstract" in kv else None)
+            if cible is None:
+                continue
+            try:
+                so = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                so.settimeout(10)
+                so.connect(cible)
+            except OSError:
+                continue
+            self.sock = so
+            break
+        if self.sock is None:
+            raise Echec(T("Pas de bus de session : aucun sélecteur de fichiers. Dépose les fichiers sur l'île.",
+                          "No session bus: no file picker. Drop the files on the island."))
+        self.sock.sendall(b"\0AUTH EXTERNAL " + str(os.getuid()).encode().hex().encode() + b"\r\n")
+        if not self.ligne().startswith(b"OK "):
+            raise Echec(T("Bus de session refusé.", "Session bus refused."))
+        self.sock.sendall(b"BEGIN\r\n")
+        self.nom = self.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "org.freedesktop.DBus")[0]
+
+    def ligne(self):
+        b = b""
+        while not b.endswith(b"\r\n") and len(b) < 4096:
+            x = self.sock.recv(1)
+            if not x:
+                break
+            b += x
+        return b
+
+    def recevoir(self, n):
+        b = bytearray()
+        while len(b) < n:
+            x = self.sock.recv(n - len(b))
+            if not x:
+                raise Echec(T("Bus de session fermé.", "Session bus closed."))
+            b += x
+        return bytes(b)
+
+    def envoyer(self, chemin, interface, membre, dest, sig="", corps=(), sans_reponse=False):
+        self.serie += 1
+        champs = [(1, ("o", chemin)), (2, ("s", interface)), (3, ("s", membre)), (6, ("s", dest))] + ([(8, ("g", sig))] if sig else [])
+        c = BusEcrit()
+        for t, v in zip(bus_types(sig), corps):
+            c.valeur(t, v)
+        h = BusEcrit()
+        h.b += b"l" + bytes([1, 2 if sans_reponse else 0, 1])
+        h.valeur("u", len(c.b))
+        h.valeur("u", self.serie)
+        h.valeur("a(yv)", champs)
+        h.aligner(8)
+        self.sock.sendall(bytes(h.b) + bytes(c.b))
+        return self.serie
+
+    def lire(self):
+        """(type, champs, valeurs, numéro) du message suivant ; None pour un message illisible (ignoré)."""
+        e = self.recevoir(16)
+        if e[:1] != b"l":
+            # shortcut: big-endian bus messages are ignored (no such host among the 4 distros' usual targets); handle them if one appears
+            raise Echec(T("Bus de session : ordre d'octets non pris en charge.", "Session bus: unsupported byte order."))
+        corps_n, serie, champs_n = struct.unpack_from("<III", e, 4)
+        if corps_n > BUS_MESSAGE_MAX or champs_n > BUS_MESSAGE_MAX:
+            raise Echec(T("Bus de session : message trop grand.", "Session bus: message too large."))
+        tout = e + self.recevoir(champs_n + (-(16 + champs_n) % 8) + corps_n)
+        try:
+            lu = BusLit(tout, 12)
+            champs = dict(lu.valeur("a(yv)"))
+            lu.aligner(8)
+            return e[1], champs, [lu.valeur(t) for t in bus_types(champs.get(8, ""))], serie
+        except (ValueError, struct.error, IndexError, KeyError, TypeError):
+            return None
+
+    def attendre_reponse(self, serie):
+        while True:
+            m = self.lire()
+            if m and m[0] in (2, 3) and m[1].get(5) == serie:
+                if m[0] == 3:
+                    raise Echec(str(m[1].get(4, "")), ERREUR, erreur=str(m[1].get(4, "")))
+                return m[2]
+
+    def appel(self, chemin, interface, membre, dest, sig="", corps=()):
+        return self.attendre_reponse(self.envoyer(chemin, interface, membre, dest, sig, corps))
+
+
+def cmd_choisir(a):
+    """Le sélecteur de fichiers du bureau ; les adresses choisies en sortie (événement « choisis »), rien d'autre."""
+    sans_selecteur = Echec(T("Aucun sélecteur de fichiers (portail xdg-desktop-portal-gtk, -gnome ou -kde) : dépose les fichiers sur l'île.",
+                             "No file picker (xdg-desktop-portal-gtk, -gnome or -kde portal): drop the files on the island."))
+    bus = Bus()
+    jeton = "nc_cloud_" + secrets.token_hex(8)
+    attendu = "/org/freedesktop/portal/desktop/request/" + bus.nom.lstrip(":").replace(".", "_") + "/" + jeton
+
+    def suivre(chemin):
+        bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "AddMatch", "org.freedesktop.DBus", "s",
+                  (f"type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{chemin}'",))
+    suivre(attendu)                    # avant l'appel : une réponse immédiate n'est jamais perdue
+    demande = None
+    fin = time.monotonic() + CHOIX_DUREE
+    try:
+        try:
+            r = bus.appel("/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser", "OpenFile",
+                          "org.freedesktop.portal.Desktop", "ssa{sv}",
+                          ("", T("Envoyer vers le Cloud JARVIS", "Upload to the JARVIS Cloud"),
+                           {"handle_token": ("s", jeton), "multiple": ("b", True), "modal": ("b", False)}))
+        except Echec as e:
+            # Pas de portail, ou un portail sans FileChooser (xdg-desktop-portal-hyprland seul ne choisit pas de fichiers)
+            if str(e.erreur or "").rsplit(".", 1)[-1] in ("ServiceUnknown", "UnknownMethod", "UnknownInterface", "UnknownObject", "NameHasNoOwner"):
+                raise sans_selecteur from None
+            raise Echec(T(f"Sélecteur de fichiers : {propre(e.erreur or str(e))}", f"File picker: {propre(e.erreur or str(e))}")) from None
+        demande = r[0] if r and isinstance(r[0], str) else attendu
+        if demande != attendu:
+            suivre(demande)            # un ancien portail choisit lui-même le chemin de la demande
+        while True:
+            reste = fin - time.monotonic()
+            if reste <= 0:
+                raise socket.timeout()
+            # L'attente se fait AVANT le message (select) : un délai au milieu d'un message mélangerait la lecture
+            if not select.select([bus.sock], [], [], min(reste, 60))[0]:
+                continue
+            m = bus.lire()
+            if m and m[0] == 4 and m[1].get(1) in (attendu, demande) and m[1].get(3) == "Response" and len(m[2]) == 2:
+                break
+        code, resultats = m[2]
+        uris = [u for u in (resultats.get("uris") or []) if isinstance(u, str)] if code == 0 and isinstance(resultats, dict) else []
+    except (Annulation, socket.timeout):
+        # Panneau fermé (SIGTERM) ou délai : la fenêtre du sélecteur est refermée, aucun processus ne reste
+        sans_signaux()
+        with contextlib.suppress(OSError, Echec):
+            bus.envoyer(demande or attendu, "org.freedesktop.portal.Request", "Close", "org.freedesktop.portal.Desktop", sans_reponse=True)
+        raise Fini(ANNULE) from None
+    finally:
+        with contextlib.suppress(OSError):
+            bus.sock.close()
+    if JSON_SORTIE:
+        evenement(evenement="choisis", fichiers=uris)
+    else:
+        for u in uris:
+            print(urllib.parse.unquote(u[7:]) if u.startswith("file://") else u)
+    return OK
+
+
 # ── Entrée ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def analyseur():
@@ -1828,6 +2112,7 @@ def analyseur():
     x.add_argument("--dossier")
     x.set_defaults(f=cmd_ouvrir)
     sous.add_parser("fenetre", aliases=["window"]).set_defaults(f=cmd_fenetre)
+    sous.add_parser("choisir", aliases=["pick"]).set_defaults(f=cmd_choisir)
     return p
 
 

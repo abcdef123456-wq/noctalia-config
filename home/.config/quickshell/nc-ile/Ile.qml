@@ -242,9 +242,13 @@ PanelWindow {
         Timer {
             id: attenteSurvol
             interval: 280                           // juste passer dessus (vers la barre) ne l'ouvre pas
-            onTriggered: if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.enCarte && !Etat.enregistre) {
-                Etat.basculer(fen.modelData.name, false)
-                Etat.parSurvol = true
+            onTriggered: {
+                // Sur l'indicateur Cloud : pas d'ouverture ; on regarde à nouveau tant que le curseur reste dans la pilule
+                if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }
+                if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.enCarte && !Etat.enregistre) {
+                    Etat.basculer(fen.modelData.name, false)
+                    Etat.parSurvol = true
+                }
             }
         }
         Timer {
@@ -378,11 +382,36 @@ PanelWindow {
                                : (Resume.actif && !Resume.ouvert && Etat.activiteType === "" ? Resume.ouvrir(fen.modelData.name)
                                // « Terminée » / « Échec » d'une commande longue : retour à son terminal
                                : (VpnEtat.indicateur && compact.surVpn(e.x, e.y) ? VpnEtat.demanderPanneau()
+                               : (compact.surCloud(e.x, e.y) ? CloudEtat.ouvrirPanneau()
                                : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false))))))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
+        }
+
+        // Des fichiers glissés sur l'île FERMÉE (Cloud JARVIS actif et associé) : cadre d'accent, puis au lâcher le panneau
+        // s'ouvre avec les fichiers reçus ; rien ne part avant « Envoyer ici ». Copie seulement. L'île ouverte (la page
+        // JARVIS et ses pièces jointes) garde son propre dépôt
+        DropArea {
+            id: depotCloud
+            objectName: "nc-cloud-depot"
+            anchors.fill: parent
+            enabled: CloudEtat.actif && CloudEtat.associe && !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
+            onEntered: drag => { if (!drag.hasUrls) { drag.accepted = false; return } drag.accept(Qt.CopyAction) }
+            onDropped: drop => {
+                if (!drop.hasUrls) return
+                drop.accept(Qt.CopyAction)
+                if (CloudEtat.recevoir(drop.urls)) CloudEtat.ouvrirPanneau()
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: ile.radius
+            color: "transparent"
+            border.width: 2
+            border.color: Couleurs.accent
+            visible: depotCloud.containsDrag
         }
 
         // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)

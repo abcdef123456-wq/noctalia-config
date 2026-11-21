@@ -4,7 +4,9 @@
 // (la ligne grandit vers le bas : le point cliqué ne bouge pas), un double-clic l'ouvre (dossier : on y entre ; fichier :
 // nc-cloud ouvrir). Créer un dossier ou un fichier vide, télécharger, renommer, déplacer (« Déplacer ici »), supprimer
 // après une question sur la ligne (un dossier : d'abord l'aperçu de ce qui partirait). Chaque action seulement si le
-// serveur annonce sa capacité. Tout vient de CloudEtat.qml (nc-cloud --json) ; rien ne tourne panneau fermé. Échap
+// serveur annonce sa capacité. Envoyer : fichiers déposés sur l'île ou « Importer des fichiers… » (le sélecteur du
+// portail), puis « Envoyer ici » ; la liste des envois (progression, conflit, reprise) survit au panneau fermé.
+// Tout vient de CloudEtat.qml (nc-cloud --json) ; rien ne tourne panneau fermé, sauf un envoi lancé. Échap
 // annule la question, le renommage ou le déplacement en cours, sinon ferme. Verre comme Garmin.
 import QtQuick
 import Quickshell
@@ -146,6 +148,120 @@ FloatingWindow {
                         texte: Reglages.t("Créer un fichier vide", "Create empty file")
                         enabled: nomNouveau.text.trim() !== "" && !CloudEtat.occupe
                         onClic: if (enabled) { CloudEtat.creerFichier(nomNouveau.text); nomNouveau.text = "" }
+                    }
+                }
+
+                // Envoyer : le sélecteur de fichiers du bureau (portail), ou des fichiers déposés sur l'île fermée
+                Flow {
+                    visible: cloud.pret && !CloudEtat.deplacement
+                    width: parent.width; spacing: 8
+                    CloudBouton {
+                        objectName: "nc-cloud-importer"
+                        texte: CloudEtat.choixOuvert ? Reglages.t("Sélecteur ouvert…", "Picker open…") : Reglages.t("Importer des fichiers…", "Import files…")
+                        enabled: !CloudEtat.choixOuvert
+                        onClic: if (enabled) CloudEtat.choisirFichiers()
+                    }
+                    Texte {
+                        objectName: "nc-cloud-choix-erreur"
+                        visible: CloudEtat.choixErreur !== ""
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(implicitWidth, contenu.width); wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12
+                        text: CloudEtat.choixErreur
+                    }
+                }
+                Rectangle {
+                    objectName: "nc-cloud-recus"
+                    visible: cloud.pret && CloudEtat.recus.length > 0
+                    width: parent.width; height: recus.implicitHeight + 20; radius: 14
+                    color: Couleurs.carte; border.width: 1; border.color: Couleurs.accent
+                    Column {
+                        id: recus
+                        x: 14; y: 10; width: parent.width - 28; spacing: 8
+                        Texte {
+                            objectName: "nc-cloud-recus-liste"
+                            width: parent.width; wrapMode: Text.Wrap
+                            text: Reglages.t(CloudEtat.recus.length + " fichier(s) à envoyer : ", CloudEtat.recus.length + " file(s) to upload: ")
+                                  + CloudEtat.recus.map(f => f.slice(f.lastIndexOf("/") + 1)).join(", ")
+                        }
+                        Texte {
+                            width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12
+                            text: Reglages.t("Vers : ", "To: ") + CloudEtat.chemin[CloudEtat.chemin.length - 1].nom
+                                  + (CloudEtat.recusRefus !== "" ? " · " + CloudEtat.recusRefus : "")
+                        }
+                        Row {
+                            spacing: 8
+                            CloudBouton { objectName: "nc-cloud-envoyer-ici"; principal: true; texte: Reglages.t("Envoyer ici", "Upload here")
+                                          onClic: CloudEtat.envoyerIci() }
+                            CloudBouton { objectName: "nc-cloud-recus-vider"; texte: Reglages.t("Retirer", "Remove"); onClic: CloudEtat.viderRecus() }
+                        }
+                    }
+                }
+                Column {
+                    objectName: "nc-cloud-envois"
+                    visible: cloud.pret && CloudEtat.envois.length > 0
+                    width: parent.width; spacing: 6
+                    Item {
+                        width: parent.width; height: 30
+                        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Envois", "Uploads"); font.weight: Font.DemiBold }
+                        Row {
+                            anchors.right: parent.right; spacing: 8
+                            CloudBouton { objectName: "nc-cloud-envois-annuler"; visible: CloudEtat.envoie; danger: true
+                                          texte: Reglages.t("Annuler l'envoi", "Cancel upload"); onClic: CloudEtat.annulerEnvois() }
+                            CloudBouton { objectName: "nc-cloud-effacer-termines"; texte: Reglages.t("Effacer les terminés", "Clear finished")
+                                          enabled: CloudEtat.envois.some(e => CloudEtat.termines.indexOf(e.etat) >= 0)
+                                          onClic: CloudEtat.effacerTermines() }
+                        }
+                    }
+                    Repeater {
+                        model: cloud.pret ? CloudEtat.envois : []
+                        Rectangle {
+                            id: envoi
+                            required property var modelData
+                            required property int index
+                            objectName: "nc-cloud-envoi-" + index
+                            width: parent.width; height: colEnvoi.implicitHeight + 16; radius: 12; color: Couleurs.carte
+                            readonly property real part: modelData.taille > 0 ? Math.min(1, modelData.envoye / modelData.taille) : 0
+                            Column {
+                                id: colEnvoi
+                                x: 12; y: 8; width: parent.width - 24; spacing: 6
+                                Item {
+                                    width: parent.width; height: 20
+                                    Texte { width: parent.width - etatEnvoi.implicitWidth - 12; elide: Text.ElideMiddle; text: envoi.modelData.nom }
+                                    Texte {
+                                        id: etatEnvoi
+                                        objectName: "nc-cloud-envoi-etat-" + envoi.index
+                                        anchors.right: parent.right; secondaire: true; font.pixelSize: 12
+                                        text: ({ attente: Reglages.t("En attente", "Waiting"),
+                                                 en_cours: Reglages.t("Envoi… ", "Uploading… ") + Math.round(envoi.part * 100) + " %",
+                                                 publie: Reglages.t("Envoyé", "Uploaded"), conflit: Reglages.t("Ce nom existe déjà", "This name already exists"),
+                                                 interrompu: Reglages.t("Interrompu", "Interrupted"), annule: Reglages.t("Annulé", "Cancelled"),
+                                                 echec: Reglages.t("Échec", "Failed"), refuse: Reglages.t("Refusé", "Refused") })[envoi.modelData.etat] || ""
+                                    }
+                                }
+                                Rectangle {
+                                    visible: envoi.modelData.etat === "en_cours"
+                                    width: parent.width; height: 4; radius: 2; color: Couleurs.gris2
+                                    Rectangle { width: parent.width * envoi.part; height: parent.height; radius: 2; color: Couleurs.accent }
+                                }
+                                Texte {
+                                    visible: (envoi.modelData.etat === "echec" || envoi.modelData.etat === "refuse") && envoi.modelData.message !== ""
+                                    width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12; text: envoi.modelData.message
+                                }
+                                Flow {
+                                    visible: envoi.modelData.etat === "conflit" || envoi.modelData.etat === "interrompu"
+                                    width: parent.width; spacing: 8
+                                    CloudBouton { visible: envoi.modelData.etat === "conflit"; objectName: "nc-cloud-garder-" + envoi.index
+                                                  texte: Reglages.t("Conserver les deux", "Keep both"); onClic: CloudEtat.resoudre(envoi.index, "garder") }
+                                    CloudBouton { visible: envoi.modelData.etat === "conflit" && !!(envoi.modelData.actuel && envoi.modelData.actuel.revision)
+                                                  objectName: "nc-cloud-remplacer-envoi-" + envoi.index
+                                                  texte: Reglages.t("Remplacer", "Replace"); onClic: CloudEtat.resoudre(envoi.index, "remplacer") }
+                                    CloudBouton { visible: envoi.modelData.etat === "conflit"; objectName: "nc-cloud-annuler-envoi-" + envoi.index
+                                                  texte: Reglages.t("Annuler", "Cancel"); onClic: CloudEtat.resoudre(envoi.index, "annuler") }
+                                    CloudBouton { visible: envoi.modelData.etat === "interrompu"; principal: true; objectName: "nc-cloud-reprendre-" + envoi.index
+                                                  texte: Reglages.t("Reprendre / vérifier", "Resume / check"); onClic: CloudEtat.reprendre(envoi.index) }
+                                }
+                            }
+                        }
                     }
                 }
 

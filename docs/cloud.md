@@ -44,7 +44,31 @@ ramène à un dossier parent.
   aperçu, nouvelle question.
 - Chaque action n'apparaît que si le serveur annonce sa capacité (déplacer, aperçu, suppression de dossier).
 
-Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
+### Envoyer des fichiers
+
+- Un petit nuage dans la pilule (à côté de l'heure, avec `CLOUD_JARVIS=oui` et ce PC associé) : un clic ouvre le
+  panneau ; le survoler n'ouvre pas l'île. Pendant un envoi, il devient une flèche d'envoi en couleur d'accent, et une
+  notification dit la fin.
+- Glisse des fichiers sur l'île fermée : un cadre d'accent apparaît ; au lâcher, le panneau s'ouvre avec les fichiers
+  reçus et le dossier de destination (le dossier affiché). Rien ne part avant « Envoyer ici ». C'est une copie : les
+  fichiers restent où ils sont. L'île ouverte (la page JARVIS et ses pièces jointes) garde son propre dépôt.
+- « Importer des fichiers… » ouvre le sélecteur de fichiers du bureau (le portail, `nc-cloud choisir`) ; l'annuler garde
+  la sélection d'avant. Il faut un portail qui sait choisir des fichiers : `xdg-desktop-portal-gtk`, installé par
+  `install.sh` sur les 4 distributions (celui de Hyprland ne le fait pas). Sans lui, le panneau dit de déposer les
+  fichiers sur l'île, et `nc-diag` le signale. Fermer le panneau referme le sélecteur ; il ne reste ouvert qu'une heure
+  au plus.
+- 8 fichiers locaux au plus ; le reste est écarté et le panneau le dit. Un dossier, un lien ou un fichier spécial est
+  refusé ligne par ligne.
+- La liste des envois : progression par fichier, « Annuler l'envoi », résultat de chacun. Un nom déjà pris : « Conserver
+  les deux », « Remplacer » ou « Annuler ». Une coupure (hors ligne) : « Reprendre / vérifier » ; à l'ouverture du
+  panneau, les envois interrompus de ce PC (après un redémarrage, par exemple) y apparaissent aussi.
+- Fermer le panneau n'arrête pas un envoi. À la première publication de chaque envoi, le dossier affiché et le quota
+  sont relus une fois (panneau fermé : à sa réouverture).
+- « Effacer les terminés » retire de la liste les envois publiés, annulés, refusés ou en échec (jamais ceux en cours,
+  interrompus ou en conflit), sans rien demander au serveur ni toucher un fichier ; ces lignes partent seules après 24 h.
+  La liste vit dans l'île : un redémarrage de l'île la vide (les envois interrompus reviennent, eux).
+
+Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
 dossier Téléchargements.
 
 ## Associer ce PC
@@ -66,6 +90,7 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud associer [NOM]` | associe ce PC ; refusé s'il l'est déjà |
 | `nc-cloud dissocier` | révoque ce PC, efface son jeton et ses envois interrompus |
 | `nc-cloud etat` | état, quota et limites annoncés par le serveur |
+| `nc-cloud choisir` | le sélecteur de fichiers du bureau (portail) ; écrit les fichiers choisis, n'envoie rien |
 | `nc-cloud lister [ID] [--suite CURSEUR]` | une page d'un dossier (la racine par défaut), avec la commande de la suite |
 | `nc-cloud dossier PARENT NOM` | crée un dossier (`root` pour la racine) |
 | `nc-cloud deposer [--dans ID] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
@@ -190,7 +215,7 @@ plus de 24 h sont retirées au prochain `ouvrir`.
 ## Limites et ce qui n'est pas fait
 
 - Pas de dossier entier, pas de partage avec d'autres personnes, pas de synchronisation automatique.
-- Pas d'interface graphique pour l'instant, ni d'ouverture dans le gestionnaire de fichiers (WebDAV en lecture seule).
+- Pas d'ouverture dans le gestionnaire de fichiers (WebDAV en lecture seule).
 - Une association dont la réponse se perd en route laisse un appareil sans jeton côté serveur : révoque-le depuis le
   serveur. Si Ctrl + C ou le trousseau interrompt l'association, ce PC est révoqué tout de suite ; si cette révocation
   échoue, le message donne l'identifiant de l'appareil à révoquer.

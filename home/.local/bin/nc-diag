@@ -111,6 +111,7 @@ ID_BT = re.compile(r"(bt_reconnecter|bt_musique):(bluez_card\.[0-9A-F_]{17})")
 BT_PROFIL_APPEL, BT_PROFIL_CVSD = "headset-head-unit", "headset-head-unit-cvsd"
 BT_A2DP = ("a2dp-sink-aac", "a2dp-sink-sbc_xq", "a2dp-sink")      # du meilleur au moins bon
 SYS = os.environ.get("NC_DIAG_SYS", "/sys")                      # les tests y mettent un faux /sys
+PORTAILS = "/usr/share/xdg-desktop-portal/portals"              # les tests y mettent un faux dossier
 
 
 def _table():
@@ -536,6 +537,12 @@ def verifier(b):
                 T("il vient avec xdg-desktop-portal-hyprland (ou hyprland-qtutils selon la distribution)",
                   "it comes with xdg-desktop-portal-hyprland (or hyprland-qtutils depending on the distribution)"),
                 cle="share_picker_absent")
+    # Cloud JARVIS, « Importer des fichiers… » : il faut un portail qui sait choisir des fichiers (pas celui de Hyprland)
+    if _reglage("CLOUD_JARVIS") == "oui" and not selecteur_fichiers():
+        b.avert(T("aucun sélecteur de fichiers (portail) : « Importer des fichiers… » du Cloud JARVIS ne marche pas, dépose les fichiers sur l'île",
+                  "no file picker (portal): “Import files…” of the JARVIS Cloud does not work, drop the files on the island"),
+                T("installe xdg-desktop-portal-gtk (nc-maj), puis déconnecte-toi et reconnecte-toi",
+                  "install xdg-desktop-portal-gtk (nc-update), then log out and back in"), cle="portail_fichiers_absent")
     attente, _ = sortie(["sh", "-c", "s=$(date +%s%N); busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop "
                         "org.freedesktop.portal.Settings ReadOne ss org.freedesktop.appearance color-scheme >/dev/null 2>&1; "
                         "echo $(( ($(date +%s%N) - s) / 1000000 ))"], 30, plafond=5)
@@ -1443,6 +1450,15 @@ def _reglage(cle):
             if l.strip().startswith(cle + "="):
                 v = l.split("=", 1)[1].strip().strip('"')
     return v
+
+
+def selecteur_fichiers():
+    """Un portail installé déclare-t-il le choix de fichiers (org.freedesktop.impl.portal.FileChooser) ?"""
+    for f in glob.glob(os.path.join(PORTAILS, "*.portal")):
+        for l in (_lire(f) or "").splitlines():
+            if l.strip().startswith("Interfaces=") and "org.freedesktop.impl.portal.FileChooser" in [x.strip() for x in l.split("=", 1)[1].split(";")]:
+                return True
+    return False
 
 
 def _secteur():
