@@ -376,8 +376,7 @@ class InstallEtDoc(unittest.TestCase):
         self.assertEqual(bloc.count("ask "), 1)
         # le paquet n'est tiré qu'après le oui, par le gestionnaire commun aux quatre distributions
         self.assertGreater(bloc.index("pkg_install nftables"), bloc.index('ask "'))
-        self.assertIn("visudo -cf", bloc)
-        self.assertIn("install -Dm0755 -o root -g root", bloc)
+        self.assertIn("pose_regle", bloc)       # visudo -cf et install -Dm0755 y sont faits (voir test_install_pose_regle)
         self.assertIn('"$REPO/system/nc-vpn-root" sudoers', bloc)
         self.assertNotRegex(bloc, r"sudo nft|\nft -f|systemctl")      # l'installation ne touche jamais au pare-feu
         self.assertIn("/usr/local/bin/nc-vpn-root", bloc)

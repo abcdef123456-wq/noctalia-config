@@ -131,6 +131,21 @@ ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en an
   r="${r:-$d}"
   [[ "$r" =~ ^[oOyY] ]]
 }
+# Pose une règle sudoers vérifiée : copie « .tmp » en root, visudo À CETTE PLACE, puis mise en service ; le fichier « .tmp » est retiré
+# en cas d'échec. pose_regle <règle à poser> <règle finale> [<outil source> <outil cible>] ; échec : NC_CAUSE dit la vraie cause.
+pose_regle() {
+  local src="$1" fin="$2"
+  if ! sudo -n true 2>/dev/null && { sans_tty || ! sudo -v; }; then
+    NC_CAUSE="$(t "sudo n'a pas pu demander ton mot de passe : relance dans un terminal." "sudo couldn't ask for your password: run it again in a terminal.")"; return 1
+  fi
+  if { [ -z "${3:-}" ] || sudo install -Dm0755 -o root -g root "$3" "$4"; } && sudo install -m0440 -o root -g root "$src" "$fin.tmp"; then
+    if ! sudo visudo -cf "$fin.tmp" >/dev/null; then
+      sudo rm -f "$fin.tmp"; NC_CAUSE="$(t "visudo a refusé la règle sudo." "visudo rejected the sudo rule.")"; return 1
+    fi
+    sudo mv -f "$fin.tmp" "$fin" && return 0
+  fi
+  sudo rm -f "$fin.tmp"; NC_CAUSE="$(t "la copie d'un fichier a échoué." "copying a file failed.")"; return 1
+}
 # Code de sortie d'un « non » qui arrête tout (« On y va ? », la restauration) : annulé par toi, rien n'est fait ;
 # distinct de 0, pour que nc-maj ne le prenne pas pour une installation réussie (ni rapport ni bilan)
 ANNULE=10
@@ -611,15 +626,12 @@ etape_energie_root() {
       t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
       # La règle est d'abord copiée en root (« .tmp » : sudo ignore les noms avec un point), vérifiée par visudo À
       # CETTE PLACE, puis mise en service : ce qui est vérifié est exactement ce qui sert
-      if sudo install -Dm0755 -o root -g root "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root &&
-         sudo install -m0440 -o root -g root "$t_e" "$regle_e.tmp" && sudo visudo -cf "$regle_e.tmp" >/dev/null &&
-         sudo mv -f "$regle_e.tmp" "$regle_e"; then
+      if pose_regle "$t_e" "$regle_e" "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root; then
         ok "$(t "Assistant des profils d'énergie poussés installé." "Advanced power profiles helper installed.")"
         migrer_anciens_assistants
         relance_apres_migration
       else
-        sudo rm -f "$regle_e.tmp"
-        warn "$(t "Installation de l'assistant d'énergie impossible (règle sudo refusée par visudo)." "Couldn't install the power helper (sudo rule rejected by visudo).")"
+        warn "$(t "Installation de l'assistant d'énergie impossible : $NC_CAUSE" "Couldn't install the power helper: $NC_CAUSE")"
       fi
       rm -f "$t_e"
     fi
@@ -649,13 +661,11 @@ etape_killswitch_root() {
       nft_ok=1
       have nft || pkg_install nftables || nft_ok=0
       # Même méthode que pour l'énergie : règle copiée en « .tmp », vérifiée par visudo à cette place, puis mise en service
-      if [ "$nft_ok" = 1 ] && sudo install -Dm0755 -o root -g root "$REPO/system/nc-vpn-root" /usr/local/bin/nc-vpn-root &&
-         sudo install -m0440 -o root -g root "$t_v" "$regle_v.tmp" && sudo visudo -cf "$regle_v.tmp" >/dev/null &&
-         sudo mv -f "$regle_v.tmp" "$regle_v"; then
+      NC_CAUSE="$(t "nftables n'a pas pu être installé." "nftables couldn't be installed.")"
+      if [ "$nft_ok" = 1 ] && pose_regle "$t_v" "$regle_v" "$REPO/system/nc-vpn-root" /usr/local/bin/nc-vpn-root; then
         ok "$(t "Assistant du kill switch VPN installé (réglage VPN_KILLSWITCH à passer à oui dans nc-reglages)." "VPN kill switch helper installed (turn the VPN_KILLSWITCH setting on in nc-settings).")"
       else
-        sudo rm -f "$regle_v.tmp"
-        warn "$(t "Installation de l'assistant du kill switch impossible (nftables ou règle sudo refusée)." "Couldn't install the kill switch helper (nftables or sudo rule rejected).")"
+        warn "$(t "Installation de l'assistant du kill switch impossible : $NC_CAUSE" "Couldn't install the kill switch helper: $NC_CAUSE")"
       fi
       rm -f "$t_v"
     fi
@@ -2433,13 +2443,14 @@ if [ "$MODE" = full ]; then
     else
       info "$(t "Interrupteur « Protéger la batterie » dans la page Système de l'île (charge arrêtée vers 80 %) : un petit" "“Protect Battery” switch on the island's System page (charging stops around 80%): a small")"
       info "$(t "utilitaire qui ne fait que ça (/usr/local/bin/nc-limite-charge), lancé depuis l'île sans mot de passe." "tool that does only that (/usr/local/bin/nc-limite-charge), run from the island without a password.")"
-      if ask "$(t "L'installer ?" "Install it?")" o; then
+      if sans_tty && ! sudo -n true 2>/dev/null; then # sans terminal ni sudo déjà autorisé : rien à demander, rien à poser
+        info "$(t "Pas de terminal pour sudo : à faire dans un terminal : nc-maj" "No terminal for sudo: do this in a terminal: nc-maj")"
+      elif ask "$(t "L'installer ?" "Install it?")" o; then
         t="$(mktemp)"; printf '# noctalia-config : interrupteur « Protéger la batterie » de l'"'"'île\n%s\n' "$ligne" > "$t"
-        if sudo install -Dm0755 -o root -g root "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge &&
-           sudo visudo -cf "$t" >/dev/null && sudo install -m0440 -o root -g root "$t" "$regle"; then
+        if pose_regle "$t" "$regle" "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge; then
           ok "$(t "Interrupteur de protection de la batterie installé." "Battery protection switch installed.")"
         else
-          warn "$(t "Installation de l'interrupteur de batterie impossible (règle sudo refusée par visudo)." "Couldn't install the battery switch (sudo rule rejected by visudo).")"
+          warn "$(t "Installation de l'interrupteur de batterie impossible : $NC_CAUSE" "Couldn't install the battery switch: $NC_CAUSE")"
         fi
         rm -f "$t"
       fi

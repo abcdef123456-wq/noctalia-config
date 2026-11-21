@@ -651,10 +651,10 @@ class Sudoers(Base):
     def test_install_sh_ecrit_la_ligne_de_l_assistant(self):
         self.assertIn('"$REPO/system/nc-energie-root" sudoers "$(id -un)"', INSTALL)
         self.assertIn("ask \"$(t \"L'installer ?\" \"Install it?\")\" n sensible", INSTALL.split("nc-energie-root", 1)[1])
-        self.assertIn("sudo install -Dm0755 -o root -g root \"$REPO/system/nc-energie-root\" /usr/local/bin/nc-energie-root", INSTALL)
+        self.assertIn('pose_regle "$t_e" "$regle_e" "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root', INSTALL)
         self.assertIn("/etc/sudoers.d/nc-energie", INSTALL)
-        self.assertIn('sudo visudo -cf "$regle_e.tmp"', INSTALL)          # vérifiée à sa place, en root, puis mise en service
-        self.assertIn('sudo mv -f "$regle_e.tmp" "$regle_e"', INSTALL)
+        self.assertIn('sudo visudo -cf "$fin.tmp"', INSTALL)          # vérifiée à sa place, en root, puis mise en service (pose_regle)
+        self.assertIn('sudo mv -f "$fin.tmp" "$fin"', INSTALL)
 
     def test_pas_d_installation_sans_accord(self):
         # La question est « sensible » avec NON par défaut : sans terminal, install.sh ne pose rien (sauf --oui)
