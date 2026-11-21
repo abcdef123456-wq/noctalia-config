@@ -330,7 +330,7 @@ class Migration(unittest.TestCase):
         appels = [m.start() for m in re.finditer(r"^\s*migrer_anciens_assistants$", corps, re.M)]
         self.assertEqual(len(appels), 2)
         self.assertTrue(i_deja < appels[0] < corps.index("else\n"))
-        self.assertTrue(i_ok < appels[1] < corps.index("        sudo rm -f"))
+        self.assertTrue(i_ok < appels[1] < corps.index("Installation de l'assistant d'énergie impossible"))
         self.assertLess(INSTALL.index("migrer_anciens_assistants() {"), INSTALL.index("etape_energie_root() {"))
 
 
