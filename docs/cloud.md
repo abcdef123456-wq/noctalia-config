@@ -262,6 +262,26 @@ Quand un téléchargement du navigateur se termine, l'île affiche « nom télé
 fichier glissé : rien ne part avant « Envoyer ici ». Un fichier caché, ou un fichier temporaire du navigateur (`.part`,
 `.crdownload`, `.tmp`), n'a jamais ce bouton.
 
+### Presse-papiers d'un PC à l'autre
+
+Dans le panneau, « Envoyer mon presse-papiers » et « Prendre celui du cloud ». Jamais automatique, jamais en fond.
+
+- Seulement du texte : 64 Kio au plus, en UTF-8. Une image, un fichier, un texte vide ou trop long est refusé.
+- Avant d'envoyer comme avant de prendre, le panneau montre un aperçu (200 caractères), le nombre de caractères et de
+  lignes, puis demande de confirmer. C'est exactement ce texte-là qui part ou arrive (son empreinte est vérifiée).
+- Rien ne reconnaît un mot de passe : c'est l'aperçu qui protège. Un texte copié depuis un gestionnaire de mots de
+  passe (il le signale au presse-papiers) n'est jamais envoyé, ni une clé privée ou une clé d'API.
+- Sur le cloud, un seul fichier, `Presse-papiers/presse-papiers.txt`, qui s'écrase : pas d'historique. Une fois pris
+  par un autre PC, il est retiré du cloud ; si le retrait échoue, c'est dit.
+- Le texte pris perd ses caractères de contrôle (sauf retour à la ligne et tabulation) : aucune séquence du terminal ne
+  passe. Un texte de plusieurs lignes est signalé : collé dans un terminal, il peut lancer des commandes.
+- Le texte ne passe jamais par la ligne de commande d'un programme ni par un journal. Il ne reste aucun fichier sur ce
+  PC, même après une coupure (aucun envoi à reprendre plus tard).
+- Il faut `wl-clipboard` (wl-paste, wl-copy) et une session Wayland ; sinon les boutons sont grisés.
+
+En ligne de commande : `nc-cloud presse voir`, `nc-cloud presse envoyer --empreinte H`, `nc-cloud presse voir-cloud`,
+`nc-cloud presse prendre --id ID --revision R --empreinte H`.
+
 ## Associer ce PC
 
 ```sh

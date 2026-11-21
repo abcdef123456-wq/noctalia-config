@@ -3396,3 +3396,168 @@ class Selecteur(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PressePapiers(CloudTest):
+    """(6) Le presse-papiers d'un PC à l'autre, à la demande : faux wl-paste et wl-copy (ils notent leur argv, jamais le
+    texte), faux serveur, CLOUD_JARVIS=oui."""
+    TEXTE = "bonjour\nls -la ~\n"
+
+    def setUp(self):
+        super().setUp()
+        self.p = self.d / "presse"
+        self.p.mkdir()
+        for nom, corps in (("wl-paste", "import os, sys\nd = os.environ['FAUX_PRESSE']\n"
+                                        "open(d + '/journal', 'a').write('wl-paste ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                                        "f = d + ('/types' if '--list-types' in sys.argv else '/texte')\n"
+                                        "if not os.path.exists(f): sys.exit(1)\n"
+                                        "sys.stdout.buffer.write(open(f, 'rb').read())\n"),
+                           ("wl-copy", "import os, sys\nd = os.environ['FAUX_PRESSE']\n"
+                                       "open(d + '/journal', 'a').write('wl-copy ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+                                       "open(d + '/copie', 'wb').write(sys.stdin.buffer.read())\n")):
+            f = self.bin / nom
+            f.write_text(f"#!{sys.executable}\n" + corps)
+            f.chmod(0o755)
+        self.faux.suppression = True
+        self.associer()
+        (self.home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        (self.home / ".config/nc/reglages.conf").write_text("CLOUD_JARVIS=oui\n")
+        self.copier(self.TEXTE.encode())
+
+    def env(self):
+        e = super().env()
+        if hasattr(self, "p"):
+            e.update(FAUX_PRESSE=str(self.p), WAYLAND_DISPLAY="wayland-faux")
+        return e
+
+    def copier(self, brut, types="text/plain;charset=utf-8\ntext/plain\nUTF8_STRING\n"):
+        (self.p / "texte").write_bytes(brut)
+        (self.p / "types").write_text(types)
+
+    def fichier_cloud(self):
+        dossier = next((e for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Presse-papiers"), None)
+        return [e for e in self.faux.entries.values() if dossier and e.get("parent") == dossier["id"]]
+
+    def envoyer(self, code=0):
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        return self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=code)
+
+    def test_aller_retour_un_seul_fichier_puis_retire(self):
+        self.assertEqual(self.nc("presse", "voir-cloud", code=1).lignes[-1]["erreur"], "vide")
+        self.assertFalse([e for e in self.faux.entries.values() if e["name"] == "Presse-papiers"])   # lire ne crée rien
+        n = len(self.faux.journal)
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        self.assertEqual((v["sens"], v["apercu"], v["caracteres"], v["lignes"]), ("envoi", self.TEXTE, len(self.TEXTE), 3))
+        self.assertEqual(len(self.faux.journal), n)                                      # voir : aucun appel au serveur
+        r = self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=0)
+        self.assertIn("il remplace le précédent", r.lignes[-1]["message"])
+        (f,) = self.fichier_cloud()
+        self.assertEqual((f["name"], self.faux.contenus[f["id"]]), ("presse-papiers.txt", self.TEXTE.encode()))
+        self.copier("deuxième".encode())
+        self.envoyer()
+        (f,) = self.fichier_cloud()                                                     # un seul fichier, qui s'écrase
+        self.assertEqual(self.faux.contenus[f["id"]], "deuxième".encode())
+        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))   # rien ne reste en local
+        # Prendre : l'aperçu, puis exactement ce qui a été vu ; copié par l'entrée de wl-copy, puis retiré du cloud
+        p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
+        self.assertEqual((p["sens"], p["apercu"], p["lignes"], p["id"]), ("prise", "deuxième", 1, f["id"]))
+        r = self.nc("presse", "prendre", "--id", p["id"], "--revision", p["revision"], "--empreinte", p["empreinte"], code=0)
+        self.assertEqual((self.p / "copie").read_bytes(), "deuxième".encode())
+        self.assertIn("retiré du cloud", r.lignes[-1]["message"])
+        self.assertEqual(self.fichier_cloud(), [])
+        # Le texte n'est jamais dans un argv : seuls ces appels, à l'identique
+        self.assertEqual(sorted(set((self.p / "journal").read_text().splitlines())),
+                         ["wl-copy --type text/plain", "wl-paste --list-types", "wl-paste --no-newline --type text/plain"])
+        self.nc("presse", "voir-cloud", code=1)                                          # plus rien
+
+    def test_refus_a_l_envoi(self):
+        cles = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n-----END OPENSSH PRIVATE KEY-----\n"
+        for nom, brut, types, erreur in (
+                ("mot de passe", b"hunter2", "text/plain\nx-kde-passwordManagerHint\n", "mot_de_passe"),
+                ("image", b"du texte valide", "image/png\n", "pas_texte"),          # pas de type texte annoncé
+                ("trop long", b"a" * (64 * 1024 + 1), "text/plain\n", "trop_long"),
+                ("pas UTF-8", b"\xff\xfe", "text/plain\n", "pas_texte"),
+                ("vide", b"  \n", "text/plain\n", "vide"),
+                ("secret", cles.encode(), "text/plain\n", "secret")):
+            with self.subTest(nom):
+                self.copier(brut, types)
+                r = self.nc("presse", "voir", code=2)
+                self.assertEqual(r.lignes[-1]["erreur"], erreur, r.lignes[-1])
+                self.nc("presse", "envoyer", "--empreinte", hashlib.sha256(brut).hexdigest(), code=2)
+        self.assertEqual(self.fichier_cloud(), [])
+        self.assertIn("gestionnaire de mots de passe", self.envoyer_refus("text/plain\nx-kde-passwordManagerHint\n"))
+        # Changé entre l'aperçu et l'envoi : rien ne part
+        self.copier(b"un")
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        self.copier(b"autre")
+        self.assertEqual(self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=6).lignes[-1]["erreur"], "change")
+        self.assertEqual(self.fichier_cloud(), [])
+
+    def envoyer_refus(self, types):
+        self.copier(b"x", types)
+        return self.nc("presse", "voir", code=2).lignes[-1]["message"]
+
+    def test_coupe_hors_wayland_sans_outil(self):
+        (self.home / ".config/nc/reglages.conf").write_text("CLOUD_JARVIS=non\n")
+        r = self.nc("presse", "voir")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("coupé", r.lignes[-1]["message"])
+        self.assertFalse((self.p / "journal").exists())                                  # rien n'est même lu
+        (self.home / ".config/nc/reglages.conf").write_text("CLOUD_JARVIS=oui\n")
+        e = self.env()
+        del e["WAYLAND_DISPLAY"]
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "presse", "voir"], capture_output=True, text=True, env=e, timeout=60)
+        self.assertIn("Wayland", r.stdout)
+        (self.bin / "wl-paste").unlink()
+        self.assertIn("Installe wl-clipboard", self.nc("presse", "voir", code=1).lignes[-1]["message"])
+
+    def test_prise_nettoyee_verifiee_et_bornee(self):
+        self.copier(b"propre")
+        self.envoyer()
+        (f,) = self.fichier_cloud()
+        # Un autre PC y a mis une séquence de terminal (OSC 52, couleur) et un renversement du sens d'écriture
+        sale = "a\x1b]52;c;ZXZpbA==\x07b\x1b[31mc\u202ed\te\r\n".encode()
+        self.faux.contenus[f["id"]] = sale
+        f.update(size=len(sale), sha256=hashlib.sha256(sale).hexdigest(), revision="r-sale")
+        p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
+        self.assertEqual(p["apercu"], "a]52;c;ZXZpbA==b[31mcd\te\n")
+        self.nc("presse", "prendre", "--id", p["id"], "--revision", p["revision"], "--empreinte", p["empreinte"], code=0)
+        self.assertEqual((self.p / "copie").read_bytes(), "a]52;c;ZXZpbA==b[31mcd\te\n".encode())
+        # Changé depuis l'aperçu, secret, trop gros : rien n'est pris
+        self.copier(b"v1")
+        self.envoyer()
+        (f,) = self.fichier_cloud()
+        p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
+        (self.p / "copie").unlink()
+        self.assertEqual(self.nc("presse", "prendre", "--id", p["id"], "--revision", "autre", "--empreinte", p["empreinte"],
+                                 code=6).lignes[-1]["erreur"], "change")
+        cle = b"-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n"
+        self.faux.contenus[f["id"]] = cle
+        f.update(size=len(cle), sha256=hashlib.sha256(cle).hexdigest())
+        self.assertEqual(self.nc("presse", "voir-cloud", code=2).lignes[-1]["erreur"], "secret")
+        f.update(size=64 * 1024 + 1)
+        self.assertEqual(self.nc("presse", "voir-cloud", code=1).lignes[-1]["erreur"], "trop_long")
+        self.assertFalse((self.p / "copie").exists())
+        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))
+
+    def test_pris_mais_pas_retire_c_est_dit(self):
+        self.envoyer()
+        p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
+        self.faux.pannes.add("delete_412")
+        r = self.nc("presse", "prendre", "--id", p["id"], "--revision", p["revision"], "--empreinte", p["empreinte"], code=0)
+        self.assertEqual((self.p / "copie").read_bytes(), self.TEXTE.encode())
+        self.assertIn("Pas retiré du cloud", r.lignes[-1]["message"])
+        self.assertEqual(len(self.fichier_cloud()), 1)
+
+    def test_envoi_coupe_rien_ne_reste_a_reprendre(self):
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        self.faux.pannes.add("perdre_creation")
+        r = self.nc("presse", "envoyer", "--empreinte", v["empreinte"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))
+        self.assertFalse([m for _, m in self.manifestes() if "presse" in str(m.get("source"))])
+
+
+# PressePapiers reprend le faux serveur de CloudTest, pas ses tests
+for _nom in [n for n in dir(CloudTest) if n.startswith("test_") and n not in PressePapiers.__dict__]:
+    setattr(PressePapiers, _nom, None)

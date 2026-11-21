@@ -222,6 +222,58 @@ FloatingWindow {
                     }
                 }
 
+                // Presse-papiers d'un PC à l'autre, à la demande : aperçu, puis confirmation ; un seul texte sur le cloud,
+                // retiré quand un autre PC le prend
+                Column {
+                    objectName: "nc-cloud-presse"
+                    visible: cloud.pret
+                    width: parent.width; spacing: 6
+                    Texte { text: Reglages.t("Presse-papiers", "Clipboard"); secondaire: true; font.pixelSize: 12 }
+                    Row {
+                        spacing: 6
+                        CloudBouton { objectName: "nc-cloud-presse-envoyer"; texte: Reglages.t("Envoyer mon presse-papiers", "Send my clipboard")
+                                      enabled: !CloudEtat.occupe && !CloudEtat.presseIndispo; onClic: CloudEtat.presseVoir() }
+                        CloudBouton { objectName: "nc-cloud-presse-prendre"; texte: Reglages.t("Prendre celui du cloud", "Take the cloud's")
+                                      enabled: !CloudEtat.occupe && !CloudEtat.presseIndispo; onClic: CloudEtat.presseVoirCloud() }
+                    }
+                    Rectangle {
+                        objectName: "nc-cloud-presse-confirmation"
+                        visible: CloudEtat.presse !== null
+                        width: parent.width; radius: 14; color: Couleurs.carte
+                        height: presseColonne.implicitHeight + 20
+                        Column {
+                            id: presseColonne
+                            x: 10; y: 10; width: parent.width - 20; spacing: 6
+                            readonly property var p: CloudEtat.presse || ({ sens: "", caracteres: 0, lignes: 0, apercu: "" })
+                            Texte {
+                                objectName: "nc-cloud-presse-question"
+                                width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; font.weight: Font.DemiBold
+                                readonly property string compte: presseColonne.p.caracteres + Reglages.t(" caractère(s), ", " character(s), ")
+                                                                 + presseColonne.p.lignes + Reglages.t(" ligne(s)", " line(s)")
+                                text: presseColonne.p.sens === "envoi"
+                                    ? Reglages.t("Envoyer ce texte au cloud (" + compte + ") ? Rien ne reconnaît un mot de passe : regarde l'aperçu.",
+                                                 "Send this text to the cloud (" + compte + ")? Nothing can recognise a password: check the preview.")
+                                    : Reglages.t("Copier ce texte dans le presse-papiers de ce PC (" + compte + ") ? Il sera retiré du cloud.",
+                                                 "Copy this text to this PC's clipboard (" + compte + ")? It will be removed from the cloud.")
+                                      + (presseColonne.p.sens === "prise" && presseColonne.p.lignes > 1
+                                         ? Reglages.t(" Plusieurs lignes : collé dans un terminal, ce texte peut lancer des commandes.",
+                                                      " Several lines: pasted into a terminal, this text can run commands.") : "")
+                            }
+                            Texte { objectName: "nc-cloud-presse-apercu"; width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 6
+                                    elide: Text.ElideRight; secondaire: true; font.pixelSize: 11; text: presseColonne.p.apercu }
+                            Row {
+                                spacing: 6
+                                CloudBouton { objectName: "nc-cloud-presse-confirmer"; principal: true
+                                              texte: presseColonne.p.sens === "envoi" ? Reglages.t("Envoyer", "Send") : Reglages.t("Copier ici", "Copy here")
+                                              onClic: CloudEtat.presseConfirmer() }
+                                CloudBouton { objectName: "nc-cloud-presse-annuler"; texte: Reglages.t("Annuler", "Cancel"); onClic: CloudEtat.presseAnnuler() }
+                            }
+                        }
+                    }
+                    Texte { objectName: "nc-cloud-presse-message"; visible: CloudEtat.presseMessage !== "" && CloudEtat.presse === null
+                            width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 11; text: CloudEtat.presseMessage }
+                }
+
                 // Coupé ou non associé : on dit quoi faire, rien n'est lancé
                 Texte {
                     objectName: "nc-cloud-coupe"

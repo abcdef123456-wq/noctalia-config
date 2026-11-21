@@ -78,6 +78,13 @@ case "$1" in
                   printf '{"evenement": "resultat", "fichier": "%s", "etat": "publie", "message": "Envoyé."}\n' "$a" ;;
              esac
            done ;;
+  presse) if [ -f "@ROOT@/presse-outil" ]; then printf '%s\n' '{"evenement": "erreur", "code": 1, "erreur": "outil", "message": "Installe wl-clipboard."}'; exit 1; fi
+          case "$2" in
+            voir) printf '%s\n' '{"evenement": "presse", "sens": "envoi", "apercu": "bonjour", "caracteres": 7, "lignes": 1, "empreinte": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+            voir-cloud) printf '%s\n' '{"evenement": "presse", "sens": "prise", "apercu": "ls -la\\nrm x", "caracteres": 11, "lignes": 2, "empreinte": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "id": "p1", "revision": "r7"}' ;;
+            envoyer) printf '%s\n' '{"evenement": "presse", "sens": "envoye", "message": "Presse-papiers envoyé."}' ;;
+            prendre) printf '%s\n' '{"evenement": "presse", "sens": "pris", "message": "Copié, et retiré du cloud."}' ;;
+          esac ;;
   examiner) apres=0; sep=""; printf '{"evenement": "examen", "fichiers": ['
             for a in "$@"; do
               if [ "$apres" = 0 ]; then [ "$a" = "--" ] && apres=1; continue; fi
@@ -197,7 +204,7 @@ class Sources(unittest.TestCase):
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
     def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False,
-               etat_echec_apres=None, mode_copie=None, parent_absent=False, copie_etat=None):
+               etat_echec_apres=None, mode_copie=None, parent_absent=False, copie_etat=None, presse_outil=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -224,6 +231,8 @@ class HorsEcran(unittest.TestCase):
                 (root / "parent-absent").write_text("1")
             if copie_etat:
                 (root / "copie-etat").write_text(copie_etat)
+            if presse_outil:
+                (root / "presse-outil").write_text("1")
             if etat_echec_apres is not None:
                 (root / "etat-echec-apres").write_text(str(etat_echec_apres))
             if associe:
@@ -347,6 +356,51 @@ class HorsEcran(unittest.TestCase):
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, associe=False)
         self.assertEqual(j, [])
+    def test_presse_papiers_apercu_puis_confirmation(self):
+        H = "a" * 64
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length) return
+                var corps = fen.contentItem
+                function q() { return trouver(corps, "nc-cloud-presse-question").text }
+                if (etape === 1) { if (!CloudEtat.lu) return
+                    verifier(vu(corps, "nc-cloud-presse") && !vu(corps, "nc-cloud-presse-confirmation"), "deux boutons, pas de question")
+                    trouver(corps, "nc-cloud-presse-envoyer").clic(); etape++; return }
+                if (etape === 2) {     // l'aperçu, le compte, l'avertissement ; rien n'est parti
+                    verifier(vu(corps, "nc-cloud-presse-confirmation") && trouver(corps, "nc-cloud-presse-apercu").text === "bonjour"
+                             && q().indexOf("7 caractère(s), 1 ligne(s)") >= 0 && q().indexOf("mot de passe") >= 0, "aperçu de l'envoi : " + q())
+                    trouver(corps, "nc-cloud-presse-annuler").clic()
+                    verifier(CloudEtat.presse === null, "annulé"); trouver(corps, "nc-cloud-presse-envoyer").clic(); etape++; return }
+                if (etape === 3) { trouver(corps, "nc-cloud-presse-confirmer").clic(); etape++; return }
+                if (etape === 4) {
+                    verifier(vu(corps, "nc-cloud-presse-message") && CloudEtat.presseMessage === "Presse-papiers envoyé.", "envoyé")
+                    trouver(corps, "nc-cloud-presse-prendre").clic(); etape++; return }
+                if (etape === 5) {     // plusieurs lignes : le rappel du terminal
+                    verifier(q().indexOf("Plusieurs lignes") >= 0 && q().indexOf("retiré du cloud") >= 0, "aperçu de la prise : " + q())
+                    trouver(corps, "nc-cloud-presse-confirmer").clic(); etape++; return }
+                if (etape === 6) {
+                    verifier(CloudEtat.presseMessage === "Copié, et retiré du cloud.", "pris")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertEqual(j[3:], ["--json presse voir", "--json presse voir", f"--json presse envoyer --empreinte={H}",
+                                 "--json presse voir-cloud", f"--json presse prendre --id=p1 --revision=r7 --empreinte={H}"])
+
+    def test_presse_papiers_sans_wl_clipboard_boutons_grises(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length) return
+                var corps = fen.contentItem
+                if (etape === 1) { if (!CloudEtat.lu) return; trouver(corps, "nc-cloud-presse-envoyer").clic(); etape++; return }
+                verifier(CloudEtat.presseIndispo && !trouver(corps, "nc-cloud-presse-envoyer").enabled
+                         && !trouver(corps, "nc-cloud-presse-prendre").enabled && CloudEtat.presseMessage === "Installe wl-clipboard.", "grisés")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, presse_outil=True)
+        self.assertEqual(j[3:], ["--json presse voir"])
+
     def test_corbeille_suppression_non_confirmee_pas_d_annuler(self):
         F = "f" * 32
         self.lancer(self.OUVRIR + '''

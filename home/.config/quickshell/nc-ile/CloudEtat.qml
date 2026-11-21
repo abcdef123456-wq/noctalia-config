@@ -61,6 +61,11 @@ Singleton {
     property int dureeAnnuler: 20000
     property string sansCopie: ""                 // id dont la copie a échoué : la question suivante dit « sans copie »
     property string raisonSansCopie: ""           // et pourquoi (corbeille pleine…), en texte brut
+    // Presse-papiers d'un PC à l'autre (nc-cloud presse) : toujours un aperçu, puis la confirmation de CE texte (son
+    // empreinte) ; le texte ne passe que par la sortie de nc-cloud, jamais par un argv ni par console.log
+    property var presse: null                     // { sens: "envoi" | "prise", apercu, caracteres, lignes, empreinte, id, revision }
+    property string presseMessage: ""
+    property bool presseIndispo: false            // wl-clipboard absent ou hors Wayland : boutons grisés
     readonly property real copieMax: 500 * 1024 * 1024
     function copiable(e) { return !!e && e.kind === "file" && typeof e.size === "number" && e.size <= copieMax }
     property string aRacine: ""                   // copie dont le dossier d'origine n'existe plus : « Remettre à la racine »
@@ -143,6 +148,17 @@ Singleton {
     property bool annulation: false                // Annuler demandé : la fin du lot vaut « annulé », même tué avant ses signaux
 
     function relireAssociation() { appareil.reload() }
+    function presseVoir() { presse = null; presseMessage = ""; lancer(["presse", "voir"], "presse") }
+    function presseVoirCloud() { presse = null; presseMessage = ""; lancer(["presse", "voir-cloud"], "presse") }
+    function presseAnnuler() { presse = null; presseMessage = "" }
+    function presseConfirmer() {
+        var p = presse
+        presse = null
+        if (!p) return                            // empreinte, id, révision : déjà vérifiés à la réception (ligne)
+        if (p.sens === "envoi") lancer(["presse", "envoyer", "--empreinte=" + p.empreinte], "presse")
+        else if (p.sens === "prise" && /^[A-Za-z0-9_]{1,128}$/.test(String(p.id)) && /^[!-~]{1,256}$/.test(String(p.revision)))
+            lancer(["presse", "prendre", "--id=" + p.id, "--revision=" + p.revision, "--empreinte=" + p.empreinte], "presse")
+    }
 
     // Un téléchargement fini (île, « téléchargé ») : envoyable s'il a un nom simple (ni « / », ni caché, ni « .. », ni
     // caractère de contrôle, ni fichier temporaire du navigateur) dans un dossier absolu. Il passe ensuite par l'examen
@@ -460,6 +476,7 @@ Singleton {
             erreur = String(d.message || Reglages.t("Erreur.", "Error.")).slice(0, 300)
             if (q === "telecharger" && d.code === 6) aRemplacer = enCours.id
             // Le dossier a changé depuis l'aperçu : rien n'est supprimé ; nouvel aperçu (après la page relue), nouvelle question
+            if (q === "presse") { presseMessage = erreur; if (d.erreur === "outil") presseIndispo = true }
             if (q === "supprimer" && d.erreur === "copie") { sansCopie = enCours.id; raisonSansCopie = erreur; redemander(enCours.id) }
             if (q === "remettre" && d.erreur === "parent_absent") aRacine = enCours.id
             if (q === "supprimer" && d.erreur === "tree_changed") {
@@ -467,6 +484,13 @@ Singleton {
                 redemander(enCours.id)
             }
             if (d.code === 4) associe = false
+        }
+        else if (d.evenement === "presse" && q === "presse") {
+            var n = x => typeof x === "number" && x >= 0 ? x : 0
+            if ((d.sens === "envoi" || d.sens === "prise") && typeof d.apercu === "string" && /^[0-9a-f]{64}$/.test(String(d.empreinte)))
+                presse = { sens: d.sens, apercu: d.apercu.slice(0, 200), caracteres: n(d.caracteres), lignes: n(d.lignes),
+                           empreinte: d.empreinte, id: String(d.id || ""), revision: String(d.revision || "") }
+            else if (typeof d.message === "string") presseMessage = d.message.slice(0, 300)
         }
         else if (d.evenement === "corbeille") {
             corbeille = (Array.isArray(d.copies) ? d.copies : []).filter(x => x && /^[0-9a-f]{32}$/.test(String(x.copie)) && typeof x.nom === "string")
