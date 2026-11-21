@@ -1921,9 +1921,10 @@ PAQUETS_FICHIERS = {"arch": ("python-gobject glib2", "gvfs-dnssd"),
 
 
 def famille_distribution():
+    """arch, debian, fedora, suse ou None, d'après os-release (lu, jamais exécuté). NC_OS_RELEASE : un autre fichier (tests)."""
     ids = []
     try:
-        for l in open("/etc/os-release", encoding="utf-8", errors="replace"):
+        for l in open(os.environ.get("NC_OS_RELEASE") or "/etc/os-release", encoding="utf-8", errors="replace"):
             k, _, v = l.strip().partition("=")
             if k in ("ID", "ID_LIKE"):
                 ids += v.strip('"').lower().split()

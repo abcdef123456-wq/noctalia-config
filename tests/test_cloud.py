@@ -586,7 +586,12 @@ elif sys.argv[1] == "clear":
         c.chmod(0o600)
 
     def env(self):
-        return {**getattr(self, "plus", {}), "HOME": str(self.home), "PATH": str(self.bin), "TMPDIR": str(self.d), "NC_LANGUE": "fr",
+        # Rien de la machine : un os-release factice (distribution inconnue) et, sans faux_gi(), un gi « absent »
+        if not (self.d / "os-release").exists():
+            (self.d / "os-release").write_text('ID="inconnue"\n')
+        if not hasattr(self, "plus"):
+            self.faux_gi("absent")
+        return {"NC_OS_RELEASE": str(self.d / "os-release"), **self.plus, "HOME": str(self.home), "PATH": str(self.bin), "TMPDIR": str(self.d), "NC_LANGUE": "fr",
                 "XDG_CONFIG_HOME": str(self.home / ".config"), "XDG_STATE_HOME": str(self.home / ".local/state"),
                 "XDG_DATA_HOME": str(self.home / ".local/share"), "XDG_CACHE_HOME": str(self.home / ".cache"),
                 "XDG_RUNTIME_DIR": str(self.d)}
@@ -1206,15 +1211,27 @@ elif sys.argv[1] == "clear":
 
     def test_fichiers_sans_gi_ou_sans_webdav_code_distinct_et_paquet_dit(self):
         self.associer()
-        for mode, mot in (("absent", "gi"), ("sans_gio", "gi"), ("sans_dav", "WebDAV")):
-            with self.subTest(mode):
-                self.faux_gi(mode)
-                r = self.nc("fichiers", code=13)
-                m = r.lignes[-1]["message"]
-                self.assertIn(mot, m)
-                self.assertTrue(any(p in m for p in ("python-gobject", "python3-gi", "gvfs-dnssd", "gvfs-backends", "python3-gobject")), m)
-                self.assertFalse([x for x in self.gi_vu() if x["evt"] == "monter"])
-                self.assertIs(self.nc("etat", code=0).lignes[-1]["fichiers"], False)
+        # Le message exact de chaque distribution (la ponctuation qui suit prouve qu'aucun autre nom n'est ajouté)
+        attendus = {'ID=arch': ("python-gobject glib2.", "gvfs-dnssd,"),
+                    'ID=debian': ("python3-gi gir1.2-glib-2.0.", "gvfs-backends,"),
+                    'ID="fedora"': ("python3-gobject-base glib2.", "gvfs,"),
+                    'ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"': ("python3-gobject typelib-1_0-Gio-2_0.", "gvfs-backends,")}
+        for osr, (gi, dav) in attendus.items():
+            for mode, mot, paquet in (("absent", "gi", gi), ("sans_gio", "gi", gi), ("sans_dav", "WebDAV", dav)):
+                with self.subTest(osr=osr, mode=mode):
+                    (self.d / "os-release").write_text(osr + "\n")
+                    self.faux_gi(mode)
+                    m = self.nc("fichiers", code=13).lignes[-1]["message"]
+                    self.assertIn(mot, m)
+                    self.assertIn("installe " + paquet, m)
+                    self.assertFalse([x for x in self.gi_vu() if x["evt"] == "monter"])
+                    self.assertIs(self.nc("etat", code=0).lignes[-1]["fichiers"], False)
+        # Distribution inconnue : les quatre sont nommées
+        (self.d / "os-release").write_text('ID="inconnue"\n')
+        self.faux_gi("sans_dav")
+        m = self.nc("fichiers", code=13).lignes[-1]["message"]
+        for nom in ("Arch : gvfs-dnssd", "Debian : gvfs-backends", "Fedora : gvfs", "openSUSE : gvfs-backends"):
+            self.assertIn(nom, m)
         self.faux_gi()
         self.assertIs(self.nc("etat", code=0).lignes[-1]["fichiers"], True)       # ce que lit CloudEtat.qml (d.fichiers)
         self.assertIn("fichiersPossible = d.fichiers === true", (REPO / "home/.config/quickshell/nc-ile/CloudEtat.qml").read_text())
