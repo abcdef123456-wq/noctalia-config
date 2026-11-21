@@ -10,6 +10,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Services.Notifications
+import "NotifsEcheance.js" as E
 
 Singleton {
     id: n
@@ -47,8 +48,20 @@ Singleton {
         var dedans = Reglages.val("NPD_NUIT", "non") === "oui" && (a <= b ? (m >= a && m < b) : (m >= a || m < b))
         if (dedans !== dansPlage) { dansPlage = dedans; garde.concentration = dedans }
     }
-    Timer { interval: 30000; repeat: true; running: true; triggeredOnStart: true; onTriggered: { n.verifierPlage(); n.verifierReports() } }
-    Connections { target: Reglages; function onValeursChanged() { n.verifierPlage() } }
+    // UN minuteur non répétitif, visé sur la prochaine échéance (début/fin de plage, retour d'un report) ; arrêté s'il n'y en a pas.
+    // Au tir on revérifie tout à l'heure réelle puis on réarme. Un minuteur ne compte pas la veille : au retour de l'écran, idem.
+    function armer() {
+        var dues = attentes.map(a => a.due).concat(Object.keys(reports).map(k => reports[k]))
+        var e = E.prochaine(Reglages.val("NPD_NUIT", "non") === "oui", Reglages.val("NPD_DEBUT", "22:00"), Reglages.val("NPD_FIN", "07:00"), dues, Date.now())
+        if (e === null) { echeance.stop(); return }
+        echeance.interval = E.delai(e, Date.now())
+        echeance.restart()
+    }
+    function verifierTout() { verifierPlage(); verifierReports(); armer() }
+    readonly property var minuteur: echeance      // lu par les tests : prouve qu'aucun minuteur ne tourne sans échéance
+    Timer { id: echeance; repeat: false; onTriggered: n.verifierTout() }
+    Connections { target: Reglages; function onValeursChanged() { n.verifierPlage(); n.armer() } }
+    Connections { target: Etat; function onEcranVuChanged() { if (Etat.ecranVu && n.pret) n.verifierTout() } }
 
     // ── Gardé d'une session à l'autre ──
     Component.onCompleted: Memo.lire("notifs", v => {
@@ -59,7 +72,7 @@ Singleton {
             if (Array.isArray(v.attentes)) attentes = v.attentes.filter(a => a && typeof a.summary === "string" && a.due > 0)
         }
         pret = true
-        verifierReports()
+        verifierTout()
     })
     function garder() {
         if (!pret) return
@@ -280,6 +293,7 @@ Singleton {
         attentes = attentes.filter(a => a.id !== String(notif.id)).concat([{ id: String(notif.id), app: notif.appName || "", summary: notif.summary || "",
             body: (notif.body || "").slice(0, 2000), image: icone(notif), urgency: notif.urgency === NotificationUrgency.Critical ? 2 : 1, due: due }])
         garder()
+        armer()
     }
     function verifierReports() {
         var maintenant = Date.now(), r = Object.assign({}, reports), change = false

@@ -31,7 +31,7 @@ class Notifications(unittest.TestCase):
             if memo is not None:
                 (root / ".local/state/nc/ile").mkdir(parents=True, mode=0o700)
                 (root / ".local/state/nc/ile/notifs.json").write_text(json.dumps(memo))
-            for nom in ("AssistantEtat.qml", "Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml", "Projecteur.qml", "NotifIA.qml", "DemandeIA.qml", "IaPrete.qml"):
+            for nom in ("AssistantEtat.qml", "Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml", "Projecteur.qml", "NotifIA.qml", "DemandeIA.qml", "IaPrete.qml", "NotifsEcheance.js"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k]!==undefined?valeurs[k]:d}}')
             (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool jeu: false; property bool ecranVu: true; property var maintenant: new Date(); property var minute: new Date(); property var hauteurs: ({}); property int fermetures: 0; property string ouvert: ""; property string ecranOuvert: ""; function basculer(e,c){ouvert="b"+c; ecranOuvert=e} function aller(n){ouvert+=n} function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
@@ -89,6 +89,24 @@ class Notifications(unittest.TestCase):
                 apres(root)
             f = root / ".local/state/nc/ile/notifs.json"
             return json.loads(f.read_text()) if f.exists() else None
+
+    def test_aucun_minuteur_sans_plage_ni_report_puis_un_seul_tir(self):
+        """Énergie : sans plage « ne pas déranger » ni report, aucun Timer de Notifs ne tourne ; avec une échéance, un seul, sans répétition."""
+        self.executer(r"""
+if (etape === 0) { creer(); etape++; return }
+if (!Notifs.pret) return
+if (etape === 1) {
+    var m = Notifs.minuteur
+    verifier(!m.running, "minuteur actif sans plage ni report")
+    Notifs.attentes = [{ id: "9", app: "a", summary: "Z", body: "", image: "", urgency: 1, due: Date.now() + 3600000 }]
+    Notifs.armer()
+    verifier(m.running && !m.repeat && m.interval > 3500000 && m.interval <= 3600000, "un seul tir à une heure : " + m.running + " " + m.interval)
+    Notifs.attentes = []
+    Notifs.armer()
+    verifier(!m.running, "arrêté quand plus rien n'est attendu")
+    Qt.quit()
+}
+""")
 
     def test_image_de_notification_jamais_chargee_du_reseau(self):
         """N'importe quelle appli locale peut envoyer une adresse comme image ou icône : la vraie page, le vrai bus, aucune requête."""
