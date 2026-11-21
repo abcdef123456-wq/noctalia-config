@@ -2218,7 +2218,16 @@ def cmd_supprimer(a):
                 raise Echec(T("Le fichier a changé depuis cette révision : rien n'est fait. Relis-le (nc-cloud entree ID).",
                               "The file changed since this revision: nothing is done. Check it again (nc-cloud entree ID)."),
                             CONFLIT, "version_conflict")
-            copie = copier_avant(s, a, e, rev)
+            try:
+                copie = copier_avant(s, a, e, rev)
+            except Echec as x:
+                if x.erreur == "copie":                # supprimé ailleurs pendant la copie (deux suppressions à la fois) ?
+                    try:
+                        entree(s, a.id, a.dossier or "root", features)
+                    except Echec as y:
+                        if y.erreur == "introuvable":  # ce n'est pas une copie ratée : on ne propose pas « sans copie »
+                            return introuvable(a)
+                raise
 
         def essai(m):                                  # avant le DELETE : « doute », et 24 h à partir de maintenant
             m["essais"] = (m.get("essais") if isinstance(m.get("essais"), int) else 0) + 1

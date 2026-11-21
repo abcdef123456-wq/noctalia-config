@@ -427,6 +427,9 @@ class Gestion(http.server.BaseHTTPRequestHandler):
                 return self.couper()
             return self.repondre(200, res)
         if len(p) == 3 and p[0] == "files" and p[2] == "content" and m == "GET":
+            if "supprime_ailleurs" in f.pannes:              # un autre PC supprime le fichier juste avant la lecture
+                f.pannes.discard("supprime_ailleurs")
+                f.entries.pop(p[1], None)
             e = f.entries.get(p[1])
             if not e or e["kind"] != "file":
                 return self.erreur(404, "not_found")
@@ -2069,6 +2072,19 @@ elif sys.argv[1] == "clear":
         self.assertEqual(sorted(self.copies()), ["a" * 32, "b" * 32])
         self.assertLess(abs(json.loads((loin / "copie.json").read_text())["date"] - time.time()), 30)
         self.assertEqual(json.loads((proche / "copie.json").read_text())["date"], avant)
+
+    def test_corbeille_supprime_ailleurs_pendant_la_copie(self):
+        """Le fichier disparaît du serveur entre la lecture de l'entrée et la copie (une autre suppression au même
+        moment) : « introuvable », jamais « copie impossible », qui ferait proposer « sans copie »."""
+        self.associer()
+        self.faux.suppression = True
+        x = self.deposer_de_plus("ailleurs.bin")
+        rev = self.faux.entries[x]["revision"]
+        self.faux.pannes.add("supprime_ailleurs")
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=1)
+        self.assertEqual(r.lignes[-1].get("erreur"), "introuvable", r.lignes[-1])
+        self.assertFalse([c for c in self.faux.journal if c[0] == "DELETE"], "aucune suppression par cette commande")
+        self.assertEqual(self.copies(), [])
 
     def test_corbeille_deux_suppressions_en_meme_temps_une_copie(self):
         """N6 : deux « supprimer --copie » du même fichier : une seule copie, et les deux disent vrai (code 0)."""
