@@ -174,8 +174,8 @@ Chaque action n'existe que si le serveur l'annonce, sinon « ce serveur ne sait 
 
 `nc-cloud ouvrir ID` télécharge une copie dans `~/.cache/nc-cloud/ouverts/` (dossiers 0700, fichier 0400, jamais
 exécutable), la relit depuis le disque pour vérifier son empreinte, puis l'ouvre avec `xdg-open` (ou `gio open`).
-Seuls s'ouvrent d'ici les types d'une courte liste : images (sauf SVG), audio, vidéo, texte simple (`.txt`, `.md`,
-`.csv`), PDF, documents OpenDocument et Office (odt, ods, odp, docx, xlsx, pptx). Le type est lu deux fois, dans le
+Seuls s'ouvrent d'ici les types d'une courte liste : images, audio et vidéo courants (PNG, JPEG, GIF, WebP, MP3,
+Ogg, FLAC, MP4, WebM, MKV, WMV…, jamais SVG ni listes de lecture), texte simple (`.txt`, `.md`, `.csv`), PDF, documents OpenDocument et Office (odt, ods, odp, docx, xlsx, pptx). Le type est lu deux fois, dans le
 contenu (`file`) et dans le nom, et les deux doivent être de la même famille : une archive nommée `.png` ne s'ouvre pas,
 car hors d'un bureau connu `xdg-open` choisit l'application d'après le contenu. Seule la dernière extension du nom
 compte (`x.txt.gz` : refusé), un nom sans extension ou avec `:`, `#`, `?` ou `;` est refusé, et la copie ne garde jamais

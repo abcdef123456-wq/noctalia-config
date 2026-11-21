@@ -1553,8 +1553,17 @@ OUVRIR_MAX = 200 * 1024 * 1024
 # Jamais d'ici : SVG (scripts) et listes de lecture (le lecteur irait chercher des adresses)
 OUVRIR_REFUSES = {"image/svg+xml", "audio/x-mpegurl", "audio/mpegurl", "audio/x-scpls", "audio/scpls", "application/xspf+xml",
                   "application/vnd.apple.mpegurl"}
-# L'extension de la copie, fixée par NOUS d'après le type lu dans le contenu ; image, audio, vidéo : celle de mimetypes
-OUVRIR_EXTENSIONS = {"text/plain": ".txt", "text/markdown": ".md", "text/csv": ".csv", "application/pdf": ".pdf",
+# L'extension de la copie, fixée par NOUS d'après le type lu dans le contenu, par cette table SEULE : mimetypes donnerait
+# .asx, .wvx, .ram (listes d'adresses) ou .fxm (JavaFX) pour des types « vidéo » ou « audio ». Type hors table : refusé
+OUVRIR_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "image/bmp": ".bmp",
+                     "image/x-ms-bmp": ".bmp", "image/tiff": ".tiff", "image/avif": ".avif", "image/heic": ".heic", "image/heif": ".heif",
+                     "image/jxl": ".jxl", "image/vnd.microsoft.icon": ".ico", "image/x-icon": ".ico",
+                     "audio/mpeg": ".mp3", "audio/ogg": ".ogg", "audio/flac": ".flac", "audio/x-flac": ".flac", "audio/wav": ".wav",
+                     "audio/x-wav": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".aac", "audio/webm": ".weba",
+                     "video/mp4": ".mp4", "video/webm": ".webm", "video/x-matroska": ".mkv", "video/quicktime": ".mov",
+                     "video/x-msvideo": ".avi", "video/mpeg": ".mpeg", "video/ogg": ".ogv", "video/3gpp": ".3gp",
+                     "video/x-ms-asf": ".wmv", "video/x-ms-wmv": ".wmv",
+                     "text/plain": ".txt", "text/markdown": ".md", "text/csv": ".csv", "application/pdf": ".pdf",
                      "application/vnd.oasis.opendocument.text": ".odt", "application/vnd.oasis.opendocument.spreadsheet": ".ods",
                      "application/vnd.oasis.opendocument.presentation": ".odp",
                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
@@ -1603,7 +1612,7 @@ def extension_sure(chemin, nom):
     par_nom = famille_sure(type_du_nom(nom))
     if par_nom is None or famille_sure(contenu) != par_nom:
         return None
-    ext = OUVRIR_EXTENSIONS.get(contenu) or mimetypes.guess_extension(contenu, strict=False)
+    ext = OUVRIR_EXTENSIONS.get(contenu)
     return ext if ext and re.fullmatch(r"\.[a-z0-9]{1,10}", ext) and famille_sure(type_du_nom("fichier" + ext)) == par_nom else None
 
 
@@ -1716,8 +1725,12 @@ def cmd_ouvrir(a):
         ext = extension_sure(tmp, nom)
         if ext is None:
             raise refus_type
-        # Jamais le nom du serveur tel quel : son radical, et l'extension qui dit ce que le contenu est
-        final = d / ((os.path.splitext(nom)[0] or "fichier") + ext)
+        # Jamais le nom du serveur tel quel : son radical, et l'extension qui dit ce que le contenu est ; le radical est
+        # raccourci si l'extension s'allonge (.md -> .txt) au-delà de 255 octets
+        radical = os.path.splitext(nom)[0] or "fichier"
+        while len((radical + ext).encode("utf-8", "surrogateescape")) > 255:
+            radical = radical[:-1]
+        final = d / (radical + ext)
         os.replace(tmp, str(final))
     except BaseException:
         effacer(Path(tmp))

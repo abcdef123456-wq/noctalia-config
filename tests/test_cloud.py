@@ -75,6 +75,8 @@ def jar(cafe=True):
 
 
 PNG = png_minimal()
+# Un en-tête ASF (Windows Media) : le GUID de l'objet d'en-tête, puis sa taille et des zéros
+ASF = bytes.fromhex("3026b2758e66cf11a6d900aa0062ce6c") + (30).to_bytes(8, "little") + b"\0" * 14
 PDF = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"
 HTML = b"<!doctype html><script>fetch('http://exemple.invalid/')</script>"
 SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
@@ -1308,6 +1310,8 @@ b = open(sys.argv[-1], 'rb').read()
 t = b.lstrip()[:200].lower()
 if b.startswith(b'\\x89PNG\\r\\n\\x1a\\n'): m = 'image/png'
 elif b.startswith(b'%PDF-'): m = 'application/pdf'
+elif b.startswith(b'FXM-TEST'): m = 'video/x-javafx'
+elif b.startswith(b'\\x30\\x26\\xb2\\x75\\x8e\\x66\\xcf\\x11'): m = 'video/x-ms-asf'
 elif b.startswith(b'PK'): m = 'application/java-archive' if b'META-INF/MANIFEST.MF' in b else 'application/zip'
 elif t.startswith((b'<!doctype html', b'<html')): m = 'text/html'
 elif b'<svg' in t: m = 'image/svg+xml'
@@ -1381,7 +1385,9 @@ print(m)
                 ("lanceur", b"[Desktop Entry]\nExec=id\n", False), ("notes", b"bonjour\n", False),
                 ("data:,x.html", b"bonjour\n", False), ("ab:x.txt#.html", b"bonjour\n", False), ("ab:x.png?.desktop", PNG, False),
                 ("http:x.png;.jar", PNG, False), ("ab:x.html#.txt", b"bonjour\n", False), ("liste.m3u", b"#EXTM3U\nhttp://exemple.invalid/a.mp3\n", False),
-                ("x.txt.gz", b"bonjour\n", False), ("photo.PNG", PNG, True),
+                ("x.txt.gz", b"bonjour\n", False), ("photo.PNG", PNG, True), ("film.wmv", ASF, True),
+                ("scene.fxm", b"FXM-TEST\n", False),     # famille vidéo par le nom et le contenu, mais hors de la table : refusé
+                ("é" * 126 + ".md", b"bonjour\n", True),
                 ("image.png", PNG, True), ("doc.pdf", PDF, True), ("note.txt", b"bonjour\n", True), ("liste.csv", b"a,b\n1,2\n", True)]
 
     def verifier_liste_blanche(self, appels):
@@ -1399,6 +1405,9 @@ print(m)
         # simple devient liste.txt
         self.assertEqual(len(vus), sum(1 for _, _, o in self.contenus_ouvrir() if o), vus)
         self.assertIn("photo.png", vus)
+        self.assertIn("film.wmv", vus, "un vrai .wmv (video/x-ms-asf) ne devient pas .asx")
+        long = next(v for v in vus if v.startswith("é"))
+        self.assertTrue(long.endswith((".txt", ".md")) and len(long.encode()) <= 255, long)
         self.assertTrue({"image.png", "doc.pdf", "note.txt"} <= set(vus) and ({"liste.csv", "liste.txt"} & set(vus)), vus)
         restes = [p.name for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file()]
         self.assertEqual(sorted(restes), vus, "aucune copie refusée ne reste")
