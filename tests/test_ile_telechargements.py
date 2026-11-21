@@ -59,10 +59,14 @@ class Source(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, inotify="", reglage=None, silence=False, ecran=True, fichiers=("doc.pdf.part",)):
+    def lancer(self, corps, inotify="", reglage=None, silence=False, ecran=True, fichiers=("doc.pdf.part",), cloud=False):
         with tempfile.TemporaryDirectory(prefix="nc-tele-") as d:
-            root = H.preparer(d, ("Couleurs",), extra={"Partage.qml": "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: %s }" % ("true" if silence else "false")},
-                              singletons=("Partage",))
+            # Faux CloudEtat : « Envoyer au cloud » proposé ou non (le vrai est testé dans test_cloud_qml)
+            faux_cloud = ("pragma Singleton\nimport QtQuick\nQtObject { function telechargementEnvoyable(d, n) { return %s && d.charAt(0) === \"/\" "
+                          "&& n === \"doc.pdf\" } }" % ("true" if cloud else "false"))
+            root = H.preparer(d, ("Couleurs",), extra={"Partage.qml": "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: %s }" % ("true" if silence else "false"),
+                                                       "CloudEtat.qml": faux_cloud},
+                              singletons=("Partage", "CloudEtat"))
             dl = root / "home/Telechargements"
             dl.mkdir()
             for f in fichiers:
@@ -80,7 +84,8 @@ class HorsEcran(unittest.TestCase):
                         property bool ecranVu: %s
                         property string activiteType: ""
                         property int nbActivites: 0
-                        function activite(t, duree) { activiteType = t; nbActivites++ }
+                        property int dureeActivite: 0
+                        function activite(t, duree) { activiteType = t; nbActivites++; dureeActivite = duree }
                     ''' % ("true" if ecran else "false")) + bloc() + textwrap.dedent('''\
                     }
                     ''') + H.OUTILS + textwrap.dedent(corps) + "\n}\n")
@@ -111,6 +116,19 @@ class HorsEcran(unittest.TestCase):
         self.assertIn("inotifywait -m -q -e create -e moved_to -e moved_from -e delete -e close_write --format %f ", j)
         self.assertRegex(j, r"xdg-open \S+/Telechargements\n")
         self.assertEqual(j.count("xdg-open "), 1, j)
+
+    def test_avec_le_cloud_l_activite_dure_8_s(self):
+        for cloud, duree in ((True, 8000), (False, 4500)):
+            with self.subTest(cloud=cloud):
+                self.lancer('''
+                    Timer { interval: 200; running: true; repeat: true; property int tours: 0
+                        onTriggered: {
+                            tours++
+                            if (etat.telechargeFini === "" && tours < 60) return
+                            verifier(etat.dureeActivite === %d, "durée : " + etat.dureeActivite)
+                            console.log("FINI"); Qt.exit(0)
+                        } }
+                ''' % duree, inotify=self.FIN_PAR_INOTIFY, cloud=cloud)
 
     def test_tmp_aussi(self):
         self.lancer('''

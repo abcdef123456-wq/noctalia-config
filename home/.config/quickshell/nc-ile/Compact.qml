@@ -28,6 +28,11 @@ Item {
         return p.x >= -4 && p.x <= pastilleVpn.width + 4 && p.y >= -6 && p.y <= pastilleVpn.height + 6
     }
     // Sur l'indicateur Cloud JARVIS ? (le clic ouvre le panneau ; le survol n'ouvre pas l'île)
+    function surEnvoiTelechargement(x, y) {
+        if (!envoiTelechargement.visible || mode !== "telechargement-fini") return false
+        var p = c.mapToItem(envoiTelechargement, x, y)
+        return p.x >= -6 && p.x <= envoiTelechargement.width + 6 && p.y >= -8 && p.y <= envoiTelechargement.height + 8
+    }
     function surCloud(x, y) {
         if (!pastilleCloud.visible || mode !== "repos") return false
         var p = c.mapToItem(pastilleCloud, x, y)
@@ -346,6 +351,16 @@ Item {
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "download_done"; taille: 17; color: Couleurs.vert }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.telechargeFini; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 200) }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("téléchargé", "downloaded"); secondaire: true }
+        // Cloud JARVIS actif et associé : « Envoyer au cloud » ; le clic ouvre le panneau avec ce fichier (Ile.qml)
+        Ico {
+            id: envoiTelechargement
+            objectName: "nc-cloud-envoyer-telechargement"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: CloudEtat.telechargementEnvoyable(Etat.dossierTel, Etat.telechargeFini)
+            nom: "cloud_upload"; taille: 16; color: Couleurs.accentClair
+            Accessible.role: Accessible.Button
+            Accessible.name: Reglages.t("Envoyer au cloud", "Send to cloud")
+        }
     }
     Fondu {
         id: video

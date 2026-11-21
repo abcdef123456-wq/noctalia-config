@@ -255,6 +255,13 @@ le résultat : envoyée, cloud injoignable, ou même nom déjà là (rien n'est 
 Le bouton n'apparaît que d'après le réglage et le fichier d'association de ce PC : aucun appel au serveur pour le
 décider, et rien ne part sans le clic.
 
+### Envoyer un téléchargement
+
+Quand un téléchargement du navigateur se termine, l'île affiche « nom téléchargé » pendant 8 secondes, avec une flèche
+« Envoyer au cloud » (Cloud JARVIS actif et ce PC associé). Un clic ouvre le panneau avec ce fichier, examiné comme un
+fichier glissé : rien ne part avant « Envoyer ici ». Un fichier caché, ou un fichier temporaire du navigateur (`.part`,
+`.crdownload`, `.tmp`), n'a jamais ce bouton.
+
 ## Associer ce PC
 
 ```sh

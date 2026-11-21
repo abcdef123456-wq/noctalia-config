@@ -144,6 +144,20 @@ Singleton {
 
     function relireAssociation() { appareil.reload() }
 
+    // Un téléchargement fini (île, « téléchargé ») : envoyable s'il a un nom simple (ni « / », ni caché, ni « .. », ni
+    // caractère de contrôle, ni fichier temporaire du navigateur) dans un dossier absolu. Il passe ensuite par l'examen
+    // comme un fichier glissé, et rien ne part avant « Envoyer ici »
+    function telechargementEnvoyable(dossier, nom) {
+        var d = String(dossier || ""), n = String(nom || "")
+        return actif && associe && d.charAt(0) === "/" && n !== "" && n.indexOf("/") < 0 && n.charAt(0) !== "."
+               && !/[\x00-\x1f\x7f]/.test(n) && !/\.(part|crdownload|tmp)$/i.test(n)
+    }
+    function recevoirTelechargement(dossier, nom) {
+        if (!telechargementEnvoyable(dossier, nom)) return false
+        var chemin = (String(dossier).replace(/\/+$/, "") + "/" + nom).split("/").map(encodeURIComponent).join("/")
+        return recevoir(["file://" + chemin])
+    }
+
     // Des adresses déposées ou choisies : seulement des fichiers locaux (file:///), sans doublon, 8 au plus. Une liste
     // vide (sélecteur annulé) garde la sélection précédente
     function recevoir(urls) {

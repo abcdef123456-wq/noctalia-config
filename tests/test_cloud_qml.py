@@ -154,6 +154,14 @@ class Sources(unittest.TestCase):
         self.assertIn("if (ac.cloud && !(CloudEtat.actif && CloudEtat.associe)) continue", r)
         self.assertIn('"ipc", "call", "ile", "cloud"', r)
 
+    def test_telechargement_fini_bouton_et_clic(self):
+        compact, ile = lire("Compact.qml"), lire("Ile.qml")
+        self.assertIn("visible: CloudEtat.telechargementEnvoyable(Etat.dossierTel, Etat.telechargeFini)", compact)
+        self.assertIn("(compact.surEnvoiTelechargement(e.x, e.y) ? (CloudEtat.recevoirTelechargement(Etat.dossierTel, Etat.telechargeFini) "
+                      "&& CloudEtat.ouvrirPanneau())", ile)
+        # Avant « ouvrir le dossier » : le clic sur le bouton n'ouvre pas aussi le dossier
+        self.assertLess(ile.index("compact.surEnvoiTelechargement(e.x, e.y)"), ile.index('Etat.activiteType === "telechargement-fini" && Etat.dossierTel'))
+
     def test_pilule_indicateur_clic_survol_et_depot_sur_l_ile_fermee(self):
         compact, ile = lire("Compact.qml"), lire("Ile.qml")
         self.assertIn('objectName: "nc-cloud-pill"', compact)
@@ -311,6 +319,34 @@ class HorsEcran(unittest.TestCase):
                              "--json lister -- root", "--json lister -- dddddddddddddddddddddddddddddddd", "--json dossier -- dddddddddddddddddddddddddddddddd Vacances", "--json lister -- dddddddddddddddddddddddddddddddd",
                              "--json lister -- root"])
 
+    def test_telechargement_fini_envoyer_au_cloud(self):
+        """(8) : un téléchargement fini passe par l'examen, comme un fichier glissé ; rien ne part avant « Envoyer ici »."""
+        j = self.lancer('''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (!CloudEtat.associe && ticks < 60) return
+                var D = "/home/user/Téléchargements"
+                for (var n of ["a.part", "b.crdownload", "c.tmp", "C.PART", ".cache", "..", "x/y", "z\\u001b[31m", ""])
+                    verifier(!CloudEtat.telechargementEnvoyable(D, n) && !CloudEtat.recevoirTelechargement(D, n), "refusé : " + n)
+                verifier(!CloudEtat.telechargementEnvoyable("relatif", "doc.pdf"), "dossier relatif refusé")
+                verifier(CloudEtat.telechargementEnvoyable(D, "Été 100%.pdf"), "nom simple envoyable")
+                if (etape === 0) {
+                    verifier(CloudEtat.recevoirTelechargement(D + "/", "Été 100%.pdf"), "reçu")
+                    verifier(CloudEtat.recus.length === 1 && CloudEtat.recus[0] === D + "/Été 100%.pdf", "chemin : " + CloudEtat.recus)
+                    etape++; return }
+                if (CloudEtat.occupe && ticks < 100) return                     // l'examen (le faux nc-cloud) se termine
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertEqual(j, ["--json examiner -- /home/user/Téléchargements/Été 100%.pdf"])     # seulement l'examen
+        j = self.lancer('''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                ticks++; if (ticks < 10) return
+                verifier(!CloudEtat.telechargementEnvoyable("/home/user/T", "doc.pdf"), "non associé : pas de bouton")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, associe=False)
+        self.assertEqual(j, [])
     def test_corbeille_suppression_non_confirmee_pas_d_annuler(self):
         F = "f" * 32
         self.lancer(self.OUVRIR + '''

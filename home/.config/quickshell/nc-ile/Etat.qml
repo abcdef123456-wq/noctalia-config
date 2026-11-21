@@ -306,7 +306,9 @@ Singleton {
         id: verifFin
         property string nom: ""
         function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
-        onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non" && !Partage.silence) { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
+        // 8 s au lieu de 4,5 quand « Envoyer au cloud » est proposé : le temps de cliquer
+        onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non" && !Partage.silence) { etat.telechargeFini = nom
+                            etat.activite("telechargement-fini", CloudEtat.telechargementEnvoyable(etat.dossierTel, nom) ? 8000 : 4500) } }
     }
     // Fin d'un téléchargement vue par inotify (inotifywait, du paquet inotify-tools, s'il est installé) : le dossier Téléchargements
     // est surveillé, et le relevé ci-dessus ne se fait qu'à l'apparition ou à la disparition d'un .part, .crdownload ou .tmp. Au

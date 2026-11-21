@@ -383,10 +383,12 @@ PanelWindow {
                                // « Terminée » / « Échec » d'une commande longue : retour à son terminal
                                : (VpnEtat.indicateur && compact.surVpn(e.x, e.y) ? VpnEtat.demanderPanneau()
                                : (compact.surCloud(e.x, e.y) ? CloudEtat.ouvrirPanneau()
+                               // « Envoyer au cloud » d'un téléchargement fini : le panneau avec ce fichier, rien ne part encore
+                               : (compact.surEnvoiTelechargement(e.x, e.y) ? (CloudEtat.recevoirTelechargement(Etat.dossierTel, Etat.telechargeFini) && CloudEtat.ouvrirPanneau())
                                : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false))))))))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
