@@ -10,7 +10,14 @@
   nc-cloud deposer [--dans ID] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
   nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]
-  nc-cloud supprimer ID --revision REVISION   un fichier (jamais un dossier), si le serveur sait supprimer
+  nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]   un fichier, ou un dossier si le serveur le sait
+                                    (non vide : l'arbre de l'aperçu confirmé)
+  nc-cloud entree ID [--dossier P]  une entrée par son id (sa révision actuelle)
+  nc-cloud deplacer ID --revision REV --vers PARENT [--nom NOM]   déplacer et/ou renommer (si le serveur le sait)
+  nc-cloud renommer ID --revision REV NOM
+  nc-cloud apercu ID                ce qu'une suppression retirerait (fichiers, dossiers, taille, arbre)
+  nc-cloud creer PARENT NOM         un fichier vide
+  nc-cloud ouvrir ID [--dossier P]  une copie privée, empreinte vérifiée, ouverte par l'application par défaut
   --json : une ligne JSON par événement (c'est ce que lit l'interface)
 
 Codes de sortie : 0 fait, 1 erreur, 2 mauvais usage, 3 hors ligne (serveur ou stockage injoignable), 4 PC non associé
@@ -21,6 +28,7 @@ relance avec --si-existe), 7 quota ou disque plein, 8 annulé, 9 transport refus
 Le serveur et la clé sont ceux de JARVIS (~/.config/nc/assistant.conf). Aucun relevé en fond : le serveur n'est
 interrogé que quand tu lances une commande. Les envois interrompus sont notés dans ~/.local/state/nc-cloud (sans jeton)."""
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import importlib.machinery
@@ -74,7 +82,8 @@ ARRET = (HORS_LIGNE, NON_ASSOCIE, DESACTIVE, TRANSPORT, SERVEUR_CHANGE)
 CODES = {"cloud_disabled": DESACTIVE, "cloud_unavailable": HORS_LIGNE, "storage_error": HORS_LIGNE,
          "authentication_required": NON_ASSOCIE, "device_revoked": NON_ASSOCIE, "quota_exceeded": QUOTA,
          "storage_full": QUOTA, "version_conflict": CONFLIT, "precondition_required": CONFLIT,
-         "destination_changed": CONFLIT, "name_conflict": CONFLIT, "integrity_error": EMPREINTE}
+         "destination_changed": CONFLIT, "name_conflict": CONFLIT, "integrity_error": EMPREINTE,
+         "invalid_destination": CONFLIT, "root_protected": CONFLIT, "directory_not_empty": CONFLIT, "tree_changed": CONFLIT}
 # Envoi perdu (expiré, annulé, invalidé par une suppression ailleurs) : à déposer à nouveau
 PERDUS = ("upload_expired", "upload_not_pending", "upload_invalidated")
 ETATS_PERDUS = ("expired", "cancelled", "invalidated")
@@ -1207,50 +1216,307 @@ def cmd_telecharger(a):
 
 # ── Suppression (seulement si le serveur l'annonce) ─────────────────────────────────────────────────────────────────────
 
-def cmd_supprimer(a):
-    rev = a.revision
+def revision_sure(rev, option="--revision"):
+    """Une révision (ou un tree_revision) telle que le serveur l'a donnée : ASCII imprimable, sans « " », « , » ni « * »."""
     if not rev or len(rev) > 256 or rev == "*" or '"' in rev or "," in rev or not all(33 <= ord(c) <= 126 for c in rev):
-        raise Echec(T("--revision : la révision exacte du fichier, telle que nc-cloud lister la montre.",
-                      "--revision: the file's exact revision, as nc-cloud lister shows it."), USAGE)
-    s = Session()
-    features = capacites_session(s)
-    if features.get("file_delete") is not True:
-        raise Echec(T("Ce serveur ne sait pas supprimer de fichier.", "This server cannot delete files."))
-    if features.get("entry_by_id") is True and entree(s, a.id, "root", features).get("kind") != "file":
-        raise Echec(T("C'est un dossier, pas un fichier : rien n'est fait.", "This is a folder, not a file: nothing is done."))
-    # La même demande (fichier, révision) garde sa clé : une réponse perdue se rejoue sans risque
-    deja = [x for x in manifestes(SUPPRESSIONS) if x[1].get("id") == a.id and x[1].get("revision") == rev
-            and all(x[1].get(k) == s.appareil[k] for k in ("server_id", "space_id", "device_id"))]
+        raise Echec(T(f"{option} : la valeur exacte donnée par le serveur (nc-cloud entree ID, nc-cloud apercu ID).",
+                      f"{option}: the exact value given by the server (nc-cloud entree ID, nc-cloud apercu ID)."), USAGE)
+    return rev
+
+
+def muter(s, dossier, demande, methode, chemin, rev, corps_neuf=None):
+    """Une mutation (déplacer, renommer, supprimer) : If-Match exact avec la révision de l'appelant, et une clé
+    d'idempotence notée AVANT l'envoi, liée à la demande complète ; la même demande rejouée reprend la même clé et le
+    même corps. Aucune relance automatique : hors ligne, le manifeste reste et la même commande saura ce qui s'est passé."""
+    ident = {k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}
+    deja = [x for x in manifestes(dossier) if x[1].get("demande") == demande and all(x[1].get(k) == v for k, v in ident.items())]
     if deja:
         cm, m = deja[0]
     else:
-        m = {"id": a.id, "revision": rev, "cle": secrets.token_urlsafe(32), "cree": time.time(),
-             **{k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}}
-        cm = SUPPRESSIONS / (m["cle"] + ".json")
+        m = {"demande": demande, "cle": secrets.token_urlsafe(32), "cree": time.time(), "corps": corps_neuf() if corps_neuf else None, **ident}
+        cm = dossier / (m["cle"] + ".json")
         ecrire_json(cm, m)
     try:
-        _, r = s.json("DELETE", "/files/" + segment(a.id), entetes={"If-Match": '"' + rev + '"', "Idempotency-Key": m["cle"]})
+        _, r = s.json(methode, chemin, m.get("corps"), {"If-Match": '"' + rev + '"', "Idempotency-Key": m["cle"]})
     except Echec as e:
-        if e.code in (HORS_LIGNE, SERVEUR_CHANGE):
-            raise                           # la suppression a peut-être eu lieu : la même commande la rejoue
-        effacer(cm)
-        if e.statut == 412 or e.erreur == "version_conflict":
-            raise Echec(T("Le fichier a changé depuis cette révision : rien n'est supprimé. Relis-le (nc-cloud lister).",
-                          "The file changed since this revision: nothing is deleted. Check it again (nc-cloud lister)."), CONFLIT) from None
-        if e.statut == 404:
-            raise Echec(T("Fichier introuvable (déjà supprimé ?) : rien n'est fait.", "File not found (already deleted?): nothing is done.")) from None
-        if e.statut == 428:
-            raise Echec(T("Le serveur exige la révision du fichier : rien n'est supprimé.",
-                          "The server requires the file's revision: nothing is deleted."), CONFLIT) from None
+        if e.code not in (HORS_LIGNE, SERVEUR_CHANGE):
+            effacer(cm)                      # refus net du serveur : rien n'a été fait
         raise
     except Annulation:
-        dire(T("Interrompu : relance la même commande pour savoir si le fichier est supprimé.",
-               "Interrupted: run the same command again to know whether the file is deleted."), evenement="erreur", code=ANNULE)
-        return ANNULE
+        dire(T("Interrompu : relance la même commande pour savoir si c'est fait.",
+               "Interrupted: run the same command again to know whether it is done."), evenement="erreur", code=ANNULE)
+        raise Fini(ANNULE) from None
     effacer(cm)
+    return r
+
+
+def refus(e, quoi):
+    """Un refus du serveur sur une mutation, dit clairement ; rien n'a été fait."""
+    textes = {
+        "tree_changed": T("Le dossier a changé depuis l'aperçu : rien n'est supprimé. Refais l'aperçu (nc-cloud apercu ID).",
+                          "The folder changed since the preview: nothing is deleted. Preview it again (nc-cloud apercu ID)."),
+        "directory_not_empty": T("Dossier non vide : nc-cloud apercu ID, puis --recursif --arbre TREE.",
+                                 "Folder not empty: nc-cloud apercu ID, then --recursif --arbre TREE."),
+        "name_conflict": T("Ce nom existe déjà dans la destination : rien n'est écrasé.",
+                           "This name already exists in the destination: nothing is overwritten."),
+        "invalid_destination": T("Un dossier ne va ni dans lui-même ni dans un de ses sous-dossiers : rien n'est fait.",
+                                 "A folder cannot go into itself or one of its subfolders: nothing is done."),
+        "root_protected": T("La racine ne se déplace ni ne se supprime.", "The root cannot be moved or deleted."),
+        "invalid_idempotency_key": T("Clé d'idempotence refusée par le serveur.", "Idempotency key refused by the server."),
+        "destination_changed": T("Le dossier de destination a changé : relance la commande.",
+                                 "The destination folder changed: run the command again."),
+    }
+    if e.erreur in textes:
+        return Echec(textes[e.erreur], CONFLIT, e.erreur, statut=e.statut)
+    if e.statut == 412 or e.erreur == "version_conflict":
+        return Echec(T(f"{quoi} a changé depuis cette révision : rien n'est fait. Relis-le (nc-cloud entree ID).",
+                       f"{quoi} changed since this revision: nothing is done. Check it again (nc-cloud entree ID)."), CONFLIT, e.erreur)
+    if e.statut == 404:
+        return Echec(T("Introuvable (déjà supprimé ?) : rien n'est fait.", "Not found (already deleted?): nothing is done."), ERREUR, e.erreur)
+    if e.statut == 428:
+        # Deux cas au serveur : pas de If-Match (jamais chez nous), ou un dossier en récursif sans arbre
+        return Echec(T("Le serveur exige la révision et l'aperçu : rien n'est fait. Refais l'aperçu (nc-cloud apercu ID).",
+                       "The server requires the revision and the preview: nothing is done. Preview it again (nc-cloud apercu ID)."),
+                     CONFLIT, e.erreur)
+    return e
+
+
+def entier_borne(v):
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 10 ** 15 else None
+
+
+def cmd_entree(a):
+    s = Session()
+    e = entree_propre(entree(s, a.id, a.dossier or "root", capacites_session(s))) or {}
+    if JSON_SORTIE:
+        evenement(evenement="entree", entree=e)
+    else:
+        print(f"{e.get('name', '?')}  {e.get('kind', '?')}  {taille_lisible(e.get('size')) if e.get('kind') == 'file' else ''}  "
+              f"[{e.get('id', '?')}  {e.get('revision', '')}]")
+    return OK
+
+
+def deplacer(a, vers, nom):
+    """Déplacer et/ou renommer : POST /entries/{id}/move (features.entry_move), même identifiant, même historique."""
+    rev = revision_sure(a.revision)
+    if a.id == "root":
+        raise Echec(T("La racine ne se déplace pas.", "The root cannot be moved."), USAGE)
+    if vers is not None and vers == a.id:
+        raise Echec(T("Un dossier ne va pas dans lui-même.", "A folder cannot go into itself."), USAGE)
+    if nom is not None and not nom_valide(nom):
+        raise Echec(T("Nom invalide.", "Invalid name."), USAGE)
+    s = Session()
+    features = capacites_session(s)
+    if features.get("entry_move") is not True:
+        raise Echec(T("Ce serveur ne sait pas déplacer ni renommer.", "This server cannot move or rename."))
+    actuel = entree(s, a.id, "root", features)
+    vers = vers if vers is not None else actuel.get("parent")
+    nom = unicodedata.normalize("NFC", nom if nom is not None else actuel.get("name", ""))
+    if not isinstance(vers, str) or not nom_valide(nom):
+        raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
+    demande = {"op": "deplacer", "id": a.id, "revision": rev, "vers": vers, "nom": nom}
+    try:
+        r = muter(s, ETAT / "operations", demande, "POST", "/entries/" + segment(a.id) + "/move", rev,
+                  lambda: {"parent_id": vers, "parent_revision": revision_dossier(s, vers), "name": nom})
+    except Echec as e:
+        raise refus(e, T("L'entrée", "The entry")) from None
+    e = entree_propre(r.get("entry")) or {}
+    if r.get("moved") is not True or e.get("id") != a.id:
+        raise Echec(T("Déplacement non confirmé par le serveur.", "Move not confirmed by the server."))
+    dire(T(f"Fait : {e.get('name', nom)}.", f"Done: {e.get('name', nom)}."), evenement="resultat", etat="deplace", entree=e)
+    return OK
+
+
+def cmd_deplacer(a):
+    return deplacer(a, a.vers, a.nom)
+
+
+def cmd_renommer(a):
+    if not nom_valide(a.nom):
+        raise Echec(T("Nom invalide.", "Invalid name."), USAGE)
+    return deplacer(a, None, a.nom)
+
+
+def cmd_apercu(a):
+    s = Session()
+    if capacites_session(s).get("delete_preview") is not True:
+        raise Echec(T("Ce serveur ne sait pas donner d'aperçu de suppression.", "This server cannot preview a deletion."))
+    _, r = s.json("GET", "/entries/" + segment(a.id) + "/delete-preview")
+    e = entree_propre(r.get("entry")) or {}
+    arbre = r.get("tree_revision")
+    n = {k: entier_borne(r.get(k)) for k in ("files", "directories", "size")}
+    if e.get("id") != a.id or not isinstance(arbre, str) or not re.fullmatch(r"[0-9a-f]{64}", arbre) or None in n.values():
+        raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
+    if JSON_SORTIE:
+        evenement(evenement="apercu", entree=e, tree_revision=arbre, **n)
+    else:
+        print(T(f"{e.get('name', '?')} : {n['files']} fichier(s), {n['directories']} dossier(s), {taille_lisible(n['size'])}.",
+                f"{e.get('name', '?')}: {n['files']} file(s), {n['directories']} folder(s), {taille_lisible(n['size'])}."))
+        print(T(f"Pour tout supprimer : nc-cloud supprimer {a.id} --revision {e.get('revision', 'REV')} --recursif --arbre {arbre}",
+                f"To delete everything: nc-cloud supprimer {a.id} --revision {e.get('revision', 'REV')} --recursif --arbre {arbre}"))
+    return OK
+
+
+def cmd_supprimer(a):
+    rev = revision_sure(a.revision)
+    if a.recursif != bool(a.arbre):
+        raise Echec(T("--recursif va avec --arbre TREE (celui de l'aperçu confirmé : nc-cloud apercu ID).",
+                      "--recursif goes with --arbre TREE (the one of the confirmed preview: nc-cloud apercu ID)."), USAGE)
+    if a.arbre and not re.fullmatch(r"[0-9a-f]{64}", a.arbre):
+        raise Echec(T("--arbre : le tree_revision exact de nc-cloud apercu ID (64 caractères hexadécimaux).",
+                      "--arbre: the exact tree_revision from nc-cloud apercu ID (64 hexadecimal characters)."), USAGE)
+    s = Session()
+    features = capacites_session(s)
+    if features.get("directory_delete") is True:
+        # DELETE /entries/{id} : fichier ou dossier ; toujours un corps JSON ; un dossier en récursif (même vide) exige
+        # l'arbre de l'aperçu (sinon 428)
+        corps = {"recursive": bool(a.recursif)}
+        if a.arbre:
+            corps["tree_revision"] = a.arbre
+        demande = {"op": "supprimer", "id": a.id, "revision": rev, "arbre": a.arbre}
+        try:
+            r = muter(s, SUPPRESSIONS, demande, "DELETE", "/entries/" + segment(a.id), rev, lambda: corps)
+        except Echec as e:
+            raise refus(e, T("L'entrée", "The entry")) from None
+        if r.get("deleted") is not True or r.get("entry_id") != a.id:
+            raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
+        n = entier_borne(r.get("count"))
+        dire(T("Supprimé." + (f" ({n} entrée(s))" if n is not None else ""), "Deleted." + (f" ({n} entr(y/ies))" if n is not None else "")),
+             evenement="resultat", etat="supprime", id=a.id, count=n)
+        return OK
+    if features.get("file_delete") is not True:
+        raise Echec(T("Ce serveur ne sait pas supprimer.", "This server cannot delete."))
+    if a.recursif:
+        raise Echec(T("Ce serveur ne sait pas supprimer un dossier.", "This server cannot delete a folder."))
+    if features.get("entry_by_id") is True and entree(s, a.id, "root", features).get("kind") != "file":
+        raise Echec(T("C'est un dossier, pas un fichier : rien n'est fait.", "This is a folder, not a file: nothing is done."))
+    try:
+        r = muter(s, SUPPRESSIONS, {"op": "supprimer", "id": a.id, "revision": rev, "arbre": None}, "DELETE",
+                  "/files/" + segment(a.id), rev)
+    except Echec as e:
+        raise refus(e, T("Le fichier", "The file")) from None
     if r.get("deleted") is not True:
         raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
     dire(T("Fichier supprimé.", "File deleted."), evenement="resultat", etat="supprime", id=propre(r.get("file_id") or a.id))
+    return OK
+
+
+def cmd_creer(a):
+    """Un fichier vide, par l'API d'envoi (taille 0, empreinte du vide, aucun morceau) : un vrai fichier vide de ce nom
+    dans un dossier privé sert de source, comme pour un dépôt."""
+    if not nom_valide(a.nom):
+        raise Echec(T("Nom de fichier invalide.", "Invalid file name."), USAGE)
+    s = Session()
+    d = ETAT / "vides" / secrets.token_hex(8)
+    dossier_prive(d.parent)
+    dossier_prive(d)
+    source = d / unicodedata.normalize("NFC", a.nom)
+    os.close(os.open(str(source), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
+    garder = False
+    try:
+        return deposer_un(s, source, a.parent, "create", None, False)
+    except Echec as e:
+        garder = e.code == HORS_LIGNE       # le manifeste vise cette source : nc-cloud reprendre en a besoin
+        raise
+    finally:
+        if not garder:
+            effacer(source)
+            with contextlib.suppress(OSError):
+                d.rmdir()
+
+
+# Ouvrir : jamais un exécutable, un script ou un lanceur, ni par son nom ni par son contenu
+EXTENSIONS_RISQUEES = {
+    ".desktop", ".sh", ".bash", ".zsh", ".fish", ".csh", ".ksh", ".py", ".pyw", ".pl", ".rb", ".php", ".lua", ".js",
+    ".mjs", ".exe", ".msi", ".bat", ".cmd", ".com", ".scr", ".ps1", ".vbs", ".jar", ".appimage", ".run", ".bin", ".elf",
+    ".deb", ".rpm", ".apk", ".flatpak", ".flatpakref", ".flatpakrepo", ".snap", ".command", ".action", ".workflow", ".url",
+    ".lnk", ".reg", ".so", ".ko", ".service", ".timer", ".kdelnk", ".directory"}
+ENTETES_RISQUEES = (b"\x7fELF", b"#!", b"MZ", b"[Desktop Entry]")
+OUVERTS_DUREE = 24 * 3600
+
+
+def nom_risque(nom):
+    n = nom.lower().rstrip(" .")
+    return any(n.endswith(x) for x in EXTENSIONS_RISQUEES)
+
+
+def nettoyer_ouverts(base):
+    """Les copies ouvertes il y a plus de 24 h sont retirées (sans suivre aucun lien)."""
+    limite = time.time() - OUVERTS_DUREE
+    with contextlib.suppress(OSError), os.scandir(str(base)) as sous:
+        for d in sous:
+            if not d.is_dir(follow_symlinks=False):
+                continue
+            with contextlib.suppress(OSError), os.scandir(d.path) as fichiers:
+                for f in fichiers:
+                    if f.stat(follow_symlinks=False).st_mtime < limite:
+                        os.unlink(f.path)
+            with contextlib.suppress(OSError):
+                os.rmdir(d.path)
+
+
+def cmd_ouvrir(a):
+    """Une copie locale privée (~/.cache/nc-cloud/ouverts, 0700 / 0600, jamais exécutable), empreinte vérifiée AVANT
+    l'ouverture par l'application par défaut (xdg-open ou gio open, le chemin en argument, jamais un shell). La copie
+    n'est jamais renvoyée au serveur."""
+    s = Session()
+    e = entree(s, a.id, a.dossier or "root", capacites_session(s))
+    taille = entier_borne(e.get("size"))
+    if e.get("kind") != "file" or taille is None or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
+        raise Echec(T("Ce n'est pas un fichier à ouvrir.", "This is not a file to open."))
+    nom = os.path.basename(propre(e.get("name"))).lstrip(".") or "fichier"
+    if nom_risque(nom):
+        raise Echec(T("Fichier exécutable, script ou lanceur : il ne s'ouvre pas d'ici, télécharge-le d'abord.",
+                      "Executable, script or launcher: it does not open from here, download it first."))
+    ouvreur = shutil.which("xdg-open") or shutil.which("gio")
+    if not ouvreur:
+        raise Echec(T("Ni xdg-open ni gio : rien pour ouvrir le fichier.", "Neither xdg-open nor gio: nothing to open the file."))
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "nc-cloud" / "ouverts"
+    dossier_prive(base)
+    nettoyer_ouverts(base)
+    d = base / hashlib.sha256(e["id"].encode()).hexdigest()[:16]
+    dossier_prive(d)
+    fd, tmp = tempfile.mkstemp(prefix=".ouvert-", dir=str(d))
+    os.fchmod(fd, 0o600)
+    h, recu, debut = hashlib.sha256(), 0, b""
+    try:
+        with os.fdopen(fd, "wb") as f:
+            r = s.srv.envoyer("GET", "/files/" + segment(e["id"]) + "/content", entetes=s.entetes(), delai=60)
+            try:
+                if r.status != 200:
+                    try:
+                        obj = lire_reponse(r.read(MAX_JSON), r.status)
+                    except (OSError, http.client.HTTPException):
+                        obj = {}
+                    raise echec_serveur(r.status, obj) if r.status >= 400 else Echec(T("Réponse du serveur invalide.", "Invalid server response."))
+                try:
+                    for bloc in iter(lambda: r.read(BLOC), b""):
+                        recu += len(bloc)
+                        if recu > taille:
+                            break
+                        if len(debut) < 64:
+                            debut += bloc[:64 - len(debut)]
+                        h.update(bloc)
+                        f.write(bloc)
+                except (OSError, http.client.HTTPException):
+                    raise Echec(T("Téléchargement interrompu.", "Download interrupted."), HORS_LIGNE) from None
+            finally:
+                r.connexion.close()
+            f.flush()
+            os.fsync(f.fileno())
+        if recu != taille or h.hexdigest() != e["sha256"]:
+            raise Echec(T("Empreinte fausse : rien n'est ouvert.", "Wrong fingerprint: nothing is opened."), EMPREINTE)
+        if debut.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(ENTETES_RISQUEES):
+            raise Echec(T("Fichier exécutable, script ou lanceur : il ne s'ouvre pas d'ici, télécharge-le d'abord.",
+                          "Executable, script or launcher: it does not open from here, download it first."))
+        final = d / nom
+        os.replace(tmp, str(final))
+    except BaseException:
+        effacer(Path(tmp))
+        raise
+    argv = [ouvreur, str(final)] if ouvreur.endswith("xdg-open") else [ouvreur, "open", str(final)]
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    dire(T(f"Ouvert : {nom}", f"Opened: {nom}"), evenement="resultat", etat="ouvert", fichier=str(final))
     return OK
 
 
@@ -1291,7 +1557,35 @@ def analyseur():
     x = sous.add_parser("supprimer", aliases=["delete"])
     x.add_argument("id")
     x.add_argument("--revision", required=True)
+    x.add_argument("--recursif", action="store_true")
+    x.add_argument("--arbre")
     x.set_defaults(f=cmd_supprimer)
+    x = sous.add_parser("entree", aliases=["entry"])
+    x.add_argument("id")
+    x.add_argument("--dossier")
+    x.set_defaults(f=cmd_entree)
+    x = sous.add_parser("deplacer", aliases=["move"])
+    x.add_argument("id")
+    x.add_argument("--revision", required=True)
+    x.add_argument("--vers", required=True)
+    x.add_argument("--nom")
+    x.set_defaults(f=cmd_deplacer)
+    x = sous.add_parser("renommer", aliases=["rename"])
+    x.add_argument("id")
+    x.add_argument("--revision", required=True)
+    x.add_argument("nom")
+    x.set_defaults(f=cmd_renommer)
+    x = sous.add_parser("apercu", aliases=["preview"])
+    x.add_argument("id")
+    x.set_defaults(f=cmd_apercu)
+    x = sous.add_parser("creer", aliases=["touch"])
+    x.add_argument("parent")
+    x.add_argument("nom")
+    x.set_defaults(f=cmd_creer)
+    x = sous.add_parser("ouvrir", aliases=["open"])
+    x.add_argument("id")
+    x.add_argument("--dossier")
+    x.set_defaults(f=cmd_ouvrir)
     return p
 
 

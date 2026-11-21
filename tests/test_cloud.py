@@ -17,6 +17,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import socket
@@ -61,6 +62,8 @@ class Faux:
         self.suppression = False            # b7828d5 : features.file_delete
         self.par_id = False                 # 36ce1f8 : features.entry_by_id (GET /entries/{id})
         self.conflit_tot = False            # 36ce1f8 : features.early_create_conflict (412 dès POST /uploads)
+        self.gestion = False                # b8313b1 : entry_move, delete_preview, directory_delete
+        self.recus_gestion = {}
         self.nom_refuse = None
         self.lock = threading.Lock()
 
@@ -78,7 +81,22 @@ class Faux:
             f["entry_by_id"] = True
         if self.conflit_tot:
             f["early_create_conflict"] = True
+        if self.gestion:
+            f.update(entry_move=True, delete_preview=True, directory_delete=True, entry_by_id=True)
         return f
+
+    def sous_arbre(self, eid):
+        """L'entrée et tous ses descendants."""
+        r, file = [], [eid]
+        while file:
+            x = file.pop()
+            r.append(self.entries[x])
+            file += [e["id"] for e in self.entries.values() if e.get("parent") == x]
+        return r
+
+    def arbre(self, eid):
+        return hashlib.sha256(json.dumps(sorted((e["id"], e.get("parent"), e["name"], e["revision"])
+                                                for e in self.sous_arbre(eid))).encode()).hexdigest()
 
     def enfant_change(self, parent_id):
         if self.revisions_vivantes:
@@ -179,7 +197,9 @@ class Gestion(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(corps)
             return
-        if len(p) == 2 and p[0] == "entries" and m == "GET" and f.par_id:
+        if p[:1] == ["entries"] and len(p) >= 2 and f.gestion and (m in ("POST", "DELETE") or p[2:] == ["delete-preview"]):
+            return self.gerer(m, p, brut, dev, ident)
+        if len(p) == 2 and p[0] == "entries" and m == "GET" and (f.par_id or f.gestion):
             e = f.entries.get(p[1])
             if not e:
                 return self.erreur(404, "not_found")
@@ -374,6 +394,81 @@ class Gestion(http.server.BaseHTTPRequestHandler):
             self.wfile.write(morceau)
             return
         return self.erreur(404, "not_found")
+
+    def gerer(self, m, p, brut, dev, ident):
+        """b8313b1, aux formes réelles (contrats/formes-b8313b1.md) et dans l'ordre réel des erreurs : aperçu,
+        déplacement, suppression d'entrée ; reçus liés à l'appareil et à la demande complète."""
+        f = F()
+        e = f.entries.get(p[1])
+        if m == "GET":
+            if not e:
+                return self.erreur(404, "not_found")
+            sous = f.sous_arbre(e["id"])
+            return self.repondre(200, dict(ident, entry=e, tree_revision=f.arbre(e["id"]), size=sum(x.get("size", 0) for x in sous),
+                                           files=sum(1 for x in sous if x["kind"] == "file"),
+                                           directories=sum(1 for x in sous if x["kind"] == "directory")))
+        if m == "DELETE" and p[1] == "root":
+            return self.repondre(404, {"error": "not_found"})                 # le gateway, avant le stockage
+        try:
+            d = json.loads(brut)
+        except ValueError:
+            return self.repondre(422, {"detail": [{"msg": "corps JSON obligatoire"}]})
+        permis = {"parent_id", "parent_revision", "name"} if m == "POST" else {"recursive", "tree_revision"}
+        if not isinstance(d, dict) or set(d) - permis or (m == "POST" and "parent_revision" not in d) or \
+                (m == "DELETE" and d.get("tree_revision") is not None and not re.fullmatch(r"[0-9a-f]{64}", str(d["tree_revision"]))):
+            return self.repondre(422, {"detail": [{"msg": "schéma"}]})
+        cle, im = self.headers.get("Idempotency-Key", ""), self.headers.get("If-Match")
+        if m == "POST" and (not d.get("name") or "/" in d["name"]):
+            return self.erreur(400, "invalid_name")
+        if not (16 <= len(cle) <= 128):
+            return self.erreur(400, "invalid_idempotency_key")
+        demande = (m, self.path, im, brut)
+        if (dev, cle) in f.recus_gestion:
+            avant, res = f.recus_gestion[(dev, cle)]
+            return self.repondre(200, res) if avant == demande else self.erreur(409, "idempotency_conflict")
+        if not e:
+            return self.erreur(404, "not_found")
+        if not im:
+            return self.erreur(428, "precondition_required")
+        if im != f'"{e["revision"]}"':
+            return self.erreur(412, "version_conflict", current=e)
+        if m == "POST" and p[2:] == ["move"]:
+            if e["id"] == "root":
+                return self.erreur(409, "root_protected")
+            dest = f.entries.get(d.get("parent_id", "root"))             # root par défaut côté serveur
+            if not dest:
+                return self.erreur(404, "not_found")
+            if dest["kind"] != "directory" or dest["revision"] != d["parent_revision"]:
+                return self.erreur(409, "destination_changed")
+            if dest["id"] in [x["id"] for x in f.sous_arbre(e["id"])]:
+                return self.erreur(409, "invalid_destination")
+            if any(x.get("parent") == dest["id"] and x["name"] == d["name"] and x["id"] != e["id"] for x in f.entries.values()):
+                return self.erreur(409, "name_conflict")
+            ancien = e["parent"]
+            e.update(parent=dest["id"], name=d["name"], revision="r" + f.nouvel_id("m"))
+            f.enfant_change(ancien)
+            f.enfant_change(dest["id"])
+            res = dict(ident, entry=e, moved=True)
+        elif m == "DELETE" and len(p) == 2:
+            sous = f.sous_arbre(e["id"])
+            if e["kind"] == "directory":
+                if len(sous) > 1 and not d.get("recursive"):
+                    return self.erreur(409, "directory_not_empty")
+                if d.get("recursive") and d.get("tree_revision") is None:
+                    return self.erreur(428, "precondition_required")
+                if d.get("recursive") and d["tree_revision"] != f.arbre(e["id"]):
+                    return self.erreur(412, "tree_changed")
+            for x in sous:
+                del f.entries[x["id"]]
+            f.enfant_change(e["parent"])
+            res = dict(ident, deleted=True, entry_id=e["id"], count=len(sous))
+        else:
+            return self.erreur(404, "not_found")
+        f.recus_gestion[(dev, cle)] = (demande, res)
+        if "perdre_gestion" in f.pannes:
+            f.pannes.discard("perdre_gestion")
+            return self.couper()
+        return self.repondre(200, res)
 
     def vue(self, up, ident):
         chunks = [{"idx": i, "sha256": hashlib.sha256(up["chunks"][i]).hexdigest(), "size": len(up["chunks"][i])}
@@ -1019,6 +1114,167 @@ elif sys.argv[1] == "clear":
         r = self.nc("supprimer", did, "--revision", self.faux.entries[did]["revision"], code=1)
         self.assertIn("dossier", r.stdout)
         self.assertIn(did, self.faux.entries)
+
+
+    # ── C1d : entree, deplacer, renommer, apercu, supprimer un dossier, creer, ouvrir (révision b8313b1) ──
+
+    def arbre_de_test(self):
+        self.faux.gestion = self.faux.revisions_vivantes = True
+        self.associer()
+        a = self.nc("dossier", "root", "A", code=0).lignes[-1]["entree"]["id"]
+        b = self.nc("dossier", a, "B", code=0).lignes[-1]["entree"]["id"]
+        r = self.nc("deposer", "--dans", b, str(self.fichier("note.txt", b"bonjour")), code=0)
+        return a, b, r.lignes[-1]["entree"]["id"]
+
+    def rev(self, eid):
+        return self.faux.entries[eid]["revision"]
+
+    def mutations(self):
+        return [c for c in self.faux.journal if c[0] in ("POST", "DELETE") and "/entries/" in c[1]]
+
+    def test_entree_deplacer_renommer(self):
+        a, b, f = self.arbre_de_test()
+        self.nc("renommer", f, "--revision", self.rev(f), "dans-B.txt", code=0)     # parent_id toujours envoyé : reste dans B
+        self.assertEqual((self.faux.entries[f]["parent"], self.faux.entries[f]["name"]), (b, "dans-B.txt"))
+        vide = self.nc("dossier", "root", "Vide", code=0).lignes[-1]["entree"]["id"]
+        self.nc("supprimer", vide, "--revision", self.rev(vide), code=0)            # corps JSON toujours envoyé
+        self.assertNotIn(vide, self.faux.entries)
+        r = self.nc("entree", f, code=0)
+        self.assertEqual((r.lignes[-1]["entree"]["id"], r.lignes[-1]["entree"]["revision"]), (f, self.rev(f)))
+        racine_avant, rev = self.rev("root"), self.rev(f)
+        r = self.nc("deplacer", f, "--revision", rev, "--vers", "root", code=0)
+        self.assertEqual((r.lignes[-1]["etat"], r.lignes[-1]["entree"]["id"]), ("deplace", f))
+        self.assertEqual((self.faux.entries[f]["parent"], self.faux.entries[f]["name"]), ("root", "dans-B.txt"))
+        self.assertNotEqual(self.rev("root"), racine_avant)               # l'appelant relit les parents
+        self.assertEqual(self.mutations()[-1][2]["If-Match"], f'"{rev}"')          # la révision de l'appelant, exacte
+        r = self.nc("renommer", f, "--revision", self.rev(f), "Note finale.txt", code=0)
+        self.assertEqual((self.faux.entries[f]["parent"], self.faux.entries[f]["name"]), ("root", "Note finale.txt"))
+        self.assertFalse(self.manifestes("operations"))
+
+    def test_revision_perimee_cycle_nom_occupe_racine(self):
+        a, b, f = self.arbre_de_test()
+        self.nc("deplacer", f, "--revision", "ancienne", "--vers", "root", code=6)      # 412 : rien n'est fait
+        self.assertEqual(self.faux.entries[f]["parent"], b)
+        r = self.nc("deplacer", a, "--revision", self.rev(a), "--vers", b, code=6)    # cycle
+        self.assertIn("sous-dossiers", r.stdout)
+        self.nc("deplacer", a, "--revision", self.rev(a), "--vers", a, code=2)        # refus local, rien ne part
+        self.nc("deplacer", "root", "--revision", self.rev("root"), "--vers", a, code=2)
+        self.nc("creer", "root", "note.txt", code=0)
+        r = self.nc("deplacer", f, "--revision", self.rev(f), "--vers", "root", code=6)   # nom occupé : jamais d'écrasement
+        self.assertIn("existe déjà", r.stdout)
+        self.assertEqual(self.faux.entries[f]["parent"], b)
+        self.nc("renommer", f, "--revision", self.rev(f), "a/b", code=2)
+        self.assertFalse(self.manifestes("operations"))
+
+    def test_reponse_perdue_puis_rejeu_meme_cle(self):
+        a, b, f = self.arbre_de_test()
+        rev = self.rev(f)
+        self.faux.pannes.add("perdre_gestion")
+        self.nc("deplacer", f, "--revision", rev, "--vers", "root", code=3)
+        self.assertEqual(len(self.manifestes("operations")), 1)                     # noté AVANT l'envoi, gardé
+        self.assertEqual(self.faux.entries[f]["parent"], "root")                    # fait sur le serveur
+        r = self.nc("deplacer", f, "--revision", rev, "--vers", "root", code=0)     # même demande : le reçu
+        self.assertEqual(r.lignes[-1]["etat"], "deplace")
+        cles = [c[2]["Idempotency-Key"] for c in self.mutations()]
+        corps = [c for c in self.faux.journal if c[0] == "POST" and c[1].endswith("/move")]
+        self.assertEqual((len(cles), len(set(cles))), (2, 1))
+        self.assertEqual(len(corps), 2)
+        self.assertFalse(self.manifestes("operations"))
+
+    def test_apercu_et_suppression_de_dossier(self):
+        a, b, f = self.arbre_de_test()
+        r = self.nc("supprimer", a, "--revision", self.rev(a), code=6)             # non vide sans --recursif
+        self.assertIn("non vide", r.stdout)
+        self.nc("supprimer", a, "--revision", self.rev(a), "--recursif", code=2)   # --recursif sans --arbre : local
+        self.nc("supprimer", a, "--revision", self.rev(a), "--recursif", "--arbre", "pas-hex", code=2)
+        ap = self.nc("apercu", a, code=0).lignes[-1]
+        self.assertEqual((ap["files"], ap["directories"], ap["size"]), (1, 2, 7))
+        self.nc("creer", b, "nouveau.txt", code=0)                                 # le dossier change après l'aperçu
+        r = self.nc("supprimer", a, "--revision", self.rev(a), "--recursif", "--arbre", ap["tree_revision"], code=6)
+        self.assertIn("refais l'aperçu", r.stdout.lower())
+        self.assertIn(a, self.faux.entries)
+        ap = self.nc("apercu", a, code=0).lignes[-1]
+        r = self.nc("supprimer", a, "--revision", self.rev(a), "--recursif", "--arbre", ap["tree_revision"], code=0)
+        self.assertEqual((r.lignes[-1]["etat"], r.lignes[-1]["count"]), ("supprime", 4))
+        self.assertNotIn(a, self.faux.entries)
+        self.assertNotIn(f, self.faux.entries)
+        self.assertFalse(self.manifestes("suppressions"))
+
+    def test_sans_les_capacites_rien_ne_part(self):
+        self.faux.suppression = True
+        eid, _ = self.deposer_gros(10)
+        self.nc("dossier", "root", "D", code=0)
+        r = self.nc("deplacer", eid, "--revision", self.rev(eid), "--vers", "root", code=1)
+        self.assertIn("ne sait pas déplacer", r.stdout)
+        self.nc("renommer", eid, "--revision", self.rev(eid), "x", code=1)
+        self.nc("apercu", eid, code=1)
+        did = next(e["id"] for e in self.faux.entries.values() if e["name"] == "D")
+        self.nc("supprimer", did, "--revision", self.rev(did), "--recursif", "--arbre", "a" * 64, code=1)
+        self.assertEqual(self.mutations(), [])
+        self.assertFalse([c for c in self.faux.journal if "/move" in c[1] or "delete-preview" in c[1]])
+
+    def test_creer_un_fichier_vide(self):
+        a, b, f = self.arbre_de_test()
+        avant = len(self.morceaux_recus())
+        r = self.nc("creer", a, "vide.txt", code=0)
+        e = r.lignes[-1]["entree"]
+        self.assertEqual((e["name"], e["size"], self.faux.entries[e["id"]]["sha256"]), ("vide.txt", 0, hashlib.sha256(b"").hexdigest()))
+        self.assertEqual(len(self.morceaux_recus()), avant)                       # aucun morceau
+        self.nc("creer", a, "vide.txt", code=6)                                   # nom pris : conflit
+        self.nc("creer", a, "../x", code=2)
+        self.assertEqual(list((self.home / ".local/state/nc-cloud/vides").iterdir()), [])
+
+    def ouvreur(self):
+        appels = self.d / "appels-xdg"
+        x = self.bin / "xdg-open"
+        x.write_text(f'#!/bin/sh\necho "$@" >> "{appels}"\n')
+        x.chmod(0o755)
+        return appels
+
+    def attendre(self, chemin):
+        for _ in range(50):
+            if chemin.exists():
+                return chemin.read_text()
+            time.sleep(0.1)
+        return ""
+
+    def test_ouvrir_copie_privee_puis_xdg_open(self):
+        appels = self.ouvreur()
+        a, b, f = self.arbre_de_test()
+        r = self.nc("ouvrir", f, code=0)
+        copie = Path(r.lignes[-1]["fichier"])
+        self.assertEqual(copie.read_bytes(), b"bonjour")
+        self.assertEqual(stat.S_IMODE(copie.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(copie.parent.stat().st_mode), 0o700)
+        self.assertTrue(str(copie).startswith(str(self.home / ".cache/nc-cloud/ouverts")))
+        self.assertEqual(self.attendre(appels).strip(), str(copie))
+        # une copie de plus de 24 h est retirée au prochain ouvrir
+        vieux = time.time() - 25 * 3600
+        os.utime(copie, (vieux, vieux))
+        autre = self.nc("deposer", "--dans", a, str(self.fichier("image.png", b"\x89PNG...")), code=0).lignes[-1]["entree"]["id"]
+        self.nc("ouvrir", autre, code=0)
+        self.assertFalse(copie.exists())
+
+    def test_ouvrir_empreinte_fausse_ou_nom_hostile(self):
+        appels = self.ouvreur()
+        a, b, f = self.arbre_de_test()
+        self.faux.pannes.add("contenu_faux")
+        self.nc("ouvrir", f, code=12)
+        self.faux.pannes.discard("contenu_faux")
+        for nom, contenu in (("lanceur.desktop", b"[Desktop Entry]\nExec=x"), ("photo.jpg", b"#!/bin/sh\nrm -rf ~")):
+            eid = self.nc("deposer", "--dans", a, str(self.fichier(nom, contenu)), code=0).lignes[-1]["entree"]["id"]
+            r = self.nc("ouvrir", eid, code=1)
+            self.assertIn("télécharge-le d'abord", r.stdout)
+        eid = self.nc("deposer", "--dans", a, str(self.fichier("x.txt", b"ok")), code=0).lignes[-1]["entree"]["id"]
+        self.faux.entries[eid]["name"] = "../../" + RLO + ".bashrc"
+        r = self.nc("ouvrir", eid, code=0)
+        copie = Path(r.lignes[-1]["fichier"])
+        self.assertTrue(copie.parent.parent == self.home / ".cache/nc-cloud/ouverts" and not copie.name.startswith("."), copie)
+        self.assertNotIn(RLO, copie.name)
+        time.sleep(0.5)
+        self.assertEqual(self.attendre(appels).count("\n"), 1)                  # seule la copie saine est ouverte
+        restes = [p for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file() and p.name.startswith(".ouvert-")]
+        self.assertEqual(restes, [])
 
 
 class DansLeProcessus(unittest.TestCase):

@@ -48,10 +48,17 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud deposer [--dans ID] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
 | `nc-cloud reprendre [N]` | liste les envois interrompus ; avec N, reprend celui-là |
 | `nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]` | télécharge un fichier (de la racine, ou de PARENT) |
-| `nc-cloud supprimer ID --revision REVISION` | supprime un fichier (jamais un dossier), seulement si le serveur l'annonce |
+| `nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]` | supprime un fichier, ou un dossier si le serveur le sait (voir plus bas) |
+| `nc-cloud entree ID [--dossier PARENT]` | une entrée par son id, avec sa révision actuelle |
+| `nc-cloud deplacer ID --revision REV --vers PARENT [--nom NOM]` | déplace et/ou renomme (même id, même historique) |
+| `nc-cloud renommer ID --revision REV NOM` | renomme dans le même dossier |
+| `nc-cloud apercu ID` | ce qu'une suppression retirerait : fichiers, dossiers, taille, et l'arbre (`tree_revision`) |
+| `nc-cloud creer PARENT NOM` | crée un fichier vide |
+| `nc-cloud ouvrir ID [--dossier PARENT]` | ouvre une copie privée du fichier avec l'application par défaut |
 
 `--json` donne une ligne JSON par événement : `progression`, `resultat` (un par fichier : `publie`, `refuse`, `echec`,
-`annule`, `telecharge`, `supprime`), `conflit`, `erreur`, et `verification`, `page`, `etat`, `envois`.
+`annule`, `telecharge`, `supprime`, `deplace`, `ouvert`), `conflit`, `erreur`, et `verification`, `page`, `etat`, `envois`,
+`entree`, `apercu`.
 
 Un fichier refusé (nom refusé, trop d'envois en cours, quota) n'arrête pas les autres : chacun a son résultat. Hors
 ligne, cloud coupé, PC révoqué, transport refusé ou serveur changé arrêtent toute la commande.
@@ -121,16 +128,31 @@ Codes de sortie :
   son dossier (`--dossier`). Après une coupure, relance la même commande : il reprend où
   il s'est arrêté (`Range` et `If-Range`).
 
-## Suppression
+## Suppression, déplacement, renommage
 
-Seulement si le serveur l'annonce (`features.file_delete`), sinon « ce serveur ne sait pas supprimer ». Un fichier à la
-fois, jamais un dossier. `--revision` est obligatoire : la révision montrée par `nc-cloud lister`. Si le fichier a changé
-depuis, rien n'est supprimé (code 6). Le script ne demande pas de confirmation : c'est à l'appelant de la demander. Si la
-réponse se perd, relance la même commande : elle rejoue la même demande (même clé), sans risque.
+Chaque action n'existe que si le serveur l'annonce, sinon « ce serveur ne sait pas … » et rien ne part :
+`features.file_delete` (supprimer un fichier), `features.directory_delete` (supprimer un fichier ou un dossier),
+`features.delete_preview` (`apercu`), `features.entry_move` (`deplacer`, `renommer`).
+
+- `--revision` est obligatoire : la révision montrée par `nc-cloud lister` ou `nc-cloud entree`. Elle part telle
+  quelle (`If-Match`), jamais relue en douce : si l'entrée a changé depuis, rien n'est fait (code 6).
+- Un dossier non vide ne se supprime qu'avec `--recursif` ET `--arbre TREE`, celui de `nc-cloud apercu ID` que tu as
+  confirmé. Si quelque chose a changé dans le dossier depuis l'aperçu, rien n'est supprimé (code 6) : refais l'aperçu.
+- Déplacer : un dossier ne va ni dans lui-même ni dans un de ses sous-dossiers, et un nom déjà pris n'est jamais
+  écrasé (code 6). Après un déplacement, l'ancien et le nouveau dossier ont changé de révision.
+- Le script ne demande pas de confirmation : c'est à l'appelant de la demander. Si la réponse se perd, relance la même
+  commande : elle rejoue la même demande (même clé, noté dans `~/.local/state/nc-cloud`), sans risque. Rien n'est
+  relancé tout seul.
+
+## Ouvrir
+
+`nc-cloud ouvrir ID` télécharge une copie dans `~/.cache/nc-cloud/ouverts/` (dossier 0700, fichier 0600, jamais
+exécutable), vérifie son empreinte, puis l'ouvre avec `xdg-open` (ou `gio open`). Un lanceur `.desktop`, un script ou
+un exécutable (reconnu à son nom ou à son début) ne s'ouvre pas d'ici : télécharge-le d'abord. La copie n'est jamais
+renvoyée au serveur ; les copies de plus de 24 h sont retirées au prochain `ouvrir`.
 
 ## Limites et ce qui n'est pas fait
 
-- Pas de déplacement ni de renommage, pas de suppression de dossier.
 - Pas de dossier entier, pas de partage avec d'autres personnes, pas de synchronisation automatique.
 - Pas d'interface graphique pour l'instant, ni d'ouverture dans le gestionnaire de fichiers (WebDAV en lecture seule).
 - Une association dont la réponse se perd en route laisse un appareil sans jeton côté serveur : révoque-le depuis le
