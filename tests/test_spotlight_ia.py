@@ -45,7 +45,9 @@ QtObject {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
                 "nc-apps": '#!/bin/sh\necho "[]"\n',
@@ -170,7 +172,9 @@ ShellRoot {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
                 "nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
@@ -250,7 +254,9 @@ ShellRoot {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                        "nc-demander": '''#!/bin/sh
@@ -321,7 +327,9 @@ ShellRoot {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             plan = {"id": "0123456789abcdef", "reponse": "Je coupe le Bluetooth.", "ia": "Claude Code", "agent": "claude", "refus": [],
                     "actions": [{"n": 0, "libelle": "Bluetooth : off", "danger": False, "fait": False, "ok": None, "resultat": ""},
@@ -401,7 +409,9 @@ ShellRoot {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             (root / "bilan.json").write_text(json.dumps(self.BILAN))
             ia = {"source": "ia", "raison": "", "ia": "Claude Code", "agent": "claude", "resume": "Noctalia est arrêtée.", "conseil": "Relance-la d'abord.",
@@ -516,7 +526,9 @@ class SpotlightLot(unittest.TestCase):
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+            (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {"nc-apps": "#!/bin/sh\nexit 1\n", "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                        "nc-demander": '''#!/bin/sh
@@ -674,7 +686,9 @@ def _lancer(corps, delai, extra=None, mutations=()):
         (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
         (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
         noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
-        (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+        # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
+        (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
+        (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
         b = root / ".local/bin"; b.mkdir(parents=True)
         scripts = {"nc-apps": "#!/bin/sh\ncase \"$1\" in list) sleep %d; echo '%s' ;; *) exit 1 ;; esac\n" % (delai, _APPS),
                    "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",

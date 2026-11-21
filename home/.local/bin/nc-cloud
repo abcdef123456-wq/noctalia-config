@@ -9,7 +9,7 @@
   nc-cloud dossier PARENT NOM       crée un dossier
   nc-cloud deposer [--dans ID] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
-  nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]
+  nc-cloud telecharger ID [DEST] [--dossier PARENT] [--remplacer]   (DEST : le dossier Téléchargements par défaut)
   nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]   un fichier, ou un dossier si le serveur le sait
                                     (non vide : l'arbre de l'aperçu confirmé)
   nc-cloud entree ID [--dossier P]  une entrée par son id (sa révision actuelle)
@@ -18,6 +18,7 @@
   nc-cloud apercu ID                ce qu'une suppression retirerait (fichiers, dossiers, taille, arbre)
   nc-cloud creer PARENT NOM         un fichier vide
   nc-cloud ouvrir ID [--dossier P]  une copie privée, empreinte vérifiée, ouverte par l'application par défaut
+  nc-cloud fenetre                  le panneau Cloud JARVIS de l'île (CLOUD_JARVIS=oui dans les réglages)
   --json : une ligne JSON par événement (c'est ce que lit l'interface)
 
 Codes de sortie : 0 fait, 1 erreur, 2 mauvais usage, 3 hors ligne (serveur ou stockage injoignable), 4 PC non associé
@@ -668,8 +669,10 @@ def cmd_etat(a):
     st = Session().etat()
     propres = {propre(k, 40): (propre(v) if isinstance(v, str) else v) for k, v in st.items()
                if isinstance(v, (str, int, float, bool)) and k not in ("server_id", "space_id", "device_id")}
+    f = st.get("features") if isinstance(st.get("features"), dict) else {}
     if JSON_SORTIE:
-        evenement(evenement="etat", etat=propres)
+        # features : seulement ce que l'interface lit, en vrais booléens
+        evenement(evenement="etat", etat=propres, features={k: f.get(k) is True for k in ("file_delete", "entry_by_id")})
     else:
         for k, v in propres.items():
             print(f"{k} : {taille_lisible(v) if k.endswith('_bytes') and isinstance(v, int) and not isinstance(v, bool) else v}")
@@ -1167,12 +1170,45 @@ def capacites_session(s):
     return f if isinstance(f, dict) else {}
 
 
+def dossier_telechargements():
+    """XDG_DOWNLOAD_DIR de user-dirs.dirs (« $HOME/… » ou absolu), sinon ~/Téléchargements ou ~/Downloads, sinon ~."""
+    home = Path.home()
+    try:
+        conf = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "user-dirs.dirs"
+        for l in conf.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.fullmatch(r'\s*XDG_DOWNLOAD_DIR="(.*)"\s*', l)
+            if m:
+                d = Path(m.group(1).replace("$HOME", str(home), 1))
+                if d.is_absolute() and d.is_dir():
+                    return d
+    except OSError:
+        pass
+    return next((d for d in (home / "Téléchargements", home / "Downloads") if d.is_dir()), home)
+
+
+def cmd_fenetre(a):
+    """Action du bureau : refusée poliment si CLOUD_JARVIS n'est pas à oui ; sinon le panneau de l'île, par son IPC."""
+    if A.reglage_conf("CLOUD_JARVIS", "non") != "oui":
+        raise Echec(T("Le Cloud JARVIS est coupé : active-le dans les réglages (section Cloud JARVIS) ou avec "
+                      "nc-reglages set CLOUD_JARVIS oui.",
+                      "The JARVIS Cloud is off: turn it on in the settings (JARVIS Cloud section) or with "
+                      "nc-settings set CLOUD_JARVIS oui."), DESACTIVE)
+    try:
+        r = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "cloud"], capture_output=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        r = None
+    if not r or r.returncode != 0:
+        raise Echec(T("L'île ne répond pas : le panneau ne peut pas s'ouvrir.", "The island does not answer: the panel cannot open."))
+    return OK
+
+
 def cmd_telecharger(a):
     s = Session()
     e = entree(s, a.id, a.dossier or "root", capacites_session(s))
     if e.get("kind") != "file" or not isinstance(e.get("size"), int) or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
         raise Echec(T("Ce n'est pas un fichier téléchargeable.", "This is not a downloadable file."))
-    dest = Path(a.dest)
+    dest = Path(a.dest) if a.dest else dossier_telechargements()
     if dest.is_dir() and not dest.is_symlink():
         nom = os.path.basename(propre(e.get("name")))
         if nom in ("", ".", ".."):
@@ -1182,7 +1218,7 @@ def cmd_telecharger(a):
     if not dest.parent.is_dir():
         raise Echec(T("Dossier de destination introuvable.", "Destination folder not found."), USAGE)
     if (dest.exists() or dest.is_symlink()) and not a.remplacer:
-        raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it."))
+        raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it."), CONFLIT)
     # Nom court tiré du nom final : un nom de 240 octets reste possible (255 au plus pour le partiel)
     partiel = dest.with_name(".nc-cloud-" + hashlib.sha256(dest.name.encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".partiel")
     suivi = TELECHARGEMENTS / (hashlib.sha256(str(partiel).encode()).hexdigest()[:32] + ".json")
@@ -1254,7 +1290,7 @@ def cmd_telecharger(a):
             try:
                 os.close(os.open(str(dest), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
             except FileExistsError:
-                raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it.")) from None
+                raise Echec(T(f"{dest} existe déjà : --remplacer pour l'écraser.", f"{dest} already exists: --remplacer to overwrite it."), CONFLIT) from None
         os.replace(str(partiel), str(dest))
     effacer(suivi)
     dire(T(f"Téléchargé : {dest}", f"Downloaded: {dest}"), evenement="resultat", fichier=str(dest), etat="telecharge")
@@ -1722,7 +1758,7 @@ def analyseur():
     x.set_defaults(f=cmd_reprendre)
     x = sous.add_parser("telecharger", aliases=["download"])
     x.add_argument("id")
-    x.add_argument("dest")
+    x.add_argument("dest", nargs="?")
     x.add_argument("--dossier")
     x.add_argument("--remplacer", action="store_true")
     x.set_defaults(f=cmd_telecharger)
@@ -1758,6 +1794,7 @@ def analyseur():
     x.add_argument("id")
     x.add_argument("--dossier")
     x.set_defaults(f=cmd_ouvrir)
+    sous.add_parser("fenetre", aliases=["window"]).set_defaults(f=cmd_fenetre)
     return p
 
 
@@ -1775,7 +1812,7 @@ def main(argv=None):
         return f.code
     except Echec as e:
         if JSON_SORTIE:
-            evenement(evenement="erreur", code=e.code, message=str(e))
+            evenement(evenement="erreur", code=e.code, message=str(e), **({"erreur": e.erreur} if e.erreur else {}))
         else:
             print(str(e), file=sys.stderr)
         return e.code

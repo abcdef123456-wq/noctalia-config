@@ -697,6 +697,9 @@ Item {
         { t: Reglages.t("Presse-papiers", "Clipboard"), k: "presse-papiers clipboard copier coller copy paste history", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
         { t: Reglages.t("Fond d'écran suivant", "Next Wallpaper"), k: "fond écran wallpaper suivant next background", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
         { t: Reglages.t("Toutes les sessions…", "All sessions…"), k: "sessions dispositions carrousel enregistrées layouts saved all", g: "view_carousel", f: () => Etat.faire([Etat.bin + "nc-shell-msg", "sessions"]) },
+        // Cloud JARVIS : seulement avec CLOUD_JARVIS=oui et ce PC associé (fichier local, aucun appel réseau)
+        { t: "Cloud JARVIS", k: "cloud jarvis drive fichiers envoyer télécharger files upload download", g: "cloud", cloud: true,
+          f: () => Quickshell.execDetached(["qs", "-c", "nc-ile", "ipc", "call", "ile", "cloud"]) },
         { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) },
         // IA (cachées quand elle est coupée)
         { t: Reglages.t("IA sur le texte copié", "AI on Copied Text"), k: "ia ai résumer traduire corriger reformuler texte summarize translate fix rephrase text", g: "auto_awesome",
@@ -1014,6 +1017,7 @@ Item {
             let ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
             if (ac.ia && (Reglages.iaCoupee || (ac.ia !== "IA_MODE" && horsLigne) || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
             if (ac.siCoupee && !Reglages.iaCoupee) continue
+            if (ac.cloud && !(CloudEtat.actif && CloudEtat.associe)) continue
             if ((ac.ppd && Etat.profilsAbsents) || (ac.wifi && (Etat.sys || {}).filaire !== undefined)) continue
             if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }

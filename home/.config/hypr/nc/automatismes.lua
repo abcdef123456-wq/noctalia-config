@@ -192,6 +192,7 @@ local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true, ["Desk
 -- Fenêtre VPN de l'île (Vpn.qml, titre exact « VPN ») : placée plus bas, jamais mémorisée
 local FENETRE_VPN = "VPN"
 local FENETRE_GARMIN = "Garmin"   -- Garmin.qml, même traitement que le VPN
+local FENETRE_CLOUD = "Cloud JARVIS"   -- CloudPanneau.qml, même traitement
 local MEMOIRE = STATE .. "fenetres-flottantes"
 os.execute("mkdir -p '" .. STATE .. "'")
 
@@ -205,7 +206,8 @@ local function exclue(w)
         or c:lower():match("%.exe$") ~= nil          -- Roblox Studio aussi : ses boîtes Windows ne sont pas mémorisées
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
-        or (w.class == "org.quickshell" and (t == FENETRE_VPN or w.title == FENETRE_VPN or t == FENETRE_GARMIN or w.title == FENETRE_GARMIN))
+        or (w.class == "org.quickshell" and (t == FENETRE_VPN or w.title == FENETRE_VPN or t == FENETRE_GARMIN or w.title == FENETRE_GARMIN
+            or t == FENETRE_CLOUD or w.title == FENETRE_CLOUD))
 end
 
 -- Les 200 dernières seulement (un titre qui change à chaque fois en créerait sans fin) : le fichier est dans l'ordre
@@ -290,7 +292,8 @@ end)
 -- Fenêtre VPN de l'île (règle nc-vpn-fenetre : flottante) : centrée dans la zone utile de son écran (sous la barre), 900 de large
 -- au plus et 90 % de la hauteur utile au plus (son contenu défile). Placée ici, à l'ouverture, et non par une règle size/move.
 hl.on("window.open", function(w)
-    if not w or not w.floating or w.class ~= "org.quickshell" or not ((w.title or w.initial_title or "") == FENETRE_VPN or (w.title or w.initial_title or "") == FENETRE_GARMIN) then return end
+    local titre = w and (w.title or w.initial_title or "") or ""
+    if not w or not w.floating or w.class ~= "org.quickshell" or not (titre == FENETRE_VPN or titre == FENETRE_GARMIN or titre == FENETRE_CLOUD) then return end
     local m = w.monitor or hl.get_active_monitor()
     local mx, my, lw, lh = ecran(w)
     if not (m and lw) then return end

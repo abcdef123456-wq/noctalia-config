@@ -656,6 +656,33 @@ elif sys.argv[1] == "clear":
         self.assertEqual(r.returncode, 0)
         self.assertRegex(r.stdout.strip().splitlines()[-1], r"^Utilisé : .+ sur .+\.$")
 
+    def test_fenetre_refusee_si_le_reglage_est_coupe(self):
+        appels = self.d / "appels-qs"
+        qs = self.bin / "qs"                    # faux qs : jamais la vraie île
+        qs.write_text('#!/bin/sh\necho "$*" >> "%s"\n' % appels)
+        qs.chmod(0o755)
+        r = self.nc("fenetre", code=5)
+        self.assertIn("CLOUD_JARVIS oui", r.lignes[-1]["message"])
+        self.assertFalse(appels.exists())
+        reglages = self.home / ".config/nc/reglages.conf"
+        reglages.parent.mkdir(parents=True, exist_ok=True)
+        reglages.write_text("CLOUD_JARVIS=oui\n")
+        self.nc("fenetre", code=0)
+        self.assertEqual(appels.read_text(), "-c nc-ile ipc call ile cloud\n")
+
+    def test_telecharger_sans_destination_va_dans_telechargements(self):
+        eid, donnees = self.deposer_gros(1000)
+        dl = self.home / "Mes téléchargements"
+        dl.mkdir()
+        (self.home / ".config").mkdir(exist_ok=True)
+        (self.home / ".config/user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/Bureau"\nXDG_DOWNLOAD_DIR="$HOME/Mes téléchargements"\n')
+        self.nc("telecharger", eid, code=0)
+        recus = [p for p in dl.iterdir() if not p.name.startswith(".")]
+        self.assertEqual(len(recus), 1)
+        self.assertEqual(recus[0].read_bytes(), donnees)
+        self.nc("telecharger", eid, code=6)                     # déjà là : conflit, le panneau propose « Remplacer »
+        self.nc("telecharger", eid, "--remplacer", code=0)
+
     def test_cle_du_serveur_refusee(self):
         self.url("http://127.0.0.1:%d" % self.srv.server_address[1], cle="une-autre-cle-0123456789")
         r = self.nc("associer", code=1)
@@ -1001,7 +1028,7 @@ elif sys.argv[1] == "clear":
         plages = [c[2].get("Range") for c in self.faux.journal if c[1].endswith("/content")]
         self.assertIsNone(plages[0])
         self.assertTrue(plages[1] and plages[1].startswith("bytes="))
-        self.nc("telecharger", eid, str(dest), code=1)          # existe déjà
+        self.nc("telecharger", eid, str(dest), code=6)          # existe déjà : conflit, rien n'est écrasé seul
         self.faux.pannes.add("contenu_faux")
         self.nc("telecharger", eid, str(dest), "--remplacer", code=12)
         self.assertEqual(dest.read_bytes(), donnees)             # rien n'est remplacé

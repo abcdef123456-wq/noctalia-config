@@ -31,7 +31,7 @@ hl.window_rule({ name = "sans-nom", match = { class = "^$", title = "^$" }, no_i
 -- Mode souris (nc-reglages → Clavier et souris, SAISIE=souris) : fenêtres libres et centrées, comme sur Windows
 -- (automatismes.lua les rouvre ensuite à la place et à la taille où tu les as laissées)
 if nc.reglage("SAISIE", "clavier") == "souris" then
-    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS|Réglages du bureau|Desktop settings|VPN|Garmin)$" }, float = true, center = true })   -- sauf le cockpit, les réglages et la fenêtre VPN, placés par nc/automatismes.lua
+    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS|Réglages du bureau|Desktop settings|VPN|Garmin|Cloud JARVIS)$" }, float = true, center = true })   -- sauf le cockpit, les réglages et la fenêtre VPN, placés par nc/automatismes.lua
     hl.window_rule({ name = "souris-terminal", match = { class = "^(kitty)$" }, size = { "monitor_w*0.5", "monitor_h*0.55" } })
 end
 hl.window_rule({ name = "hyprland-run",match = { class = "hyprland-run" }, float = true, move = "20 monitor_h-120" })
@@ -152,3 +152,5 @@ end
 hl.window_rule({ name = "nc-vpn-fenetre", match = { class = "^(org.quickshell)$", title = "^(VPN)$" }, float = true })
 -- Fenêtre Santé Garmin de l'île (Super + Alt + S ; Garmin.qml) : titre exact « Garmin », flottante ; placée comme le VPN par nc/automatismes.lua
 hl.window_rule({ name = "nc-garmin-fenetre", match = { class = "^(org.quickshell)$", title = "^(Garmin)$" }, float = true })
+-- Fenêtre Cloud JARVIS de l'île (CloudPanneau.qml) : titre exact « Cloud JARVIS », flottante ; placée comme le VPN par nc/automatismes.lua
+hl.window_rule({ name = "nc-cloud-fenetre", match = { class = "^(org.quickshell)$", title = "^(Cloud JARVIS)$" }, float = true })

@@ -13,6 +13,7 @@
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
 //   qs -c nc-ile ipc call ile garmin       panneau Santé Garmin : batterie, sommeil, stress, pas (Super + Alt + S, nc-garmin)
+//   qs -c nc-ile ipc call ile cloud        panneau Cloud JARVIS : parcourir, télécharger (nc-cloud fenetre, CLOUD_JARVIS=oui)
 //   qs -c nc-ile ipc call ile aimant ZONE X Y W H   aperçu d'aimantation pendant un glisser (nc/raccourcis.lua) ; ZONE "" l'efface
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
@@ -181,6 +182,31 @@ ShellRoot {
         target: GarminEtat
         function onOuvrirPanneau() { if (!racine.garminOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.garminOuvert = true } }
     }
+    // Panneau Cloud JARVIS (IPC cloud, recherche, nc-cloud fenetre) : créé à l'ouverture seulement, si CLOUD_JARVIS=oui
+    property bool cloudOuvert: false
+    onCloudOuvertChanged: if (cloudOuvert && !CloudEtat.actif) cloudOuvert = false
+    // L'écran du panneau est celui qui a le focus À L'OUVERTURE, puis il y reste : jamais lié au moniteur actif en continu
+    // (changer d'écran ne le déplace ni ne le ferme)
+    property var ecranCloud: null
+    function ouvrirCloud() {
+        if (racine.cloudOuvert || !CloudEtat.actif) return
+        Etat.fermer()
+        Hyprland.refreshMonitors()
+        racine.ecranCloud = Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+        racine.cloudOuvert = true
+    }
+    LazyLoader {
+        id: chargeurCloud
+        active: racine.cloudOuvert
+        CloudPanneau {
+            screen: racine.ecranCloud
+            onFermer: racine.cloudOuvert = false
+        }
+    }
+    Connections {
+        target: CloudEtat
+        function onOuvrirPanneau() { racine.ouvrirCloud() }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -228,6 +254,9 @@ ShellRoot {
             if (!racine.garminOuvert) Hyprland.refreshMonitors()
             racine.garminOuvert = !racine.garminOuvert
         }
+        // Panneau Cloud JARVIS (nc-cloud fenetre, recherche) : sans argument, ouvre (déjà ouvert : rien ; il ne se ferme que
+        // par l'utilisateur) ; rien si CLOUD_JARVIS n'est pas à oui
+        function cloud(): void { racine.ouvrirCloud() }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
         function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }

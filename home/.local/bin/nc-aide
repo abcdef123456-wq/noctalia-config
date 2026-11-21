@@ -70,6 +70,9 @@ A_TAPER = [
     ("nc-assistant", "nc-assistant configurer", "Assistant personnel distant : URL et clé du serveur, chat kitty "
                                            "(Super + Maj + A), questions, briefing ; nc-assistant verifier teste la connexion "
                                            "(réseau, clé, TLS, runner) ; aucun modèle local."),
+    ("nc-cloud", "nc-cloud lister", "Cloud JARVIS, ton espace de fichiers sur ton serveur JARVIS : associer ce PC, "
+                                    "deposer, telecharger, ouvrir, renommer, deplacer, supprimer ; nc-cloud fenetre : le panneau de l'île "
+                                    "(CLOUD_JARVIS=oui, nc-reglages → Cloud JARVIS)."),
     ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
                                     "demandes, et lui écrire depuis l'île. Aussi opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, "
                                     "Antigravity : nc-claude installer IA (ou tout) ; nc-claude diag si rien ne s'affiche."),
@@ -157,6 +160,8 @@ ANGLAIS = {
     "nc-assistant": ("nc-assistant configurer", "Remote personal assistant: server URL and key, kitty chat "
                      "(Super + Shift + A), questions, daily briefing; nc-assistant verifier tests the connection "
                      "(network, key, TLS, runner); no local model."),
+    "nc-cloud": ("nc-cloud lister", "JARVIS Cloud, your file space on your JARVIS server: pair this PC, upload, download, "
+                 "open, rename, move, delete; nc-cloud fenetre: the island panel (CLOUD_JARVIS=oui, nc-settings → JARVIS Cloud)."),
     "nc-reglages": ("nc-settings", "Every setting, in the window with search (also Super + Alt + ,); with the arrow keys in "
                                    "the terminal over SSH, without the island or with nc-settings terminal: island, appearance, "
                                    "animations, power, keyboard, sleep, terminal, shortcuts… Kept across updates."),

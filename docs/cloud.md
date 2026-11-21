@@ -24,6 +24,29 @@ une fois associé, « État et quota » et « Dissocier » (avec confirmation). 
 du même nom ; sa dernière ligne (« Tout est prêt. », « À faire : … », « Utilisé : … sur … ») s'affiche en bas de la
 fenêtre.
 
+`CLOUD_JARVIS` coupe le bureau (réglages, panneau, recherche), pas une commande `nc-cloud` tapée exprès dans le
+terminal ; seule `nc-cloud fenetre`, une action du bureau, refuse quand il n'est pas à `oui`.
+
+## Le panneau de l'île
+
+`nc-cloud fenetre`, l'entrée « Cloud JARVIS » de la recherche de l'île (seulement avec `CLOUD_JARVIS=oui` et ce PC
+associé) ou `qs -c nc-ile ipc call ile cloud` ouvrent la fenêtre « Cloud JARVIS », sur l'écran qui a le focus à ce
+moment ; elle y reste (changer d'écran ne la déplace pas) et ne se ferme que par toi (Fermer ou Échap). Le chemin en haut
+ramène à un dossier parent.
+
+- Un clic choisit une ligne et montre ses actions sous son nom ; un double-clic l'ouvre : un dossier, on y entre ; un
+  fichier, une copie privée s'ouvre avec l'application par défaut (`nc-cloud ouvrir`, types sûrs seulement).
+- Créer un dossier ou un fichier vide (le champ en haut). Télécharger un fichier dans le dossier Téléchargements
+  (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé : le bouton devient « Remplacer ».
+- Renommer, et Déplacer… : on parcourt les dossiers, puis « Déplacer ici » (jamais un dossier dans lui-même).
+- Supprimer… demande d'abord sur la ligne : « suppression définitive, toutes ses versions » ; pour un dossier, d'abord
+  l'aperçu (« N fichier(s), M dossier(s), taille »). Si le dossier a changé entre-temps, rien n'est supprimé : nouvel
+  aperçu, nouvelle question.
+- Chaque action n'apparaît que si le serveur annonce sa capacité (déplacer, aperçu, suppression de dossier).
+
+Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
+dossier Téléchargements.
+
 ## Associer ce PC
 
 ```sh

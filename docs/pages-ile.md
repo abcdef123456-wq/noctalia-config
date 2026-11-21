@@ -92,3 +92,5 @@ affichés ; « Actualiser » relit ; « + » ouvre JARVIS avec une demande de cr
 choisi). Rien n’est demandé au démarrage de l’île : seulement à l’ouverture de la page, un mois à la fois, gardé
 5 minutes. Fuseau : `BRIEFING_TIMEZONE` du gateway, sinon Europe/Paris.
 
+Le Cloud JARVIS n'est pas une page : c'est une fenêtre à part (`nc-cloud fenetre`, voir `docs/cloud.md`). Son entrée
+« Cloud JARVIS » n'apparaît dans la recherche de l'île qu'avec `CLOUD_JARVIS=oui` et ce PC associé.
