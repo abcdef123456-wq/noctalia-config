@@ -145,6 +145,16 @@ Singleton {
                   image: "", appIcon: "", desktopEntry: "", urgency: NotificationUrgency.Normal, actions: [], resident: true,
                   hasInlineReply: false, hints: {} })
     }
+    // Rappel de la recherche (Rappels.qml) : bannière + historique ; revenues la rend reportable (reporter)
+    property int nRappel: 0
+    function rappeler(texte) {
+        var objet = { id: "q" + Date.now() + "-" + (nRappel++), synthetique: true, appName: Reglages.t("Rappel", "Reminder"), summary: texte, body: "",
+                      image: "", appIcon: "", desktopEntry: "", urgency: NotificationUrgency.Normal, actions: [], resident: true,
+                      hasInlineReply: false, hints: {} }
+        var h = Object.assign({}, heures); h[objet.id] = Date.now(); heures = h
+        revenues = revenues.concat([objet])
+        if (!concentration) montrer(objet)
+    }
     // Toujours là : ni fermée (par toi ou par l'appli), ni reportée, ni son appli masquée entre-temps
     function encoreLa(notif) {
         if (notif.synthetique) return revenues.indexOf(notif) >= 0

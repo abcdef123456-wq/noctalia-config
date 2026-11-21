@@ -128,6 +128,7 @@ ShellRoot {
     // Un seul Component.onCompleted par objet (deux : « Property value set multiple times », l'île ne démarre plus)
     Component.onCompleted: {
         Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
+        Rappels.demarrer()           // rappels de la recherche (Rappels.qml) : relit la liste, montre les échus de l'arrêt
         Chaleur.demarrer()           // veille de surchauffe (Chaleur.qml) : un « nc-ile-etat capteurs », puis deux fichiers
                                      // du noyau relus toutes les 20 s écran allumé ; rien sur une machine sans capteur
     }

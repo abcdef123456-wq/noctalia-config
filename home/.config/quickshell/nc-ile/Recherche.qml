@@ -606,7 +606,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? )/i.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?)(\s|$))/i.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -661,7 +661,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? )/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -910,6 +910,35 @@ Item {
             resultats = [{ titre: demandeA || Reglages.t("Dis ce que l'IA doit faire", "Say what the AI should do"),
                            sous: Reglages.t("Elle propose, tu confirmes · ", "It proposes, you confirm · ") + (nomIATexte === "-" ? Reglages.t("aucune IA sans outils", "no AI without tools") : nomIATexte),
                            glyphe: "smart_toy", garder: true, f: () => r.lancerAgent(demandeA) }]
+            return
+        }
+        // « rappel 15h appeler le garage » / « rappels » : l'heure comprise est montrée AVANT Entrée ; texte brut, jamais interprété
+        if (/^\s*(rappels?|reminders?)(\s|$)/i.test(champ.text)) {
+            let saisie = champ.text.replace(/^\s*(rappels?|reminders?)\s*/i, "")
+            let lignesR = []
+            if (saisie === "" || /^(rappels|reminders)$/i.test(champ.text.trim())) {
+                lignesR = Rappels.liste.slice().sort((a, b) => a.due - b.due).map(x => ({
+                    titre: x.texte, sous: Rappels.quand(x.due) + Reglages.t(" · Entrée pour supprimer", " · Enter to delete"), glyphe: "alarm", garder: true,
+                    f: () => { Rappels.supprimer(x.id); r.chercher() } }))
+                if (!lignesR.length) lignesR = [{ titre: Reglages.t("Aucun rappel · rappel 15h appeler le garage", "No reminders · reminder 3pm call the garage"),
+                                                   sous: Reglages.t("Aussi : rappel 20 min sortir le linge, rappel demain 9h…", "Also: reminder 20 min take out laundry, reminder tomorrow 9am…"),
+                                                   glyphe: "alarm", garder: true, f: () => {} }]
+            } else {
+                let a = Rappels.analyser(saisie)
+                if (a.ok) {
+                    lignesR = [{ titre: Reglages.t("Rappel à ", "Reminder at ") + Rappels.quand(a.due) + " · " + a.texte,
+                                 sous: Reglages.t("Entrée pour créer", "Enter to create"), glyphe: "alarm_add", garder: false,
+                                 f: () => Rappels.creer(a.texte, a.due) }]
+                    if (Rappels.plein) lignesR = [{ titre: Reglages.t("Trop de rappels (50 au plus) : supprime-en un avec « rappels »", "Too many reminders (50 at most): delete one with “reminders”"),
+                                                     sous: "", glyphe: "error", garder: true, f: () => {} }]
+                } else {
+                    lignesR = [{ titre: a.raison === "texte" ? Reglages.t("Que faut-il te rappeler ? (rappel 15h appeler le garage)", "What should I remind you of? (reminder 3pm call the garage)")
+                                                              : Reglages.t("Je n'ai pas compris l'heure (15h, 15h30, 20 min, demain 9h…)", "I did not understand the time (3pm, 15:30, 20 min, tomorrow 9am…)"),
+                                 sous: saisie, glyphe: "error", garder: true, f: () => {} }]
+                }
+            }
+            resultats = lignesR
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
         // « session NOM » : ouvrir une disposition enregistrée, ou enregistrer celle d'aujourd'hui sous ce nom

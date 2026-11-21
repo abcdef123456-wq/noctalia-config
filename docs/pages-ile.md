@@ -94,3 +94,13 @@ choisi). Rien n’est demandé au démarrage de l’île : seulement à l’ouve
 
 Le Cloud JARVIS n'est pas une page : c'est une fenêtre à part (`nc-cloud fenetre`, voir `docs/cloud.md`). Son entrée
 « Cloud JARVIS » n'apparaît dans la recherche de l'île qu'avec `CLOUD_JARVIS=oui` et ce PC associé.
+
+**Rappels dans le Spotlight** (Super + R) : `rappel 15h appeler le garage`, `rappel 20 min sortir le linge`,
+`rappel demain 9h dentiste` (en anglais : `reminder 3pm call`, `reminder tomorrow 9am …`). Heures acceptées : `15h`,
+`15h30`, `15:30`, `3pm` ; durées : `20 min`, `2 h`, `90 s`, `dans 1h30` / `in 2 hours`. Une heure déjà passée aujourd'hui
+veut dire demain. La ligne montre l'heure comprise avant que tu valides (Entrée) ; si l'heure n'est pas comprise, rien
+n'est créé. Le texte reste tel quel (200 caractères au plus, jamais interprété), 50 rappels au plus. `rappels` les
+liste, Entrée sur l'un le supprime. À l'heure, une notification sort (bouton « Reporter » comme les autres) ; un rappel
+échu pendant que l'île ou le PC était éteint s'affiche une fois au démarrage. Les rappels sont gardés dans un fichier
+privé. Attention : `1h30` collé veut dire 01:30 ; pour une durée, écris `dans 1h30` ou `1 h 30`. Limite : l'île n'a
+pas de signal de veille ; si le PC dort, le rappel est montré à son réveil, un peu en retard.

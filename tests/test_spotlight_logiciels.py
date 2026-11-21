@@ -187,7 +187,8 @@ QtObject {
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
+            (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
                 "nc-apps": '#!/bin/sh\ncase "$1" in list) echo \'[{"id":"obsidian.desktop","name":"Obsidian","generic":"Notes","keywords":"","icon":"obsidian","exe":"obsidian"}]\' ;; *) echo "[]" ;; esac\n',

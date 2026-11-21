@@ -138,7 +138,8 @@ QtObject { property string saisie: ""; property bool recherche: true; property b
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml")
+            (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             for nom, code in {"nc-apps": '#!/bin/sh\necho "[]"\n', "nc-demander": "#!/bin/sh\necho Claude\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                               "nc-logiciels": "#!/bin/sh\necho '[]'\n", "hyprctl": "#!/bin/sh\necho '[]'\n",

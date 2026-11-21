@@ -157,6 +157,8 @@ proposée en dernier ; la recherche de la fenêtre des réglages comprend aussi 
 Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). En tapant sans
 préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
 installer dans le Spotlight »).
+**`rappel 15h appeler le garage`** (ou `rappel 20 min …`, `reminder tomorrow 9am …`) programme une notification
+locale, qui survit aux redémarrages ; `rappels` les liste et Entrée en supprime un (détails : `docs/pages-ile.md`).
 
 **Emoji dans le Spotlight** : `:` puis un mot (`:coeur`, `:rire`, `:heart`) propose des emoji, en français comme en
 anglais, sans accents ni casse ; Entrée copie l'emoji (`wl-copy`) et referme. Les 24 derniers choisis passent en
