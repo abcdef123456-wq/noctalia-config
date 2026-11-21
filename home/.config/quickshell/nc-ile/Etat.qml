@@ -347,6 +347,7 @@ Singleton {
     // ── Café : empêche la mise en veille (Noctalia) ──
     property bool cafe: false
     function basculerCafe() { cafe = !cafe; Quickshell.execDetached(["noctalia", "msg", cafe ? "caffeine-enable" : "caffeine-disable"]) }
+    function cafeRegler(actif) { if (cafe !== actif) basculerCafe() }   // mode Présentation : commande seulement si l'état change
 
     // ── Heure ──
     property date maintenant: new Date()

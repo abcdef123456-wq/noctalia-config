@@ -284,6 +284,8 @@ ShellRoot {
         function concentration(): void { Notifs.basculerConcentration() }
         function concentrationRegler(actif: bool): void { Notifs.concentration = actif }   // mode jeu
         function concentrationEtat(): string { return Notifs.concentration ? "oui" : "non" }
+        function cafeRegler(actif: bool): void { Etat.cafeRegler(actif) }   // mode Présentation
+        function cafeEtat(): string { return Etat.cafe ? "oui" : "non" }
         // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
         function page(nom: string): void {
             if (Etat.vues.indexOf(nom) < 0) return

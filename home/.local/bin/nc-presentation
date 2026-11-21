@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# nc-presentation : mode Présentation en un geste (Spotlight : « Mode Présentation »).
+# L'écran ne s'éteint pas (café) et les notifications se taisent (concentration) ; couper remet chaque élément comme avant.
+# usage : nc-presentation activer | couper | basculer | etat
+set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+FICHIER="$RUN/nc-presentation"
+dire() { notify-send -a "$(t "Mode Présentation" "Presentation Mode")" -i video-display "$@" 2>/dev/null || true; }
+ile() { timeout 2 qs -c nc-ile ipc call ile "$@" 2>/dev/null; }   # île absente ou muette : échec
+
+activer() {
+  [ -e "$FICHIER" ] && return 0     # déjà actif : on ne touche pas à l'état d'avant
+  if [ -e "$RUN/nc-mode-jeu" ]; then
+    echo "$(t "Le mode jeu est actif : quitte-le d'abord." "Game mode is on: leave it first.")" >&2
+    dire "$(t "Mode jeu actif" "Game mode is on")" "$(t "Quitte le mode jeu avant la présentation." "Leave game mode before presenting.")"
+    return 1
+  fi
+  local cafe="" dnd=""
+  cafe="$(ile cafeEtat)" && dnd="$(ile concentrationEtat)" || cafe=""
+  case "$cafe/$dnd" in
+    oui/oui|oui/non|non/oui|non/non) ;;
+    *) echo "$(t "L'île ne répond pas : mode Présentation impossible." "The island does not answer: presentation mode is not possible.")" >&2
+       dire "$(t "L'île ne répond pas" "The island does not answer")" "$(t "Le mode Présentation a besoin de l'île." "Presentation mode needs the island.")"
+       return 1 ;;
+  esac
+  printf '%s %s\n' "$cafe" "$dnd" > "$FICHIER.$$" && mv -f "$FICHIER.$$" "$FICHIER" || { rm -f "$FICHIER.$$"; return 1; }
+  ile cafeRegler true >/dev/null; ile concentrationRegler true >/dev/null
+  dire "$(t "Mode Présentation activé" "Presentation mode on")" "$(t "L'écran reste allumé, notifications en pause." "The screen stays on, notifications are paused.")"
+}
+
+couper() {
+  [ -e "$FICHIER" ] || return 0
+  local cafe dnd
+  read -r cafe dnd < "$FICHIER"
+  [ "$cafe" = oui ] && cafe=true || cafe=false
+  [ "$dnd" = oui ] && dnd=true || dnd=false
+  ile cafeRegler "$cafe" >/dev/null; ile concentrationRegler "$dnd" >/dev/null
+  rm -f "$FICHIER"
+  dire "$(t "Mode Présentation désactivé" "Presentation mode off")" "$(t "Tout est comme avant." "Everything is back as before.")"
+}
+
+case "${1:-basculer}" in
+  activer) activer ;;
+  couper) couper ;;
+  basculer) if [ -e "$FICHIER" ]; then couper; else activer; fi ;;
+  etat) [ -e "$FICHIER" ] && echo oui || echo non ;;
+  *) echo "usage : nc-presentation activer | couper | basculer | etat" >&2; exit 2 ;;
+esac
