@@ -5,7 +5,12 @@
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
-RUN="${XDG_RUNTIME_DIR:-/tmp}"
+# Seulement dans le dossier privé de la session : jamais un fichier au nom prévisible dans /tmp
+RUN="${XDG_RUNTIME_DIR:-}"
+if [ -z "$RUN" ] || [ ! -d "$RUN" ]; then
+  echo "$(t "Mode Présentation impossible : pas de dossier de session (XDG_RUNTIME_DIR)." "Presentation mode impossible: no session folder (XDG_RUNTIME_DIR).")" >&2
+  exit 1
+fi
 FICHIER="$RUN/nc-presentation"
 dire() { notify-send -a "$(t "Mode Présentation" "Presentation Mode")" -i video-display "$@" 2>/dev/null || true; }
 ile() { timeout 2 qs -c nc-ile ipc call ile "$@" 2>/dev/null; }   # île absente ou muette : échec

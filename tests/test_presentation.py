@@ -48,12 +48,14 @@ class Presentation(unittest.TestCase):
     def lire(self):
         return (self.d / "cafe").read_text().strip(), (self.d / "dnd").read_text().strip()
 
-    def lance(self, *args, muet=False):
+    def lance(self, *args, muet=False, sans_session=False):
         env = {"PATH": f"{self.d}/bin:/usr/bin:/bin", "HOME": str(self.d / "home"), "XDG_CONFIG_HOME": str(self.d / "cfg"),
                "XDG_STATE_HOME": str(self.d / "state"), "XDG_RUNTIME_DIR": str(self.d / "run"), "D": str(self.d),
                "NC_LANGUE": "fr"}
         if muet:
             env["QS_MUET"] = "1"
+        if sans_session:
+            del env["XDG_RUNTIME_DIR"]
         return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=20)
 
     def test_activer_puis_couper_restaure_les_quatre_combinaisons(self):
@@ -74,6 +76,15 @@ class Presentation(unittest.TestCase):
         self.lance("activer")
         self.lance("couper")
         self.assertEqual(self.lire(), ("non", "oui"))
+
+    def test_sans_dossier_de_session_refuse(self):
+        """Sans XDG_RUNTIME_DIR : refus, l'île n'est pas appelée et rien n'est écrit dans /tmp."""
+        self.etats("non", "non")
+        r = self.lance("activer", sans_session=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("XDG_RUNTIME_DIR", r.stderr)
+        self.assertFalse((self.d / "journal").exists())
+        self.assertEqual(self.lire(), ("non", "non"))
 
     def test_couper_sans_activation_ne_fait_rien(self):
         self.etats("oui", "non")
