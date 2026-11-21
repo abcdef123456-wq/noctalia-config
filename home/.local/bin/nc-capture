@@ -97,7 +97,9 @@ if [ "$delai" != - ] && case "$mode" in ecran|zone|retouche|texte) true ;; *) fa
   trap - TERM INT
   rm -f "$verrou"
   [ -z "$nid" ] || notify-send -a "$(t "Capture d'écran" "Screenshot")" -r "$nid" -t 1 "$(t "Capture…" "Capturing…")" 2>/dev/null
-  sleep 0.3      # laisse la notification se retirer avant que grim ne regarde l'écran
+  # L'île coupe ses bannières (elle les reprend seule après 3 s) ; sans qs ou sans île, la capture se fait quand même
+  timeout 2 qs -c nc-ile ipc call ile bannieresPause true >/dev/null 2>&1 || true
+  sleep 0.4      # laisse l'île et la notification se retirer avant que grim ne regarde l'écran
 fi
 
 # Texte d'une zone : lu par tesseract (français et anglais), copié ; rien n'est enregistré

@@ -12,7 +12,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
 OUTILS = ("bash", "sh", "sed", "tail", "tr", "mkdir", "date", "cat", "grep", "head", "rm", "env", "cmp", "awk", "mktemp",
-          "chmod", "mv", "cut", "sleep", "python3", "paste", "dirname", "basename")
+          "chmod", "mv", "cut", "sleep", "python3", "paste", "dirname", "basename", "timeout")
 
 
 class Base(unittest.TestCase):
@@ -147,6 +147,24 @@ class CaptureRetardee(Capture):
         self.assertLess(j.index("Capture dans 1 s"), j.index("grim"))
         self.assertFalse(self.verrou.exists())
         self.assertEqual(len(list(self.dossier.iterdir())), 1)
+
+    def test_bannieres_en_pause_avant_grim(self):
+        self.faux_prog("sleep", "exit 0")
+        self.faux_prog("qs", 'echo "qs $*" >> "$JOURNAL"')
+        r = self.lancer("ecran", "--dans", "2")
+        r.communicate(timeout=20)
+        self.assertEqual(r.returncode, 0)
+        j = self.journal.read_text()
+        self.assertIn("qs -c nc-ile ipc call ile bannieresPause true", j)
+        self.assertLess(j.rindex("Capture dans 1 s"), j.index("qs -c"))
+        self.assertLess(j.index("qs -c"), j.index("grim"))
+
+    def test_sans_qs_la_capture_se_fait(self):
+        self.faux_prog("sleep", "exit 0")
+        r = self.lancer("ecran", "--dans", "1")
+        r.communicate(timeout=20)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("grim", self.journal.read_text())
 
     def attendre_verrou(self, p):
         import time
