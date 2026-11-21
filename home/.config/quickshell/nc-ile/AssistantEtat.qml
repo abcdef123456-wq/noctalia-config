@@ -78,8 +78,11 @@ Singleton {
             && !reglagesOuverts && !reglagesModifies)
     }
     Timer { id: relectureCatalogue; interval: a.delaiCatalogue; onTriggered: a.relireCatalogue() }
+    // Pages JARVIS visibles (comptées par Assistant.qml) : aucune visible (île fermée), la relecture attend la prochaine
+    // ouverture, aucun processus
+    property int pagesVisibles: 0
     function relireCatalogue() {
-        if (enCours || reglagesEnCours || reglagesOuverts || reglagesModifies) { catalogueARelire = true; return }
+        if (pagesVisibles <= 0 || enCours || reglagesEnCours || reglagesOuverts || reglagesModifies) { catalogueARelire = true; return }
         lireReglages()
     }
     property var moteurs: [
@@ -106,7 +109,7 @@ Singleton {
     readonly property var modeles: moteurCourant.models || []
     readonly property var modeleCourant: modeles.find(m => m.id === modele) || ({})
     // Le modèle appliqué n'est plus dans la liste du compte (pas celle de repli, pas pendant une saisie) : dit, jamais changé en silence
-    readonly property bool modeleHorsCatalogue: moteur === "agy" && moteurCourant.catalogue_compte === true && modele !== ""
+    readonly property bool modeleHorsCatalogue: (moteur === "agy" || moteur === "opencode") && moteurCourant.catalogue_compte === true && modele !== ""
         && modele === sessionReglages.model && !modeleCourant.id
     // Niveaux de réflexion proposés : ceux du modèle s'il en annonce (un tableau, même vide), sinon ceux du moteur ; aucun
     // pour un modèle à réflexion fixe (Claude Opus « thinking » : agy refuse --effort, JARVIS-BIS l'ignore)
@@ -114,20 +117,97 @@ Singleton {
     readonly property var efforts: reflexionFixe(modele) ? []
         : Array.isArray(modeleCourant.efforts) ? modeleCourant.efforts
         : Array.isArray(moteurCourant.efforts) ? moteurCourant.efforts : []
-    readonly property var famillesModeles: ["Flash", "Argon", "Hydrogen", "Neon", "Opus", "Sonnet"]
+    // Familles du menu rapide, tirées du catalogue RÉEL du moteur courant (aucune liste écrite à la main) : une famille =
+    // un identifiant sans son suffixe de niveau (-low, -medium, -high, -xhigh), dans l'ordre du catalogue.
+    // Libellé court tiré du nom annoncé : sans la parenthèse de fin (« (High) ») ; un identifiant pris pour nom (OpenCode)
+    // se coupe à ses tirets ; le premier mot part s'il est commun à plusieurs familles (le fabricant : Gemini, Claude) et
+    // qu'il reste un autre mot en lettres ; les mots qui commencent par un chiffre (versions) partent.
+    // « Gemini 4 Argon (Medium) » → « Argon », « Claude Opus 5.5 » → « Opus », « big-pickle » → « big pickle ». Deux
+    // familles au même libellé : on y ajoute la version, puis le nom entier, puis l'identifiant.
+    function cleFamille(id) { return String(id || "").replace(/-(low|medium|high|xhigh)$/, "") }
+    function nomDeBase(m) {
+        var n = String(m.name || "").replace(/\s*\([^()]*\)\s*$/, "").trim()
+        if (!n || n === m.id) n = String(m.id).split("/").pop()          // OpenCode : fournisseur/modèle
+        return n.replace(/-(low|medium|high|xhigh)$/i, "")
+    }
+    function motsDuNom(base) {
+        var mots = base.split(/\s+/).filter(w => w)
+        // Un identifiant (« claude-sonnet-4 », tout en minuscules) se coupe à ses tirets ; un vrai nom (« GPT-5.5 ») non
+        if (mots.length === 1 && mots[0].indexOf("-") > 0 && mots[0] === mots[0].toLowerCase()) mots = mots[0].split("-").filter(w => w)
+        return mots
+    }
+    readonly property var famillesModeles: {
+        var fam = [], vues = ({}), premiers = ({})
+        for (var m of modeles) {
+            if (!m || typeof m.id !== "string" || !m.id) continue
+            var c = cleFamille(m.id)
+            if (vues[c]) continue
+            vues[c] = true
+            var base = nomDeBase(m), mots = motsDuNom(base)
+            fam.push({ cle: c, base: base, mots: mots })
+            premiers[mots[0]] = (premiers[mots[0]] || 0) + 1
+        }
+        for (var f of fam) {
+            var w = f.mots
+            if (premiers[w[0]] > 1 && w.filter(x => /^[A-Za-z]/.test(x)).length >= 2 && /^[A-Za-z]/.test(w[0])) w = w.slice(1)
+            var sans = w.filter(x => !/^[0-9]/.test(x))
+            f.libelle = (sans.length ? sans : w).join(" ") || f.cle
+        }
+        var doublon = x => fam.filter(y => y.libelle === x.libelle).length > 1
+        for (var d of fam.filter(doublon)) { var v = d.mots.find(x => /[0-9]/.test(x)); d.libelle = v ? d.libelle + " " + v : d.base }
+        for (var d2 of fam.filter(doublon)) d2.libelle = d2.base
+        for (var d3 of fam.filter(doublon)) d3.libelle = d3.cle
+        return fam.map(x => ({ cle: x.cle, libelle: x.libelle.length > 24 ? x.libelle.slice(0, 23) + "…" : x.libelle }))
+    }
+    function famille(nom) { return famillesModeles.find(f => f.libelle === nom || f.cle === nom) || null }
+    // Derniers modèles choisis sur ce PC, par moteur (familles, du plus récent au plus ancien) : seulement pour l'ordre
+    // du menu rapide quand tout ne tient pas. Gardé dans l'état de l'île, aucun réseau, aucun processus.
+    property var recents: ({})
+    function noterRecent(engine, id) {
+        if (!engine || !id) return
+        var l = (recents[engine] || []).filter(x => x !== cleFamille(id))
+        l.unshift(cleFamille(id))
+        var r = Object.assign({}, recents)
+        r[engine] = l.slice(0, 8)
+        if (JSON.stringify(r) === JSON.stringify(recents)) return
+        recents = r
+        fichierRecents.setText(JSON.stringify(r))
+    }
+    // Ordre de priorité quand la place manque : le modèle courant, les derniers choisis, puis l'ordre du catalogue
+    function ordreFamilles() {
+        var cles = famillesModeles.map(f => f.cle), r = []
+        var courant = cleFamille(modele)
+        if (cles.indexOf(courant) >= 0) r.push(courant)
+        for (var c of (recents[moteur] || [])) if (cles.indexOf(c) >= 0 && r.indexOf(c) < 0) r.push(c)
+        for (var c2 of cles) if (r.indexOf(c2) < 0) r.push(c2)
+        return r
+    }
+    FileView {
+        id: fichierRecents
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/nc-ile/jarvis-modeles-recents.json"
+        printErrors: false
+        onLoaded: {
+            try {
+                var d = JSON.parse(text()), r = ({})
+                for (var k in d) if (Array.isArray(d[k])) r[k] = d[k].filter(x => typeof x === "string").slice(0, 8)
+                a.recents = r
+            } catch (e) { a.recents = ({}) }
+        }
+    }
     // Le bouton xhigh n'existe que pour agy, et si le catalogue a la variante -xhigh du modèle courant
     readonly property bool xhighDispo: {
         var s = moteur === "agy" && /-(low|medium|high|xhigh)$/.exec(modele)
         return !!s && modeles.some(m => m.id === modele.slice(0, -s[0].length) + "-xhigh")
     }
+    // Le libellé de la famille d'un modèle du catalogue, ou "" (hors catalogue)
     function familleModele(item) {
-        var mots = ((item.id || "") + " " + (item.name || "")).toLowerCase().split(/[^a-z0-9]+/)
-        // « Orchestrator (Neon) » est un autre modèle : il n'appartient à aucune famille, il reste choisi dans les réglages
-        if (mots.indexOf("orchestrator") >= 0) return ""
-        return famillesModeles.find(nom => mots.indexOf(nom.toLowerCase()) >= 0) || ""
+        var f = item && item.id ? famille(cleFamille(item.id)) : null
+        return f ? f.libelle : ""
     }
     function modelePourFamille(nom) {
-        var candidats = modeles.filter(m => familleModele(m) === nom)
+        var f = famille(nom)
+        if (!f) return null
+        var candidats = modeles.filter(m => m && cleFamille(m.id) === f.cle)
         return candidats.find(m => m.id === modele)
             || candidats.find(m => effort && m.id.endsWith("-" + effort)) || candidats[0] || null
     }
@@ -191,6 +271,7 @@ Singleton {
                 moteurs = r.data.engines; moteur = r.data.session.engine || "agy"
                 modele = r.data.session.model || ""; effort = r.data.session.effort || ""
                 sessionReglages = {engine:moteur, model:modele, effort:effort}
+                if (modeleCourant.id) noterRecent(moteur, modele)
             } else ok = false
         }
         if (!ok) {

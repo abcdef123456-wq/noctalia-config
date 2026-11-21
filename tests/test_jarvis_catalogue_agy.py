@@ -630,6 +630,10 @@ class RunnerDeBoutEnBout(unittest.TestCase):
         self.d = Path(d.name)
         (self.d / "home-runner").mkdir()
         self.agy = faux_agy(self.d)
+        # /nc/engines relit aussi le catalogue d'OpenCode : un faux en tête du PATH, jamais le vrai
+        oc = self.d / "opencode"
+        oc.write_text("#!/bin/sh\nexit 1\n")
+        oc.chmod(0o755)
         env = patch.dict(os.environ, HOME=str(self.d), XDG_CONFIG_HOME=str(self.d / ".config"), NC_PIECES_JOINTES=str(self.d / "pieces"),
                          PATH=str(self.d) + os.pathsep + os.environ.get("PATH", ""))
         env.start()
@@ -651,7 +655,7 @@ class RunnerDeBoutEnBout(unittest.TestCase):
 
     def attendre(self):
         for fil in threading.enumerate():
-            if fil.name == "nc-agy-modeles":
+            if fil.name in ("nc-agy-modeles", "nc-opencode-modeles"):
                 fil.join(30)
 
     def charger(self):

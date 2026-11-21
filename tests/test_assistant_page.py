@@ -15,7 +15,7 @@ QML = REPO / "home/.config/quickshell/nc-ile"
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class PageAssistant(unittest.TestCase):
-    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False, dictee=None, limite=5):
+    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False, dictee=None, limite=5, etat=None, garder=None):
         with tempfile.TemporaryDirectory(prefix="nc-assistant-page-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -118,7 +118,11 @@ ShellRoot {
 }'''.replace('LIMITE', str(limite * 1000)))
             (root/'shell.qml').write_text(shell.replace('// TEST_INPUT','TestCase {id:clavier;name:"ChatInput";when:false}\nfunction ecrire(texte){for(var i=0;i<texte.length;i++)clavier.keyClick(texte.charAt(i))}' if evenements else ''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
-                       XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / "cache"))
+                       XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / "state"),
+                       XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"))
+            if etat is not None:
+                (root / "state/nc-ile").mkdir(parents=True)
+                (root / "state/nc-ile/jarvis-modeles-recents.json").write_text(json.dumps(etat))
             env.pop("WAYLAND_DISPLAY", None)
             r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env,
                                capture_output=True, text=True, timeout=limite + 3)
@@ -127,6 +131,9 @@ ShellRoot {
             self.assertNotIn("TypeError", r.stdout + r.stderr)
             self.assertNotIn("Binding loop", r.stdout + r.stderr)
             self.assertNotIn("Cannot assign", r.stdout + r.stderr)
+            if garder is not None:
+                f = root / "state/nc-ile/jarvis-modeles-recents.json"
+                garder["recents"] = json.loads(f.read_text()) if f.exists() else None
             recus = root / ("reglages-recus" if lectureReglages else "dictee-recus" if dictee is not None else "recus")
             return [json.loads(l) for l in recus.read_text().splitlines()] if recus.exists() else []
 
@@ -417,8 +424,9 @@ else if(etape===1){
         recus=self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- verifier(AssistantEtat.famillesModeles.join(",")==="Flash,Argon,Hydrogen,Neon,Opus,Sonnet","familles incohérentes")
- for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.toLowerCase()).enabled,"famille absente : "+nom)
+ verifier(AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")==="Flash,Argon,Hydrogen,Neon,Opus,Sonnet","familles : "+AssistantEtat.famillesModeles.map(f=>f.libelle))
+ for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.libelle.toLowerCase()).enabled,"famille absente : "+nom.libelle)
+ verifier(!trouver(page,"nc-jarvis-model-autres").visible,"Autres… alors que tout tient à 400")
  var bouton=trouver(page,"nc-jarvis-model-argon");clavier.mouseClick(bouton,bouton.width/2,bouton.height/2)
  verifier(AssistantEtat.modele==="gemini-argon-low","mauvais identifiant Argon")
  var effort=trouver(page,"nc-jarvis-effort-high");clavier.mouseClick(effort,effort.width/2,effort.height/2)
@@ -464,8 +472,9 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
         self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- verifier(!trouver(page,"nc-jarvis-model-argon").enabled,"Argon inventé")
- verifier(!trouver(page,"nc-jarvis-model-hydrogen").enabled,"Hydrogen inventé")
+ verifier(trouver(page,"nc-jarvis-model-argon")===null,"Argon inventé")
+ verifier(trouver(page,"nc-jarvis-model-hydrogen")===null,"Hydrogen inventé")
+ verifier(trouver(page,"nc-jarvis-model-flash").enabled,"Flash absent")
  verifier(!trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh visible sans variante -xhigh")
  verifier(!trouver(page,"nc-jarvis-effort-medium").enabled,"variante non annoncée activée")
  AssistantEtat.choisirFamille("Argon");AssistantEtat.choisirEffort("medium")
@@ -484,8 +493,10 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
         self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- var b=trouver(page,"nc-jarvis-model-neon");verifier(b.enabled,"Neon grisé alors que le catalogue l'annonce")
- verifier(AssistantEtat.familleModele({id:"gemini-pro-orchestrator-neon",name:"Orchestrator (Neon)"})==="","l'orchestrateur compte comme Neon")
+ var b=trouver(page,"nc-jarvis-model-gemini neon");verifier(b!==null&&b.enabled,"Neon absent alors que le catalogue l'annonce")
+ verifier(AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")==="Flash,Gemini Neon,Orchestrator","familles : "+AssistantEtat.famillesModeles.map(f=>f.libelle))
+ verifier(AssistantEtat.familleModele({id:"gemini-pro-orchestrator-neon",name:"Orchestrator (Neon)"})==="Orchestrator","l'orchestrateur compte comme Neon")
+ verifier(trouver(page,"nc-jarvis-model-orchestrator").visible,"l'orchestrateur a son bouton")
  b.clic();verifier(AssistantEtat.modele==="gemini-4-neon-low"&&b.primaire,"Neon : "+AssistantEtat.modele)
  for(var n of ["low","medium","high","xhigh"]){AssistantEtat.choisirEffort(n);verifier(AssistantEtat.modele==="gemini-4-neon-"+n&&AssistantEtat.effort===n,"Neon "+n+" : "+AssistantEtat.modele)}
  verifier(trouver(page,"nc-jarvis-effort-xhigh").visible,"xhigh caché sous Neon")
@@ -494,9 +505,9 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
  page.width=330;etape++
 }else if(etape===2){
  var tot=0
- for(var nom of AssistantEtat.famillesModeles){var h=trouver(page,"nc-jarvis-model-"+nom.toLowerCase()),t=null;for(var c of h.children)if(c.paintedWidth!==undefined)t=c
-  verifier(t!==null&&t.paintedWidth<=h.width-8,nom+" coupé à 330 : "+t.paintedWidth+" > "+h.width);tot+=h.width}
- verifier(tot<=330-20,"six boutons plus larges que la page : "+tot)
+ for(var nom of AssistantEtat.famillesModeles){var h=trouver(page,"nc-jarvis-model-"+nom.libelle.toLowerCase()),t=null;for(var c of h.children)if(c.paintedWidth!==undefined)t=c
+  verifier(t!==null&&t.paintedWidth<=h.width-8,nom.libelle+" coupé à 330 : "+t.paintedWidth+" > "+h.width);tot+=h.width}
+ verifier(tot<=330-20,"boutons plus larges que la page : "+tot)
  Qt.quit()
 }
 ''',configuration=conf(flash+neon+[orch]),evenements=True)
@@ -504,7 +515,7 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
             self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- verifier(!trouver(page,"nc-jarvis-model-neon").enabled,"Neon allumé sans modèle Neon")
+ verifier(trouver(page,"nc-jarvis-model-neon")===null&&trouver(page,"nc-jarvis-model-gemini neon")===null,"bouton Neon sans modèle Neon")
  verifier(trouver(page,"nc-jarvis-model-flash").enabled,"Flash grisé")
  Qt.quit()
 }
@@ -542,10 +553,11 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
         self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours){
- for(var nom of AssistantEtat.famillesModeles)verifier(trouver(page,"nc-jarvis-model-"+nom.toLowerCase()).enabled,"famille absente : "+nom)
- AssistantEtat.choisirFamille("Argon")
+ verifier(AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")==="argon,flash,opus,sonnet,hydrogen,neon,GPT-OSS","familles : "+AssistantEtat.famillesModeles.map(f=>f.libelle))
+ verifier(trouver(page,"nc-jarvis-model-flash").visible&&trouver(page,"nc-jarvis-model-flash").primaire,"le modèle courant toujours visible")
+ AssistantEtat.choisirFamille("argon")
  verifier(AssistantEtat.modele==="gemini-4-argon-low"&&AssistantEtat.effort==="low","Argon : "+AssistantEtat.modele)
- AssistantEtat.choisirFamille("Opus")
+ AssistantEtat.choisirFamille("opus")
  verifier(!AssistantEtat.reflexionFixe(AssistantEtat.modele),"Claude 5.5 pris pour un modèle à réflexion fixe")
  verifier(AssistantEtat.efforts.length===3,"efforts : "+AssistantEtat.efforts.length)
  AssistantEtat.choisirEffort("high")
@@ -590,6 +602,152 @@ else if(etape===2&&!AssistantEtat.enCours){
 }
 """,configuration=self._config_modele_sorti(True))
 
+    # ── M1 : les modèles réellement disponibles (catalogue du moteur courant), plus aucune liste écrite à la main ──
+
+    AGY_REEL = [dict(id='gemini-4-argon-'+e, name='Gemini 4 Argon ('+e.capitalize()+')') for e in ('low','medium','high')] \
+        + [dict(id='gemini-3.8-flash-'+e, name='Gemini 3.8 Flash ('+e.capitalize()+')') for e in ('low','medium','high')] \
+        + [dict(id='claude-opus-5-5-'+e, name='Claude Opus 5.5 ('+e.capitalize()+')') for e in ('low','medium','high')] \
+        + [dict(id='claude-sonnet-5-5-'+e, name='Claude Sonnet 5.5 ('+e.capitalize()+')') for e in ('low','medium','high')] \
+        + [dict(id='gemini-hydrogen-'+e, name='Gemini Hydrogen ('+e.capitalize()+')') for e in ('low','medium','high')] \
+        + [dict(id='gemini-4-neon-'+e, name='Gemini Neon ('+e.capitalize()+')') for e in ('low','medium','high','xhigh')] \
+        + [dict(id='gemini-pro-orchestrator-neon', name='Orchestrator (Neon)')]
+
+    def _conf(self, models, engine='agy', model='gemini-3.8-flash-low', effort='low', **plus):
+        return dict(session=dict(engine=engine, model=model, effort=effort),
+                    engines=[dict(id=engine, name=engine, installed=True, models=models, efforts=['low','medium','high','xhigh'], **plus)])
+
+    def test_catalogue_reel_d_agy_un_bouton_par_famille(self):
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var lib=AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")
+ verifier(lib==="Argon,Flash,Opus,Sonnet,Hydrogen,Neon,Orchestrator","libellés : "+lib)
+ page.width=330;etape++
+}else if(etape===2){
+ var vus=[]
+ for(var f of AssistantEtat.famillesModeles){var b=trouver(page,"nc-jarvis-model-"+f.libelle.toLowerCase());if(b&&b.visible)vus.push(f.libelle)}
+ verifier(vus.indexOf("Flash")>=0,"le modèle courant n'est pas visible : "+vus)
+ verifier(vus.length<7&&trouver(page,"nc-jarvis-model-autres").visible,"tout tiendrait à 330 ? "+vus)
+ var tot=0;for(var c of trouver(page,"nc-jarvis-model-autres").parent.children)if(c.visible&&c.texte!==undefined)tot+=c.width+6
+ verifier(tot-6<=310+1,"plus large que la page : "+tot)
+ AssistantEtat.choisirFamille("gemini-4-neon");verifier(AssistantEtat.modele==="gemini-4-neon-low","Neon par sa clé : "+AssistantEtat.modele)
+ Qt.quit()
+}
+''',configuration=self._conf(self.AGY_REEL))
+
+    def test_rendu_sur_la_sortie_reelle_d_agy(self):
+        from tests.test_jarvis_catalogue_agy import LISTE
+        models = [dict(id=l.split('\t')[0], name=l.split('\t')[1]) for l in LISTE.splitlines()]
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var lib=AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")
+ verifier(lib==="Argon,Flash,Opus,Sonnet,GPT-OSS","libellés : "+lib)
+ Qt.quit()
+}
+''',configuration=self._conf(models, model='gemini-3.8-flash-low'))
+
+    def test_modele_inconnu_de_l_ancienne_liste_a_son_bouton(self):
+        models = [dict(id='gemini-flash-low', name='Gemini Flash (Low)'), dict(id='gemini-5-krypton-high', name='Gemini 5 Krypton (High)')]
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var b=trouver(page,"nc-jarvis-model-krypton");verifier(b!==null&&b.visible&&b.enabled,"Krypton sans bouton")
+ verifier(trouver(page,"nc-jarvis-model-argon")===null&&trouver(page,"nc-jarvis-model-opus")===null,"bouton inventé")
+ verifier(!trouver(page,"nc-jarvis-model-autres").visible,"Autres… sans rien de caché")
+ b.clic();verifier(AssistantEtat.modele==="gemini-5-krypton-high"&&AssistantEtat.effort==="high","Krypton : "+AssistantEtat.modele)
+ Qt.quit()
+}
+''',configuration=self._conf(models, model='gemini-flash-low'))
+
+    def test_codex_ses_modeles(self):
+        models = [dict(id='gpt-5.5', name='GPT-5.5', efforts=['low','medium','high']), dict(id='gpt-5.5-codex', name='GPT-5.5 Codex', efforts=['low','high'])]
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var lib=AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")
+ verifier(lib==="GPT-5.5,Codex","codex : "+lib)
+ verifier(trouver(page,"nc-jarvis-model-gpt-5.5").primaire,"courant non marqué")
+ trouver(page,"nc-jarvis-model-codex").clic();verifier(AssistantEtat.modele==="gpt-5.5-codex","Codex : "+AssistantEtat.modele)
+ Qt.quit()
+}
+''',configuration=self._conf(models, engine='codex', model='gpt-5.5', effort='high'))
+
+    def test_opencode_identifiants_du_catalogue(self):
+        models = [dict(id=i, name=i) for i in ('opencode/big-pickle', 'opencode/deepseek-v4.1-flash-free', 'anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5')]
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var lib=AssistantEtat.famillesModeles.map(f=>f.libelle).join(",")
+ verifier(lib==="big pickle,deepseek v4.1 flash free,sonnet,opus","opencode : "+lib)
+ trouver(page,"nc-jarvis-model-opus").clic();verifier(AssistantEtat.modele==="anthropic/claude-opus-5-5","opus : "+AssistantEtat.modele)
+ Qt.quit()
+}
+''',configuration=self._conf(models, engine='opencode', model='opencode/big-pickle', effort='', catalogue_compte=True))
+
+    def test_catalogue_vide_modele_courant_et_autres(self):
+        self.executer('''
+if(etape===0){creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ verifier(AssistantEtat.famillesModeles.length===0,"familles inventées")
+ var c=trouver(page,"nc-jarvis-model-opus");verifier(c!==null&&c.visible&&c.primaire&&!c.enabled,"le modèle courant seul")
+ var x=trouver(page,"nc-jarvis-model-autres");verifier(x.visible&&x.enabled,"Autres… absent")
+ x.clic();verifier(AssistantEtat.reglagesOuverts,"Autres… n'ouvre pas les réglages")
+ Qt.quit()
+}
+''',configuration=self._conf([], engine='claude', model='opus', effort='high'))
+
+    def test_dix_familles_courant_visible_ordre_stable_et_recents(self):
+        noms = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliett']
+        models = [dict(id='m-'+n.lower()+'-low', name='Gemini '+n+' (Low)') for n in noms]
+        garder = {}
+        self.executer('''
+if(etape===0){creer();page.width=330;AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ var vus=()=>{var v=[];for(var f of AssistantEtat.famillesModeles){var b=trouver(page,"nc-jarvis-model-"+f.libelle.toLowerCase());if(b&&b.visible)v.push(f.libelle)}return v}
+ memo.vus=vus;memo.avant=vus().join(",")
+ verifier(memo.avant.indexOf("Juliett")>=0,"le courant (Juliett) doit être visible : "+memo.avant)
+ verifier(memo.avant.indexOf("Hotel")>=0,"le récent (Hotel) passe avant l'ordre du catalogue : "+memo.avant)
+ verifier(trouver(page,"nc-jarvis-model-autres").visible,"Autres… absent")
+ var autre=memo.avant.split(",").find(n=>n!=="Juliett")
+ AssistantEtat.choisirFamille("m-"+autre.toLowerCase());etape++
+}else if(etape===2){
+ verifier(memo.vus().join(",")===memo.avant,"ordre changé après un choix visible : "+memo.vus()+" / "+memo.avant)
+ var cache=AssistantEtat.famillesModeles.map(f=>f.libelle).find(n=>memo.avant.split(",").indexOf(n)<0)
+ AssistantEtat.choisirFamille("m-"+cache.toLowerCase());etape++
+}else if(etape===3){
+ verifier(memo.vus().indexOf(AssistantEtat.famillesModeles.find(f=>f.cle===AssistantEtat.cleFamille(AssistantEtat.modele)).libelle)>=0,"le modèle choisi (via Autres…) reste caché : "+memo.vus())
+ Qt.quit()
+}
+''',configuration=self._conf(models, model='m-juliett-low'), etat={'agy': ['m-hotel']}, garder=garder)
+        self.assertEqual(garder['recents']['agy'][:2], ['m-juliett', 'm-hotel'])
+
+    def test_ile_fermee_aucune_relecture(self):
+        """Page cachée (île fermée) : la relecture annoncée (catalogue_en_cours) attend l'ouverture ; aucun processus."""
+        recus = self.executer('''
+if(etape===0){AssistantEtat.delaiCatalogue=150;creer();AssistantEtat.lireReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){page.animationsActives=false;memo.t=Date.now();etape++}
+else if(etape===2&&Date.now()-memo.t>900){
+ verifier(AssistantEtat.pagesVisibles===0,"fenêtre cachée comptée : "+AssistantEtat.pagesVisibles)
+ page.animationsActives=true;page.visible=false;verifier(AssistantEtat.pagesVisibles===0,"page cachée comptée")
+ verifier(AssistantEtat.catalogueARelire,"relecture oubliée")
+ Qt.quit()
+}
+''',configuration=self._config_relecture(True), lectureReglages=True)
+        self.assertEqual(len(recus), 1, recus)
+
+    def test_processus_page_voisine_cachee_puis_ouverte(self):
+        """Île ouverte sur une autre page : JARVIS peut être préchargée (page voisine) mais cachée, et rien ne part ; à son
+        ouverture, une seule lecture des réglages rapides ; rouverte tout de suite, aucune autre."""
+        recus = self.executer('''
+if(etape===0){var c=Qt.createComponent("Assistant.qml");page=c.createObject(w.contentItem,{width:400,height:488,visible:false});memo.t=Date.now();etape++}
+else if(etape===1&&Date.now()-memo.t>800){verifier(!AssistantEtat.reglagesDemandes,"lecture avec la page cachée");page.visible=true;etape++}
+else if(etape===2&&AssistantEtat.reglagesDemandes&&!AssistantEtat.reglagesEnCours){page.visible=false;etape++}
+else if(etape===3){page.visible=true;memo.t=Date.now();etape++}
+else if(etape===4&&Date.now()-memo.t>600){Qt.quit()}
+''',configuration=self._conf(self.AGY_REEL), lectureReglages=True)
+        self.assertEqual(len(recus), 1, recus)
+
     def _config_relecture(self,en_cours):
         session=dict(engine='agy',model='gemini-3.8-flash-low',effort='low')
         moteur=lambda models,**plus:dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'],**plus)
@@ -603,9 +761,9 @@ else if(etape===2&&!AssistantEtat.enCours){
         self.executer('''
 if(etape===0){AssistantEtat.delaiCatalogue=150;creer();AssistantEtat.lireReglages();etape++}
 else if(etape===1&&!AssistantEtat.reglagesEnCours&&AssistantEtat.moteurs.length){
- verifier(!trouver(page,"nc-jarvis-model-argon").enabled,"Argon avant la relecture");etape++
+ verifier(trouver(page,"nc-jarvis-model-argon")===null,"Argon avant la relecture");etape++
 }else if(etape===2&&AssistantEtat.modelePourFamille("Argon")){
- verifier(trouver(page,"nc-jarvis-model-argon").enabled,"Argon grisé après la relecture")
+ verifier(trouver(page,"nc-jarvis-model-argon")!==null&&trouver(page,"nc-jarvis-model-argon").enabled,"Argon absent après la relecture")
  Qt.quit()
 }
 ''',configuration=self._config_relecture(True))

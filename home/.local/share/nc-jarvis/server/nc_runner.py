@@ -163,8 +163,8 @@ if not all(callable(getattr(engines,name,None)) for name in ('snapshot','choose'
 
 
 def _catalogue_agy(nom):
-    """Relit le catalogue d'agy en fond si besoin (ne bloque jamais) ; un backend sans cette méthode : rien."""
-    fn=getattr(engines,nom,None)
+    """Relit les catalogues (agy, opencode) en fond si besoin (ne bloque jamais) ; un backend sans cette méthode : rien."""
+    fn=getattr(engines,nom,None) or (getattr(engines,'rafraichir_agy',None) if nom=='rafraichir_catalogues' else None)
     if callable(fn): fn()
 
 
@@ -183,7 +183,7 @@ class _CatalogueAuxModels:
             if message.get('type') == 'http.response.start': statuts.append(message.get('status'))
             await send(message)
         await self.app(scope, receive, envoyer)
-        if statuts == [200]: _catalogue_agy('rafraichir_agy')
+        if statuts == [200]: _catalogue_agy('rafraichir_agy')   # /models ne liste que ceux d'agy
 
 
 _catalogue_agy('catalogue_au_demarrage')
@@ -201,7 +201,7 @@ async def settings(request: Request, session_key: str | None = None):
     upstream._check_secret(request)
     # Avec AGY récent, la session montrée est celle du PC qui demande (session_key) ; nos CLI : la session commune
     if session_key is not None and len(session_key)>200: raise HTTPException(400)
-    _catalogue_agy('rafraichir_agy')
+    _catalogue_agy('rafraichir_catalogues')
     return engines.snapshot(session_key)
 
 

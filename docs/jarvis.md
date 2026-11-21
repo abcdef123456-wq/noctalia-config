@@ -658,14 +658,27 @@ Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et ni
 c’est la session partagée par tous, Telegram et Discord compris. Avec AGY (`64523e5`), c’est celle de ce PC : le
 client envoie sa clé (`desktop:` et le nom du PC) avec chaque réglage, chaque reprise et chaque réinitialisation, et
 `/nc/engines` répond `shared_session` vrai seulement quand la session l’est. Changer de moteur vaut pour tout le monde. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
-La carte d’accueil présente les familles **Flash, Argon, Hydrogen, Neon, Opus et Sonnet**, avec **low / medium / high** séparés, plus **xhigh** quand le catalogue d’agy propose la variante `-xhigh` du modèle.
-Les boutons utilisent uniquement les identifiants annoncés pour le moteur courant ; les familles et variantes
-absentes sont grisées (Neon : modèles `gemini-4-neon-*` ; le seul « Orchestrator (Neon) » ne l’allume ni ne le dégrise, il se choisit dans les réglages). Les six boutons se partagent la largeur selon leur texte. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
+La carte d’accueil montre les modèles **réellement disponibles** pour le moteur courant : un bouton par famille du
+catalogue que donne le runner, aucune liste écrite à la main. Une famille est un identifiant sans son niveau (`-low`,
+`-medium`, `-high`, `-xhigh`) : les niveaux se choisissent à part, avec **low / medium / high**, plus **xhigh** quand le
+catalogue d’agy propose la variante `-xhigh` du modèle. Aucun bouton pour un modèle absent (plus de bouton grisé).
+Le libellé vient du nom annoncé : sans la parenthèse de fin, sans le premier mot s’il est commun à plusieurs familles (le
+fabricant), sans les numéros de version. Sur le catalogue réel d’agy : **Argon, Flash, Opus, Sonnet, GPT-OSS** (et
+**Hydrogen, Neon, Orchestrator** quand le compte les a) ; Codex : ses noms (`GPT-5.5`, `Codex`…) ; OpenCode : ses identifiants (`big pickle`…). Deux
+familles au même libellé reprennent leur version. Quand tout ne tient pas sur la largeur : d’abord le modèle courant, puis
+les derniers choisis sur ce PC (gardés dans `~/.local/state/nc-ile/jarvis-modeles-recents.json`, jamais envoyés), puis
+l’ordre du catalogue ; l’ordre affiché reste celui du catalogue, il ne saute pas à chaque choix. **Autres…** ouvre la
+liste complète des réglages. Claude Code n’a aucune commande pour lister ses modèles : la carte montre le modèle courant
+et **Autres…**, rien d’inventé. Aucun modèle n’est
 présumé actif avant lecture de la session du serveur. Le catalogue est lu une fois à l’ouverture d’un accueil
 sans saisie en cours ; le bouton réglages permet de le charger ou de l’actualiser explicitement.
 Pour agy, le catalogue vient du compte (`agy models`) : le runner le relit en fond au démarrage s’il n’en a aucun, puis quand
 il est demandé (île, `/models`) et a plus de 6 h, et le garde sur disque (`.nc-jarvis-agy-models.json`). Il ne lance rien si
-l’IA est coupée. agy pas connecté, hors ligne ou sortie inattendue : la dernière bonne liste reste, sinon celle du runner, et un
+l’IA est coupée. OpenCode suit le même chemin avec `opencode models --standalone` (jamais sans `--standalone` : sans lui,
+OpenCode 2 démarre son service de fond, qui resterait), mais jamais au démarrage du runner : seulement quand une page le
+demande et que la liste a plus de 6 h (`.nc-jarvis-opencode-models.json`). Ses identifiants qui ne repartent pas tels quels
+après `--model` (avec `@` ou des crochets) ne sont pas proposés ; ils se saisissent dans les réglages. Île fermée, rien ne
+part : une relecture annoncée attend l’ouverture de la page. agy pas connecté, hors ligne ou sortie inattendue : la dernière bonne liste reste, sinon celle du runner, et un
 nouvel essai au plus toutes les 15 min. Une sortie au format inattendu laisse une ligne dans le journal du runner (« Sortie de agy
 models au format inattendu »), sans son contenu. Pendant une relecture, l’île relit une seule fois 30 s plus tard, jamais par-dessus
 des réglages ouverts ou un choix non appliqué, et l’accueil relit à son ouverture si sa dernière lecture a plus de 6 h. « Actualiser »

@@ -29,6 +29,16 @@ Item {
     readonly property color corail: Couleurs.rouge
     readonly property color teinteEtat: (AssistantEtat.erreur || ecouteVocale) ? corail : cyan
     readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant" && m.num > depuis)
+    // Pages vues, comptées dans AssistantEtat.pagesVisibles (aucune : la relecture du catalogue attend). Vue : visible ET
+    // dans une fenêtre montrée (les fenêtres JARVIS cachées gardent leur page ; animationsActives suit leur visibilité)
+    readonly property bool vue: visible && animationsActives
+    property bool compteeVisible: false
+    function compterVisible() {
+        if (vue === compteeVisible) return
+        AssistantEtat.pagesVisibles += vue ? 1 : -1
+        compteeVisible = vue
+    }
+    onVueChanged: compterVisible()
     function chargerReglagesRapides() {
         if (visible && !dansDashboard && !historiqueOuvert && !entree.activeFocus && !AssistantEtat.brouillon
             && AssistantEtat.relectureAttendue() && !AssistantEtat.enCours)
@@ -87,9 +97,12 @@ Item {
         }
         dictee.running = true
     }
-    Component.onCompleted: { bas(); Qt.callLater(chargerReglagesRapides) }
+    Component.onCompleted: { compterVisible(); bas(); Qt.callLater(chargerReglagesRapides) }
     // Page détruite (île fermée) en pleine écoute : le micro ne reste pas ouvert
-    Component.onDestruction: if (ecouteVocale) Quickshell.execDetached([AssistantEtat.bin + "nc-dictee", "cancel"])
+    Component.onDestruction: {
+        if (compteeVisible) AssistantEtat.pagesVisibles -= 1
+        if (ecouteVocale) Quickshell.execDetached([AssistantEtat.bin + "nc-dictee", "cancel"])
+    }
     onDansDashboardChanged: if (dansDashboard) historiqueOuvert = true
     Connections {
         target: AssistantEtat
@@ -449,29 +462,61 @@ Item {
                     onClic: page.reglages()
                 }
             }
+            // Les familles du catalogue RÉEL du moteur (AssistantEtat.famillesModeles), un bouton chacune, dans l'ordre du
+            // catalogue. Quand tout ne tient pas : le modèle courant, puis les derniers choisis, puis l'ordre du catalogue,
+            // et « Autres… » ouvre la liste complète des réglages ; l'ordre affiché reste celui du catalogue, il ne saute
+            // donc pas à chaque choix. Catalogue vide : le modèle courant seul et « Autres… ».
+            FontMetrics { id: mesure; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.DemiBold }
+            readonly property var famillesVisibles: {
+                var fam = AssistantEtat.famillesModeles, place = choix.width, ecart = choix.spacing
+                var large = t => Math.ceil(mesure.advanceWidth(t)) + 12      // le texte et 6 px de chaque côté au moins
+                if (!fam.length) {
+                    var m = AssistantEtat.modele
+                    return m ? [{ cle: "", libelle: m.split("/").pop().replace(/-(low|medium|high|xhigh)$/, "").slice(0, 24), seul: true }] : []
+                }
+                var total = fam.reduce((t, f) => t + large(f.libelle), 0) + ecart * (fam.length - 1)
+                if (total <= place) return fam
+                var reste = place - large(Reglages.t("Autres…", "More…")) - ecart, pris = []
+                for (var cle of AssistantEtat.ordreFamilles()) {
+                    var f = fam.find(x => x.cle === cle), w = large(f.libelle) + (pris.length ? ecart : 0)
+                    if (w <= reste || !pris.length) { pris.push(cle); reste -= w }
+                }
+                return fam.filter(x => pris.indexOf(x.cle) >= 0)
+            }
+            readonly property bool autresVisible: famillesVisibles.length < AssistantEtat.famillesModeles.length
+                || !AssistantEtat.famillesModeles.length
             Row {
                 id: choix
                 x: 10; y: 38; width: parent.width - 20; spacing: 6
-                // Six boutons : chacun a la largeur de son texte plus une part égale de la place restante (marges égales,
-                // « Hydrogen » tient à 330 px). Pas de QtQuick.Layouts : sur Debian, c'est un paquet que l'île n'installe pas
+                // Chaque bouton a la largeur de son texte plus une part égale de la place restante (marges égales). Pas de
+                // QtQuick.Layouts : sur Debian, c'est un paquet que l'île n'installe pas
                 readonly property real part: {
                     var texte = 0, n = 0
                     for (var i = 0; i < children.length; i++)
-                        if (children[i].texte !== undefined) { texte += children[i].implicitWidth - 26; n++ }
-                    return n ? (width - spacing * (n - 1) - texte) / n : 0
+                        if (children[i].texte !== undefined && children[i].visible) { texte += children[i].implicitWidth - 26; n++ }
+                    return n ? Math.max(0, (width - spacing * (n - 1) - texte) / n) : 0
                 }
                 Repeater {
-                    model: AssistantEtat.famillesModeles
+                    model: modeles.famillesVisibles
                     JarvisBouton {
-                        required property string modelData
-                        objectName: "nc-jarvis-model-" + modelData.toLowerCase()
+                        required property var modelData
+                        objectName: "nc-jarvis-model-" + modelData.libelle.toLowerCase()
                         width: implicitWidth - 26 + choix.part; height: 34   // 26 : marges de JarvisBouton autour du texte
-                        texte: modelData; taille: 11
-                        primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.familleModele(AssistantEtat.modeleCourant) === modelData
-                        enabled: AssistantEtat.reglagesDisponibles && !!AssistantEtat.moteurCourant.installed
-                            && !!AssistantEtat.modelePourFamille(modelData) && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
-                        onClic: AssistantEtat.choisirFamille(modelData)
+                        texte: modelData.libelle; taille: 11
+                        primaire: AssistantEtat.reglagesDisponibles && (modelData.seul === true
+                            || AssistantEtat.cleFamille(AssistantEtat.modele) === modelData.cle)
+                        enabled: modelData.seul !== true && AssistantEtat.reglagesDisponibles && !!AssistantEtat.moteurCourant.installed
+                            && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
+                        onClic: AssistantEtat.choisirFamille(modelData.cle)
                     }
+                }
+                JarvisBouton {
+                    objectName: "nc-jarvis-model-autres"
+                    visible: modeles.autresVisible
+                    width: implicitWidth - 26 + choix.part; height: 34
+                    texte: Reglages.t("Autres…", "More…"); taille: 11
+                    enabled: !AssistantEtat.enCours
+                    onClic: page.reglages()
                 }
             }
             Row {
@@ -498,7 +543,8 @@ Item {
                 text: AssistantEtat.reglagesEnCours ? Reglages.t("Chargement…", "Loading…")
                     : (!AssistantEtat.reglagesDisponibles ? Reglages.t("Configurer la connexion avec ⚙", "Configure connection with ⚙")
                     : (AssistantEtat.reglagesModifies ? Reglages.t("Choix en attente d’Appliquer", "Selection pending Apply")
-                    : Reglages.t("Grisé : absent du catalogue de ce moteur", "Disabled: absent from this engine’s catalog")))
+                    : (!AssistantEtat.famillesModeles.length ? Reglages.t("Ce moteur ne donne pas sa liste : « Autres… » pour choisir", "This engine does not list its models: “More…” to choose")
+                    : Reglages.t("Les modèles de ce moteur sur ce PC", "This engine’s models on this PC"))))
                 elide: Text.ElideRight; textFormat: Text.PlainText
             }
         }

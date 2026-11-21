@@ -61,6 +61,13 @@ AGY_CATALOGUE_MAX = 50
 # Pas de tiret de tête : l'identifiant part après --model. 55 au plus : au-delà, le callback de Telegram (64 octets) casse tout le clavier /models
 AGY_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,54}')
 AGY_SUFFIXE = re.compile(r'(.+)-(low|medium|high|xhigh)')
+# `opencode models` : une ligne « fournisseur/modèle » sans espace (OPENCODE_LIGNE, sinon toute la sortie est refusée). Seuls
+# sont gardés les identifiants qui repartent tels quels après --model (MODELE) et servent de nom (nom_propre) : ni @, ni
+# crochet, ni tiret de tête, 80 au plus ; les autres (…@20250929) restent choisissables à la main dans les réglages
+OPENCODE_LIGNE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*/\S+')
+OPENCODE_ID = re.compile(r'(?=.{3,80}$)[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:/-]*')
+OPENCODE_CATALOGUE_MAX = 200
+_OPENCODE_ARGS = None
 # Toute entrée (/session, /nc/engine, /run, /model, état enregistré) : un identifiant saisi à la main reste permis, mais il part après --model
 # @ et [ ] : formes réelles (claude-x@20251101, opus[1m]), jamais au début ; # sépare l'effort chez OpenCode ; l'argv part sans shell
 MODELE = re.compile(r'[A-Za-z0-9._:/][A-Za-z0-9._:/@\[\]-]{0,79}')
@@ -130,12 +137,52 @@ def lire_catalogue_agy(sortie):
     return modeles[:AGY_CATALOGUE_MAX] or None
 
 
+def lire_catalogue_opencode(sortie):
+    """La liste [{id, name}] de `opencode models` (une ligne « fournisseur/modèle »), ou None : une seule ligne hors format, ou
+    aucun modèle gardé, et tout est rejeté. Le nom est l'identifiant (OpenCode n'en donne pas d'autre ici)."""
+    modeles, vus = [], set()
+    for ligne in sortie.split('\n'):
+        ligne = ligne.strip()
+        if not ligne: continue
+        if not OPENCODE_LIGNE.fullmatch(ligne): return None
+        if OPENCODE_ID.fullmatch(ligne) and ligne not in vus: vus.add(ligne); modeles.append(dict(id=ligne, name=ligne))
+    return modeles[:OPENCODE_CATALOGUE_MAX] or None
+
+
+def opencode_args_catalogue(chemin):
+    """Les arguments pour lister les modèles d'OpenCode sans démarrer son service de fond : ['models', '--standalone'] si
+    son aide cite --standalone (OpenCode 2 : sans lui, `models` lance le service qui reste), ['models'] si elle cite models
+    sans lui (OpenCode 1, pas de service), None sinon. Seule une aide allée au bout est retenue pour ce processus."""
+    global _OPENCODE_ARGS
+    if _OPENCODE_ARGS is None:
+        try:
+            r = subprocess.run([chemin, 'models', '--help'], stdin=subprocess.DEVNULL, capture_output=True, timeout=10, text=True,
+                               errors='replace', env=env_catalogue_opencode(), start_new_session=True)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+        aide = (r.stdout or '') + '\n' + (r.stderr or '')
+        if r.returncode != 0 or not re.search(r'\bmodels\b', aide): _OPENCODE_ARGS = ()
+        else: _OPENCODE_ARGS = ('models', '--standalone') if '--standalone' in aide else ('models',)
+    return list(_OPENCODE_ARGS) or None
+
+
+def env_catalogue_opencode():
+    # Comme env_unite : ni config de projet, ni ~/.claude ; pas de mise à jour automatique pendant la liste
+    return dict(env_moteur('opencode'), OPENCODE_CONFIG_PROJECT_DISABLE='1', OPENCODE_DISABLE_PROJECT_CONFIG='1',
+                OPENCODE_DISABLE_CLAUDE_CODE='1', OPENCODE_DISABLE_AUTOUPDATE='1')
+
+
 def lancer_catalogue_agy(chemin):
-    """La sortie de `agy models`, ou None : code non nul, délai, sortie trop longue ou illisible. Sans shell, entrée et erreurs
-    fermées, dans son propre groupe, tué au délai ; lecture bornée, jamais d'attente au-delà de AGY_CATALOGUE_DELAI."""
+    return lancer_catalogue([chemin, 'models'], env_catalogue_agy())
+
+
+def lancer_catalogue(argv, env, cwd=None):
+    """La sortie de `agy models` (ou `opencode models`), ou None : code non nul, délai, sortie trop longue ou illisible. Sans
+    shell, entrée et erreurs fermées, dans son propre groupe, tué au délai ; lecture bornée, jamais d'attente au-delà de
+    AGY_CATALOGUE_DELAI."""
     try:
-        p = subprocess.Popen([chemin, 'models'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             start_new_session=True, env=env_catalogue_agy())
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=env, cwd=cwd)
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     fin, morceaux, taille, termine = time.monotonic() + AGY_CATALOGUE_DELAI, [], 0, False
@@ -150,14 +197,14 @@ def lancer_catalogue_agy(chemin):
             if not bloc: break
             taille += len(bloc)
             if taille > AGY_CATALOGUE_SORTIE_MAX:
-                logging.getLogger('nc_engines').warning('Sortie de agy models au format inattendu (trop longue) : la liste actuelle est gardée.')
+                logging.getLogger('nc_engines').warning('Sortie de %s models au format inattendu (trop longue) : la liste actuelle est gardée.', Path(argv[0]).name)
                 return None
             morceaux.append(bloc)
         p.wait(timeout=max(0.1, fin - time.monotonic()))
         termine = True
         return b''.join(morceaux).decode('utf-8') if p.returncode == 0 else None
     except UnicodeDecodeError:
-        logging.getLogger('nc_engines').warning('Sortie de agy models au format inattendu (pas de l\'UTF-8) : la liste actuelle est gardée.')
+        logging.getLogger('nc_engines').warning('Sortie de %s models au format inattendu (pas de l\'UTF-8) : la liste actuelle est gardée.', Path(argv[0]).name)
         return None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
@@ -170,7 +217,7 @@ def lancer_catalogue_agy(chemin):
         p.stdout.close()
 
 
-def lire_cache_agy(path):
+def lire_cache_agy(path, motif=AGY_ID, maxi=AGY_CATALOGUE_MAX):
     """(modèles, date) du cache disque, ou None : absent, lien symbolique, droits trop ouverts, trop gros, ou de forme
     inattendue, entrée par entrée (ces identifiants repartent vers --model : mêmes règles que la sortie d'agy)."""
     try:
@@ -192,10 +239,10 @@ def lire_cache_agy(path):
         return None
     if not math.isfinite(date): return None
     modeles = data.get('modeles')
-    if not isinstance(modeles, list) or not 0 < len(modeles) <= AGY_CATALOGUE_MAX: return None
+    if not isinstance(modeles, list) or not 0 < len(modeles) <= maxi: return None
     propres = []
     for m in modeles:
-        if not isinstance(m, dict) or not isinstance(m.get('id'), str) or not AGY_ID.fullmatch(m['id']): return None
+        if not isinstance(m, dict) or not isinstance(m.get('id'), str) or not motif.fullmatch(m['id']): return None
         nom = m.get('name')
         if not isinstance(nom, str) or not nom or nom_propre(nom) != nom: return None
         propres.append(dict(id=m['id'], name=nom))
@@ -864,6 +911,12 @@ class Engines:
         self.agy_verrou = threading.Lock()
         cache = lire_cache_agy(self.agy_catalogue)
         if cache: self.agy_models, self.agy_lu = cache
+        # Catalogue d'OpenCode : même mécanisme (disque, relu en fond après 6 h, un seul fil), liste vide tant que rien n'est lu
+        self.oc_catalogue = self.path.with_name('.nc-jarvis-opencode-models.json')
+        self.oc_models, self.oc_lu, self.oc_essai = [], 0.0, None
+        self.oc_verrou = threading.Lock()
+        cache = lire_cache_agy(self.oc_catalogue, OPENCODE_ID, OPENCODE_CATALOGUE_MAX)
+        if cache: self.oc_models, self.oc_lu = cache
         self.lock = asyncio.Lock()
         self.agy_en_cours = 0  # requêtes AGY en vol : chaque PC a sa session, l'upstream a ses propres verrous
         initial=os.getenv('NC_JARVIS_ENGINE','agy')
@@ -956,6 +1009,7 @@ class Engines:
     def models(self, engine=None):
         engine = engine or self.state['engine']
         if engine == 'agy': return self.agy_models
+        if engine == 'opencode': return self.oc_models
         if engine == 'codex':
             path = Path.home()/'.codex/models_cache.json'
             if path.is_file() and path.stat().st_size < 8*1024*1024:
@@ -981,6 +1035,45 @@ class Engines:
             self.agy_verrou.release()
             return False
         return True
+
+    def rafraichir_opencode(self):
+        """Comme rafraichir_agy pour `opencode models` : en fond, liste de plus de 6 h seulement, rien si l'IA est coupée ou
+        OpenCode absent ; jamais au démarrage du runner (seulement quand une page demande le catalogue)."""
+        if 0 <= time.time() - self.oc_lu < AGY_CATALOGUE_TTL: return False
+        if self.oc_essai is not None and time.monotonic() - self.oc_essai < AGY_CATALOGUE_REESSAI: return False
+        if ia_coupee(): return False
+        chemin = executable('opencode')
+        if not chemin or not self.oc_verrou.acquire(blocking=False): return False
+        self.oc_essai = time.monotonic()
+        try:
+            threading.Thread(target=self._rafraichir_opencode, args=(chemin,), name='nc-opencode-modeles', daemon=True).start()
+        except RuntimeError:
+            self.oc_verrou.release()
+            return False
+        return True
+
+    def _rafraichir_opencode(self, chemin):
+        try:
+            args = opencode_args_catalogue(chemin)
+            if not args or ia_coupee(): return
+            with tempfile.TemporaryDirectory(prefix='nc-jarvis-opencode-') as vide:   # aucun projet autour
+                sortie = lancer_catalogue([chemin] + args, env_catalogue_opencode(), cwd=vide)
+            modeles = lire_catalogue_opencode(sortie) if sortie else None
+            if not modeles:
+                if sortie and sortie.strip():
+                    logging.getLogger('nc_engines').warning('Sortie de opencode models au format inattendu : la liste actuelle est gardée.')
+                return
+            self.oc_models, self.oc_lu = modeles, time.time()
+            atomique(self.oc_catalogue, dict(t=self.oc_lu, modeles=modeles))
+        except Exception as e:
+            logging.getLogger('nc_engines').warning('Catalogue opencode non relu (%s).', type(e).__name__)
+        finally:
+            self.oc_verrou.release()
+
+    def rafraichir_catalogues(self):
+        """Ce que le runner appelle quand l'île ou nc-jarvis demande le catalogue (/nc/engines)."""
+        a = self.rafraichir_agy()
+        return self.rafraichir_opencode() or a
 
     def catalogue_au_demarrage(self):
         """Une fois au démarrage, seulement sans aucune liste du compte ; ensuite, quand le catalogue est demandé."""
@@ -1029,8 +1122,8 @@ class Engines:
 
     def snapshot(self, session_key=None):
         return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
-            permission_modes=modes_permis(k),catalogue_compte=k=='agy' and bool(self.agy_lu),
-            catalogue_en_cours=k=='agy' and self.agy_verrou.locked(),
+            permission_modes=modes_permis(k),catalogue_compte=bool(self.agy_lu) if k=='agy' else bool(self.oc_lu) if k=='opencode' else False,
+            catalogue_en_cours=self.agy_verrou.locked() if k=='agy' else self.oc_verrou.locked() if k=='opencode' else False,
             efforts=((['low','medium','high'] + (['xhigh'] if any(isinstance(m, dict) and str(m.get('id')).endswith('-xhigh') for m in self.models('agy')) else [])) if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
             shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
