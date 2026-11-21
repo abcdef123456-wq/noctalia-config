@@ -143,7 +143,7 @@ function nc.mode_jeu()
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
     local q = nc.guillemets
     -- « Ne pas déranger » d'avant le jeu (oui/non), noté une seule fois : l'île muette ne laisse rien, donc on coupe comme avant
-    local dnd = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-dnd"
+    local dnd = q((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-dnd")     -- entre guillemets pour sh
     local appli = q(nc.t("Mode jeu", "Game Mode"))
     if actif then
         hl.exec_cmd("[ -e " .. dnd .. " ] || { e=$(timeout 2 qs -c nc-ile ipc call ile concentrationEtat 2>/dev/null) && [ -n \"$e\" ] && echo \"$e\" > " .. dnd .. "; };"
