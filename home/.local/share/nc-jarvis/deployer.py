@@ -76,7 +76,8 @@ VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f117
                      '6041caf630606d3b1b2deb3f3447f839e1637206','ca985cc11a0cf3644088bfc6d1badeeb2ed2417b',
                      'b7828d521c9bcdd284409ae66c927ddf8d907554','36ce1f86a3c40821d6dd387f29dbe6d982d813c1',
                      '8dba70e20a318593d0d0b90fd7d638eb8b3bf56a','caa24ad79e2c0fac94602de517fe94f2cfb0934a',
-                     '22f1bbcff975d1f2d23d28dae3319b7b6b6f097e','d16df9080c6fd9f341978f7cd522c5bfc184d627',REVISION)
+                     '22f1bbcff975d1f2d23d28dae3319b7b6b6f097e','d16df9080c6fd9f341978f7cd522c5bfc184d627',
+                     '2a865e69a6b3dbb91eb1c072f3040e45f77374d5',REVISION)
 # Secrets du cloud : seulement dans gateway/.env. Avec cette clé, le port local du stockage donne les droits
 # d'administration : elle ne doit jamais arriver dans le .env racine ni dans celui du runner (IA).
 GATEWAY_SEUL=('CLOUD_INTERNAL_KEY','CLOUD_INTERNAL_URL','CLOUD_DAV_WRITE')   # CLOUD_DAV_WRITE : jamais activé par nous, gardé tel quel

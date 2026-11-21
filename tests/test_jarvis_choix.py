@@ -441,6 +441,7 @@ class DocAlignee(unittest.TestCase):
         self.assertIn("'caa24ad79e2c0fac94602de517fe94f2cfb0934a'", validees)      # issue #46, manifeste abîmé
         for acceptee in ("22f1bbcff975d1f2d23d28dae3319b7b6b6f097e", "d16df9080c6fd9f341978f7cd522c5bfc184d627"):
             self.assertIn("'" + acceptee + "'", validees)
+        self.assertIn("'2a865e69a6b3dbb91eb1c072f3040e45f77374d5'", validees)      # issue #46, DELETE borné, PUT après authentification
         self.assertNotIn("b8313b1a65f92dca5e3da0d782aabee803590eb2", validees)     # corps non borné avant authentification
         self.assertNotIn("d605b224ee992f6c7fe89eec3b8b49a7f679164e", validees)     # première version du cloud : refusée
         self.assertIn("REVISION", validees)
