@@ -63,6 +63,9 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # 8dba70e (issue #46) : le commit d'un envoi ne refuse plus pour un simple changement du dossier, réduction
 # d'historique sous confirmation, empreintes des dépendances du stockage ; relu, acceptable.
 # caa24ad (issue #46) : manifeste de synchronisation abîmé ignoré, erreur propre de la confirmation ; diff court, relu.
+# 22f1bbc et d16df90 (issue #46) : ramasse-objets qui n'attend plus SQLite, valeurs passées à Compose sans shell,
+# racine du dépôt ajoutée au chemin du runner autonome ; relues, acceptables. b8313b1 (déplacement, suppression récursive,
+# écriture WebDAV) n'est PAS acceptée : corps non borné avant authentification sur DELETE /entries/{id}.
 REVISION='e1448c824b49e2e291be7c8a8cd2acbacf3f3006'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
                      '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
@@ -72,10 +75,11 @@ VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f117
                      '17525afe78e11d4c509daac8bcf4cbb00673cd4a','9617d4b6827b6e4b0467430455ccb5b2189e7af8',
                      '6041caf630606d3b1b2deb3f3447f839e1637206','ca985cc11a0cf3644088bfc6d1badeeb2ed2417b',
                      'b7828d521c9bcdd284409ae66c927ddf8d907554','36ce1f86a3c40821d6dd387f29dbe6d982d813c1',
-                     '8dba70e20a318593d0d0b90fd7d638eb8b3bf56a','caa24ad79e2c0fac94602de517fe94f2cfb0934a',REVISION)
+                     '8dba70e20a318593d0d0b90fd7d638eb8b3bf56a','caa24ad79e2c0fac94602de517fe94f2cfb0934a',
+                     '22f1bbcff975d1f2d23d28dae3319b7b6b6f097e','d16df9080c6fd9f341978f7cd522c5bfc184d627',REVISION)
 # Secrets du cloud : seulement dans gateway/.env. Avec cette clé, le port local du stockage donne les droits
 # d'administration : elle ne doit jamais arriver dans le .env racine ni dans celui du runner (IA).
-GATEWAY_SEUL=('CLOUD_INTERNAL_KEY','CLOUD_INTERNAL_URL')
+GATEWAY_SEUL=('CLOUD_INTERNAL_KEY','CLOUD_INTERNAL_URL','CLOUD_DAV_WRITE')   # CLOUD_DAV_WRITE : jamais activé par nous, gardé tel quel
 
 
 def ask(message, default=False):
