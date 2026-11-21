@@ -1203,16 +1203,24 @@ def cmd_telecharger(a):
             f.seek(deja)
             recu = deja
             try:
-                for bloc in iter(lambda: r.read(BLOC), b""):
+                while True:
+                    try:
+                        bloc = r.read(BLOC)
+                    except (OSError, http.client.HTTPException):
+                        recu = -1
+                        break
+                    if not bloc:
+                        break
                     recu += len(bloc)
                     if recu > e["size"]:
                         break
                     f.write(bloc)
                     evenement(evenement="progression", fichier=str(dest), recu=recu, taille=e["size"])
-            except (OSError, http.client.HTTPException):
-                recu = -1
-            f.flush()
-            os.fsync(f.fileno())
+                f.flush()
+                os.fsync(f.fileno())
+            except OSError as err:          # écriture locale (disque plein, quota) : pas une coupure ; le partiel reste
+                raise Echec(T(f"Disque local : {err.strerror or err}. Libère de la place, puis relance la même commande.",
+                              f"Local disk: {err.strerror or err}. Free some space, then run the same command again."), QUOTA) from None
             if recu < e["size"]:           # coupure (recu = -1 sur une erreur de lecture) : le partiel reste pour reprendre
                 raise Echec(T("Téléchargement interrompu : relance la même commande pour reprendre.",
                               "Download interrupted: run the same command again to resume."), HORS_LIGNE)

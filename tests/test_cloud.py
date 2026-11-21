@@ -1402,6 +1402,25 @@ print(m)
         self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
         self.assertNotIn("interrompu", r.stdout.lower())
 
+    def test_telecharger_disque_plein_code_7(self):
+        self.faux.gestion = True
+        self.associer()
+        eid = self.depot("gros.txt", b"x" * 300000)
+        dest = self.d / "dest"
+        dest.mkdir()
+
+        def limite():
+            import resource
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "telecharger", eid, str(dest)], capture_output=True, text=True,
+                           timeout=60, env=self.env(), stdin=subprocess.DEVNULL, preexec_fn=limite)
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertNotIn("interrompu", r.stdout.lower())
+        self.assertFalse((dest / "gros.txt").exists())
+        self.nc("telecharger", eid, str(dest), code=0)                 # place libérée : la même commande reprend
+        self.assertEqual((dest / "gros.txt").read_bytes(), b"x" * 300000)
+
     def brut(self, *args, env=None):
         return subprocess.run([sys.executable, str(NC_CLOUD), *args], capture_output=True, text=True, timeout=60,
                               env=env or self.env(), stdin=subprocess.DEVNULL)
