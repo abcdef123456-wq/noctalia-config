@@ -40,8 +40,8 @@ case "$1" in
              case "$*" in *--copie*) m=$(cat "@ROOT@/mode-copie" 2>/dev/null)
                if [ "$m" = echec ]; then echo ok > "@ROOT@/mode-copie"
                  printf '%s\n' '{"evenement": "erreur", "code": 12, "erreur": "copie", "message": "Copie locale impossible."}'; exit 12; fi
-               if [ "$m" = ok ]; then printf '%s\n' '[{"copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "taille": 12, "date": 1, "remettable": true}, {"copie": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "nom": "cle.pem", "taille": 3, "date": 1, "remettable": false}, {"copie": "../x", "nom": "y"}]' > "@ROOT@/corbeille.json"
-                 printf '%s\n' '{"evenement": "resultat", "etat": "supprime", "copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "message": "Fichier supprimé. Une copie reste sur ce PC 24 h."}'; exit 0; fi ;;
+               if [ "$m" = ok ]; then printf '%s\n' '[{"copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "taille": 12, "date": 1, "remettable": true, "etat": "supprime"}, {"copie": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "nom": "cle.pem", "taille": 3, "date": 1, "remettable": false, "etat": "supprime"}, {"copie": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "nom": "vieux.txt", "taille": 1, "date": 1, "remettable": false, "etat": "refuse"}, {"copie": "../x", "nom": "y"}]' > "@ROOT@/corbeille.json"
+                 printf '{"evenement": "resultat", "etat": "supprime", "copie": "cccccccccccccccccccccccccccccccc", "copie_etat": "%s", "nom": "note.txt", "message": "Fichier supprimé. Une copie reste sur ce PC 24 h."}\n' "$(cat "@ROOT@/copie-etat" 2>/dev/null || echo supprime)"; exit 0; fi ;;
              esac
              printf '%s\n' '{"evenement": "resultat", "message": "Supprimé."}' ;;
   corbeille) case "$*" in *--racine*) ;; *--remettre=*) if [ -f "@ROOT@/parent-absent" ]; then rm -f "@ROOT@/parent-absent"
@@ -189,7 +189,7 @@ class Sources(unittest.TestCase):
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
     def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False,
-               etat_echec_apres=None, mode_copie=None, parent_absent=False):
+               etat_echec_apres=None, mode_copie=None, parent_absent=False, copie_etat=None):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -214,6 +214,8 @@ class HorsEcran(unittest.TestCase):
                 (root / "mode-copie").write_text(mode_copie)
             if parent_absent:
                 (root / "parent-absent").write_text("1")
+            if copie_etat:
+                (root / "copie-etat").write_text(copie_etat)
             if etat_echec_apres is not None:
                 (root / "etat-echec-apres").write_text(str(etat_echec_apres))
             if associe:
@@ -309,6 +311,23 @@ class HorsEcran(unittest.TestCase):
                              "--json lister -- root", "--json lister -- dddddddddddddddddddddddddddddddd", "--json dossier -- dddddddddddddddddddddddddddddddd Vacances", "--json lister -- dddddddddddddddddddddddddddddddd",
                              "--json lister -- root"])
 
+    def test_corbeille_suppression_non_confirmee_pas_d_annuler(self):
+        F = "f" * 32
+        self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length) return
+                var corps = fen.contentItem
+                if (etape === 1) { if (!CloudEtat.lu) return
+                    CloudEtat.choisir(CloudEtat.entrees[1]); trouver(corps, "nc-cloud-supprimer-@F@").clic(); etape++; return }
+                if (etape === 2) { trouver(corps, "nc-cloud-confirmer-@F@").clic(); etape++; return }
+                if (etape === 3) {
+                    verifier(CloudEtat.message.indexOf("Une copie reste") >= 0, "résultat reçu : " + CloudEtat.message)
+                    verifier(CloudEtat.annulable === null && !vu(corps, "nc-cloud-annulable"), "pas d'Annuler sans suppression confirmée")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        '''.replace("@F@", F), reglages={"CLOUD_JARVIS": "oui"}, mode_copie="ok", copie_etat="doute")
+
     def test_corbeille_copie_ratee_sans_copie_puis_annuler(self):
         F = "f" * 32
         j = self.lancer(self.OUVRIR + '''
@@ -353,7 +372,13 @@ class HorsEcran(unittest.TestCase):
                     confirmer().clic(); etape++; return }
                 if (etape === 6) {
                     verifier(vu(corps, "nc-cloud-annulable") && CloudEtat.annulable.nom === "note.txt" && CloudEtat.annulable.remettable, "Supprimé · Annuler")
-                    verifier(vu(corps, "nc-cloud-corbeille") && CloudEtat.corbeille.length === 2 && vu(corps, "nc-cloud-remettre-@C@"), "corbeille : deux copies sûres")
+                    verifier(vu(corps, "nc-cloud-corbeille") && CloudEtat.corbeille.length === 3 && vu(corps, "nc-cloud-remettre-@C@"), "corbeille : trois copies sûres")
+                    // Refusée : grisée, son état dit, pas de « Remettre » (le fichier est toujours sur le serveur)
+                    verifier(!vu(corps, "nc-cloud-remettre-@A@") && vu(corps, "nc-cloud-ouvrir-copie-@A@")
+                             && vu(corps, "nc-cloud-etat-copie-@A@") && trouver(corps, "nc-cloud-etat-copie-@A@").parent.opacity < 1
+                             && trouver(corps, "nc-cloud-etat-copie-@C@").parent.opacity === 1
+                             && trouver(corps, "nc-cloud-etat-copie-@A@").text.indexOf("toujours sur le serveur") >= 0
+                             && !vu(corps, "nc-cloud-etat-copie-@C@"), "copie refusée")
                     // Un nom de fichier de secrets : pas de « Remettre », son dossier à ouvrir
                     verifier(!vu(corps, "nc-cloud-remettre-@E@") && vu(corps, "nc-cloud-ouvrir-copie-@E@") && !vu(corps, "nc-cloud-ouvrir-copie-@C@"), "copie non remettable")
                     // Le dossier montre « contenu » : le nom d'origine est dit
@@ -383,8 +408,8 @@ class HorsEcran(unittest.TestCase):
                     verifier(CloudEtat.annulable === null && !vu(corps, "nc-cloud-annulable"), "bandeau parti seul")
                     console.log("FINI"); Qt.exit(0) }
             } }
-        '''.replace("@F@", F).replace("@C@", "c" * 32).replace("@E@", "e" * 32), reglages={"CLOUD_JARVIS": "oui"}, mode_copie="echec",
-           parent_absent=True)
+        '''.replace("@F@", F).replace("@C@", "c" * 32).replace("@E@", "e" * 32).replace("@A@", "a" * 32), reglages={"CLOUD_JARVIS": "oui"},
+           mode_copie="echec", parent_absent=True)
         ouvert = [x for x in j if x.startswith("xdg-open ")]               # le dossier de la copie, en argv, une seule fois
         self.assertEqual(len(ouvert), 1, j)
         self.assertTrue(ouvert[0].endswith("/nc-cloud/corbeille/" + "e" * 32), ouvert)

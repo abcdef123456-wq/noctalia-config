@@ -456,11 +456,13 @@ Singleton {
         else if (d.evenement === "corbeille") {
             corbeille = (Array.isArray(d.copies) ? d.copies : []).filter(x => x && /^[0-9a-f]{32}$/.test(String(x.copie)) && typeof x.nom === "string")
                           .slice(0, 50).map(x => ({ copie: x.copie, nom: x.nom.slice(0, 240), taille: Number(x.taille) || 0,
-                                                    remettable: x.remettable === true }))
+                                                    remettable: x.remettable === true, abimee: x.abimee === true,
+                                                    etat: ["doute", "supprime", "refuse"].indexOf(x.etat) >= 0 ? x.etat : "doute" }))
         }
         else if (typeof d.message === "string" && d.message !== "") {
             message = d.message.slice(0, 300); erreur = ""
-            if (q === "supprimer" && d.etat === "supprime" && /^[0-9a-f]{32}$/.test(String(d.copie))) {
+            // « Annuler » seulement pour une suppression confirmée ; une copie « doute » ou « refuse » reste dans la corbeille
+            if (q === "supprimer" && d.etat === "supprime" && d.copie_etat === "supprime" && /^[0-9a-f]{32}$/.test(String(d.copie))) {
                 var sup = entrees.find(x => x.id === enCours.id)
                 annulable = { copie: d.copie, nom: String(d.nom || "").slice(0, 240), remettable: !(sup && sup.sensible === true) }
                 finAnnulable.restart()

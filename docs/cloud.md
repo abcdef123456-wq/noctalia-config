@@ -118,32 +118,41 @@ ce PC (`~/.cache/nc-cloud/corbeille/`, dossiers 0700, fichiers 0600).
 - Juste avant la suppression, elle est vérifiée encore (taille et empreinte).
 - Si la copie échoue, rien n'est supprimé, et la question revient : « supprimer quand même, sans copie ? ».
 
-La règle : une copie n'est effacée que dans trois cas.
+La règle : une copie posée dans la corbeille n'est effacée que dans trois cas, jamais par la réponse du serveur à une
+suppression.
 
 - La remise a réussi.
 - Elle a plus de 24 h. Une date dans le futur, après une horloge reculée, ne l'efface jamais ; à plus d'une heure dans le
-  futur, elle est ramenée une fois à maintenant (la copie vit encore 24 h).
-- Le serveur a refusé net avant toute suppression : réponse 4xx complète, sauf 404 et 410, et seulement au premier
-  essai. Si un essai précédent a pu atteindre le serveur, seuls les 24 h ou la remise l'effacent.
+  futur, elle est ramenée une fois à maintenant.
+- Il faut de la place (voir les limites).
 
-Dans le doute (coupure, erreur 5xx, arrêt, sortie fermée), elle reste.
+Chaque copie a un état :
+
+- « supprimé » : le serveur a confirmé la suppression ;
+- « suppression non confirmée » : réponse perdue, erreur 5xx, arrêt, ou refus après un essai précédent ;
+- « non supprimé » : le serveur a refusé dès le premier essai ; le fichier est toujours sur le serveur.
 
 Aucune suppression avec copie ne part sans une copie vérifiée de ce fichier, à cette révision. Une suppression rejouée
-reprend la copie déjà faite, revérifiée ; sinon le fichier est copié à nouveau. S'il n'est déjà plus sur le serveur, la
-réponse le dit : « Déjà supprimé du serveur », avec « une copie reste sur ce PC » ou « aucune copie sur ce PC ». Deux
-suppressions du même fichier en même temps ne gardent qu'une copie.
+reprend la copie déjà faite, revérifiée, et ses 24 h repartent de maintenant. Une copie abîmée est marquée, plus jamais
+reprise, et une copie neuve est téléchargée. Si la révision demandée n'est plus celle du serveur, rien n'est fait. Si le
+fichier est introuvable sur le serveur, la réponse le dit : « cette commande n'a rien supprimé », avec « une copie reste
+sur ce PC » (code 0) ou « aucune copie sur ce PC » (une erreur). Deux suppressions du même fichier en même temps ne
+gardent qu'une copie.
 
 Dans le panneau :
 
-- Après la suppression, un bandeau « Supprimé : nom · Annuler » reste 20 secondes.
+- Après une suppression confirmée, un bandeau « Supprimé : nom · Annuler » reste 20 secondes.
 - Une ligne « Corbeille locale » reste tant que la copie existe : « Remettre » redépose le fichier dans son dossier
   d'origine, par les contrôles d'un dépôt. Il reçoit un nouvel identifiant, et l'historique de ses versions est perdu.
 - Si le dossier d'origine n'existe plus : « Remettre à la racine ».
+- Une copie dont la suppression n'est pas confirmée le dit sur sa ligne. Une copie « non supprimé » est grisée, sans
+  « Remettre » (le fichier est toujours sur le serveur), avec « Ouvrir le dossier ».
 
 Les limites :
 
-- Toutes les copies, et celles en cours de préparation, tiennent dans 500 Mio. La place n'est faite qu'après une copie réussie, et jamais aux dépens d'une
-  copie de moins de 10 minutes.
+- Toutes les copies, et celles en cours de préparation (le partiel compris), tiennent dans 500 Mio. La place n'est faite
+  qu'après une copie réussie, jamais aux dépens d'une copie de moins de 10 minutes. Les copies « non supprimé » et les
+  abîmées partent d'abord, puis les plus vieilles.
 - Un fichier de plus de 500 Mio n'a pas de copie : la question le dit avant.
 - Un nom de fichier de secrets (`.pem`, `.key`, `.env`, `id_rsa`…) se supprime avec une copie, mais ne se remet pas
   depuis l'île. La question le dit avant, et la corbeille propose « Ouvrir le dossier » ; le fichier y porte le nom

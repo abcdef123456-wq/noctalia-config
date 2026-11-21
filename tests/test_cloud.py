@@ -196,6 +196,8 @@ class Gestion(http.server.BaseHTTPRequestHandler):
         if refus_del:                                          # un DELETE refusé AVANT toute suppression (503, ou un intermédiaire)
             f.pannes.discard(refus_del)
             st = int(refus_del[7:])
+            if st == 409:                                      # b8313b1 : clé déjà utilisée pour une autre demande
+                return self.erreur(409, "idempotency_conflict")
             return self.repondre(st, {"detail": "Service Unavailable"}) if st >= 500 else self.repondre(st, corps=b"<html>refus</html>")
         u = urllib.parse.urlsplit(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
@@ -1681,9 +1683,11 @@ elif sys.argv[1] == "clear":
         self.assertEqual((r.lignes[-1]["etat"], r.lignes[-1]["copie"]), ("supprime", c))
         self.assertEqual(self.copies(), [c])
         self.assertEqual((self.corbeille() / c / "contenu").read_bytes(), donnees)
-        # Refus net (412) : rien n'est supprimé, la copie de cette demande est effacée
+        # Une révision qui n'est plus celle du serveur : ni copie, ni DELETE (P1)
         eid2 = self.deposer_de_plus("g2.bin")
+        n = len([x for x in self.faux.journal if x[0] == "DELETE"])
         self.nc("supprimer", eid2, "--revision", "ancienne", "--dossier", "root", "--copie", code=6)
+        self.assertEqual(len([x for x in self.faux.journal if x[0] == "DELETE"]), n)
         self.assertIn(eid2, self.faux.entries)
         self.assertEqual(self.copies(), [c])
         # Sortie fermée (le lecteur est parti) après la suppression : la copie reste
@@ -1725,17 +1729,28 @@ elif sys.argv[1] == "clear":
         self.faux.pannes.add("perdre_suppression")
         self.nc("supprimer", eid, "--revision", rev, code=3)                              # fait, réponse perdue, sans copie
         self.assertNotIn(eid, self.faux.entries)
-        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
-        self.assertEqual(r.lignes[-1]["etat"], "supprime")
-        self.assertIsNone(r.lignes[-1]["copie"])                                        # jamais « supprimé » tout court
-        self.assertIn("Déjà supprimé du serveur. Aucune copie sur ce PC.", r.lignes[-1]["message"])
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=1)   # sans copie : pas de code 0
+        self.assertEqual(r.lignes[-1]["erreur"], "introuvable")
+        self.assertIn("Introuvable sur le serveur : cette commande n'a rien supprimé. Aucune copie sur ce PC.", r.lignes[-1]["message"])
         self.assertFalse([x for x in r.lignes if x.get("erreur") == "copie"])
+
+    def note_de(self, eid):
+        for d in self.corbeille().glob("[0-9a-f]*"):
+            with contextlib.suppress(OSError, ValueError):
+                m = json.loads((d / "copie.json").read_text())
+                if m.get("id") == eid and not m.get("abimee"):
+                    return m
+        return None
+
+    def etat_de(self, eid):
+        return (self.note_de(eid) or {}).get("etat")
 
     def copie_de(self, eid):
         """Le contenu de la copie de ce fichier sur ce PC (None s'il n'y en a pas)."""
         for d in self.corbeille().glob("[0-9a-f]*"):
             with contextlib.suppress(OSError, ValueError):
-                if json.loads((d / "copie.json").read_text()).get("id") == eid:
+                m = json.loads((d / "copie.json").read_text())
+                if m.get("id") == eid and not m.get("abimee"):
                     return (d / "contenu").read_bytes()
         return None
 
@@ -1807,15 +1822,58 @@ elif sys.argv[1] == "clear":
                 self.assertNotEqual(r.returncode, 0)
                 self.assertEqual(self.copie_de(x), contenu)
                 self.assertIn("la copie est gardée", r.lignes[-1]["message"])
-        # Le contrôle : sans essai précédent, le même refus net efface la copie (rien n'a été supprimé)
+                self.assertEqual(self.etat_de(x), "doute")
+        # 4xx au tout premier essai : la copie RESTE (aucune issue d'un DELETE ne l'efface), marquée « refuse »
         x = self.deposer_de_plus("net.bin")
+        contenu = self.faux.contenus[x]
         self.faux.pannes.add("delete_412")
-        self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=6)
+        r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=6)
+        self.assertIn("toujours sur le serveur", r.lignes[-1]["message"])
         self.assertIn(x, self.faux.entries)
-        self.assertIsNone(self.copie_de(x))
+        self.assertEqual(self.copie_de(x), contenu)
+        self.assertEqual(self.etat_de(x), "refuse")
+        c = next(m for m in self.nc("corbeille", code=0).lignes[-1]["copies"] if m["etat"] == "refuse")
+        self.assertFalse(c["remettable"])
+        self.assertEqual(self.nc("corbeille", "--remettre", c["copie"], code=1).lignes[-1]["erreur"], "refuse")
+        # P4 : réponse perdue, puis DEUX rejeux en 401 : la copie est là, « doute »
+        x = self.deposer_de_plus("p4.bin")
+        contenu = self.faux.contenus[x]
+        rev = self.faux.entries[x]["revision"]
+        self.faux.pannes.add("perdre_suppression")
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        for _ in range(2):
+            self.faux.pannes.add("delete_401")
+            self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie")
+        self.assertEqual(self.copie_de(x), contenu)
+        self.assertEqual(self.etat_de(x), "doute")
+
+    def test_corbeille_rejeu_meme_cle_meme_route_et_409(self):
+        """b8313b1 : le rejeu reprend la clé et la route du manifeste ; un 409 idempotency_conflict ne touche pas la copie."""
+        self.associer()
+        self.faux.suppression = True
+        x = self.deposer_de_plus("cle.bin")
+        contenu = self.faux.contenus[x]
+        rev = self.faux.entries[x]["revision"]
+        self.faux.pannes.add("delete_503")
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        self.faux.pannes.add("delete_409")
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.copie_de(x), contenu)
+        self.assertEqual(self.etat_de(x), "doute")
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        essais = [(c[1], c[2].get("Idempotency-Key"), c[2].get("If-Match")) for c in self.faux.journal if c[0] == "DELETE"]
+        self.assertEqual(len(essais), 3)
+        self.assertEqual(essais[0], essais[1])                                          # le rejeu : même route, même clé, même If-Match
+        # Après un 4xx, muter efface le manifeste (comme pour toute mutation) : une clé neuve, la même route ; sur un
+        # fichier déjà supprimé, elle recevrait un 404 (« introuvable, une copie reste »), jamais une perte
+        self.assertEqual((essais[2][0], essais[2][2]), (essais[0][0], essais[0][2]))
+        self.assertNotEqual(essais[2][1], essais[0][1])
+        self.assertEqual(self.etat_de(x), "supprime")
 
     def test_corbeille_copie_reprise_reverifiee_avant_le_delete(self):
-        """N4 : au rejeu, la copie reprise est revérifiée ; abîmée, aucun DELETE."""
+        """N4 et P2 : au rejeu, la copie reprise est revérifiée ; abîmée, elle est marquée (plus jamais reprise, ni
+        remettable) et une copie neuve est téléchargée avant le DELETE."""
         self.associer()
         self.faux.suppression = True
         x = self.deposer_de_plus("abime.bin")
@@ -1823,12 +1881,25 @@ elif sys.argv[1] == "clear":
         self.faux.pannes.add("delete_503")
         self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
         d = next(d for d in self.corbeille().glob("[0-9a-f]*") if json.loads((d / "copie.json").read_text())["id"] == x)
+        contenu = self.faux.contenus[x]
         (d / "contenu").write_bytes(b"Z" * 10)
-        n = len([c for c in self.faux.journal if c[0] == "DELETE"])
-        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=1)
-        self.assertEqual(r.lignes[-1]["erreur"], "copie")
-        self.assertIn(x, self.faux.entries)
-        self.assertEqual(len([c for c in self.faux.journal if c[0] == "DELETE"]), n)
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertNotEqual(r.lignes[-1]["copie"], d.name)
+        self.assertNotIn(x, self.faux.entries)
+        self.assertEqual(self.copie_de(x), contenu)
+        self.assertEqual(self.etat_de(x), "supprime")
+        abimee = next(c for c in self.nc("corbeille", code=0).lignes[-1]["copies"] if c["copie"] == d.name)
+        self.assertEqual((abimee["abimee"], abimee["remettable"]), (True, False))
+        # Une copie marquée abîmée n'est plus jamais reprise, même si son contenu redevient juste
+        y = self.deposer_de_plus("abime2.bin")
+        rev = self.faux.entries[y]["revision"]
+        self.faux.pannes.add("delete_503")
+        self.nc("supprimer", y, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        d = next(d for d in self.corbeille().glob("[0-9a-f]*") if json.loads((d / "copie.json").read_text())["id"] == y)
+        m = json.loads((d / "copie.json").read_text())
+        (d / "copie.json").write_text(json.dumps(dict(m, abimee=True)))
+        r = self.nc("supprimer", y, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertNotEqual(r.lignes[-1]["copie"], d.name)
 
     def test_corbeille_supprime_ailleurs_entre_deux_essais_la_copie_reste(self):
         """Copie gardée après un 503, le fichier est supprimé ailleurs, puis le rejeu : 404 au DELETE, « déjà supprimé »."""
@@ -1841,9 +1912,110 @@ elif sys.argv[1] == "clear":
         self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
         del self.faux.entries[x]
         r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
-        self.assertIn("Déjà supprimé du serveur. Une copie reste sur ce PC 24 h.", r.lignes[-1]["message"])
+        self.assertIn("Introuvable sur le serveur : cette commande n'a rien supprimé. Une copie reste sur ce PC 24 h.", r.lignes[-1]["message"])
+        self.assertEqual(self.etat_de(x), "doute")                                        # rien de confirmé
         self.assertRegex(str(r.lignes[-1]["copie"]), "^[0-9a-f]{32}$")
         self.assertEqual(self.copie_de(x), contenu)
+
+    def test_corbeille_reprise_juste_avant_24_h_repart_de_maintenant(self):
+        """P5 : une copie reprise à 24 h moins 4 s vit encore 24 h après la suppression."""
+        self.associer()
+        self.faux.suppression = True
+        x = self.deposer_de_plus("p5.bin")
+        rev = self.faux.entries[x]["revision"]
+        self.faux.pannes.add("delete_503")
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        d = next(d for d in self.corbeille().glob("[0-9a-f]*") if json.loads((d / "copie.json").read_text())["id"] == x)
+        m = json.loads((d / "copie.json").read_text())
+        m["date"] = time.time() - 24 * 3600 + 4
+        (d / "copie.json").write_text(json.dumps(m))
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertLess(abs(self.note_de(x)["date"] - time.time()), 30)
+        self.assertEqual(self.etat_de(x), "supprime")
+        # Rejoué après la réussite : introuvable, et « supprime » ne redescend jamais vers « doute »
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertIn("n'a rien supprimé", r.lignes[-1]["message"])
+        self.assertEqual(self.etat_de(x), "supprime")
+
+    def test_corbeille_deux_essais_l_un_refuse_l_autre_reussi(self):
+        """Deux processus partagent une copie ; pendant notre DELETE, l'autre réussit (« supprime » reste) ou reste dans
+        le doute (« doute » reste) ; notre 4xx ne fait jamais « refuse »."""
+        self.associer()
+        self.faux.suppression = True
+        for autre_issue in ("reussi", "doute"):
+            with self.subTest(autre_issue):
+                self.un_essai_partage(autre_issue)
+
+    def un_essai_partage(self, autre_issue):
+        x = self.deposer_de_plus(f"deux-{autre_issue}.bin")
+        rev = self.faux.entries[x]["revision"]
+        env = self.env()
+        ancien = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            spec = importlib.util.spec_from_loader("ncc_deux", importlib.machinery.SourceFileLoader("ncc_deux", str(NC_CLOUD)))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            autre = []
+
+            def puis_refus(a, s, features, rev_, copie):           # l'autre processus essaie pendant notre DELETE
+                if autre_issue == "doute":
+                    self.faux.pannes.add("delete_503")
+                autre.append(subprocess.run([sys.executable, str(NC_CLOUD), "--json", "supprimer", x, "--revision", rev, "--dossier",
+                                             "root", "--copie"], capture_output=True, text=True, env=env, timeout=60))
+                e = mod.Echec("refusé", mod.CONFLIT, "version_conflict")
+                e.statut_serveur = 412
+                raise e
+            mod.supprimer_sur_serveur = puis_refus
+            sortie = io.StringIO()
+            with contextlib.redirect_stdout(sortie):
+                code = mod.main(["--json", "supprimer", x, "--revision", rev, "--dossier", "root", "--copie"])
+        finally:
+            os.environ.clear()
+            os.environ.update(ancien)
+        self.sorties.append(sortie.getvalue() + autre[0].stdout + autre[0].stderr)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("toujours sur le serveur", sortie.getvalue())
+        if autre_issue == "reussi":
+            self.assertEqual(autre[0].returncode, 0, autre[0].stdout + autre[0].stderr)
+            self.assertNotIn(x, self.faux.entries)
+        self.assertEqual(self.etat_de(x), "supprime" if autre_issue == "reussi" else "doute")
+        self.assertEqual(len([c for c in self.corbeille().glob("[0-9a-f]*") if json.loads((c / "copie.json").read_text())["id"] == x]), 1)
+
+    def test_corbeille_les_copies_refusees_cedent_la_place_en_premier(self):
+        self.associer()
+        self.faux.suppression = True
+        x = self.deposer_de_plus("place2.bin")
+        vieille = self.fausse_copie("b" * 32, 7200, 250 * 1024 ** 2, etat="supprime")
+        plus_vieille = self.fausse_copie("c" * 32, 9000, 250 * 1024 ** 2, etat="supprime")
+        refusee = self.fausse_copie("a" * 32, 3600, 250 * 1024 ** 2, etat="refuse")
+        # 750 Mio pour 500 : deux copies partent. Sans l'ordre, ce seraient les deux plus vieilles (et la refusée resterait)
+        self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=0)
+        self.assertFalse(refusee.exists())
+        self.assertFalse(plus_vieille.exists())
+        self.assertTrue(vieille.exists())
+
+    def test_corbeille_introuvable_sans_copie_n_est_pas_un_succes(self):
+        """P3 : un 404 (d'un intermédiaire, ou d'un autre dossier) sur l'entrée : « n'a rien supprimé », code d'erreur."""
+        self.associer()
+        self.faux.suppression = True
+        self.faux.par_id = True                                                           # GET /entries/{id}
+        x = self.deposer_de_plus("p3.bin")
+        vrai = Gestion.traiter
+
+        def proxy(self_, m):
+            if m == "GET" and "/entries/" + x in self_.path:
+                return self_.repondre(404, corps=b"<html>404</html>")
+            return vrai(self_, m)
+        Gestion.traiter = proxy
+        try:
+            r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=1)
+        finally:
+            Gestion.traiter = vrai
+        self.assertEqual(r.lignes[-1]["erreur"], "introuvable")
+        self.assertIn("n'a rien supprimé", r.lignes[-1]["message"])
+        self.assertIn(x, self.faux.entries)
 
     def test_corbeille_date_lointaine_ramenee_une_fois(self):
         """N5 : plus d'une heure dans le futur, la date devient maintenant (la copie vit encore 24 h, puis expire)."""
@@ -1882,7 +2054,7 @@ elif sys.argv[1] == "clear":
         x = self.deposer_de_plus("place.bin")
         a = self.corbeille() / ".attente" / ("e" * 32)
         a.mkdir(parents=True)
-        with open(a / "contenu", "wb") as f:
+        with open(a / "contenu.partiel", "wb") as f:                                  # en cours : le partiel compte (P6)
             f.truncate(500 * 1024 ** 2 - 5)
         r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=1)
         self.assertEqual(r.lignes[-1]["erreur"], "copie")

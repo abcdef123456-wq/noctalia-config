@@ -184,6 +184,17 @@ FloatingWindow {
                                 required property var modelData
                                 readonly property string court: modelData.nom.length > 28 ? modelData.nom.slice(0, 27) + "…" : modelData.nom
                                 spacing: 6
+                                // Refusée : le fichier est toujours sur le serveur, la ligne est grisée
+                                opacity: modelData.etat === "refuse" ? 0.55 : 1
+                                Texte {
+                                    visible: copieLigne.modelData.etat !== "supprime" || copieLigne.modelData.abimee
+                                    objectName: "nc-cloud-etat-copie-" + copieLigne.modelData.copie
+                                    anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 11
+                                    text: copieLigne.court + " : " + (copieLigne.modelData.abimee ? Reglages.t("copie abîmée", "damaged copy")
+                                          : copieLigne.modelData.etat === "refuse" ? Reglages.t("non supprimé, le fichier est toujours sur le serveur",
+                                                                                                  "not deleted, the file is still on the server")
+                                          : Reglages.t("suppression non confirmée", "deletion not confirmed"))
+                                }
                                 CloudBouton {
                                     visible: copieLigne.modelData.remettable
                                     objectName: "nc-cloud-remettre-" + copieLigne.modelData.copie
