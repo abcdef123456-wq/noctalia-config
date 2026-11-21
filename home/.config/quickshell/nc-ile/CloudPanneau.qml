@@ -120,6 +120,34 @@ FloatingWindow {
                     }
                 }
 
+                // Récents : les 5 derniers fichiers envoyés ou ouverts par CE PC (liste locale) ; un clic l'ouvre
+                Column {
+                    objectName: "nc-cloud-recents"
+                    visible: cloud.pret && CloudEtat.recents.length > 0
+                    width: parent.width; spacing: 6
+                    Item {
+                        width: parent.width; height: 26
+                        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Récents", "Recent"); secondaire: true; font.pixelSize: 12 }
+                        CloudBouton { objectName: "nc-cloud-effacer-recents"; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                      texte: Reglages.t("Effacer les récents", "Clear recent"); enabled: !CloudEtat.occupe
+                                      onClic: CloudEtat.effacerRecents() }
+                    }
+                    Flow {
+                        width: parent.width; spacing: 6
+                        Repeater {
+                            model: CloudEtat.recents
+                            CloudBouton {
+                                required property var modelData
+                                required property int index
+                                objectName: "nc-cloud-recent-" + index
+                                texte: modelData.nom.length > 32 ? modelData.nom.slice(0, 31) + "…" : modelData.nom
+                                enabled: !CloudEtat.occupe
+                                onClic: CloudEtat.ouvrirRecent(index)
+                            }
+                        }
+                    }
+                }
+
                 // Coupé ou non associé : on dit quoi faire, rien n'est lancé
                 Texte {
                     objectName: "nc-cloud-coupe"

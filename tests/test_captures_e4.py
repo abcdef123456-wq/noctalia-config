@@ -96,9 +96,10 @@ class EnvoyerAuCloud(Base):
         self.assertFalse([x for x in j if x.startswith("nc-cloud")])          # rien ne part sans le clic
 
     def test_envoi_resultats_et_capture_locale_intacte(self):
-        for code, mot in ((0, "Capture envoyée au cloud"), (3, "Cloud injoignable"), (6, "même nom"), (7, "Quota plein")):
+        for code, mot, message in ((0, "Capture envoyée au cloud", ""), (3, "Cloud injoignable", ""), (6, "même nom", ""),
+                                   (7, "Quota plein", "Quota plein\033[31m"), (1, "-- Capture non envoyée --version", "--version")):
             with self.subTest(code=code):
-                j = self.capturer("CLOUD_JARVIS=oui\n", choix="cloud", code=code, message="Quota plein\033[31m")
+                j = self.capturer("CLOUD_JARVIS=oui\n", choix="cloud", code=code, message=message)
                 envoi = [x for x in j if x.startswith("nc-cloud")]
                 self.assertEqual(len(envoi), 1, j)
                 self.assertRegex(envoi[0], r"^nc-cloud deposer --racine Captures -- /.+/Pictures/Captures/.+\.png$")

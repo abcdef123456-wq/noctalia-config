@@ -43,6 +43,8 @@ case "$1" in
   deplacer) printf '%s\n' '{"evenement": "resultat", "message": "Déplacé."}' ;;
   ouvrir) printf '%s\n' '{"evenement": "resultat", "message": "Ouvert : note.txt"}' ;;
   dossier) printf '%s\n' '{"evenement": "dossier", "message": "Dossier créé."}' ;;
+  recents) case "$*" in *--effacer*) rm -f "@ROOT@/recents.json" ;; esac
+           printf '{"evenement": "recents", "recents": %s}\n' "$(cat "@ROOT@/recents.json" 2>/dev/null || echo '[]')" ;;
   note) cat > "@ROOT@/note-entree"
         printf '%s\n' '{"evenement": "note", "nom": "Idee 2026-11-21 08h15.txt", "message": "Note enregistrée dans Notes : Idee 2026-11-21 08h15.txt."}' ;;
   deposer) apres=0
@@ -173,7 +175,7 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False):
+    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -191,6 +193,8 @@ class HorsEcran(unittest.TestCase):
             (root / "racine.json").write_text(json.dumps(page or PAGE_RACINE) + "\n")
             if sous:
                 (root / "sous.json").write_text(json.dumps(sous) + "\n")
+            if recents is not None:
+                (root / "recents.json").write_text(json.dumps(recents))
             if associe:
                 (root / "state/nc-cloud").mkdir(parents=True)
                 (root / "state/nc-cloud/appareil.json").write_text('{"device_id": "d", "name": "pc"}')
@@ -205,7 +209,8 @@ class HorsEcran(unittest.TestCase):
             self.assertIn("FINI", sortie, sortie)
             n = Path(root) / "note-entree"
             self.note_recue = n.read_text(encoding="utf-8") if n.exists() else None
-            return H.journal(root).splitlines()
+            # La relecture locale des récents (à chaque ouverture, envoi, ouverture de fichier) n'est montrée qu'à qui la demande
+            return [x for x in H.journal(root).splitlines() if voir_recents or x != "--json recents"]
 
     OUVRIR = '''
         function ouvrir() { var c = Qt.createComponent("CloudPanneau.qml"); verifier(c.status === Component.Ready, c.errorString())
@@ -562,6 +567,44 @@ class HorsEcran(unittest.TestCase):
         self.assertIn("--json note", j)
         self.assertFalse([x for x in j if "secrète" in x or "7Qz" in x], j)                       # jamais dans argv
         self.assertEqual(self.note_recue, "Idée secrète\nmot-de-passe-7Qz")
+
+    def test_recents_ouvrir_effacer_et_ids_surs(self):
+        r = [{"id": "a" * 32, "nom": "Rapport final.pdf", "dossier": "d" * 32},
+             {"id": "--json", "nom": "piège", "dossier": "root"},                    # id hostile : écarté
+             {"id": "b" * 32, "nom": "x", "dossier": "../.."},                        # dossier hostile : écarté
+             {"id": "c" * 32, "nom": "<b>gras</b>" + "n" * 60, "dossier": "root"}]
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) {
+                    verifier(vu(corps, "nc-cloud-recents") && CloudEtat.recents.length === 2, "deux récents sûrs : " + CloudEtat.recents.length)
+                    verifier(trouver(corps, "nc-cloud-recent-0").texte === "Rapport final.pdf", "nom")
+                    verifier(trouver(corps, "nc-cloud-recent-1").texte.length === 32, "nom long coupé")
+                    trouver(corps, "nc-cloud-recent-0").clic(); etape++; return }
+                if (etape === 2) { trouver(corps, "nc-cloud-effacer-recents").clic(); etape++; return }
+                if (etape === 3) {
+                    verifier(CloudEtat.recents.length === 0 && !vu(corps, "nc-cloud-recents"), "effacés : bande cachée")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, recents=r, voir_recents=True)
+        self.assertEqual(j[:4], ["--json etat", "--json lister -- root", "--json reprendre", "--json recents"])
+        i = j.index("--json ouvrir --dossier=" + "d" * 32 + " -- " + "a" * 32)
+        self.assertEqual(j[i + 1], "--json recents")                                   # relue après l'ouverture
+        self.assertIn("--json recents --effacer", j)
+        self.assertFalse([x for x in j if "piège" in x or "--json ouvrir --dossier=../" in x])
+
+    def test_recents_eteints_sans_cloud(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                ticks++; if (ticks < 5) return
+                verifier(!vu(fen.contentItem, "nc-cloud-recents"), "rien sans le cloud")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "non"}, recents=[{"id": "a" * 32, "nom": "x", "dossier": "root"}], voir_recents=True)
+        self.assertEqual(j, [])
 
     def test_coupure_reprendre_fermer_puis_annuler(self):
         j = self.lancer(self.OUVRIR + '''

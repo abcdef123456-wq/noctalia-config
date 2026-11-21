@@ -9,6 +9,7 @@
   nc-cloud dossier PARENT NOM       crée un dossier
   nc-cloud deposer [--dans ID | --racine NOM] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
   nc-cloud examiner FICHIER…        taille, caché ou refusé, de chaque fichier (rien ne part)
+  nc-cloud recents [--effacer]      les 5 derniers fichiers envoyés ou ouverts par ce PC (liste locale)
   nc-cloud note                     le texte de l'entrée standard devient un .txt du dossier « Notes » (64 Kio au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
   nc-cloud telecharger ID [DEST] [--dossier PARENT] [--remplacer]   (DEST : le dossier Téléchargements par défaut)
@@ -677,6 +678,7 @@ def cmd_dissocier(a):
     demonter_et_oublier(srv)
     jeton_effacer(app["device_id"])
     effacer(APPAREIL)
+    effacer(RECENTS)
     for d in (ENVOIS, SUPPRESSIONS):
         for m in manifestes(d):
             effacer(m[0])
@@ -853,6 +855,8 @@ class Envoi:
     def succes(self, r):
         e = entree_propre(r.get("result")) or {}
         effacer(self.cm)
+        if e.get("kind", "file") == "file":
+            recent_noter(e.get("id"), e.get("name", self.nom), e.get("parent") or self.m.get("parent_id"))
         dire(T(f"Envoyé : {self.nom} → {e.get('name', self.nom)}.", f"Uploaded: {self.nom} → {e.get('name', self.nom)}."),
              evenement="resultat", fichier=self.m["source"], etat="publie", entree=e)
         return OK
@@ -1224,6 +1228,52 @@ def cmd_note(a):
     return code
 
 
+# ── Récents : liste locale, jamais demandée au serveur ──────────────────────────────────────────────────────────────────
+RECENTS_MAX = 5
+ID_SUR = re.compile(r"[A-Za-z0-9_]{1,128}")   # ni tiret (lu comme une option), ni caractère spécial
+
+
+def recents_lire():
+    try:
+        d = lire_json(RECENTS) or {}
+    except Echec:
+        return []                              # illisible : comme vide (elle se réécrit au prochain envoi)
+    l = d.get("recents") if isinstance(d.get("recents"), list) else []
+    return [x for x in l if isinstance(x, dict) and isinstance(x.get("id"), str) and ID_SUR.fullmatch(x["id"])
+            and isinstance(x.get("nom"), str) and isinstance(x.get("dossier"), str)
+            and (x["dossier"] == "root" or ID_SUR.fullmatch(x["dossier"]))][:RECENTS_MAX]
+
+
+def recents_ecrire(l):
+    with contextlib.suppress(Echec, OSError):  # une liste de confort : jamais une raison d'échouer
+        ecrire_json(RECENTS, {"version": 1, "recents": l[:RECENTS_MAX]})
+
+
+def recent_noter(ident, nom, dossier):
+    if isinstance(ident, str) and ID_SUR.fullmatch(ident) and isinstance(dossier, str) and (dossier == "root" or ID_SUR.fullmatch(dossier)):
+        recents_ecrire([{"id": ident, "nom": propre(nom, 240), "dossier": dossier}] + [x for x in recents_lire() if x["id"] != ident])
+
+
+def recent_oublier(ident):
+    l = recents_lire()
+    if any(x["id"] == ident for x in l):
+        recents_ecrire([x for x in l if x["id"] != ident])
+
+
+def cmd_recents(a):
+    if a.effacer:
+        effacer(RECENTS)
+    l = recents_lire()
+    if JSON_SORTIE:
+        evenement(evenement="recents", recents=l)
+    else:
+        for x in l:
+            print(f"{x['nom']}  ({x['id']})")
+        if not l:
+            print(T("Aucun fichier récent.", "No recent file."))
+    return OK
+
+
 def cmd_examiner(a):
     """Pour le panneau, avant « Envoyer ici » : chemin, taille, caché ou refusé, de chaque fichier. Rien ne part."""
     l = []
@@ -1348,7 +1398,7 @@ def trouver(s, ident, parent):
         if e.get("id") == ident:
             return e
     raise Echec(T("Fichier introuvable dans ce dossier (--dossier PARENT si ce n'est pas la racine).",
-                  "File not found in this folder (--dossier PARENT if it is not the root)."))
+                  "File not found in this folder (--dossier PARENT if it is not the root)."), erreur="introuvable")
 
 
 def ouvrir_partiel(partiel, reprise):
@@ -1396,7 +1446,7 @@ def entree(s, ident, parent, features):
             e = s.json("GET", "/entries/" + segment(ident))[1].get("entry")
         except Echec as x:
             if x.statut == 404:
-                raise Echec(T("Fichier introuvable (supprimé ?).", "File not found (deleted?).")) from None
+                raise Echec(T("Fichier introuvable (supprimé ?).", "File not found (deleted?)."), erreur="introuvable") from None
             raise
         if not isinstance(e, dict) or e.get("id") != ident:
             raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
@@ -1916,7 +1966,12 @@ def cmd_ouvrir(a):
     annonce lui-même : elle protège d'une coupure ou d'une corruption, pas d'un serveur hostile ; c'est la liste blanche qui
     protège. La copie n'est jamais renvoyée au serveur."""
     s = Session()
-    e = entree(s, a.id, a.dossier or "root", capacites_session(s))
+    try:
+        e = entree(s, a.id, a.dossier or "root", capacites_session(s))
+    except Echec as x:
+        if x.erreur == "introuvable":
+            recent_oublier(a.id)               # une entrée qui n'existe plus quitte les récents au premier refus
+        raise
     taille = entier_borne(e.get("size"))
     if e.get("kind") != "file" or taille is None or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
         raise Echec(T("Ce n'est pas un fichier à ouvrir.", "This is not a file to open."))
@@ -1997,6 +2052,7 @@ def cmd_ouvrir(a):
         raise
     argv = [ouvreur, str(final)] if ouvreur.endswith("xdg-open") else [ouvreur, "open", str(final)]
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    recent_noter(e["id"], e.get("name"), e.get("parent") or a.dossier or "root")
     dire(T(f"Ouvert : {final.name}", f"Opened: {final.name}"), evenement="resultat", etat="ouvert", fichier=str(final))
     return OK
 
@@ -2008,7 +2064,8 @@ def cmd_ouvrir(a):
 FAVORI = "Cloud JARVIS"
 MONTAGE_DELAI = 120
 MONTAGE_SORTIE = 15             # après l'annulation : si GVfs ne rappelle jamais, la boucle sort quand même
-MONTAGE = ETAT / "montage.json" # l'adresse montée : demonter la retrouve sans refaire la sonde (une autre peut répondre)
+MONTAGE = ETAT / "montage.json"
+RECENTS = ETAT / "recents.json"   # les 5 derniers fichiers envoyés ou ouverts par CE PC : ids et noms seulement, 0600 # l'adresse montée : demonter la retrouve sans refaire la sonde (une autre peut répondre)
 # Les paquets qui donnent gi avec Gio, puis le moteur WebDAV de GVfs (lus dans les dépôts de chaque distribution)
 PAQUETS_FICHIERS = {"arch": ("python-gobject glib2", "gvfs-dnssd"),
                     "debian": ("python3-gi gir1.2-glib-2.0", "gvfs-backends"),
@@ -2690,6 +2747,9 @@ def analyseur():
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_deposer)
     sous.add_parser("note").set_defaults(f=cmd_note)
+    x = sous.add_parser("recents", aliases=["recent"])
+    x.add_argument("--effacer", "--clear", action="store_true")
+    x.set_defaults(f=cmd_recents)
     x = sous.add_parser("examiner", aliases=["inspect"])
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_examiner)

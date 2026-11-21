@@ -52,6 +52,7 @@ Singleton {
     readonly property int maxFichiers: 8
     property var recus: []                         // chemins locaux reçus, 8 au plus : rien ne part avant « Envoyer ici »
     property string recusRefus: ""                 // ce qui a été écarté (pas un fichier local, au-delà de 8)
+    property var recents: []                       // les 5 derniers fichiers envoyés ou ouverts par CE PC (nc-cloud recents, local)
     property var examen: ({})                      // chemin -> {taille, cache, refus} : nc-cloud examiner, avant « Envoyer ici »
     readonly property bool examenPret: recus.length > 0 && recus.every(f => examen[f] !== undefined)
     readonly property bool recusCaches: recus.some(f => examen[f] && examen[f].cache && !examen[f].refus)
@@ -216,6 +217,7 @@ Singleton {
         if (!panneauOuvert || suites.some(t => t.quoi === "page")) return
         lancer(["etat"], "etat")
         lister(false)
+        lancer(["recents"], "recents")
     }
     function finLot(code) {
         var lot = lotEnCours
@@ -258,7 +260,15 @@ Singleton {
         lancer(["etat"], "etat")
         lister(false)
         lancer(["reprendre"], "envois")          // la liste des envois interrompus : locale, sans réseau
+        lancer(["recents"], "recents")           // les récents de ce PC : locaux, sans réseau
     }
+    function ouvrirRecent(i) {
+        var r = recents[i]
+        if (!r || occupe) return
+        lancer(["ouvrir", "--dossier=" + r.dossier, "--", r.id], "ouvrir", r.id)
+        lancer(["recents"], "recents")           // relue après : une entrée qui n'existe plus en sort
+    }
+    function effacerRecents() { lancer(["recents", "--effacer"], "recents") }
 
     function lancer(args, quoi, id) {
         if (!actif || !associe) return
@@ -284,7 +294,7 @@ Singleton {
     function ouvrirEntree(e) {
         if (!e || occupe) return
         if (e.kind === "directory") aller(e)
-        else if (e.kind === "file") lancer(["ouvrir", "--dossier=" + dossier, "--", e.id], "ouvrir", e.id)
+        else if (e.kind === "file") { lancer(["ouvrir", "--dossier=" + dossier, "--", e.id], "ouvrir", e.id); lancer(["recents"], "recents") }
     }
     function creerFichier(nom) {
         nom = String(nom || "").trim()
@@ -358,6 +368,12 @@ Singleton {
             var n = x => typeof x === "number" && x >= 0 ? x : -1
             if (n(d.files) >= 0 && n(d.directories) >= 0 && n(d.size) >= 0 && /^[0-9a-f]{64}$/.test(String(d.tree_revision)))
                 apercu = { id: enCours.id, files: d.files, directories: d.directories, size: d.size, tree: d.tree_revision }
+        }
+        else if (d.evenement === "recents" && q === "recents") {
+            // Ids sûrs seulement (32 hex ; le dossier : root ou 32 hex), nom en texte brut, 5 au plus
+            recents = (Array.isArray(d.recents) ? d.recents : []).filter(x => x && /^[0-9a-f]{32}$/.test(String(x.id))
+                          && /^(root|[0-9a-f]{32})$/.test(String(x.dossier)) && typeof x.nom === "string").slice(0, 5)
+                          .map(x => ({ id: x.id, nom: x.nom.slice(0, 240), dossier: x.dossier }))
         }
         else if (d.evenement === "examen" && q === "examen") {
             var ex = ({})

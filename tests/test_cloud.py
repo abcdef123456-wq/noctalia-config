@@ -1684,6 +1684,41 @@ print(m)
         self.nc("ouvrir", autre, code=0)
         self.assertFalse(copie.exists())
 
+    def test_recents_envoyes_et_ouverts_locaux_bornes_et_effacables(self):
+        self.associer()
+        self.ouvreur()
+        ids = [self.nc("deposer", str(self.fichier(f"f{i}.txt", b"x")), code=0).lignes[-1]["entree"]["id"] for i in range(7)]
+        f = self.home / ".local/state/nc-cloud/recents.json"
+        self.assertEqual(stat.S_IMODE(f.stat().st_mode), 0o600)
+        l = self.nc("recents", code=0).lignes[-1]["recents"]
+        self.assertEqual([x["nom"] for x in l], ["f6.txt", "f5.txt", "f4.txt", "f3.txt", "f2.txt"])     # 5 au plus, le plus récent d'abord
+        self.assertEqual({k for x in l for k in x}, {"id", "nom", "dossier"})                       # ids et noms seulement
+        self.assertEqual({x["dossier"] for x in l}, {"root"})
+        n = len(self.faux.journal)
+        self.nc("recents", code=0)
+        self.assertEqual(len(self.faux.journal), n)                                                   # aucun appel au serveur
+        # Ouvert : remonte en tête
+        self.assertEqual(len(json.loads(f.read_text())["recents"]), 5)                              # bornée dans le fichier aussi
+        self.nc("ouvrir", ids[3], code=0)
+        l = self.nc("recents", code=0).lignes[-1]["recents"]
+        self.assertEqual(l[0]["id"], ids[3])
+        self.assertEqual([x["id"] for x in json.loads(f.read_text())["recents"]], [ids[3], ids[6], ids[5], ids[4], ids[2]])   # sans doublon
+        # Supprimé ailleurs : disparaît au premier refus
+        del self.faux.entries[ids[4]]
+        r = self.nc("ouvrir", ids[4])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn(ids[4], [x["id"] for x in self.nc("recents", code=0).lignes[-1]["recents"]])
+        # Liste abîmée : comme vide, sans erreur
+        f.write_text("{")
+        self.assertEqual(self.nc("recents", code=0).lignes[-1]["recents"], [])
+        self.nc("deposer", str(self.fichier("g.txt", b"y")), code=0)
+        self.assertEqual(len(self.nc("recents", code=0).lignes[-1]["recents"]), 1)
+        self.assertEqual(self.nc("recents", "--effacer", code=0).lignes[-1]["recents"], [])
+        self.assertFalse(f.exists())
+        self.nc("deposer", str(self.fichier("h.txt", b"z")), code=0)
+        self.nc("dissocier", code=0)
+        self.assertFalse(f.exists())                                                                  # dissocier oublie aussi
+
     def test_ouvrir_empreinte_fausse_ou_nom_hostile(self):
         appels = self.ouvreur()
         a, b, f = self.arbre_de_test()

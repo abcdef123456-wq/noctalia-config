@@ -237,7 +237,7 @@ envoyer_cloud() {
        corps="$(t "Une capture du même nom est déjà dans « Captures » : rien n'est remplacé." "A screenshot with the same name is already in “Captures”: nothing replaced.")" ;;
     *) titre="$(t "Capture non envoyée" "Screenshot not sent")"; corps="$(printf '%s\n' "$sortie" | tail -n 1 | tr -d '\000-\037' | cut -c1-300)" ;;
   esac
-  notify-send -a "$(t "Capture d'écran" "Screenshot")" "$titre" "$corps" 2>/dev/null
+  notify-send -a "$(t "Capture d'écran" "Screenshot")" -- "$titre" "$corps" 2>/dev/null      # « -- » : un corps en « - » n'est pas une option
 }
 (
   action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" "${annoter[@]}" -A "supprimer=$(t "Supprimer" "Delete")" \
