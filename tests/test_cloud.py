@@ -1311,6 +1311,7 @@ t = b.lstrip()[:200].lower()
 if b.startswith(b'\\x89PNG\\r\\n\\x1a\\n'): m = 'image/png'
 elif b.startswith(b'%PDF-'): m = 'application/pdf'
 elif b.startswith(b'FXM-TEST'): m = 'video/x-javafx'
+elif b.startswith(b'MPEG-TEST'): m = 'video/mpeg'
 elif b.startswith(b'\\x30\\x26\\xb2\\x75\\x8e\\x66\\xcf\\x11'): m = 'video/x-ms-asf'
 elif b.startswith(b'PK'): m = 'application/java-archive' if b'META-INF/MANIFEST.MF' in b else 'application/zip'
 elif t.startswith((b'<!doctype html', b'<html')): m = 'text/html'
@@ -1378,8 +1379,8 @@ print(m)
         self.faux.entries[eid]["name"] = nom
         return eid
 
-    def contenus_ouvrir(self):
-        return [("vacances.png", jar(True), False), ("vacances.png", jar(False), False), ("vacances.png", HTML, False),
+    def contenus_ouvrir(self, vrai=False):
+        cas = [("vacances.png", jar(True), False), ("vacances.png", jar(False), False), ("vacances.png", HTML, False),
                 ("page.html", HTML, False), ("dessin.svg", SVG, False), ("photo.jpg", b"bonjour\n", False),
                 ("photo.png", b"#!/bin/sh\nid\n", False), ("script.sh", b"echo\n", False), ("x.jar", jar(True), False),
                 ("lanceur", b"[Desktop Entry]\nExec=id\n", False), ("notes", b"bonjour\n", False),
@@ -1387,13 +1388,16 @@ print(m)
                 ("http:x.png;.jar", PNG, False), ("ab:x.html#.txt", b"bonjour\n", False), ("liste.m3u", b"#EXTM3U\nhttp://exemple.invalid/a.mp3\n", False),
                 ("x.txt.gz", b"bonjour\n", False), ("photo.PNG", PNG, True), ("film.wmv", ASF, True),
                 ("scene.fxm", b"FXM-TEST\n", False),     # famille vidéo par le nom et le contenu, mais hors de la table : refusé
-                ("é" * 126 + ".md", b"bonjour\n", True),
+                ("é" * 126 + ".md", b"bonjour\n", True)]
+        if not vrai:     # le faux file seulement : .mpg (4) devient .mpeg (5), le radical est raccourci sous 255 octets
+            cas.append(("é" * 125 + "a.mpg", b"MPEG-TEST\n", True))
+        return cas + [
                 ("image.png", PNG, True), ("doc.pdf", PDF, True), ("note.txt", b"bonjour\n", True), ("liste.csv", b"a,b\n1,2\n", True)]
 
-    def verifier_liste_blanche(self, appels):
+    def verifier_liste_blanche(self, appels, vrai=False):
         self.faux.gestion = True
         self.associer()
-        for nom, contenu, ouvert in self.contenus_ouvrir():
+        for nom, contenu, ouvert in self.contenus_ouvrir(vrai):
             with self.subTest(nom=nom, debut=contenu[:12]):
                 eid = self.depot(nom, contenu)
                 r = self.nc("ouvrir", eid, code=0 if ouvert else 1)
@@ -1403,12 +1407,14 @@ print(m)
         vus = sorted(Path(x).name for x in self.attendre(appels).split())
         # La copie porte NOTRE extension, tirée du contenu : photo.PNG devient photo.png ; un CSV que file lit comme texte
         # simple devient liste.txt
-        self.assertEqual(len(vus), sum(1 for _, _, o in self.contenus_ouvrir() if o), vus)
+        self.assertEqual(len(vus), sum(1 for _, _, o in self.contenus_ouvrir(vrai) if o), vus)
         self.assertIn("photo.png", vus)
         self.assertIn("film.wmv", vus, "un vrai .wmv (video/x-ms-asf) ne devient pas .asx")
-        long = next(v for v in vus if v.startswith("é"))
-        self.assertTrue(long.endswith((".txt", ".md")) and len(long.encode()) <= 255, long)
-        self.assertTrue({"image.png", "doc.pdf", "note.txt"} <= set(vus) and ({"liste.csv", "liste.txt"} & set(vus)), vus)
+        self.assertIn("é" * 126 + ".md", vus)
+        if not vrai:
+            long = next(v for v in vus if v.endswith(".mpeg"))
+            self.assertLessEqual(len(long.encode()), 255, long)
+        self.assertTrue({"image.png", "doc.pdf", "note.txt", "liste.csv"} <= set(vus), vus)     # liste.csv : text/plain ou text/csv
         restes = [p.name for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file()]
         self.assertEqual(sorted(restes), vus, "aucune copie refusée ne reste")
 
@@ -1419,7 +1425,7 @@ print(m)
     def test_ouvrir_liste_blanche_avec_le_vrai_file(self):
         appels = self.ouvreur(file=False)
         (self.bin / "file").symlink_to(shutil.which("file"))
-        self.verifier_liste_blanche(appels)
+        self.verifier_liste_blanche(appels, vrai=True)
 
     def test_ouvrir_sans_file_trop_gros_ou_nom_trop_long(self):
         appels = self.ouvreur(file=False)
@@ -1614,6 +1620,24 @@ class DansLeProcessus(unittest.TestCase):
             with self.assertRaises(m.Echec):
                 m.dossier_prive(h / ".cache/nc-cloud/ouverts/ghi")
         self.assertFalse((h / ".cache/nc-cloud/ouverts/ghi").exists())
+
+    def test_table_des_types_figee_sans_le_systeme(self):
+        """Ni mimetypes ni /etc/mime.types : la même décision sur les 4 distributions (openSUSE n'a pas .csv en text/csv)."""
+        self.assertNotRegex(NC_CLOUD.read_text(), r"^import mimetypes|mimetypes\.")
+        m = self.charger("http://127.0.0.1:9")
+        for nom, attendu in (("liste.csv", "text/csv"), ("a.b.PNG", "image/png"), ("x.jpeg", "image/jpeg"), ("film.wmv", "video/x-ms-wmv"),
+                             ("notes", None), ("x.txt.gz", None), ("x.html", None), ("x.svg", None), ("x.m3u", None), ("x.asx", None)):
+            self.assertEqual(m.type_du_nom(nom), attendu, nom)
+        for ext in m.OUVRIR_EXTENSIONS.values():          # toute extension de sortie se relit dans la même famille
+            self.assertIn(ext, m.OUVRIR_PAR_EXTENSION, ext)
+        for t, ext in m.OUVRIR_EXTENSIONS.items():
+            self.assertEqual(m.famille_sure(m.OUVRIR_PAR_EXTENSION[ext]), m.famille_sure(t), t)
+        cas = (("liste.csv", "text/plain", ".csv"), ("liste.csv", "text/csv", ".csv"), ("notes.md", "text/plain", ".md"),
+               ("photo.PNG", "image/png", ".png"), ("film.wmv", "video/x-ms-asf", ".wmv"), ("x.png", "text/plain", None),
+               ("scene.mp4", "video/x-javafx", None), ("x.txt", "text/html", None), ("x.csv", "image/png", None))
+        for nom, contenu, attendu in cas:
+            with mock.patch.object(m, "type_par_contenu", return_value=contenu):
+                self.assertEqual(m.extension_sure("/inutile", nom), attendu, (nom, contenu))
 
     def test_nettoyer_ouverts_sans_suivre_un_lien_meme_en_course(self):
         m = self.charger("http://127.0.0.1:9")

@@ -35,7 +35,6 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
-import mimetypes
 import os
 from pathlib import Path
 import re
@@ -1541,7 +1540,7 @@ def cmd_creer(a):
                 d.rmdir()
 
 
-# Ouvrir : une LISTE BLANCHE de types, lus par le contenu (file) ET par le nom (mimetypes), de la même famille. xdg-open
+# Ouvrir : une LISTE BLANCHE de types, lus par le contenu (file) ET par le nom (OUVRIR_PAR_EXTENSION), de la même famille. xdg-open
 # hors d'un bureau connu choisit l'application d'après le contenu : une archive JAR nommée .png partirait à java -jar
 OUVRIR_TEXTES = {"text/plain", "text/markdown", "text/csv"}
 OUVRIR_BUREAU = {"application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.spreadsheet",
@@ -1553,7 +1552,7 @@ OUVRIR_MAX = 200 * 1024 * 1024
 # Jamais d'ici : SVG (scripts) et listes de lecture (le lecteur irait chercher des adresses)
 OUVRIR_REFUSES = {"image/svg+xml", "audio/x-mpegurl", "audio/mpegurl", "audio/x-scpls", "audio/scpls", "application/xspf+xml",
                   "application/vnd.apple.mpegurl"}
-# L'extension de la copie, fixée par NOUS d'après le type lu dans le contenu, par cette table SEULE : mimetypes donnerait
+# L'extension de la copie, fixée par NOUS d'après le type lu dans le contenu, par cette table SEULE : le module mimetypes donnerait
 # .asx, .wvx, .ram (listes d'adresses) ou .fxm (JavaFX) pour des types « vidéo » ou « audio ». Type hors table : refusé
 OUVRIR_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "image/bmp": ".bmp",
                      "image/x-ms-bmp": ".bmp", "image/tiff": ".tiff", "image/avif": ".avif", "image/heic": ".heic", "image/heif": ".heif",
@@ -1598,11 +1597,30 @@ def type_par_contenu(chemin):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+# Le type attendu d'après l'extension du nom : une table À NOUS, la même sur les 4 distributions. Le module mimetypes lit
+# /etc/mime.types et ses voisins, qui diffèrent (.csv n'y est pas text/csv sur openSUSE) : jamais utilisé pour décider
+OUVRIR_PAR_EXTENSION = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg",
+                        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".tif": "image/tiff",
+                        ".tiff": "image/tiff", ".avif": "image/avif", ".heic": "image/heic", ".heif": "image/heif",
+                        ".jxl": "image/jxl", ".ico": "image/vnd.microsoft.icon",
+                        ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
+                        ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac", ".weba": "audio/webm",
+                        ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska",
+                        ".mov": "video/quicktime", ".avi": "video/x-msvideo", ".mpeg": "video/mpeg", ".mpg": "video/mpeg",
+                        ".ogv": "video/ogg", ".3gp": "video/3gpp", ".wmv": "video/x-ms-wmv",
+                        ".txt": "text/plain", ".md": "text/markdown", ".markdown": "text/markdown", ".csv": "text/csv",
+                        ".pdf": "application/pdf",
+                        ".odt": "application/vnd.oasis.opendocument.text", ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+                        ".odp": "application/vnd.oasis.opendocument.presentation",
+                        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+
+
 def type_du_nom(nom):
-    """Le type tiré de la SEULE dernière extension du nom (os.path.splitext), jamais de guess_type sur le nom entier, qui
-    lit « schéma:… » comme une adresse ; None sans extension (« notes » : refusé)."""
-    ext = os.path.splitext(nom)[1].lower()
-    return mimetypes.guess_type("fichier" + ext, strict=False)[0] if re.fullmatch(r"\.[a-z0-9]{1,10}", ext) else None
+    """Le type tiré de la SEULE dernière extension du nom (os.path.splitext), par notre table ; None sans extension
+    (« notes » : refusé) ou hors table."""
+    return OUVRIR_PAR_EXTENSION.get(os.path.splitext(nom)[1].lower())
 
 
 def extension_sure(chemin, nom):
@@ -1612,8 +1630,10 @@ def extension_sure(chemin, nom):
     par_nom = famille_sure(type_du_nom(nom))
     if par_nom is None or famille_sure(contenu) != par_nom:
         return None
-    ext = OUVRIR_EXTENSIONS.get(contenu)
-    return ext if ext and re.fullmatch(r"\.[a-z0-9]{1,10}", ext) and famille_sure(type_du_nom("fichier" + ext)) == par_nom else None
+    # Texte simple : txt, md et csv sont une seule famille (file dit text/plain ou text/csv pour un CSV) ; l'extension du
+    # nom, déjà dans notre table, est gardée (liste.csv reste liste.csv). Le reste : l'extension tirée du contenu
+    # (test_table_des_types_figee_sans_le_systeme : chaque extension de la table est de la famille de son type)
+    return os.path.splitext(nom)[1].lower() if par_nom == "texte" else OUVRIR_EXTENSIONS.get(contenu)
 
 
 def nettoyer_ouverts(base):

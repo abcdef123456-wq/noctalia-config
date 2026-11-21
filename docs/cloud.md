@@ -179,8 +179,9 @@ Ogg, FLAC, MP4, WebM, MKV, WMV…, jamais SVG ni listes de lecture), texte simpl
 contenu (`file`) et dans le nom, et les deux doivent être de la même famille : une archive nommée `.png` ne s'ouvre pas,
 car hors d'un bureau connu `xdg-open` choisit l'application d'après le contenu. Seule la dernière extension du nom
 compte (`x.txt.gz` : refusé), un nom sans extension ou avec `:`, `#`, `?` ou `;` est refusé, et la copie ne garde jamais
-le nom du serveur tel quel : son extension est fixée d'après le contenu (`photo.PNG` devient `photo.png`, un CSV lu
-comme texte simple devient `.txt`). Tout le reste (HTML, SVG, XML, listes de lecture, scripts, lanceurs, archives…), un
+le nom du serveur tel quel : son extension est fixée d'après le contenu (`photo.PNG` devient `photo.png` ; un texte simple garde
+sa propre extension `.txt`, `.md` ou `.csv`). Les types attendus d'après le nom sont dans une table de nc-cloud, la même
+sur les 4 distributions (jamais `/etc/mime.types`, qui change de l'une à l'autre). Tout le reste (HTML, SVG, XML, listes de lecture, scripts, lanceurs, archives…), un
 fichier de plus de 200 Mio, ou un PC sans `file` : « télécharge-le d'abord ».
 L'empreinte vérifiée est celle que le serveur annonce lui-même : elle protège d'une coupure ou d'une corruption, pas
 d'un serveur hostile ; c'est la liste des types qui protège. La copie n'est jamais renvoyée au serveur ; les copies de
