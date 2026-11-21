@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# nc-pipette : choisis un point de l'écran à la souris ; sa couleur (#rrggbb) est copiée, prête à coller.   Super + Maj + C
+# Échap annule sans rien dire. Le presse-papiers de l'île montre un échantillon de la couleur copiée.
+set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+
+dire() { notify-send -a "$(t "Pipette" "Color Picker")" -i "${ICONE:-dialog-warning}" "$@" 2>/dev/null || true; }
+# Même nom de paquet sur Arch, Debian, Fedora et openSUSE
+manque() {   # manque OUTIL PAQUET
+  dire "$(t "$1 n'est pas installé" "$1 is not installed")" "$(t "Installe le paquet « $2 » (nc-maj l'installe)." "Install the package “$2” (nc-update installs it).")"
+}
+command -v grim >/dev/null 2>&1 || { manque grim grim; exit 1; }
+command -v slurp >/dev/null 2>&1 || { manque slurp slurp; exit 1; }
+command -v wl-copy >/dev/null 2>&1 || { manque wl-copy wl-clipboard; exit 1; }
+
+# La vue des fenêtres (nc-ile), si elle est ouverte, lâche clavier et souris le temps du choix (comme nc-capture)
+vue=0
+hyprctl layers -j 2>/dev/null | grep -q '"namespace": *"nc-vue"' && vue=1
+[ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause true >/dev/null 2>&1
+point="$(slurp -p 2>/dev/null)"; rc=$?
+[ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause false >/dev/null 2>&1
+[ "$rc" = 0 ] && [ -n "$point" ] || exit 0     # Échap : rien
+
+# slurp -p rend déjà « x,y 1x1 ». Un PPM 1x1 fait toujours 11 octets d'en-tête puis 3 octets de couleur : tout autre chose est refusé
+hex="$(grim -g "$point" -t ppm - 2>/dev/null | od -An -v -tx1 | tr -d ' \n')"
+case "$hex" in
+  50360a3120310a3235350a[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) dire "$(t "Couleur illisible" "Could not read the color")" "$(t "La capture du point a échoué." "Capturing the point failed.")"; exit 1 ;;
+esac
+couleur="#${hex#50360a3120310a3235350a}"
+printf '%s' "$couleur" | wl-copy
+ICONE=color-select dire "$couleur" "$(t "Couleur copiée." "Color copied.")"

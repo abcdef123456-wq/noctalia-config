@@ -146,6 +146,7 @@ touche(SUPER .. " + SHIFT + code:28", cmd("~/.local/bin/nc-capture texte"), trad
 touche("CTRL + Print",          cmd("~/.local/bin/nc-capture ecran --dans 5"), trad("Applis et barre|Capture de l'écran dans 5 secondes", "Screenshot of the screen in 5 seconds"))
 touche("CTRL + SHIFT + Print",  cmd("~/.local/bin/nc-capture annuler"), trad("Applis et barre|Annuler la capture en attente", "Cancel the pending screenshot"))
 -- Vidéo de l'écran (nc-video) : zone ou écran entier ; le même raccourci (ou un clic sur l'île) arrête
+touche(SUPER .. " + SHIFT + code:54", cmd("~/.local/bin/nc-pipette"), trad("Applis et barre|Pipette : copier la couleur d'un point de l'écran", "Color picker: copy the color of a point on the screen"))
 touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), trad("Applis et barre|Enregistrer l'écran en vidéo (démarrer / arrêter)", "Record the screen (start / stop)"))
 
 -- ── Fenêtres ─────────────────────────────────────────────────────────────────

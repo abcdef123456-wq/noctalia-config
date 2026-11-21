@@ -37,6 +37,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Maj` + `T` | Copier le texte d'une zone de l'écran (image, vidéo, PDF scanné) |
 | `Ctrl` + `Impr. écran` | Capture de l'écran dans 5 secondes |
 | `Ctrl` + `Maj` + `Impr. écran` | Annuler la capture en attente |
+| `Super` + `Maj` + `C` | Pipette : copier la couleur (#rrggbb) d'un point de l'écran |
 
 ## Fenêtres
 

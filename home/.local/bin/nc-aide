@@ -101,6 +101,7 @@ A_TAPER = [
 ]
 RACCOURCIS = [
     ("nc-capture", "nc-capture zone", "Captures d'écran (Impr. écran, Super + P…), enregistrées et copiées."),
+    ("nc-pipette", "nc-pipette", "Pipette (Super + Maj + C) : clique un point de l'écran, sa couleur #rrggbb est copiée."),
     ("nc-video", "nc-video", "Vidéo de l'écran (Super + Maj + R) : zone ou écran entier ; même raccourci pour arrêter."),
     ("nc-ecrans", "nc-ecrans miroir", "Projeter sur un second écran ou un projecteur (Super + O), comme Windows + P : "
                                       "écran du PC seulement, dupliquer, étendre (à droite, à gauche…), second écran seulement."),
@@ -206,6 +207,7 @@ ANGLAIS = {
                                        "and the island page (ile); also serveur, agent, deployer and verifier."),
     "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
     "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
+    "nc-pipette": ("nc-color-picker", "Color picker (Super + Shift + C): click a point on the screen, its #rrggbb color is copied."),
     "nc-ecrans": ("nc-displays mirror", "Project to a second display or a projector (Super + O), like Windows + P: "
                                         "PC screen only, duplicate, extend (right, left…), second screen only."),
     "nc-video": ("nc-video", "Screen recording (Super + Shift + R): an area or the whole screen; same shortcut to stop."),

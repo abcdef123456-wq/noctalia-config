@@ -139,6 +139,7 @@ HOME_FILES=(
   .local/bin/nc-fermer
   .local/bin/nc-greeting
   .local/bin/nc-capture
+  .local/bin/nc-pipette
   .local/bin/nc-session-propre
   .local/bin/nc-noctalia-avant
   .local/bin/nc-keys
