@@ -7,7 +7,7 @@
   nc-cloud etat                     état, quota et limites
   nc-cloud lister [ID] [--suite C]  une page d'un dossier (racine par défaut), avec la suite
   nc-cloud dossier PARENT NOM       crée un dossier
-  nc-cloud deposer [--dans ID] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
+  nc-cloud deposer [--dans ID | --racine NOM] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
   nc-cloud examiner FICHIER…        taille, caché ou refusé, de chaque fichier (rien ne part)
   nc-cloud note                     le texte de l'entrée standard devient un .txt du dossier « Notes » (64 Kio au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
@@ -1157,17 +1157,17 @@ def nom_de_note(texte, quand):
     return ((debut or T("Note", "Note")) + " " + time.strftime("%Y-%m-%d %Hh%M", time.localtime(quand))).strip()
 
 
-def dossier_des_notes(s):
-    """L'id du dossier « Notes » de la racine, créé s'il manque."""
+def dossier_des_notes(s, nom=DOSSIER_NOTES, essai=1):
+    """L'id du dossier `nom` (« Notes », « Captures »…) de la racine, créé s'il manque."""
     for e in s.pages("root"):
-        if e.get("kind") == "directory" and e.get("name") == DOSSIER_NOTES and isinstance(e.get("id"), str):
+        if e.get("kind") == "directory" and e.get("name") == nom and isinstance(e.get("id"), str):
             return e["id"]
     try:
-        _, r = s.json("POST", "/directories", {"parent_id": "root", "parent_revision": revision_dossier(s, "root"), "name": DOSSIER_NOTES})
+        _, r = s.json("POST", "/directories", {"parent_id": "root", "parent_revision": revision_dossier(s, "root"), "name": nom})
     except Echec as e:
-        if e.code != CONFLIT:
+        if e.code != CONFLIT or essai > 2:
             raise
-        return dossier_des_notes(s)          # créé entre-temps par un autre PC
+        return dossier_des_notes(s, nom, essai + 1)          # créé entre-temps par un autre PC
     e = entree_propre(r.get("entry")) or {}
     if not isinstance(e.get("id"), str) or not e["id"]:
         raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
@@ -1241,6 +1241,8 @@ def cmd_examiner(a):
 def cmd_deposer(a):
     if len(a.fichiers) > MAX_FICHIERS:
         raise Echec(T(f"{MAX_FICHIERS} fichiers au plus par envoi.", f"{MAX_FICHIERS} files at most per upload."), USAGE)
+    if a.racine is not None and (a.dans or not nom_valide(a.racine)):
+        raise Echec(T("--racine : un nom de dossier valide, sans --dans.", "--racine: a valid folder name, without --dans."), USAGE)
     pol, attendue, annuler = politique(a.si_existe)
     if pol == "replace" and len(a.fichiers) > 1:
         raise Echec(T("remplacer:REVISION vaut pour un seul fichier.", "remplacer:REVISION applies to a single file."), USAGE)
@@ -1257,8 +1259,9 @@ def cmd_deposer(a):
         return code
     s = Session()
     s.etat()                                   # connexion authentifiée avant de préparer quoi que ce soit
+    dans = dossier_des_notes(s, a.racine) if a.racine else a.dans or "root"
     for p, st in valides:
-        code = deposer_un(s, p, a.dans or "root", pol, attendue, annuler, controle=st) or code
+        code = deposer_un(s, p, dans, pol, attendue, annuler, controle=st) or code
     return code
 
 
@@ -2682,6 +2685,7 @@ def analyseur():
     x.set_defaults(f=cmd_dossier)
     x = sous.add_parser("deposer", aliases=["upload"])
     x.add_argument("--dans")
+    x.add_argument("--racine", help="un dossier de la racine, par son nom, créé s'il manque (Captures…)")
     x.add_argument("--si-existe", dest="si_existe")
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_deposer)

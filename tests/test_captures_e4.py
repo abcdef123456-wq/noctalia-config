@@ -44,6 +44,71 @@ class Base(unittest.TestCase):
         return env
 
 
+class EnvoyerAuCloud(Base):
+    """I2 : l'action « Envoyer au cloud » de la notification, seulement avec CLOUD_JARVIS=oui et ce PC associé (fichier
+    local) ; elle passe par nc-cloud deposer --racine Captures, et la capture locale n'est jamais touchée."""
+    def setUp(self):
+        super().setUp()
+        self.faux_prog("grim", 'for a; do f="$a"; done; echo "png" > "$f"')
+        self.faux_prog("xdg-user-dir", 'echo "$HOME/Pictures"')
+        self.faux_prog("hyprctl", "echo '[]'")
+        self.faux_prog("jq", "exit 0")
+        self.faux_prog("wl-copy", "exit 0")
+        # La notification avec actions répond CHOIX ; chaque appel est noté
+        self.faux_prog("notify-send", 'echo "notif $*" >> "$JOURNAL"; case "$*" in *-A*) echo "$CHOIX" ;; esac')
+        b = self.home / ".local/bin"
+        b.mkdir(parents=True)
+        (b / "nc-cloud").write_text('#!/bin/sh\necho "nc-cloud $*" >> "$JOURNAL"\necho "$MESSAGE_CLOUD"\nexit "$CODE_CLOUD"\n')
+        (b / "nc-cloud").chmod(0o755)
+        self.appareil = self.home / ".local/state/nc-cloud/appareil.json"
+
+    def capturer(self, reglages, associe=True, choix="cloud", code=0, message="Envoyé : capture.png → capture.png."):
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nCAPTURES_COPIER=non\n" + reglages)
+        if associe:
+            self.appareil.parent.mkdir(parents=True, exist_ok=True)
+            self.appareil.write_text("{}")
+        elif self.appareil.exists():
+            self.appareil.unlink()
+        self.journal.write_text("")
+        r = subprocess.run([shutil.which("bash"), str(BIN / "nc-capture"), "ecran"], capture_output=True, text=True, timeout=20,
+                           env=self.env(CHOIX=choix, CODE_CLOUD=str(code), MESSAGE_CLOUD=message), stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # L'action tourne en arrière-plan : on attend la notification du résultat (ou la fin)
+        import time
+        fin = time.monotonic() + 10
+        while time.monotonic() < fin:
+            l = self.journal.read_text().splitlines()
+            if choix != "cloud" or len([x for x in l if x.startswith("notif")]) >= 2 or not any("cloud=" in x for x in l):
+                break
+            time.sleep(0.05)
+        time.sleep(0.2)
+        return self.journal.read_text().splitlines()
+
+    def test_action_seulement_avec_le_cloud_actif_et_associe(self):
+        for reglages, associe in (("", True), ("CLOUD_JARVIS=non\n", True), ("CLOUD_JARVIS=oui\n", False)):
+            with self.subTest(reglages=reglages, associe=associe):
+                j = self.capturer(reglages, associe, choix="")
+                self.assertTrue(j and j[0].startswith("notif"), j)
+                self.assertNotIn("cloud=", j[0])
+                self.assertFalse([x for x in j if x.startswith("nc-cloud")])
+        j = self.capturer("CLOUD_JARVIS=oui\n", True, choix="")
+        self.assertIn("cloud=Envoyer au cloud", j[0])
+        self.assertFalse([x for x in j if x.startswith("nc-cloud")])          # rien ne part sans le clic
+
+    def test_envoi_resultats_et_capture_locale_intacte(self):
+        for code, mot in ((0, "Capture envoyée au cloud"), (3, "Cloud injoignable"), (6, "même nom"), (7, "Quota plein")):
+            with self.subTest(code=code):
+                j = self.capturer("CLOUD_JARVIS=oui\n", choix="cloud", code=code, message="Quota plein\033[31m")
+                envoi = [x for x in j if x.startswith("nc-cloud")]
+                self.assertEqual(len(envoi), 1, j)
+                self.assertRegex(envoi[0], r"^nc-cloud deposer --racine Captures -- /.+/Pictures/Captures/.+\.png$")
+                fin = [x for x in j if x.startswith("notif")][-1]
+                self.assertIn(mot, fin)
+                self.assertNotIn("\033", fin)
+                captures = list((self.home / "Pictures/Captures").glob("*.png"))
+                self.assertTrue(captures and all(c.read_text() == "png\n" for c in captures))
+
+
 class Capture(Base):
     def setUp(self):
         super().setUp()

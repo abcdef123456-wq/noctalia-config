@@ -119,6 +119,14 @@ Le texte passe par l'entrée standard de `nc-cloud note`, jamais par ses argumen
 processus). Le fichier local (`~/.local/state/nc-cloud/notes/`, 0600) disparaît après l'envoi. Il ne reste que si
 l'envoi est interrompu, pour `nc-cloud reprendre`.
 
+### Envoyer une capture d'écran
+
+Avec Cloud JARVIS actif et ce PC associé, la notification d'une capture (`nc-capture`) a un bouton « Envoyer au
+cloud ». Il dépose la capture dans le dossier « Captures » de la racine (créé s'il manque), puis une notification dit
+le résultat : envoyée, cloud injoignable, ou même nom déjà là (rien n'est remplacé). La capture locale ne bouge pas.
+Le bouton n'apparaît que d'après le réglage et le fichier d'association de ce PC : aucun appel au serveur pour le
+décider, et rien ne part sans le clic.
+
 ## Associer ce PC
 
 ```sh
@@ -143,7 +151,7 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud choisir` | le sélecteur de fichiers du bureau (portail) ; écrit les fichiers choisis, n'envoie rien |
 | `nc-cloud lister [ID] [--suite CURSEUR]` | une page d'un dossier (la racine par défaut), avec la commande de la suite |
 | `nc-cloud dossier PARENT NOM` | crée un dossier (`root` pour la racine) |
-| `nc-cloud deposer [--dans ID] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
+| `nc-cloud deposer [--dans ID \| --racine NOM] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
 | `nc-cloud note` | enregistre le texte lu sur l'entrée standard dans « Notes » (64 Kio au plus) |
 | `nc-cloud examiner FICHIER…` | taille, fichier caché ou refusé, de chaque fichier ; n'envoie rien |
 | `nc-cloud reprendre [N]` | liste les envois interrompus ; avec N, reprend celui-là |

@@ -10,6 +10,7 @@
 # L'image est aussi copiée : Ctrl + V la colle directement. Une notification la montre ; un clic l'ouvre dans Swappy
 # pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
 # corbeille. Dans Swappy, l'icône de corbeille efface seulement les annotations ; Échap ferme Swappy.
+# Avec Cloud JARVIS (CLOUD_JARVIS=oui, PC associé) : bouton « Envoyer au cloud », dans le dossier « Captures » du cloud.
 set -uo pipefail
 # Captures et dossier privés : lisibles par toi seul (0600 / 0700), pas par les autres comptes du PC
 umask 077
@@ -218,12 +219,33 @@ fi
 # « Demander à l'IA » : seulement si l'IA est permise (nc-ia actif) et l'explication des captures pas coupée
 ia=()
 if [ "$(reglage IA_CAPTURE)" != non ] && "$HOME/.local/bin/nc-ia" disponible 2>/dev/null; then ia=(-A "ia=$(t "Demander à l'IA" "Ask the AI")"); fi
+# « Envoyer au cloud » : seulement avec CLOUD_JARVIS=oui et ce PC associé (le fichier local d'association, aucun appel réseau)
+cloud=()
+if [ "$(reglage CLOUD_JARVIS)" = oui ] && [ -x "$HOME/.local/bin/nc-cloud" ] \
+   && [ -f "${XDG_STATE_HOME:-$HOME/.local/state}/nc-cloud/appareil.json" ]; then
+  cloud=(-A "cloud=$(t "Envoyer au cloud" "Send to cloud")")
+fi
+# Dépose la capture dans « Captures » du cloud (créé s'il manque) ; la capture locale n'est jamais touchée
+envoyer_cloud() {
+  local sortie code titre corps
+  sortie="$("$HOME/.local/bin/nc-cloud" deposer --racine Captures -- "$1" 2>&1)"; code=$?
+  case "$code" in
+    0) titre="$(t "Capture envoyée au cloud" "Screenshot sent to the cloud")"; corps="$(t "Dans le dossier « Captures »." "In the “Captures” folder.")" ;;
+    3) titre="$(t "Capture non envoyée" "Screenshot not sent")"
+       corps="$(t "Cloud injoignable : la capture reste sur ce PC." "Cloud unreachable: the screenshot stays on this PC.")" ;;
+    6) titre="$(t "Capture non envoyée" "Screenshot not sent")"
+       corps="$(t "Une capture du même nom est déjà dans « Captures » : rien n'est remplacé." "A screenshot with the same name is already in “Captures”: nothing replaced.")" ;;
+    *) titre="$(t "Capture non envoyée" "Screenshot not sent")"; corps="$(printf '%s\n' "$sortie" | tail -n 1 | tr -d '\000-\037' | cut -c1-300)" ;;
+  esac
+  notify-send -a "$(t "Capture d'écran" "Screenshot")" "$titre" "$corps" 2>/dev/null
+}
 (
   action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" "${annoter[@]}" -A "supprimer=$(t "Supprimer" "Delete")" \
-    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
+    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "${cloud[@]}" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
     ia) "$HOME/.local/bin/nc-ia" fichier "$fichier" --notifier ;;     # l'IA du bureau l'explique (notification)
+    cloud) [ "${#cloud[@]}" -gt 0 ] && envoyer_cloud "$fichier" ;;
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)
     dossier) ( umask 022; xdg-open "$dossier" ) ;;
   esac

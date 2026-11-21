@@ -1301,6 +1301,21 @@ elif sys.argv[1] == "clear":
         self.assertEqual(list((self.home / ".local/state/nc-cloud/notes").rglob("*")), [])
         self.assertEqual([self.faux.contenus[e["id"]] for e in self.faux.entries.values() if e["kind"] == "file"], [b"Hors ligne"])
 
+    def test_deposer_dans_un_dossier_de_la_racine_par_son_nom(self):
+        self.associer()
+        a, b = self.fichier("a.png", b"a"), self.fichier("b.png", b"b")
+        self.nc("deposer", "--racine", "Captures", "--", str(a), code=0)
+        self.nc("deposer", "--racine", "Captures", "--", str(b), code=0)
+        dossiers = [e for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Captures"]
+        self.assertEqual(len(dossiers), 1)
+        self.assertEqual(dossiers[0]["parent"], "root")
+        self.assertEqual(sorted(e["name"] for e in self.faux.entries.values() if e["kind"] == "file" and e["parent"] == dossiers[0]["id"]),
+                         ["a.png", "b.png"])
+        self.assertEqual(a.read_bytes(), b"a")                         # la source n'est jamais touchée
+        for args in (("--racine", "Captures", "--dans", "root"), ("--racine", "a/b"), ("--racine", "")):
+            with self.subTest(args=args):
+                self.nc("deposer", *args, "--", str(a), code=2)
+
     def test_note_trop_longue_vide_ou_illisible_rien_ne_part(self):
         self.associer()
         for entree, mot in ((b"a" * (100 * 1024), "trop longue"), (b"  \n ", "vide"), (b"\xff\xfe", "UTF-8")):
@@ -2465,7 +2480,7 @@ class Selecteur(unittest.TestCase):
         vus = []
         with mock.patch.object(self.m, "Session"), \
                 mock.patch.object(self.m, "deposer_un", side_effect=lambda *a, **k: vus.append(k.get("controle")) or 0):
-            self.m.cmd_deposer(self.m.argparse.Namespace(fichiers=[str(f)], si_existe=None, dans=None))
+            self.m.cmd_deposer(self.m.argparse.Namespace(fichiers=[str(f)], si_existe=None, dans=None, racine=None))
         self.assertEqual((vus[0].st_ino, vus[0].st_dev), (f.stat().st_ino, f.stat().st_dev))
 
     def test_fichier_cache_quand_le_dossier_personnel_est_un_lien(self):
