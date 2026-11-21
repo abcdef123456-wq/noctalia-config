@@ -93,8 +93,17 @@ class CloudReglages(unittest.TestCase):
                        ("GOOGLE_INTEGRATION", "oui"), ("MAJ_SYSTEME", "auto"), ("NOEUD_JARVIS", "oui"), ("ALERTES_TELEGRAM", "oui"),
                        ("SESSIONS_CAPTURE", "oui"), ("SESSION_DEMARRAGE", "vide"), ("VERROU_PHOTO", "oui"), ("ANIM_VERROU", "fade"),
                        ("HZ_ECO", "60"), ("CAPTURES_COPIER", "oui"), ("APPLI_TERMINAL", "kitty"), ("CODE_AGENT", "auto"),
-                       ("ECRAN_VRR", "non"), ("POLICE", "x"), ("INCONNU", "1"), ("DOCK_TAILLE", "99999"), ("DOCK", "peut-être")):
+                       ("ECRAN_VRR", "non"), ("POLICE", "x"), ("INCONNU", "1"), ("DOCK_TAILLE", "99999"), ("DOCK", "peut-être"),
+                       # Tour 2 : alertes, protections, données gardées plus longtemps
+                       ("PARTAGE_DISCRET", "non"), ("NAVIGATEURS_XWAYLAND", "oui"), ("PRESSE_DUREE", "jamais"), ("ILE_PRESSE", "oui"),
+                       ("CHALEUR_ALERTE", "0"), ("BATTERIE_ALERTE", "0"), ("PANNES", "non"), ("NPD_NUIT", "oui"), ("NPD_AUTO", "oui"),
+                       ("NPD_DEBUT", "18:00"), ("POMODORO_CONCENTRATION", "oui"), ("ILE_BANNIERES", "non"), ("ILE_PRESSE_ACTIONS", "oui"),
+                       ("ILE_PAGE_PRESSE", "oui"), ("TERMINAL_COPIE_SELECTION", "oui"), ("COLLER_CLIC_MILIEU", "oui"),
+                       ("TERMINAL_HISTORIQUE", "10000"), ("ILE_TERMINAL", "oui"), ("FIREFOX_SESSION", "oui"), ("SPOTLIGHT_AUR", "oui"),
+                       ("SPOTLIGHT_PAQUETS", "auto"), ("SPOTLIGHT_FLATPAK", "oui"), ("FENETRES_FOCUS_DEMANDE", "oui"),
+                       ("VOLUME_MAX", "150"), ("BOUTON_ARRET", "eteindre")):
             self.assertIsNone(pc(cle, v), cle)
+        self.assertEqual(pc("DOCK_TAILLE", "48"), "48")    # le contrôle : un réglage ordinaire passe
         for r in self.nc["REGLAGES"]:                     # aucun texte libre ni dossier
             if r.genre in ("texte", "dossier", "hz"):
                 self.assertIsNone(pc(r.cle, r.defaut), r.cle)

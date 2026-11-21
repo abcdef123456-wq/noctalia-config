@@ -1749,9 +1749,18 @@ SECTIONS_CLOUD = {
     "Captures": False,                      # dossier de ce PC, son enregistré
 }
 # Dans une section qui part, restent celles de chaque PC : VPN (kill switch, adresse publique), verrou, sessions
-# (captures des fenêtres), IA, polices et thème du curseur installés, agent de code, écran (VRR)
+# (captures des fenêtres), IA, polices et thème du curseur installés, agent de code, écran (VRR) ; et tout ce qui coupe
+# une alerte ou une protection, ou garde une donnée plus longtemps : alertes de batterie et de chaleur, pannes, Ne pas
+# déranger, bannières, partage d'écran discret, presse-papiers (historique, page, actions, copie à la sélection, collage
+# au clic du milieu), historique du terminal et commandes dans l'île, onglets rouverts de Firefox, logiciels à installer
+# depuis le Spotlight (AUR, dépôts, Flatpak), touches lisibles par X11, fenêtre qui prend la main, volume au-delà de 100,
+# bouton d'arrêt
 CLES_PAS_CLOUD = re.compile(r"VPN_.*|.*VERROU.*|SESSIONS?_.*|IA_.*|.*_IA|METEO_VILLE|POLICE|TERMINAL_POLICE|CURSEUR_THEME|"
-                            r"CODE_.*|ECRAN_VRR")
+                            r"CODE_.*|ECRAN_VRR|BATTERIE_ALERTE|CHALEUR_ALERTE|PANNES|NPD_.*|POMODORO_CONCENTRATION|"
+                            r"ILE_BANNIERES|PARTAGE_DISCRET|PRESSE_.*|ILE_PRESSE.*|ILE_PAGE_PRESSE|TERMINAL_COPIE_SELECTION|"
+                            r"COLLER_CLIC_MILIEU|TERMINAL_HISTORIQUE|ILE_TERMINAL|FIREFOX_SESSION|SPOTLIGHT_AUR|"
+                            r"SPOTLIGHT_PAQUETS|SPOTLIGHT_FLATPAK|NAVIGATEURS_XWAYLAND|FENETRES_FOCUS_DEMANDE|VOLUME_MAX|"
+                            r"BOUTON_ARRET")
 
 
 def familles_cloud():

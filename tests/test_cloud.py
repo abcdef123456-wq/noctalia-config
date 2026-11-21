@@ -1391,6 +1391,17 @@ elif sys.argv[1] == "clear":
         self.assertIn("ne sait pas supprimer", r.lignes[-1]["message"])
         self.assertEqual(len([e for e in self.faux.entries.values() if e.get("parent") == bureau and e["name"] not in etrangers]), 6)
 
+    def test_bureau_futur_tolere_14_heures(self):
+        """Un nom en heure locale d'un autre fuseau (jusqu'à 14 h d'avance) reste une sauvegarde ; au-delà, ignoré."""
+        spec = importlib.util.spec_from_loader("ncc_futur", importlib.machinery.SourceFileLoader("ncc_futur", str(NC_CLOUD)))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        nom = lambda h: {"kind": "file", "id": f"i{h}", "name": time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz",
+                                                                            time.localtime(time.time() + h * 3600))}
+        tri, futur = mod.bureau_trier([nom(-1), nom(13), nom(15), {"kind": "file", "id": "x", "name": "nc-bureau-2099-01-01-000000.tar.gz"}])
+        self.assertEqual([e["id"] for e in tri], ["i13", "i-1"])
+        self.assertEqual(futur, 2)
+
     def test_bureau_archive_trop_grosse_ou_absente(self):
         self.associer()
         r = self.nc("bureau", "telecharger", code=1)

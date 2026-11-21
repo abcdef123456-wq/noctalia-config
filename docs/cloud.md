@@ -179,6 +179,10 @@ Ce qui part et revient : une liste blanche, à un seul endroit (`SECTIONS_CLOUD`
   dock, fenêtres, fonds d'écran, son et luminosité, clavier et souris, terminal.
 - Même dans ces sections, ne partent jamais : le VPN, le verrou, les sessions, l'IA, la ville de la météo, les polices
   et le thème du curseur, l'agent de code, l'écran (VRR), aucun texte libre, aucun dossier.
+- Ni ce qui coupe une alerte ou une protection, ou garde une donnée plus longtemps : alertes de batterie et de chaleur,
+  pannes, Ne pas déranger, bannières, partage d'écran discret, presse-papiers, historique du terminal, onglets rouverts
+  de Firefox, logiciels à installer depuis le Spotlight, touches lisibles par X11, fenêtre qui prend la main, volume
+  au-delà de 100, bouton d'arrêt.
 - Restent ceux de chaque PC : énergie, veille, applications, intelligence artificielle, agents IA, Google, Garmin,
   Cloud JARVIS, mises à jour, captures.
 - À la reprise, c'est une fusion : seuls les réglages de la liste changent, toutes tes autres lignes restent.
@@ -186,6 +190,8 @@ Ce qui part et revient : une liste blanche, à un seul endroit (`SECTIONS_CLOUD`
 Les autres fichiers :
 
 - Partent aussi tes raccourcis d'applications (aucune commande), tes palettes et ta photo de profil.
+- À la reprise, les raccourcis de l'archive remplacent ceux de ce PC : une ligne `aucun` (un raccourci coupé) de ce PC
+  disparaît ; les anciens restent dans `~/.cache/nc/avant-restauration/`.
 - Une palette part si c'est un fichier ordinaire à un seul lien, avec un nom simple. La photo part si c'est une image.
 - Ne partent jamais : aucun fichier qui lance du code, aucun fond d'écran, ni `style.conf` ni `style-avant`
   (`nc-reglages appliquer` les refait).
@@ -197,10 +203,16 @@ bornes :
 - 32 Mio au plus, aussi au téléchargement ;
 - un seul flux gzip, décompressé avec un plafond de 80 Mio ;
 - 500 éléments au plus ;
-- seulement des fichiers ordinaires, et des en-têtes PAX de 8 Kio au plus, vérifiés avant tarfile.
+- seulement des fichiers ordinaires en en-têtes USTAR simples (aucun en-tête PAX, champ `prefix` vide), vérifiés
+  avant tarfile, puis comparés à ce que lit tarfile (mêmes noms, mêmes tailles) ;
+- un nom en double refuse toute l'archive.
+
+L'archive envoyée est écrite en USTAR : une palette dont le chemin dépasse 100 octets est écartée. Le tri des réglages
+(nc-reglages) se fait avant toute écriture : s'il échoue, rien n'est remis. Si le `reglages.conf` de ce PC dépasse
+1 Mo, la reprise est refusée (il n'est jamais coupé).
 
 Si le serveur sait supprimer, les 5 sauvegardes les plus récentes sont gardées, jamais celle qu'on vient d'envoyer.
-Un nom daté de plus de 10 minutes dans le futur est ignoré : il n'est ni choisi, ni compté, ni supprimé, et c'est dit.
+Un nom daté de plus de 14 heures dans le futur (l'écart maximal entre deux fuseaux) est ignoré : il n'est ni choisi, ni compté, ni supprimé, et c'est dit.
 Un fichier d'une autre forme n'est jamais touché.
 
 Limite : les raccourcis remis remplacent ceux de ce PC (comme `nc-sauvegarde restaurer`). Les anciens sont gardés

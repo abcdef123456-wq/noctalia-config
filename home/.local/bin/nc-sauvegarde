@@ -379,10 +379,16 @@ def fusion_reglages(donnees):
     return ("\n".join(sortie + locales) + "\n").encode("utf-8"), sorted(set(gardees))
 
 
+_FILTRES = {}
+
+
 def filtre_cloud(donnees):
     """[(CLE, valeur)] d'un reglages.conf qui partent sur le cloud ou en reviennent : la liste blanche de nc-reglages
     (pour-le-cloud : réglage connu, section qui part, valeur valide), lancé à côté de ce script ; en plus, jamais un nom
-    de secret ni une valeur de plus de 512 caractères. Sans nc-reglages, rien ne part ni n'est remis."""
+    de secret ni une valeur de plus de 512 caractères. Sans nc-reglages, rien ne part ni n'est remis. Le résultat est
+    gardé : la reprise trie AVANT toute écriture, et l'écriture reprend ce tri."""
+    if donnees[:MAX_REGLAGE] in _FILTRES:
+        return _FILTRES[donnees[:MAX_REGLAGE]]
     try:
         r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-reglages"),
                             "pour-le-cloud"], input=donnees[:MAX_REGLAGE], capture_output=True, timeout=120)
@@ -396,6 +402,7 @@ def filtre_cloud(donnees):
         mm = re.fullmatch(r"([A-Z0-9_]+)=(.*)", x)
         if mm and not NOM_SECRET.fullmatch(mm[1]) and len(mm[2]) <= CLOUD_VALEUR_MAX:
             l.append((mm[1], mm[2]))
+    _FILTRES[donnees[:MAX_REGLAGE]] = l
     return l
 
 
@@ -409,6 +416,8 @@ def reglages_pour_le_cloud(donnees):
 def fusion_cloud(donnees):
     """reglages.conf venu du cloud : seuls ses réglages de la liste blanche changent ceux de ce PC, qui garde toutes ses
     autres lignes telles quelles (fusion, pas remplacement). (octets, clés de l'archive non reprises)"""
+    if reglages_local_trop_gros():
+        raise Refus(T("reglages.conf de ce PC trop gros : jamais coupé", "this PC's reglages.conf is too big: never cut"))
     venus = dict(filtre_cloud(donnees))
     cles = set(re.findall(r"(?m)^\s*([A-Z0-9_]+)\s*=", donnees.decode("utf-8", "replace")))
     souple = re.compile(r"\s*([A-Z0-9_]+)\s*=.*")
@@ -423,6 +432,13 @@ def fusion_cloud(donnees):
         sortie.append(l)
     sortie += [f"{k}={v}" for k, v in venus.items() if k not in faits]
     return ("\n".join(sortie) + "\n").encode("utf-8"), sorted(cles - set(venus))
+
+
+def reglages_local_trop_gros():
+    try:
+        return os.path.getsize(os.path.join(HOME, REGLAGES)) > MAX_REGLAGE
+    except OSError:
+        return False
 
 
 def palette_sure(nom):
@@ -475,7 +491,8 @@ def creer_pour_le_cloud(sortie):
     dossier = os.path.join(*reel(PALETTES))
     if os.path.isdir(dossier) and not os.path.islink(dossier):
         for e in sorted(os.listdir(dossier)):
-            brut, st = lire_sur(os.path.join(dossier, e), MAX_REGLAGE, True) if palette_sure(e) else (None, None)
+            sur = palette_sure(e) and len(os.fsencode(PALETTES + "/" + e)) <= 100     # le champ nom USTAR, sans prefix
+            brut, st = lire_sur(os.path.join(dossier, e), MAX_REGLAGE, True) if sur else (None, None)
             if brut is None:
                 palettes_ecartees += 1
             else:
@@ -484,7 +501,8 @@ def creer_pour_le_cloud(sortie):
         sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
     fd, tmp = tempfile.mkstemp(prefix=".nc-sauvegarde-", suffix=".tmp", dir=os.path.dirname(os.path.abspath(sortie)))
     try:
-        with os.fdopen(fd, "wb") as f, tarfile.open(fileobj=f, mode="w:gz") as t:
+        # USTAR : aucun en-tête PAX (un nom accentué tient dans le champ nom, en UTF-8), qu'une reprise refuserait
+        with os.fdopen(fd, "wb") as f, tarfile.open(fileobj=f, mode="w:gz", format=tarfile.USTAR_FORMAT, encoding="utf-8") as t:
             for arc, brut, date in a_poser:
                 ti = tarfile.TarInfo(arc)
                 ti.size, ti.mtime, ti.mode = len(brut), int(date), 0o600 if arc in (REGLAGES, RACCOURCIS) else 0o644
@@ -513,9 +531,10 @@ def creer_pour_le_cloud(sortie):
 
 
 def tar_cloud(fichier):
-    """Le tar d'une archive du cloud, en mémoire : un seul flux gzip, décompressé avec un PLAFOND (80 Mio), puis ses
-    en-têtes vérifiés AVANT tarfile (qui lirait un en-tête PAX ou un nom long GNU en entier) : fichiers ordinaires et
-    en-têtes PAX de 8 Kio au plus, rien d'autre (ni lien, ni dossier, ni nom long GNU, ni type inconnu)."""
+    """(tar, [(nom, taille)]) d'une archive du cloud, en mémoire : un seul flux gzip, décompressé avec un PLAFOND (80 Mio),
+    puis ses en-têtes vérifiés AVANT tarfile : des en-têtes USTAR (magie « ustar\\0 00 », champ prefix vide, taille en
+    octal sans NUL au milieu) de fichiers ordinaires, rien d'autre (ni PAX, ni lien, ni dossier, ni nom long GNU, ni type
+    inconnu). Ce que la boucle a vu est comparé ensuite à ce que lit tarfile (lire_membres)."""
     def refus(fr, en):
         echec(f"{fichier} : sauvegarde du cloud refusée ({fr}), rien n'est écrit.",
               f"{fichier}: cloud backup refused ({en}), nothing is written.")
@@ -537,19 +556,23 @@ def tar_cloud(fichier):
         refus(f"abîmée : {e}", f"damaged: {e}")
     if not d.eof:
         refus("coupée", "truncated")
-    data, pos, n = b"".join(bouts), 0, 0
+    data, pos, n, vus = b"".join(bouts), 0, 0, []
     while True:
         h = data[pos:pos + 512]
         if len(h) < 512:
             refus("coupée", "truncated")
         if h == bytes(512):
-            return data
+            return data, vus
+        champ = h[124:136].rstrip(b"\0 ")
         try:
-            t = int(h[124:136].strip(b"\0 ") or b"0", 8)
+            t = int(champ or b"0", 8)            # un NUL au milieu (tarfile s'y arrêterait) : ValueError, refusé
         except ValueError:
             refus("en-tête abîmé", "damaged header")
-        if h[156:157] not in (b"0", b"\0", b"x") or (h[156:157] == b"x" and t > CLOUD_MAX_ENTETE):
+        if h[156:157] not in (b"0", b"\0"):
             refus("élément d'un type refusé", "item of a refused type")
+        if h[257:265] != b"ustar\x0000" or h[345:500] != bytes(155):
+            refus("en-tête qui n'est pas USTAR simple", "header that is not plain USTAR")
+        vus.append((h[:100].split(b"\0", 1)[0].decode("utf-8", "surrogateescape"), t))
         n += 1
         if n > 2 * CLOUD_MAX_MEMBRES:
             refus("trop d'éléments", "too many items")
@@ -644,9 +667,17 @@ def ouvrir(fichier):
         echec(f"{fichier} fait plus de {taille(CLOUD_MAX_ARCHIVE)} : refusée sans être lue.",
               f"{fichier} is over {taille(CLOUD_MAX_ARCHIVE)}: refused without being read.")
     try:
-        return tarfile.open(fileobj=io.BytesIO(tar_cloud(fichier)), mode="r:") if POUR_LE_CLOUD else tarfile.open(fichier, "r:gz")
+        if not POUR_LE_CLOUD:
+            return tarfile.open(fichier, "r:gz")
+        data, vus = tar_cloud(fichier)
+        t = tarfile.open(fileobj=io.BytesIO(data), mode="r:", encoding="utf-8", errors="surrogateescape")
+        t.nc_vus = vus                       # comparé à ce que tarfile lit (lire_membres)
+        return t
     except (OSError, EOFError, tarfile.TarError, zlib.error) as e:
         echec(f"{fichier} n'est pas une sauvegarde lisible ({e}).", f"{fichier} is not a readable backup ({e}).")
+    except Exception as e:                   # du cloud : toute autre erreur de tarfile est un refus propre, sans trace
+        echec(f"{fichier} : sauvegarde du cloud refusée ({type(e).__name__}), rien n'est écrit.",
+              f"{fichier}: cloud backup refused ({type(e).__name__}), nothing is written.")
 
 
 def fonds_sur():
@@ -675,7 +706,22 @@ POUR_LE_CLOUD = False             # --pour-le-cloud : bornes plus serrées (arch
 
 
 def lire_membres(t, fonds_dest, avec_code):
-    tous, annonce = [], 0
+    if not POUR_LE_CLOUD:
+        return lire_membres_de(t, fonds_dest, avec_code)
+    try:
+        r = lire_membres_de(t, fonds_dest, avec_code)
+        vus = [(m.name, m.size) for m in t.getmembers()]
+    except Exception as e:                   # sans trace : un refus propre
+        echec(f"sauvegarde du cloud refusée ({type(e).__name__}), rien n'est écrit.",
+              f"cloud backup refused ({type(e).__name__}), nothing is written.")
+    if vus != t.nc_vus:                      # mêmes membres, mêmes noms, mêmes tailles que la boucle à la main
+        echec("sauvegarde du cloud refusée (en-têtes lus de deux façons), rien n'est écrit.",
+              "cloud backup refused (headers read two ways), nothing is written.")
+    return r
+
+
+def lire_membres_de(t, fonds_dest, avec_code):
+    tous, annonce, noms = [], 0, set()
     plafond = CLOUD_MAX_MEMBRES if POUR_LE_CLOUD else MAX_MEMBRES
     for m in t:                  # lu un par un : on s'arrête au premier membre de trop (getmembers() lirait tout)
         tous.append(m)
@@ -689,6 +735,10 @@ def lire_membres(t, fonds_dest, avec_code):
         if POUR_LE_CLOUD and nom_cloud(m) is None:          # du cloud : rien d'autre que ce qui y part
             echec(f"« {propre(m.name)} » n'a rien à faire dans une sauvegarde du cloud : refusée, rien n'est écrit.",
                   f"“{propre(m.name)}” does not belong in a cloud backup: refused, nothing is written.")
+        if POUR_LE_CLOUD and m.name in noms:      # voir n'en montrerait qu'un, la reprise les prendrait tous
+            echec(f"« {propre(m.name)} » est deux fois dans l'archive : refusée, rien n'est écrit.",
+                  f"“{propre(m.name)}” is twice in the archive: refused, nothing is written.")
+        noms.add(m.name)
     return membres_surs(tous, fonds_rel_de(fonds_dest), avec_code)
 
 
@@ -761,6 +811,14 @@ def restaurer(fichier, avec_code):
         with ouvrir(fichier) as t:
             membres, ignores, non_remis = lire_membres(t, fonds_dest, avec_code)
             verifier_taille(membres, fonds_dest)
+            if POUR_LE_CLOUD:                    # AVANT toute écriture : le tri des réglages (nc-reglages), et la place
+                if reglages_local_trop_gros():
+                    echec(f"~/{REGLAGES} de ce PC fait plus de {taille(MAX_REGLAGE)} : rien n'est remis (il ne serait "
+                          "jamais coupé).", f"~/{REGLAGES} on this PC is over {taille(MAX_REGLAGE)}: nothing is restored "
+                          "(it would never be cut).")
+                for m, n in membres:
+                    if n == REGLAGES:
+                        filtre_cloud(b"".join(morceaux(t.extractfile(m))))
             for m, n in membres:
                 try:
                     dest = destination(n, fonds_dest)

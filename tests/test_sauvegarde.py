@@ -737,6 +737,185 @@ class PourLeCloud(Base):
                     self.assertNotIn("Traceback", r.stderr)
                 self.assertFalse((home / ".face").exists())
 
+    def rien_d_ecrit(self, home, avant):
+        self.assertEqual((home / ".config/nc/reglages.conf").read_text(), avant)
+        self.assertFalse((home / ".face").exists())
+        self.assertFalse((home / ".config/noctalia/palettes").exists())
+        self.assertFalse((home / ".config/nc/raccourcis.conf").exists())
+
+    def test_nom_en_double_refuse_toute_l_archive(self):
+        """voir ne montrerait que le premier reglages.conf, la reprise les prendrait tous : refusée en entier."""
+        home, env = self.maison("doubles")
+        self.reglages(home, LANGUE="fr")
+        avant = (home / ".config/nc/reglages.conf").read_text()
+        r1, r2 = (".config/nc/reglages.conf", b"DOCK_TAILLE=40\n", 0o600), (".config/nc/reglages.conf", b"LANGUE=en\n", 0o600)
+        f1, p1 = (".face", self.PNG, 0o644), (".config/noctalia/palettes/a.json", b"{}", 0o644)
+        for nom, membres in (("reglages", [r1, r2]), ("face", [r1, f1, f1]), ("palette", [r1, p1, p1])):
+            with self.subTest(nom):
+                f = self.archive_cloud(membres, nom=nom + ".tar.gz")
+                for cmd in ("voir", "restaurer"):
+                    r = self.lancer(env, cmd, "--pour-le-cloud", str(f))
+                    self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                    self.assertIn("deux fois dans l'archive", r.stderr)
+                self.rien_d_ecrit(home, avant)
+        # Le contrôle : chaque membre une fois, la reprise passe
+        r = self.lancer(env, "restaurer", "--pour-le-cloud", str(self.archive_cloud([r1, f1, p1])))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_entetes_lus_pareil_par_la_boucle_et_tarfile(self):
+        home, env = self.maison("desaccord")
+        self.reglages(home, LANGUE="fr")
+        avant = (home / ".config/nc/reglages.conf").read_text()
+
+        def entete(nom, type_=b"0", size=0, champ=None, prefix=b"", magie=None, somme=True):
+            t = tarfile.TarInfo(nom)
+            t.size = size
+            b = bytearray(t.tobuf(tarfile.USTAR_FORMAT))
+            b[156:157] = type_
+            b[345:345 + len(prefix)] = prefix
+            if champ is not None:
+                b[124:136] = champ
+            if magie is not None:
+                b[257:265] = magie
+            b[148:156] = b"        "
+            b[148:156] = b"%06o\0 " % (sum(b) + (0 if somme else 1))
+            return bytes(b)
+
+        def bloc(d):
+            return d + bytes((-len(d)) % 512)
+
+        def pax(type_, enregs):
+            txt = b""
+            for k, v in enregs:
+                rec = f" {k}={v}\n".encode()
+                n = len(rec) + 1
+                while len(str(n)) + len(rec) != n:
+                    n += 1
+                txt += str(n).encode() + rec
+            return entete("././@PaxHeader", type_, len(txt)) + bloc(txt)
+        fin = bytes(1024)
+        regl = entete(".config/nc/reglages.conf", size=15) + bloc(b"DOCK_TAILLE=33\n")
+        cas = {
+            "taille qui commence par NUL": (entete(".config/noctalia/palettes/a.json", champ=b"\0" + b"0000001000" + b"\0")
+                                            + regl + fin, "en-tête abîmé"),
+            "PAX size=0": (pax(b"x", [("size", "0")]) + entete(".config/noctalia/palettes/b.json", size=512) + bytes(512) + fin,
+                           "type refusé"),
+            "PAX path": (pax(b"x", [("path", ".config/nc/reglages.conf")]) + entete(".config/noctalia/palettes/c.json", size=15)
+                         + bloc(b"DOCK_TAILLE=33\n") + fin, "type refusé"),
+            "deux PAX de suite": (pax(b"x", [("comment", "a")]) * 2 + regl + fin, "type refusé"),
+            "999 PAX": (pax(b"x", [("comment", "x")]) * 999 + regl + fin, "type refusé"),
+            "PAX global": (pax(b"g", [("comment", "x")]) + regl + fin, "type refusé"),
+            "prefix": (entete("reglages.conf", size=15, prefix=b".config/nc") + bloc(b"DOCK_TAILLE=33\n") + fin, "pas USTAR simple"),
+            "sans magie": (entete(".config/nc/reglages.conf", size=15, magie=bytes(8)) + bloc(b"DOCK_TAILLE=33\n") + fin,
+                           "pas USTAR simple"),
+            # tarfile s'arrête sur un en-tête à la somme fausse, la boucle non : lus de deux façons
+            "somme fausse": (entete(".config/noctalia/palettes/d.json", size=2) + bloc(b"{}")
+                             + entete(".config/nc/reglages.conf", size=15, somme=False) + bloc(b"DOCK_TAILLE=33\n") + fin,
+                             "lus de deux façons"),
+        }
+        for nom, (brut, raison) in cas.items():
+            with self.subTest(nom):
+                f = self.r / "desaccord.tar.gz"
+                f.write_bytes(gzip.compress(brut))
+                for cmd in ("voir", "restaurer"):
+                    r = self.lancer(env, cmd, "--pour-le-cloud", str(f))
+                    self.assertEqual(r.returncode, 1, nom + " " + cmd + " : " + r.stdout + r.stderr)
+                    self.assertIn(raison, r.stderr)
+                    self.assertNotIn("Traceback", r.stderr)
+                self.rien_d_ecrit(home, avant)
+        # Le contrôle : le même reglages.conf seul, en USTAR simple, passe
+        f.write_bytes(gzip.compress(regl + fin))
+        self.assertEqual(self.lancer(env, "restaurer", "--pour-le-cloud", str(f)).returncode, 0)
+        self.assertIn("DOCK_TAILLE=33", (home / ".config/nc/reglages.conf").read_text())
+
+    def test_toute_erreur_de_tarfile_est_un_refus_propre(self):
+        import contextlib
+        mod = self.module()
+        mod.POUR_LE_CLOUD = True
+        f = self.archive_cloud([(".config/nc/reglages.conf", b"LANGUE=en\n", 0o600)])
+
+        def plante(*a, **k):
+            raise RecursionError("maximum recursion depth exceeded")
+        for ou in ("ouvrir", "lire"):
+            with self.subTest(ou):
+                err = io.StringIO()
+                vrai_open, vrai_lire = mod.tarfile.open, mod.lire_membres_de
+                if ou == "ouvrir":
+                    mod.tarfile.open = plante
+                else:
+                    mod.lire_membres_de = plante
+                try:
+                    with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as fin:
+                        with mod.ouvrir(str(f)) as t:
+                            mod.lire_membres(t, None, False)
+                finally:
+                    mod.tarfile.open, mod.lire_membres_de = vrai_open, vrai_lire
+                self.assertNotEqual(fin.exception.code, 0)
+                self.assertIn("RecursionError", str(fin.exception.code) + err.getvalue())
+
+    def test_palette_accentuee_aller_retour_sans_pax(self):
+        home, env = self.maison("accent")
+        self.reglages(home, LANGUE="fr")
+        (home / ".config/noctalia/palettes").mkdir(parents=True)
+        (home / ".config/noctalia/palettes/Été.json").write_text('{"a": 1}')
+        (home / ".config/noctalia/palettes" / ("p" * 80 + ".json")).write_text("{}")      # plus de 100 octets en tout : écartée
+        sortie = self.r / "accent.tar.gz"
+        r = self.lancer(env, "creer", "--pour-le-cloud", "--sortie", str(sortie))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 palette(s) écartée(s)", r.stdout)
+        with tarfile.open(sortie) as t:
+            self.assertEqual(t.getnames(), [".config/nc/reglages.conf", ".config/noctalia/palettes/Été.json"])
+            self.assertFalse(any(m.pax_headers for m in t.getmembers()))
+        self.assertNotIn(b"PaxHeader", gzip.decompress(sortie.read_bytes()))
+        autre, env2 = self.maison("accent-2")
+        r = self.lancer(env2, "restaurer", "--pour-le-cloud", str(sortie))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((autre / ".config/noctalia/palettes/Été.json").read_text(), '{"a": 1}')
+
+    def test_tri_des_reglages_avant_toute_ecriture(self):
+        """nc-reglages manque ou plante : rien n'est écrit (ni photo, ni palette, ni raccourcis)."""
+        home, env = self.maison("tri")
+        self.reglages(home, LANGUE="fr")
+        avant = (home / ".config/nc/reglages.conf").read_text()
+        f = self.archive_cloud([(".face", self.PNG, 0o644), (".config/noctalia/palettes/a.json", b"{}", 0o644),
+                                (".config/nc/raccourcis.conf", b"ajout\tSUPER + B\tappli\tfirefox\tNavigateur\n", 0o600),
+                                (".config/nc/reglages.conf", b"LANGUE=en\n", 0o600)])
+        bin_ = self.r / "bin-plante"
+        bin_.mkdir()
+        (bin_ / "nc-sauvegarde").write_bytes(NC_SAUVEGARDE.read_bytes())
+        (bin_ / "nc-sauvegarde").chmod(0o755)
+        for corps in (None, "#!/bin/sh\nexit 1\n"):
+            with self.subTest(nc_reglages="absent" if corps is None else "plante"):
+                if corps:
+                    (bin_ / "nc-reglages").write_text(corps)
+                    (bin_ / "nc-reglages").chmod(0o755)
+                r = subprocess.run([str(bin_ / "nc-sauvegarde"), "restaurer", "--pour-le-cloud", str(f)], env=env, cwd=env["HOME"],
+                                   capture_output=True, text=True, timeout=60)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("rien n'est envoyé ni remis", r.stderr)
+                self.rien_d_ecrit(home, avant)
+
+    def test_fusion_ne_coupe_jamais_un_reglages_local_trop_gros(self):
+        """Le fichier grossit entre le contrôle d'avant et l'écriture : la fusion refuse, elle ne coupe pas."""
+        home, env = self.maison("course")
+        (home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        (home / ".config/nc/reglages.conf").write_text("# " + "x" * (1024 ** 2) + "\n")
+        mod = self.module()
+        mod.HOME = str(home)
+        with self.assertRaises(mod.Refus):
+            mod.fusion_cloud(b"LANGUE=en\n")
+
+    def test_reglages_local_trop_gros_jamais_coupe(self):
+        home, env = self.maison("gros")
+        (home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        gros = "LANGUE=fr\n" + "# " + "x" * (1024 ** 2) + "\n"
+        (home / ".config/nc/reglages.conf").write_text(gros)
+        f = self.archive_cloud([(".config/nc/reglages.conf", b"LANGUE=en\n", 0o600), (".face", self.PNG, 0o644)])
+        r = self.lancer(env, "restaurer", "--pour-le-cloud", str(f))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("jamais coupé", r.stderr)
+        self.rien_d_ecrit(home, gros)
+
     def test_usage_strict(self):
         home, env = self.preparer_home()
         for args in (("creer", "--pour-le-cloud"), ("creer", "--pour-le-cloud", "--sortie", "x", "--avec-code"),

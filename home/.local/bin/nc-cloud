@@ -1317,13 +1317,16 @@ def bureau_date(e):
         return None
 
 
+BUREAU_FUTUR = 14 * 3600
+
+
 def bureau_trier(entrees):
-    """(sauvegardes de la plus récente à la plus vieille, nombre de noms datés de plus de 10 minutes dans le futur :
-    ignorés, ni « plus récente », ni comptés, ni supprimés)."""
+    """(sauvegardes de la plus récente à la plus vieille, nombre de noms datés de plus de 14 heures dans le futur (l'écart
+    maximal entre deux fuseaux : le nom est en heure locale) : ignorés, ni « plus récente », ni comptés, ni supprimés)."""
     l, futur = [], 0
     for e in entrees:
         d = bureau_date(e)
-        if d is not None and d > time.time() + 600:
+        if d is not None and d > time.time() + BUREAU_FUTUR:
             futur += 1
         elif d is not None:
             l.append((d, e))
