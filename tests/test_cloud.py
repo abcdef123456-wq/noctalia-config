@@ -1118,16 +1118,75 @@ elif sys.argv[1] == "clear":
     def test_fichiers_question_de_gvfs_et_jeton_refuse(self):
         self.associer()
         self.favoris().parent.mkdir(parents=True)
-        for mode, code, reponses in (("question", 9, ["refuse"]), ("mdp_refuse", 4, ["repondu", "refuse"]), ("erreur", 3, ["repondu"])):
+        for mode, code, reponses in (("question", 9, ["refuse"]), ("mdp_refuse", 1, ["repondu", "refuse"]), ("erreur", 1, ["repondu"]),
+                                     ("domaine", 15, ["refuse"]), ("msg_proxy", 15, ["refuse"]), ("sans_mdp", 15, ["refuse"])):
             with self.subTest(mode):
                 self.faux_gi(mode)
                 if self.journal_gi.exists():
                     self.journal_gi.unlink()
                 r = self.nc("fichiers", code=code)
-                self.assertEqual([x["r"] for x in self.gi_vu() if x["evt"] == "reponse"], reponses)
+                vus = [x for x in self.gi_vu() if x["evt"] == "reponse"]
+                self.assertEqual([x["r"] for x in vus], reponses)
+                # Tout refus : l'opération est vidée AVANT la réponse (le jeton n'y reste pas)
+                self.assertTrue(all(x["mdp"] is None and not x["u"] for x in vus if x["r"] == "refuse"), vus)
+                if mode in ("mdp_refuse", "erreur"):           # le jeton est parti : message honnête, plus « refuse le jeton »
+                    self.assertIn("après l'envoi du jeton", r.lignes[-1]["message"])
+                    self.assertIn("dissocie puis associe", r.lignes[-1]["message"])
                 self.assertFalse(self.favoris().exists(), "aucun favori sans montage")
                 self.assertNotIn("\x1b", r.stdout)
                 self.assertNotIn("\\u001b", r.stdout)
+
+    def test_fichiers_proxy_annonce_refus_avant_tout_montage(self):
+        self.associer()
+        for mode in ("proxy", "proxy_erreur"):
+            with self.subTest(mode):
+                self.faux_gi(mode)
+                if self.journal_gi.exists():
+                    self.journal_gi.unlink()
+                r = self.nc("fichiers", code=14)
+                self.assertIn("proxy", r.lignes[-1]["message"])
+                vus = self.gi_vu()
+                self.assertEqual([x["uri"] for x in vus if x["evt"] == "proxy"], [vus[0]["uri"]])
+                self.assertRegex(vus[0]["uri"], r"^http://127\.0\.0\.1:\d+/cloud/dav/$")
+                self.assertFalse([x for x in vus if x["evt"] in ("monter", "reponse")], vus)
+
+    def test_fichiers_delai_joue_sans_rappel_de_gvfs(self):
+        self.associer()
+        self.faux_gi("jamais")
+        r = self.nc("fichiers", code=3)
+        vus = self.gi_vu()
+        self.assertEqual([x["n"] for x in vus if x["evt"] == "delai"], [120, 15])   # le délai, puis la seconde échéance
+        self.assertTrue([x for x in vus if x["evt"] == "annule"])
+        self.assertIn("après l'envoi du jeton", r.lignes[-1]["message"])
+
+    def test_deja_monte_seulement_a_notre_racine_et_question_puis_monte(self):
+        self.associer()
+        self.faux_gi("deja_autre")                    # l'utilisateur a monté la racine du même hôte : ni repris ni démonté
+        r = self.nc("fichiers", code=6)
+        self.assertIn("Un autre montage", r.lignes[-1]["message"])
+        self.nc("demonter", code=0)
+        self.assertFalse([x for x in self.gi_vu() if x["evt"] == "demonter"])
+        self.faux_gi("question_monte")                 # question refusée, mais GVfs a monté : retiré, puis dit
+        r = self.nc("fichiers", code=9)
+        self.assertTrue([x for x in self.gi_vu() if x["evt"] == "demonter"])
+        self.assertFalse(Path(str(self.journal_gi) + ".monte").exists())
+
+    def test_demonter_par_l_adresse_notee_au_montage(self):
+        self.associer()
+        self.faux_gi()
+        r = self.nc("fichiers", code=0)
+        adresse = r.lignes[-1]["adresse"]
+        note = self.home / ".local/state/nc-cloud/montage.json"
+        self.assertEqual(json.loads(note.read_text()), {"adresse": adresse})
+        note.write_text(json.dumps({"adresse": adresse.replace("127.0.0.1", "127.0.0.2")}))   # ce qui a été monté, pas la sonde
+        self.faux_gi("deja")
+        r = self.nc("demonter", code=0)
+        self.assertEqual([x["uri"] for x in self.gi_vu() if x["evt"] == "demonter"], [adresse.replace("127.0.0.1", "127.0.0.2")])
+        self.assertFalse(note.exists())
+        self.assertIn("aucun favori à retirer", r.lignes[-1]["message"])
+        # Sans note, en http : rien n'est démonté (la sonde pourrait viser une autre adresse)
+        r = self.nc("demonter", code=0)
+        self.assertEqual(len([x for x in self.gi_vu() if x["evt"] == "demonter"]), 1)
 
     def test_fichiers_sans_gi_ou_sans_webdav_code_distinct_et_paquet_dit(self):
         self.associer()
@@ -1153,8 +1212,10 @@ elif sys.argv[1] == "clear":
         cible = self.d / "ailleurs"
         cible.write_text("x\n")
         self.favoris().symlink_to(cible)
-        self.nc("fichiers", code=1)
+        r = self.nc("fichiers", code=0)                    # monté et ouvert : seul le favori manque, et c'est dit
         self.assertEqual(cible.read_text(), "x\n")
+        self.assertIn("Favori non posé", r.lignes[-1]["message"])
+        self.assertIs(r.lignes[-1]["favori"], False)
         self.favoris().unlink()
         self.nc("fichiers", code=0)
         self.assertIn("Cloud JARVIS", self.favoris().read_text())
@@ -1912,16 +1973,25 @@ class GLib:
     @staticmethod
     def timeout_add_seconds(n, f):
         note(evt="delai", n=n)
+        if MODE == "jamais":               # le délai se joue vraiment : GVfs, lui, ne rappelle jamais
+            _rappels.append(f)
+class _Racine:
+    def __init__(self, u): self.u = u
+    def get_uri(self): return self.u
 class _Montage:
     def __init__(self, u): self.u = u
+    def get_root(self):
+        return _Racine(self.u.split("/cloud/", 1)[0] + "/" if MODE == "deja_autre" else self.u)
     def unmount_with_operation(self, flags, op, annuler, rappel):
         note(evt="demonter", uri=self.u); _rappels.append(lambda: rappel(self, None))
+        if os.path.exists(os.environ["FAUX_GI_JOURNAL"] + ".monte"):
+            os.unlink(os.environ["FAUX_GI_JOURNAL"] + ".monte")
     def unmount_with_operation_finish(self, res):
         pass
 class _Fichier:
     def __init__(self, u): self.u = u
     def find_enclosing_mount(self, annuler):
-        if MODE == "deja":
+        if MODE in ("deja", "deja_autre") or os.path.exists(os.environ["FAUX_GI_JOURNAL"] + ".monte"):
             return _Montage(self.u)
         raise _Erreur(0, "pas monté")
     def mount_enclosing_volume(self, flags, op, annuler, rappel):
@@ -1929,13 +1999,26 @@ class _Fichier:
         def jouer():
             if MODE == "question":
                 op.h["ask-question"](op, "Certificat inconnu, continuer ?", ["Oui", "Non"])
-            else:
+            elif MODE == "domaine":
+                op.h["ask-password"](op, "Mot de passe pour Cloud", "", "Cloud", 1 | 2 | 4)
+            elif MODE == "msg_proxy":
+                op.h["ask-password"](op, "Enter PROXY password for proxy.example:3128", "", "", 1 | 2)
+            elif MODE == "sans_mdp":
+                op.h["ask-password"](op, "Nom d'utilisateur", "", "", 2)
+            elif MODE not in ("deja_autre",):
                 for _ in range(2 if MODE == "mdp_refuse" else 1):
-                    op.h["ask-password"](op, "Mot de passe", "", "Cloud", 0)
+                    op.h["ask-password"](op, "Mot de passe", "", "Cloud", 1 | 2)
+            if MODE == "jamais":
+                return                     # GVfs ne rappelle jamais, même après l'annulation
+            if MODE == "question_monte":
+                op.h["ask-question"](op, "Certificat inconnu, continuer ?", ["Oui", "Non"])
+                open(os.environ["FAUX_GI_JOURNAL"] + ".monte", "w").close()
             rappel(self, None)
         _rappels.append(jouer)
     def mount_enclosing_volume_finish(self, res):
-        if MODE in ("question", "mdp_refuse"):
+        if MODE == "deja_autre":
+            raise _Erreur(17, "déjà monté")
+        if MODE in ("question", "mdp_refuse", "domaine", "msg_proxy", "sans_mdp"):
             raise _Erreur(19, "annulé")
         if MODE == "erreur":
             raise _Erreur(1, "Hôte injoignable\x1b[31m")
@@ -1945,7 +2028,19 @@ class _Vfs:
 class _Appli:
     def launch_uris(self, uris, contexte):
         note(evt="ouvrir", uris=uris); return True
+class _Resolveur:
+    def lookup(self, uri, annuler):
+        note(evt="proxy", uri=uri)
+        if MODE == "proxy_erreur":
+            raise _Erreur(1, "résolveur cassé")
+        return ["http://proxy.example:3128", "direct://"] if MODE == "proxy" else ["direct://"]
 class Gio:
+    class AskPasswordFlags:
+        NEED_PASSWORD, NEED_USERNAME, NEED_DOMAIN = 1, 2, 4
+    class ProxyResolver:
+        @staticmethod
+        def get_default():
+            return _Resolveur()
     class PasswordSave:
         NEVER, FOR_SESSION, PERMANENTLY = "jamais", "session", "toujours"
     class MountOperationResult:
@@ -2186,6 +2281,27 @@ class Selecteur(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("dépose les fichiers sur l'île", r.stdout.lower())
 
+    def test_favori_au_caractere_pres(self):
+        f = self.m.favoris_chemin()
+        f.parent.mkdir(parents=True)
+        A = "davs://h/cloud/dav/"
+        for avant, adresse, apres in (
+                (b"file:///a A\r\nfile:///b B\r\n", A, b"file:///a A\r\nfile:///b B\r\n" + A.encode() + b" Cloud JARVIS\n"),
+                (b"file:///a A\nfile:///b B", A, b"file:///a A\nfile:///b B\n" + A.encode() + b" Cloud JARVIS\n"),
+                (b"file:///a nom\rsuite\n", None, None),                                    # rien à retirer : rien d'écrit
+                ("file:///a x\u2028davs://autre Cloud JARVIS\n".encode(), None, None),     # U+2028 : pas une fin de ligne
+                (b"file:///a x\x0cdavs://autre Cloud JARVIS\n", None, None),
+                (b"file:///a \xff\xfe\n" + A.encode() + b" Cloud JARVIS\n", None, b"file:///a \xff\xfe\n"),
+                (b"x\n" + A.encode() + b" Cloud JARVIS\n", A, None)):                     # déjà là, à l'identique
+            with self.subTest(avant=avant, adresse=adresse):
+                f.write_bytes(avant)
+                os.utime(f, ns=(1, 1))
+                ecrit = self.m.favori_changer(adresse)
+                self.assertEqual(f.read_bytes(), avant if apres is None else apres)
+                self.assertEqual(ecrit, apres is not None)
+                if apres is None:
+                    self.assertEqual(f.stat().st_mtime_ns, 1)                               # pas réécrit
+
     def test_illisible_entre_examen_et_empreinte_ce_fichier_seulement(self):
         with mock.patch.object(self.m, "preparer", side_effect=PermissionError("refusé")):
             sortie = io.StringIO()
@@ -2225,8 +2341,9 @@ class Selecteur(unittest.TestCase):
         self.assertTrue(d.selecteur_fichiers())
         self.assertIn('cle="portail_fichiers_absent"', (NC_CLOUD.parent / "nc-diag").read_text())
         # « Ouvrir dans Fichiers » : contrôle local, sans réseau ; gi absent, puis sans WebDAV, puis tout là
-        with mock.patch.object(d, "sortie", return_value=("file sftp dav davs", 0)):
+        with mock.patch.object(d, "sortie", return_value=("file sftp dav davs", 0)) as so:
             self.assertEqual(d.fichiers_cloud_manque(), "")
+        self.assertEqual(so.call_args[0][0][1], "-I")                  # mode isolé : un gi du dossier courant n'est pas chargé
         with mock.patch.object(d, "sortie", return_value=("", 1)):
             self.assertIn("gi", d.fichiers_cloud_manque())
         with mock.patch.object(d, "sortie", return_value=("file sftp", 0)):

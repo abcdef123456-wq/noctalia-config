@@ -24,7 +24,8 @@
 Codes de sortie : 0 fait, 1 erreur, 2 mauvais usage, 3 hors ligne (serveur ou stockage injoignable), 4 PC non associé
 (ou révoqué), 5 pas de cloud (serveur non configuré, mode local ou option coupée), 6 conflit (rien n'est choisi tout seul :
 relance avec --si-existe), 7 quota ou disque plein, 8 annulé, 9 transport refusé (HTTP en clair sur Internet),
-10 serveur changé, 11 fichier source modifié, 12 empreinte fausse.
+10 serveur changé, 11 fichier source modifié, 12 empreinte fausse, 13 dépendance absente (gi, GVfs), 14 proxy sur
+l'adresse du cloud, 15 demande de mot de passe inattendue.
 
 Le serveur et la clé sont ceux de JARVIS (~/.config/nc/assistant.conf). Aucun relevé en fond : le serveur n'est
 interrogé que quand tu lances une commande. Les envois interrompus sont notés dans ~/.local/state/nc-cloud (sans jeton)."""
@@ -82,6 +83,8 @@ MORCEAU_MIN, MORCEAU_MAX = 64 * 1024, 64 * 1024 * 1024
 OK, ERREUR, USAGE, HORS_LIGNE, NON_ASSOCIE, DESACTIVE, CONFLIT, QUOTA, ANNULE, TRANSPORT, SERVEUR_CHANGE, SOURCE, EMPREINTE = \
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 DEPENDANCE = 13          # nc-cloud fichiers : le module gi (Gio) ou le moteur WebDAV de GVfs manque
+PROXY = 14               # nc-cloud fichiers : un proxy s'appliquerait à l'adresse du cloud (GVfs le suivrait)
+DEMANDE = 15             # nc-cloud fichiers : demande de mot de passe inattendue (proxy, domaine…) : refusée
 # Ces codes arrêtent toute la commande ; les autres ne touchent que le fichier en cours
 ARRET = (HORS_LIGNE, NON_ASSOCIE, DESACTIVE, TRANSPORT, SERVEUR_CHANGE)
 # Code d'erreur du serveur -> code de sortie
@@ -1840,6 +1843,8 @@ def cmd_ouvrir(a):
 # par GVfs (password_save = NEVER). Toute question de GVfs (certificat inconnu…) reçoit un refus.
 FAVORI = "Cloud JARVIS"
 MONTAGE_DELAI = 120
+MONTAGE_SORTIE = 15             # après l'annulation : si GVfs ne rappelle jamais, la boucle sort quand même
+MONTAGE = ETAT / "montage.json" # l'adresse montée : demonter la retrouve sans refaire la sonde (une autre peut répondre)
 # Les paquets qui donnent gi avec Gio, puis le moteur WebDAV de GVfs (lus dans les dépôts de chaque distribution)
 PAQUETS_FICHIERS = {"arch": ("python-gobject glib2", "gvfs-dnssd"),
                     "debian": ("python3-gi gir1.2-glib-2.0", "gvfs-backends"),
@@ -1932,9 +1937,10 @@ def favoris_chemin():
 
 
 def favori_changer(adresse=None):
-    """Retire la ligne « Cloud JARVIS » (dav:// ou davs://) des favoris GTK, puis l'ajoute pour adresse si donnée. Les
-    autres lignes ne bougent pas ; écriture atomique, droits gardés ; un lien symbolique est refusé ; le fichier n'est
-    créé que si son dossier existe. Vrai si le fichier a été écrit."""
+    """Retire la ligne « Cloud JARVIS » (dav:// ou davs://) des favoris GTK, puis l'ajoute pour adresse si donnée.
+    Lu en OCTETS et coupé sur « \n » seulement, comme GTK : les autres lignes restent au caractère près. Rien n'est
+    réécrit si rien ne change ; écriture atomique (fsync), droits gardés ; un lien symbolique est refusé ; le fichier
+    n'est créé que si son dossier existe. Vrai si le fichier a été écrit."""
     f = favoris_chemin()
     try:
         st = os.lstat(f)
@@ -1945,20 +1951,25 @@ def favori_changer(adresse=None):
                       "GTK bookmarks: not a regular file (link refused), nothing changed."))
     if st is None and (adresse is None or not f.parent.is_dir()):
         return False
-    lignes = f.read_text(encoding="utf-8", errors="surrogateescape").splitlines(keepends=True) if st else []
+    lignes = f.read_bytes().split(b"\n") if st else [b""]
     def notre(l):
-        u, _, nom = l.rstrip("\n").partition(" ")
-        return nom == FAVORI and u.startswith(("dav://", "davs://"))
+        u, _, nom = l.partition(b" ")
+        return nom == FAVORI.encode() and u.startswith((b"dav://", b"davs://"))
     gardees = [l for l in lignes if not notre(l)]
-    if gardees and not gardees[-1].endswith("\n"):
-        gardees[-1] += "\n"
-    nouvelles = gardees + ([f"{adresse} {FAVORI}\n"] if adresse else [])
-    if nouvelles == lignes:
-        return False
+    nous = f"{adresse} {FAVORI}".encode() if adresse else None
+    if len(gardees) == len(lignes) and nous is None:
+        return False                              # rien à retirer
+    if nous is not None and [l for l in lignes if notre(l)] == [nous]:
+        return False                              # déjà là, à l'identique
+    texte = b"\n".join(gardees)
+    if nous is not None:
+        texte += (b"\n" if texte and not texte.endswith(b"\n") else b"") + nous + b"\n"
     fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix=".bookmarks-nc-")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as o:
-            o.write("".join(nouvelles))
+        with os.fdopen(fd, "wb") as o:
+            o.write(texte)
+            o.flush()
+            os.fsync(o.fileno())
         os.chmod(tmp, stat.S_IMODE(st.st_mode) if st else 0o644)
         os.replace(tmp, f)
     except BaseException:
@@ -1968,75 +1979,125 @@ def favori_changer(adresse=None):
     return True
 
 
-def monter(gio, adresse, utilisateur, jeton):
-    """Monte adresse par GVfs (déjà monté : rien). Le jeton ne sert qu'à répondre à ask-password, une fois."""
-    Gio, GLib = gio
-    f = Gio.File.new_for_uri(adresse)
+def proxy_pour(gio, adresse):
+    """Vrai si Gio annonce un proxy pour cette adresse (ou ne sait pas le dire) : GVfs suivrait le proxy du système,
+    pas notre règle « pas de proxy », et le jeton partirait vers une adresse que nous n'avons pas vérifiée."""
+    Gio = gio[0]
+    http = ("https://" if adresse.startswith("davs://") else "http://") + adresse.split("://", 1)[1]
     try:
-        f.find_enclosing_mount(None)
-        return False
-    except GLib.Error:
-        pass
-    op = Gio.MountOperation()
-    etat = {"essais": 0, "refus": None, "erreur": None}
-    annuler = Gio.Cancellable()
+        r = list(Gio.ProxyResolver.get_default().lookup(http, None) or [])
+    except Exception:
+        return True
+    return r != ["direct://"]
 
-    def mot_de_passe(o, *_):
-        etat["essais"] += 1
-        if etat["essais"] > 1:                     # refusé une fois : jeton faux ou révoqué, on ne boucle pas
-            etat["refus"] = "jeton"
-            o.reply(Gio.MountOperationResult.ABORTED)
-            return
+
+def montage_exact(gio, adresse):
+    """Le montage GVfs dont la racine est EXACTEMENT notre adresse, ou None (un montage de l'utilisateur sur la racine du
+    même hôte n'est ni réutilisé ni démonté)."""
+    Gio, GLib = gio
+    try:
+        m = Gio.File.new_for_uri(adresse).find_enclosing_mount(None)
+        racine = m.get_root().get_uri()
+    except Exception:
+        return None
+    return m if isinstance(racine, str) and racine.rstrip("/") == adresse.rstrip("/") else None
+
+
+def monter(gio, adresse, utilisateur, jeton):
+    """Monte adresse par GVfs (déjà monté à cette racine : rien). Le jeton ne sert qu'à répondre à UNE demande de mot de
+    passe, sans domaine et sans proxy ; toute autre demande est refusée, l'opération vidée avant."""
+    Gio, GLib = gio
+    if montage_exact(gio, adresse) is not None:
+        return False
+    if proxy_pour(gio, adresse):
+        raise Echec(T("Un proxy est configuré pour cette adresse : le cloud ne se monte pas à travers un proxy.",
+                      "A proxy is configured for this address: the cloud is not mounted through a proxy."), PROXY)
+    op = Gio.MountOperation()
+    etat = {"jeton_donne": False, "refus": None, "erreur": None, "fini": False}
+    annuler = Gio.Cancellable()
+    boucle = GLib.MainLoop()
+
+    def refuser(o, raison):
+        etat["refus"] = etat["refus"] or raison
+        o.set_password("")                         # le jeton ne reste pas dans l'opération (GVfs peut la renvoyer)
+        o.set_username("")
+        o.reply(Gio.MountOperationResult.ABORTED)
+
+    def mot_de_passe(o, message, _utilisateur, _domaine, drapeaux):
+        F = Gio.AskPasswordFlags
+        d = int(drapeaux)
+        if etat["jeton_donne"]:                    # une seconde demande : on ne boucle pas, rien n'est redonné
+            return refuser(o, "apres_jeton")
+        if not d & int(F.NEED_PASSWORD) or d & int(F.NEED_DOMAIN) or "proxy" in str(message or "").lower():
+            return refuser(o, "inattendue")
+        etat["jeton_donne"] = True
         o.set_username(utilisateur)
         o.set_password(jeton)
         o.set_password_save(Gio.PasswordSave.NEVER)
         o.reply(Gio.MountOperationResult.HANDLED)
 
     def question(o, *_):                           # certificat inconnu, autre domaine… : jamais oui tout seul
-        etat["refus"] = "question"
-        o.reply(Gio.MountOperationResult.ABORTED)
+        refuser(o, "question")
 
     op.connect("ask-password", mot_de_passe)
     op.connect("ask-question", question)
-    boucle = GLib.MainLoop()
 
     def fini(source, res):
         try:
             source.mount_enclosing_volume_finish(res)
         except GLib.Error as e:
             etat["erreur"] = e
+        etat["fini"] = True
         boucle.quit()
+
+    def sortir():                                  # GVfs n'a jamais rappelé après l'annulation
+        boucle.quit()
+        return False
 
     def trop_long():
         etat["refus"] = etat["refus"] or "delai"
         annuler.cancel()
+        GLib.timeout_add_seconds(MONTAGE_SORTIE, sortir)
         return False
 
     GLib.timeout_add_seconds(MONTAGE_DELAI, trop_long)
+    f = Gio.File.new_for_uri(adresse)
     f.mount_enclosing_volume(Gio.MountMountFlags.NONE, op, annuler, fini)
     boucle.run()
     e = etat["erreur"]
     if e is not None and e.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
-        return False
-    if etat["refus"] == "question":
+        if montage_exact(gio, adresse) is not None:
+            return False
+        raise Echec(T("Un autre montage de ce serveur existe déjà : démonte-le dans ton gestionnaire de fichiers, puis réessaie.",
+                      "Another mount of this server already exists: unmount it in your file manager, then try again."), CONFLIT)
+    refus = etat["refus"]
+    if refus == "question":
+        if montage_exact(gio, adresse) is not None:        # monté malgré le refus : on ne le garde pas
+            demonter_si_monte(gio, adresse)
         raise Echec(T("GVfs a posé une question (certificat inconnu ?) : refusée, rien n'est monté.",
                       "GVfs asked a question (unknown certificate?): refused, nothing mounted."), TRANSPORT)
-    if etat["refus"] == "jeton":
-        raise Echec(T("Le serveur refuse le jeton de ce PC pour WebDAV : associe ce PC à nouveau.",
-                      "The server refuses this PC's token for WebDAV: pair this PC again."), NON_ASSOCIE)
-    if etat["refus"] == "delai":
-        raise Echec(T("Montage trop long : serveur injoignable ?", "Mount took too long: server unreachable?"), HORS_LIGNE)
-    if e is not None:
-        raise Echec(T(f"Montage refusé par GVfs : {propre(e.message, 200)}", f"Mount refused by GVfs: {propre(e.message, 200)}"), HORS_LIGNE)
+    if refus == "inattendue":
+        raise Echec(T("Demande de mot de passe inattendue (proxy, domaine…) : refusée, rien n'est monté.",
+                      "Unexpected password request (proxy, domain…): refused, nothing mounted."), DEMANDE)
+    if refus == "delai" and not etat["fini"] or e is not None or refus == "apres_jeton":
+        if montage_exact(gio, adresse) is not None and refus != "apres_jeton":
+            return True
+        detail = T("montage trop long", "mount took too long") if refus == "delai" else propre(e.message, 200) if e is not None else T(
+            "seconde demande de mot de passe", "second password request")
+        if etat["jeton_donne"]:
+            raise Echec(T(f"Le montage a échoué après l'envoi du jeton ({detail}) : vérifie avec nc-cloud verifier ; si le doute "
+                          "persiste, dissocie puis associe ce PC.",
+                          f"The mount failed after the token was sent ({detail}): check with nc-cloud verifier; if in doubt, "
+                          "unpair then pair this PC again."), HORS_LIGNE if refus == "delai" else ERREUR)
+        raise Echec(T(f"Montage impossible ({detail}) : serveur injoignable ?", f"Mount impossible ({detail}): server unreachable?"), HORS_LIGNE)
     return True
 
 
 def demonter_si_monte(gio, adresse):
-    """Démonte adresse si GVfs la garde ; faux si rien n'était monté. Les erreurs sont tues (démontage de courtoisie)."""
+    """Démonte adresse si GVfs la garde à cette racine exacte ; faux sinon. Les erreurs sont tues (démontage de courtoisie)."""
     Gio, GLib = gio
-    try:
-        m = Gio.File.new_for_uri(adresse).find_enclosing_mount(None)
-    except GLib.Error:
+    m = montage_exact(gio, adresse)
+    if m is None:
         return False
     boucle = GLib.MainLoop()
 
@@ -2063,7 +2124,13 @@ def cmd_fichiers(a):
     f = st.get("features") if isinstance(st.get("features"), dict) else {}
     ecriture = f.get("webdav_write") is True
     monter(gio, adresse, s.appareil["device_id"], s.jeton)
-    favori_changer(adresse)
+    dossier_prive(ETAT)
+    ecrire_json(MONTAGE, {"adresse": adresse})
+    favori = ""
+    try:
+        favori_changer(adresse)
+    except (Echec, OSError) as e:                  # monté quand même : le favori seul manque
+        favori = T(f" Favori non posé ({propre(str(e), 200)}).", f" Bookmark not set ({propre(str(e), 200)}).")
     Gio = gio[0]
     appli = Gio.AppInfo.get_default_for_type("inode/directory", False)
     ouvert = False
@@ -2071,23 +2138,30 @@ def cmd_fichiers(a):
         with contextlib.suppress(Exception):
             ouvert = bool(appli.launch_uris([adresse], None))
     mode = T("lecture et écriture", "read and write") if ecriture else T("lecture seule", "read only")
-    dire(T(f"Cloud JARVIS dans Fichiers ({mode}) : favori « {FAVORI} »." + ("" if ouvert else " Ouvre-le depuis ton gestionnaire de fichiers."),
-           f"JARVIS Cloud in Files ({mode}): “{FAVORI}” bookmark." + ("" if ouvert else " Open it from your file manager.")),
-         evenement="fichiers", adresse=adresse, ecriture=ecriture, ouvert=ouvert)
+    dire(T(f"Cloud JARVIS dans Fichiers ({mode})" + (f" : favori « {FAVORI} »." if not favori else ".") + favori
+           + ("" if ouvert else " Ouvre-le depuis ton gestionnaire de fichiers."),
+           f"JARVIS Cloud in Files ({mode})" + (f": “{FAVORI}” bookmark." if not favori else ".") + favori
+           + ("" if ouvert else " Open it from your file manager.")),
+         evenement="fichiers", adresse=adresse, ecriture=ecriture, ouvert=ouvert, favori=not favori)
     return OK
 
 
 def demonter_et_oublier(srv):
-    """Démontage (si gi est là) et favori retiré ; pour demonter et dissocier. Rien n'échoue pour si peu."""
-    try:
-        adresse = adresse_dav(srv)
-    except Echec:
+    """Démontage (si gi est là) et favori retiré ; pour demonter et dissocier. Rien n'échoue pour si peu. L'adresse est
+    celle notée au montage ; sans elle, en https seulement, celle du nom (en http, refaire la sonde pourrait viser une
+    autre adresse)."""
+    note = lire_json(MONTAGE) or {}
+    adresse = note.get("adresse") if isinstance(note.get("adresse"), str) else None
+    if adresse is None or not re.fullmatch(r"davs?://[A-Za-z0-9.:\[\]-]{1,260}/[!-~]{0,2000}", adresse):
         adresse = None
+        with contextlib.suppress(Echec):
+            adresse = adresse_dav(srv) if srv.https else None
     gio = charger_gio()
     monte = False
     if adresse and gio is not None:
         with contextlib.suppress(Exception):
             monte = demonter_si_monte(gio, adresse)
+    effacer(MONTAGE)
     retire = False
     with contextlib.suppress(Echec, OSError):
         retire = favori_changer(None)
@@ -2096,8 +2170,8 @@ def demonter_et_oublier(srv):
 
 def cmd_demonter(a):
     monte, retire = demonter_et_oublier(Serveur())
-    dire(T("Cloud JARVIS démonté, favori retiré." if monte or retire else "Rien à démonter.",
-           "JARVIS Cloud unmounted, bookmark removed." if monte or retire else "Nothing to unmount."),
+    dire(T(("Cloud JARVIS démonté" if monte else "Rien à démonter") + (", favori retiré." if retire else ", aucun favori à retirer."),
+           ("JARVIS Cloud unmounted" if monte else "Nothing to unmount") + (", bookmark removed." if retire else ", no bookmark to remove.")),
          evenement="demonte", demonte=monte, favori_retire=retire)
     return OK
 

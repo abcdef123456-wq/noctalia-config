@@ -505,6 +505,31 @@ class HorsEcran(unittest.TestCase):
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertFalse([x for x in j if x.startswith("--json reprendre -- ")], j)          # la reprise annulée ne part pas
 
+    def test_en_tete_a_420_px_sans_chevauchement(self):
+        self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                var t = trouver(corps, "nc-cloud-titre"), b = trouver(corps, "nc-cloud-boutons-entete")
+                function separes() {
+                    var a = t.mapToItem(corps, 0, 0), c = b.mapToItem(corps, 0, 0)
+                    return a.x + t.implicitWidth <= c.x || a.y + t.height <= c.y
+                }
+                if (etape === 1) {
+                    verifier(vu(corps, "nc-cloud-fichiers"), "4 boutons")
+                    verifier(separes() && !trouver(corps, "nc-cloud-entete").serre, "700 px : une ligne")
+                    fen.width = 420; etape++; return }
+                if (etape === 2) {
+                    verifier(separes(), "420 px : titre et boutons séparés")
+                    verifier(trouver(corps, "nc-cloud-entete").serre, "420 px : deux lignes")
+                    var c = b.mapToItem(corps, 0, 0)
+                    verifier(c.x >= 0 && c.x + b.width <= fen.width, "boutons dans la fenêtre")
+                    verifier(b.y + b.height <= trouver(corps, "nc-cloud-entete").height, "l'en-tête grandit : rien ne déborde dessous")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, fichiers=True)
+
     def test_coupure_reprendre_fermer_puis_annuler(self):
         j = self.lancer(self.OUVRIR + '''
             Timer { interval: 80; running: true; repeat: true; onTriggered: {

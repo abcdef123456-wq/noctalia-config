@@ -1460,7 +1460,7 @@ def _reglage(cle):
 
 def fichiers_cloud_manque():
     """Ce qui manque à « nc-cloud fichiers » (gi avec Gio, moteur WebDAV de GVfs), vérifié sur place sans réseau, ou ""."""
-    r, code = sortie([sys.executable, "-c", "import gi; gi.require_version('Gio', '2.0'); from gi.repository import Gio; "
+    r, code = sortie([sys.executable, "-I", "-c", "import gi; gi.require_version('Gio', '2.0'); from gi.repository import Gio; "
                       "print(' '.join(Gio.Vfs.get_default().get_supported_uri_schemes() or []))"], 20)
     if code != 0:
         return T("module Python gi (Gio) absent (nc-cloud verifier dit le paquet)", "Python module gi (Gio) missing (nc-cloud verifier names the package)")

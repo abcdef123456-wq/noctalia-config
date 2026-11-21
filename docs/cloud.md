@@ -54,12 +54,19 @@ ramène à un dossier parent.
 lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni à la connexion, ni en fond.
 
 - Identifiants : l'identifiant de ce PC et son jeton, donnés à GVfs dans le processus de nc-cloud seulement (jamais dans
-  l'adresse, la ligne de commande, un fichier ni l'environnement), et jamais enregistrés par GVfs. Toute question de GVfs
-  (certificat inconnu…) est refusée.
+  l'adresse, la ligne de commande, un fichier ni l'environnement), et jamais enregistrés par GVfs. Ils ne répondent qu'à
+  UNE demande de mot de passe sans domaine ni proxy ; toute autre demande (proxy, domaine, seconde demande) et toute
+  question de GVfs (certificat inconnu…) sont refusées (code 15 pour une demande inattendue).
+- GVfs suit le proxy du système, pas la règle « pas de proxy » de nc-cloud : si un proxy s'applique à l'adresse du
+  cloud, le montage est refusé (code 14). Le serveur ne doit jamais rediriger le WebDAV vers un autre hôte.
+- Si le montage échoue APRÈS l'envoi du jeton, le message le dit : vérifie avec `nc-cloud verifier`, et dans le doute
+  dissocie puis associe ce PC (le jeton a pu être vu par un intermédiaire).
 - En `https://`, le montage vise le nom du serveur (certificat vérifié par GVfs) ; en `http://` (ce PC, réseau privé,
   Tailscale), il vise l'adresse IP vérifiée par nc-cloud, jamais le nom ; `http://` vers Internet est refusé.
 - Le favori est une ligne du fichier `~/.config/gtk-3.0/bookmarks`, sans identifiants ; les autres lignes ne bougent
-  pas. `nc-cloud demonter` et `nc-cloud dissocier` démontent et le retirent.
+  pas, au caractère près. Si ce fichier ne peut pas être modifié (un lien de dotfiles, par exemple), le cloud est monté
+  et ouvert quand même, et le message dit que le favori manque. `nc-cloud demonter` et `nc-cloud dissocier` démontent
+  l'adresse notée au montage (seulement si la racine du montage est exactement celle du cloud) et retirent le favori.
 - Il faut deux paquets facultatifs, qu'`install.sh` n'installe pas : sans eux, le bouton n'apparaît pas, et
   `nc-cloud verifier` comme `nc-diag` disent lequel manque.
 
@@ -248,6 +255,9 @@ plus de 24 h sont retirées au prochain `ouvrir`.
 
 - Pas de dossier entier, pas de partage avec d'autres personnes, pas de synchronisation automatique.
 - Fichiers : la fin de session et les coupures réseau sont l'affaire de GVfs ; un montage perdu se refait par le bouton.
+- Fichiers : aucun vrai montage GVfs n'a été essayé ici (tests avec un faux module `gi`). Pas vérifié : ce que gvfsd-dav
+  fait de « jamais enregistrer », s'il suit une redirection vers un autre hôte, son invite exacte. Le premier essai réel
+  est à faire avec un vrai serveur.
 - Une association dont la réponse se perd en route laisse un appareil sans jeton côté serveur : révoque-le depuis le
   serveur. Si Ctrl + C ou le trousseau interrompt l'association, ce PC est révoqué tout de suite ; si cette révocation
   échoue, le message donne l'identifiant de l'appareil à révoquer.

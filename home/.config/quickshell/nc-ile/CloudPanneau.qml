@@ -86,16 +86,23 @@ FloatingWindow {
                 x: 26; y: 24; width: defile.width - 52
                 spacing: 14
 
+                // Trop étroit pour le titre et les boutons sur une ligne (420 px) : les boutons passent dessous
                 Item {
-                    width: parent.width; height: 34
-                    Ico { id: ico; anchors.verticalCenter: parent.verticalCenter; nom: "cloud"; taille: 26; color: Couleurs.accent }
+                    objectName: "nc-cloud-entete"
+                    readonly property bool serre: titreEntete.x + titreEntete.implicitWidth + 16 + boutonsEntete.implicitWidth > width
+                    width: parent.width; height: serre ? 34 + 8 + boutonsEntete.implicitHeight : 34
+                    Ico { id: ico; y: (34 - height) / 2; nom: "cloud"; taille: 26; color: Couleurs.accent }
                     Column {
-                        anchors.verticalCenter: parent.verticalCenter; x: 36
+                        id: titreEntete
+                        objectName: "nc-cloud-titre"
+                        y: (34 - height) / 2; x: 36
                         Texte { text: "Cloud JARVIS"; font.pixelSize: 20; font.weight: Font.DemiBold }
                         Texte { objectName: "nc-cloud-quota"; visible: cloud.quota !== ""; text: cloud.quota; secondaire: true; font.pixelSize: 11 }
                     }
                     Row {
-                        anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; spacing: 8
+                        id: boutonsEntete
+                        objectName: "nc-cloud-boutons-entete"
+                        y: parent.serre ? 42 : (34 - height) / 2; anchors.right: parent.right; spacing: 8
                         CloudBouton { visible: cloud.pret && CloudEtat.fichiersPossible; objectName: "nc-cloud-fichiers"
                                       texte: Reglages.t("Ouvrir dans Fichiers", "Open in Files"); enabled: !CloudEtat.occupe
                                       onClic: CloudEtat.ouvrirFichiers() }
