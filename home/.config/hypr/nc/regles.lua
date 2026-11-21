@@ -103,13 +103,16 @@ hl.window_rule({
     float = true,
 })
 -- Jeux (Steam, Proton, gamescope) : marqués « jeu » (fréquence variable, affichage direct) ; en mode jeu
--- (Super + Alt + G), image envoyée sans attendre l'écran (latence minimale)
-hl.window_rule({
+-- (Super + Alt + G), image envoyée sans attendre l'écran (latence minimale). JEUX_PLEIN_ECRAN=oui : ouverts en plein
+-- écran (fullscreen, pas fullscreen_state, qui casse F11) ; à non, la clé n'est pas posée du tout (rien ne change)
+local jeux = {
     name      = "jeux",
     match     = { class = "^(steam_app_.*|gamescope|.*\\.exe)$" },
     content   = "game",
     immediate = true,
-})
+}
+if nc.reglage("JEUX_PLEIN_ECRAN", false) then jeux.fullscreen = true end
+hl.window_rule(jeux)
 
 -- Pas de mise en veille pendant une vidéo en plein écran
 hl.window_rule({ name = "video-plein-ecran", match = { class = ".*" }, idle_inhibit = "fullscreen" })

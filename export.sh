@@ -150,6 +150,7 @@ HOME_FILES=(
   .local/bin/nc-presse-capture
   .local/bin/nc-qr
   .local/bin/nc-note
+  .local/bin/nc-xwayland-primaire
   .local/bin/nc-verrou-media
   .local/bin/nc-media
   .local/bin/nc-touches

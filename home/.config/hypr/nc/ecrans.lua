@@ -311,3 +311,33 @@ hl.on("monitor.removed", function()
     hl.exec_cmd("~/.local/bin/nc-ecrans verifier; sleep 1; ~/.local/bin/nc-verrou-place")
 end)
 hl.on("hyprland.start", function() hl.exec_cmd("sleep 3; ~/.local/bin/nc-verrou-place") end)
+
+-- ── XWayland : l'écran primaire suit l'écran actif (bloc lu par tests/test_xwayland_primaire.py) ──
+-- Les jeux X11/Proton démarrent aux dimensions de l'écran primaire de XWayland : il suit l'écran où l'on est (pas
+-- toujours l'interne, pas toujours l'externe). Rien avec un seul écran ; aucun processus tant que l'écran actif ne
+-- change pas (window.active part à chaque changement de fenêtre) ; nc-xwayland-primaire ne fait rien si Xwayland ne
+-- tourne pas, et ne rappelle pas xrandr si le primaire est déjà le bon.
+local primaire_pose = nil
+local function primaire_suivre(force)
+    local m = hl.get_active_monitor()
+    local nom = m and tostring(m.name or "") or ""
+    local n = 0
+    for _, x in ipairs(hl.get_monitors()) do
+        if not virtuel(x) then n = n + 1 end
+    end
+    if n < 2 or #nom > 32 or not nom:match("^%a[%w._-]*$") then return end
+    if nom == primaire_pose and not force then return end
+    primaire_pose = nom
+    hl.exec_cmd("~/.local/bin/nc-xwayland-primaire " .. nom)
+end
+hl.on("hyprland.start", function() primaire_suivre(true) end)
+hl.on("monitor.added", function() primaire_suivre(true) end)
+hl.on("monitor.removed", function() primaire_suivre(true) end)
+hl.on("workspace.active", function() primaire_suivre(false) end)
+hl.on("window.active", function() primaire_suivre(false) end)
+-- Steam ou un jeu s'ouvre : Xwayland vient peut-être de démarrer (le script dédoublonne par Xwayland)
+hl.on("window.open", function(w)
+    local c = w and tostring(w.class or "") or ""
+    if c == "steam" or c == "gamescope" or c:match("^steam_app_") or c:match("%.exe$") then primaire_suivre(true) end
+end)
+-- ── fin du primaire de XWayland
