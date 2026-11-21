@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -31,6 +32,8 @@ import time
 import unittest
 from unittest import mock
 import urllib.parse
+import zipfile
+import zlib
 
 REPO = Path(__file__).resolve().parents[1]
 NC_CLOUD = REPO / "home/.local/bin/nc-cloud"
@@ -38,6 +41,33 @@ CLE = "cle-jarvis-tres-secrete-0123456789"
 JETON = "jeton-cloud-aleatoire-abcdefghijklmnopqrstuvwxyz"
 MORCEAU = 64 * 1024
 RLO = chr(0x202E)    # inversion de sens : écrit par son code, jamais en vrai dans le source
+
+
+def png_minimal():
+    """Une vraie image PNG de 1 × 1 pixel."""
+    def bloc(t, d):
+        return len(d).to_bytes(4, "big") + t + d + zlib.crc32(t + d).to_bytes(4, "big")
+    return (b"\x89PNG\r\n\x1a\n" + bloc(b"IHDR", (1).to_bytes(4, "big") * 2 + b"\x08\x02\x00\x00\x00")
+            + bloc(b"IDAT", zlib.compress(b"\x00\xff\x00\x00")) + bloc(b"IEND", b""))
+
+
+def jar(cafe=True):
+    """Une archive JAR (jamais exécutée) : META-INF/ et son manifeste, avec ou sans l'en-tête 0xCAFE de l'outil jar."""
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        i = zipfile.ZipInfo("META-INF/")
+        if cafe:
+            i.extra = b"\xfe\xca\x00\x00"
+        z.writestr(i, b"")
+        z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\nMain-Class: A\r\n\r\n")
+        z.writestr("A.class", b"\xca\xfe\xba\xbe" + b"\0" * 20)
+    return b.getvalue()
+
+
+PNG = png_minimal()
+PDF = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"
+HTML = b"<!doctype html><script>fetch('http://exemple.invalid/')</script>"
+SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
 
 
 class Faux:
@@ -468,6 +498,9 @@ class Gestion(http.server.BaseHTTPRequestHandler):
         if "perdre_gestion" in f.pannes:
             f.pannes.discard("perdre_gestion")
             return self.couper()
+        if "erreur_500_gestion" in f.pannes:                 # fait, mais le serveur répond une erreur interne
+            f.pannes.discard("erreur_500_gestion")
+            return self.repondre(500, {"detail": "Internal Server Error"})
         return self.repondre(200, res)
 
     def vue(self, up, ident):
@@ -1224,7 +1257,27 @@ elif sys.argv[1] == "clear":
         self.nc("creer", a, "../x", code=2)
         self.assertEqual(list((self.home / ".local/state/nc-cloud/vides").iterdir()), [])
 
-    def ouvreur(self):
+    def ouvreur(self, file=True):
+        """Un faux xdg-open qui note ses appels ; et un faux `file` (la CI n'installe pas le vrai partout) qui lit le
+        type au contenu comme lui sur ces cas : PNG, PDF, ZIP / JAR, HTML, SVG, script, texte."""
+        if file:
+            ff = self.bin / "file"
+            ff.write_text("#!" + sys.executable + """
+import sys
+b = open(sys.argv[-1], 'rb').read()
+t = b.lstrip()[:200].lower()
+if b.startswith(b'\\x89PNG\\r\\n\\x1a\\n'): m = 'image/png'
+elif b.startswith(b'%PDF-'): m = 'application/pdf'
+elif b.startswith(b'PK'): m = 'application/java-archive' if b'META-INF/MANIFEST.MF' in b else 'application/zip'
+elif t.startswith((b'<!doctype html', b'<html')): m = 'text/html'
+elif b'<svg' in t: m = 'image/svg+xml'
+elif b.startswith(b'#!'): m = 'text/x-shellscript'
+else:
+    try: b.decode('utf-8'); m = 'text/plain'
+    except UnicodeDecodeError: m = 'application/octet-stream'
+print(m)
+""")
+            ff.chmod(0o755)
         appels = self.d / "appels-xdg"
         x = self.bin / "xdg-open"
         x.write_text(f'#!/bin/sh\necho "$@" >> "{appels}"\n')
@@ -1244,14 +1297,14 @@ elif sys.argv[1] == "clear":
         r = self.nc("ouvrir", f, code=0)
         copie = Path(r.lignes[-1]["fichier"])
         self.assertEqual(copie.read_bytes(), b"bonjour")
-        self.assertEqual(stat.S_IMODE(copie.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(copie.stat().st_mode), 0o400)
         self.assertEqual(stat.S_IMODE(copie.parent.stat().st_mode), 0o700)
         self.assertTrue(str(copie).startswith(str(self.home / ".cache/nc-cloud/ouverts")))
         self.assertEqual(self.attendre(appels).strip(), str(copie))
         # une copie de plus de 24 h est retirée au prochain ouvrir
         vieux = time.time() - 25 * 3600
         os.utime(copie, (vieux, vieux))
-        autre = self.nc("deposer", "--dans", a, str(self.fichier("image.png", b"\x89PNG...")), code=0).lignes[-1]["entree"]["id"]
+        autre = self.nc("deposer", "--dans", a, str(self.fichier("image.png", PNG)), code=0).lignes[-1]["entree"]["id"]
         self.nc("ouvrir", autre, code=0)
         self.assertFalse(copie.exists())
 
@@ -1266,7 +1319,7 @@ elif sys.argv[1] == "clear":
             r = self.nc("ouvrir", eid, code=1)
             self.assertIn("télécharge-le d'abord", r.stdout)
         eid = self.nc("deposer", "--dans", a, str(self.fichier("x.txt", b"ok")), code=0).lignes[-1]["entree"]["id"]
-        self.faux.entries[eid]["name"] = "../../" + RLO + ".bashrc"
+        self.faux.entries[eid]["name"] = "../../" + RLO + ".note.txt"
         r = self.nc("ouvrir", eid, code=0)
         copie = Path(r.lignes[-1]["fichier"])
         self.assertTrue(copie.parent.parent == self.home / ".cache/nc-cloud/ouverts" and not copie.name.startswith("."), copie)
@@ -1275,6 +1328,153 @@ elif sys.argv[1] == "clear":
         self.assertEqual(self.attendre(appels).count("\n"), 1)                  # seule la copie saine est ouverte
         restes = [p for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file() and p.name.startswith(".ouvert-")]
         self.assertEqual(restes, [])
+
+    # ── Retouches de C1d ──
+
+    def depot(self, nom, contenu, parent="root"):
+        p = self.fichier("src-" + hashlib.sha256(nom.encode() + contenu).hexdigest()[:12], contenu)
+        eid = self.nc("deposer", "--dans", parent, str(p), code=0).lignes[-1]["entree"]["id"]
+        self.faux.entries[eid]["name"] = nom
+        return eid
+
+    def contenus_ouvrir(self):
+        return [("vacances.png", jar(True), False), ("vacances.png", jar(False), False), ("vacances.png", HTML, False),
+                ("page.html", HTML, False), ("dessin.svg", SVG, False), ("photo.jpg", b"bonjour\n", False),
+                ("photo.png", b"#!/bin/sh\nid\n", False), ("script.sh", b"echo\n", False), ("x.jar", jar(True), False),
+                ("lanceur", b"[Desktop Entry]\nExec=id\n", False),
+                ("image.png", PNG, True), ("doc.pdf", PDF, True), ("note.txt", b"bonjour\n", True), ("liste.csv", b"a,b\n1,2\n", True)]
+
+    def verifier_liste_blanche(self, appels):
+        self.faux.gestion = True
+        self.associer()
+        for nom, contenu, ouvert in self.contenus_ouvrir():
+            with self.subTest(nom=nom, debut=contenu[:12]):
+                eid = self.depot(nom, contenu)
+                r = self.nc("ouvrir", eid, code=0 if ouvert else 1)
+                if not ouvert:
+                    self.assertIn("télécharge-le d'abord", r.stdout)
+        time.sleep(0.5)
+        vus = sorted(Path(x).name for x in self.attendre(appels).split())
+        self.assertEqual(vus, sorted(n for n, _, o in self.contenus_ouvrir() if o), "xdg-open n'a vu que les types sûrs")
+        restes = [p.name for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file()]
+        self.assertEqual(sorted(restes), vus, "aucune copie refusée ne reste")
+
+    def test_ouvrir_liste_blanche_contenu_et_nom(self):
+        self.verifier_liste_blanche(self.ouvreur())
+
+    @unittest.skipUnless(shutil.which("file"), "file absent ici (la CI ne l'installe pas partout)")
+    def test_ouvrir_liste_blanche_avec_le_vrai_file(self):
+        appels = self.ouvreur(file=False)
+        (self.bin / "file").symlink_to(shutil.which("file"))
+        self.verifier_liste_blanche(appels)
+
+    def test_ouvrir_sans_file_trop_gros_ou_nom_trop_long(self):
+        appels = self.ouvreur(file=False)
+        self.faux.gestion = True
+        self.associer()
+        eid = self.depot("image.png", PNG)
+        r = self.nc("ouvrir", eid, code=1)                                    # file absent : refus
+        self.assertIn("télécharge-le d'abord", r.stdout)
+        self.ouvreur()
+        self.faux.entries[eid]["size"] = 200 * 1024 * 1024 + 1
+        avant = len(self.faux.journal)
+        r = self.nc("ouvrir", eid, code=1)
+        self.assertIn("200 Mio", r.stdout)
+        self.assertFalse([c for c in self.faux.journal[avant:] if c[1].endswith("/content")], "rien n'est téléchargé")
+        eid = self.depot("é" * 200 + ".txt", b"ok")
+        r = self.nc("ouvrir", eid, code=1)
+        self.assertIn("255 octets", r.stdout)
+        time.sleep(0.3)
+        self.assertEqual(self.attendre(appels), "")
+
+    def test_ouvrir_disque_plein_code_7(self):
+        self.ouvreur()
+        self.faux.gestion = True
+        self.associer()
+        eid = self.depot("gros.txt", b"x" * 300000)
+
+        def limite():
+            import resource
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (100000, 100000))
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "ouvrir", eid], capture_output=True, text=True, timeout=60,
+                           env=self.env(), stdin=subprocess.DEVNULL, preexec_fn=limite)
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertNotIn("interrompu", r.stdout.lower())
+
+    def brut(self, *args, env=None):
+        return subprocess.run([sys.executable, str(NC_CLOUD), *args], capture_output=True, text=True, timeout=60,
+                              env=env or self.env(), stdin=subprocess.DEVNULL)
+
+    def test_commandes_suggerees_jamais_executees_par_un_shell(self):
+        a, b, f = self.arbre_de_test()
+        piege = "$(touch${IFS}PIEGE)`touch${IFS}PIEGE2`;touch${IFS}PIEGE3"
+        self.faux.entries[a]["revision"] = piege
+        r = self.brut("apercu", a)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        ligne = r.stdout.splitlines()[-1].split(" : ", 1)[1]
+        cwd, fbin = self.d / "shell", self.d / "fbin"
+        cwd.mkdir()
+        fbin.mkdir()
+        recu = self.d / "argv-recu"
+        (fbin / "nc-cloud").write_text("#!" + sys.executable + f"\nimport sys, json\nopen({str(recu)!r}, 'w').write(json.dumps(sys.argv[1:]))\n")
+        (fbin / "nc-cloud").chmod(0o755)
+        subprocess.run(["bash", "-c", ligne], cwd=cwd, env={"PATH": f"{fbin}:/usr/bin:/bin"}, timeout=10)
+        self.assertEqual(list(cwd.iterdir()), [], "rien ne s'exécute au copier-coller")
+        self.assertEqual(json.loads(recu.read_text()), ["supprimer", a, "--revision", piege, "--recursif", "--arbre", self.faux.arbre(a)])
+        r = self.brut("entree", a)
+        self.assertIn(shlex.quote(piege), r.stdout)
+        for mauvaise in ("a b", "a\nb", 'x"y', "é"):
+            self.faux.entries[a]["revision"] = mauvaise
+            r = self.brut("apercu", a)
+            self.assertIn("aucune commande suggérée", r.stdout, repr(mauvaise))
+            self.assertNotIn("supprimer", r.stdout)
+            self.assertIn("révision inattendue", self.brut("entree", a).stdout)
+
+    def test_nombres_hostiles(self):
+        a, b, f = self.arbre_de_test()
+        self.faux.entries[f]["size"] = 10 ** 400
+        r = self.brut("entree", f)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.faux.entries[f]["size"] = -5
+        self.assertNotIn("size", self.nc("entree", f, code=0).lignes[-1]["entree"])
+
+    def test_creer_hors_ligne_ou_nom_pris(self):
+        self.faux.gestion = True
+        self.associer()
+        r = self.nc("creer", "root", "pris.txt", code=0)
+        r = self.brut("creer", "root", "pris.txt")
+        self.assertEqual(r.returncode, 6)
+        self.assertIn("ce nom existe déjà", r.stdout)
+        self.assertNotIn("--si-existe", r.stdout + r.stderr)
+        self.url("http://127.0.0.1:9")
+        self.nc("creer", "root", "vide.txt", code=3)
+        self.assertEqual(list((self.home / ".local/state/nc-cloud/vides").rglob("*")), [])
+        self.assertFalse(self.manifestes())
+
+    def test_rejeu_sur_une_autre_route_nouvelle_cle(self):
+        self.faux.gestion = self.faux.revisions_vivantes = self.faux.suppression = True
+        self.associer()
+        eid = self.depot("f.txt", b"x")
+        rev = self.rev(eid)
+        self.faux.pannes.add("perdre_gestion")
+        self.nc("supprimer", eid, "--revision", rev, code=3)
+        self.faux.gestion = False                         # le serveur n'annonce plus directory_delete : autre route
+        self.nc("supprimer", eid, "--revision", rev, code=1)
+        sup = [c for c in self.faux.journal if c[0] == "DELETE"]
+        self.assertEqual([c[1].split("/v1")[1].split("/")[1] for c in sup], ["entries", "files"])
+        self.assertNotEqual(sup[0][2]["Idempotency-Key"], sup[1][2]["Idempotency-Key"])
+
+    def test_erreur_500_pendant_une_mutation_le_manifeste_reste(self):
+        a, b, f = self.arbre_de_test()
+        rev = self.rev(f)
+        self.faux.pannes.add("erreur_500_gestion")
+        r = self.nc("deplacer", f, "--revision", rev, "--vers", "root")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(len(self.manifestes("operations")), 1, "l'opération a peut-être eu lieu")
+        r = self.nc("deplacer", f, "--revision", rev, "--vers", "root", code=0)       # même clé : le reçu
+        self.assertEqual(r.lignes[-1]["etat"], "deplace")
+        self.assertFalse(self.manifestes("operations"))
 
 
 class DansLeProcessus(unittest.TestCase):
@@ -1296,6 +1496,56 @@ class DansLeProcessus(unittest.TestCase):
         m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_cloud_essai", l))
         l.exec_module(m)
         return m
+
+    def test_dossier_prive_chaque_niveau_et_aucun_lien(self):
+        m = self.charger("http://127.0.0.1:9")
+        h = Path(os.environ["HOME"])
+        ancien = os.umask(0)
+        try:
+            m.dossier_prive(h / ".cache/nc-cloud/ouverts/abc")
+        finally:
+            os.umask(ancien)
+        for x in (".cache", ".cache/nc-cloud", ".cache/nc-cloud/ouverts", ".cache/nc-cloud/ouverts/abc"):
+            self.assertEqual(stat.S_IMODE((h / x).stat().st_mode), 0o700, x)
+        ailleurs = h.parent / "ailleurs"
+        ailleurs.mkdir()
+        (h / ".local/state").mkdir(parents=True)
+        (h / ".local/state/nc-cloud").symlink_to(ailleurs)
+        with self.assertRaises(m.Echec):
+            m.dossier_prive(h / ".local/state/nc-cloud/envois")
+        self.assertEqual(list(ailleurs.iterdir()), [], "rien d'écrit au bout du lien")
+        lien_home = h.parent / "lien-home"                 # un HOME derrière un lien (/home -> /var/home) reste permis
+        lien_home.symlink_to(h)
+        m.dossier_prive(lien_home / ".cache/nc-cloud/ouverts/def")
+
+    def test_nettoyer_ouverts_sans_suivre_un_lien_meme_en_course(self):
+        m = self.charger("http://127.0.0.1:9")
+        racine = Path(os.environ["HOME"]).parent
+        base, precieux = racine / "ouverts", racine / "precieux"
+        (base / "0123456789abcdef").mkdir(parents=True)
+        (base / "fedcba9876543210").mkdir()
+        precieux.mkdir()
+        vieux = time.time() - 30 * 3600
+        for f in (precieux / "these.odt", precieux / "photo.jpg", base / "fedcba9876543210/vieux.txt"):
+            f.write_text("x")
+            os.utime(f, (vieux, vieux))
+        (base / "fedcba9876543210/recent.txt").write_text("x")
+        (base / "lien").symlink_to(precieux)                # un lien déjà posé
+        vrai = os.scandir
+        etat = {"fait": False}
+
+        def scandir(p):
+            r = vrai(p)
+            if not etat["fait"]:                            # l'autre processus, juste après la liste de base
+                etat["fait"] = True
+                os.rmdir(base / "0123456789abcdef")
+                os.symlink(precieux, base / "0123456789abcdef")
+            return r
+        with mock.patch.object(m.os, "scandir", scandir):
+            m.nettoyer_ouverts(base)
+        self.assertTrue(etat["fait"])
+        self.assertEqual(sorted(x.name for x in precieux.iterdir()), ["photo.jpg", "these.odt"])
+        self.assertEqual(sorted(x.name for x in (base / "fedcba9876543210").iterdir()), ["recent.txt"])
 
     def lancer(self, m, *args):
         sortie = io.StringIO()

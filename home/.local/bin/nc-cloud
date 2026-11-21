@@ -34,10 +34,12 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import ssl
@@ -130,7 +132,7 @@ def entree_propre(e):
     if not isinstance(e, dict):
         return None
     r = {k: propre(e.get(k)) for k in ("id", "parent", "name", "kind", "revision", "sha256", "modified") if e.get(k) is not None}
-    if isinstance(e.get("size"), int) and not isinstance(e.get("size"), bool):
+    if entier_borne(e.get("size")) is not None:    # 10**400 ou -5 : écarté (ni erreur locale, ni valeur absurde en --json)
         r["size"] = e["size"]
     return r
 
@@ -177,8 +179,32 @@ def segment(ident):
 # ── Fichiers d'état : dossier 0700, fichiers 0600, jamais de jeton ni de clé ──────────────────────────────────────────────
 
 def dossier_prive(d):
-    d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if d.is_symlink() or not d.is_dir():
+    """d et chaque niveau qui manque, créés en 0700 (quel que soit le umask) ; ni d ni aucun niveau jusqu'au dossier
+    « nc-cloud » (~/.cache/nc-cloud, ~/.local/state/nc-cloud) ne peut être un lien symbolique, vérifié avant de créer
+    (rien n'est créé au bout d'un lien) et après."""
+    d = Path(d)
+    niveaux = [d] + list(d.parents)
+    haut = next((i for i, x in enumerate(niveaux) if x.name == "nc-cloud"), 0)
+    portee = niveaux[:haut + 1]
+
+    def verifier():
+        for x in portee:
+            try:
+                st = os.lstat(x)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                raise Echec(T(f"{x} n'est pas un vrai dossier.", f"{x} is not a real directory."))
+    verifier()
+    manquants, p = [], d
+    while not os.path.lexists(p) and p != p.parent:
+        manquants.append(p)
+        p = p.parent
+    for m in reversed(manquants):
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(m, 0o700)            # le umask ne fait qu'ôter des droits : 0700 au plus, à chaque niveau
+    verifier()
+    if not d.is_dir():
         raise Echec(T(f"{d} n'est pas un vrai dossier.", f"{d} is not a real directory."))
     os.chmod(str(d), 0o700)
 
@@ -733,6 +759,7 @@ class Envoi:
     def __init__(self, s, chemin_manifeste, m):
         self.s, self.cm, self.m = s, chemin_manifeste, m
         self.nom = propre(m.get("name"))
+        self.pour_creer = False       # nc-cloud creer : un nom pris se dit simplement (creer n'a pas de --si-existe)
 
     def intention(self):
         return {k: self.m[k] for k in ("parent_id", "parent_revision", "name", "size", "sha256", "policy", "expected_revision")}
@@ -891,12 +918,16 @@ class Envoi:
             dire(T(f"{self.nom} existe déjà : envoi annulé.", f"{self.nom} already exists: upload cancelled."),
                  evenement="resultat", fichier=self.m["source"], etat="annule", code=ANNULE)
             return OK
-        rev = (actuel or {}).get("revision")
+        if self.pour_creer:
+            dire(T(f"{self.nom} : ce nom existe déjà.", f"{self.nom}: this name already exists."), evenement="conflit",
+                 fichier=self.m["source"], nom=self.nom, erreur=e.erreur if e else "version_conflict", actuel=actuel)
+            return CONFLIT
+        rev = rev_a_copier((actuel or {}).get("revision"))
         texte = str(e) if e else T("Le nom existe déjà.", "The name already exists.")
         dire(T(f"Conflit pour {self.nom} : {texte} Relance avec --si-existe garder"
-               + (f", remplacer:{rev}" if rev else "") + " ou annuler.",
+               + (f", {shlex.quote('remplacer:' + rev)}" if rev else "") + " ou annuler.",
                f"Conflict for {self.nom}: {texte} Run again with --si-existe garder"
-               + (f", remplacer:{rev}" if rev else "") + " or annuler."),
+               + (f", {shlex.quote('remplacer:' + rev)}" if rev else "") + " or annuler."),
              evenement="conflit", fichier=self.m["source"], nom=self.nom, erreur=e.erreur if e else "version_conflict", actuel=actuel)
         return CONFLIT
 
@@ -915,12 +946,13 @@ def preparer(s, p, parent, pol, attendue):
     return envoi
 
 
-def deposer_un(s, p, parent, pol, attendue, annuler):
+def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
     """Un fichier : code de sortie pour lui. Les codes d'ARRET remontent (toute la commande s'arrête)."""
     for essai in (1, 2):
         envoi = None
         try:
             envoi = preparer(s, p, parent, pol, attendue)
+            envoi.pour_creer = pour_creer
             if pol == "create":
                 # Le serveur ne refuse un nom pris qu'au commit : on regarde avant, pour ne pas tout envoyer pour rien
                 pris = next((e for e in s.pages(parent) if e.get("name") == envoi.m["name"]), None)
@@ -1224,11 +1256,23 @@ def revision_sure(rev, option="--revision"):
     return rev
 
 
+def rev_a_copier(rev):
+    """Une révision du serveur à mettre dans une commande suggérée : la règle de revision_sure, sinon None (la commande
+    n'est pas suggérée). L'appelant la passe encore par shlex.quote : `$(…)` collé dans un shell ne s'exécute jamais."""
+    try:
+        return revision_sure(rev) if isinstance(rev, str) else None
+    except Echec:
+        return None
+
+
 def muter(s, dossier, demande, methode, chemin, rev, corps_neuf=None):
     """Une mutation (déplacer, renommer, supprimer) : If-Match exact avec la révision de l'appelant, et une clé
     d'idempotence notée AVANT l'envoi, liée à la demande complète ; la même demande rejouée reprend la même clé et le
     même corps. Aucune relance automatique : hors ligne, le manifeste reste et la même commande saura ce qui s'est passé."""
     ident = {k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}
+    # La route fait partie de la demande : si les capacités du serveur ont changé entre deux essais (autre route), la clé
+    # n'est jamais rejouée ailleurs, c'est une nouvelle demande
+    demande = dict(demande, route=methode + " " + chemin)
     deja = [x for x in manifestes(dossier) if x[1].get("demande") == demande and all(x[1].get(k) == v for k, v in ident.items())]
     if deja:
         cm, m = deja[0]
@@ -1239,8 +1283,10 @@ def muter(s, dossier, demande, methode, chemin, rev, corps_neuf=None):
     try:
         _, r = s.json(methode, chemin, m.get("corps"), {"If-Match": '"' + rev + '"', "Idempotency-Key": m["cle"]})
     except Echec as e:
-        if e.code not in (HORS_LIGNE, SERVEUR_CHANGE):
-            effacer(cm)                      # refus net du serveur : rien n'a été fait
+        # Refus net du serveur (4xx) : rien n'a été fait. Hors ligne, coupure ou erreur 5xx : l'opération a peut-être eu
+        # lieu, le manifeste reste pour que la même commande rejouée dise « fait »
+        if e.code not in (HORS_LIGNE, SERVEUR_CHANGE) and not (e.statut or 0) >= 500:
+            effacer(cm)
         raise
     except Annulation:
         dire(T("Interrompu : relance la même commande pour savoir si c'est fait.",
@@ -1287,12 +1333,14 @@ def entier_borne(v):
 
 def cmd_entree(a):
     s = Session()
-    e = entree_propre(entree(s, a.id, a.dossier or "root", capacites_session(s))) or {}
+    brut = entree(s, a.id, a.dossier or "root", capacites_session(s))
+    e = entree_propre(brut) or {}
     if JSON_SORTIE:
         evenement(evenement="entree", entree=e)
     else:
+        rev = rev_a_copier(brut.get("revision") if isinstance(brut, dict) else None)     # la valeur brute, pas l'affichée
         print(f"{e.get('name', '?')}  {e.get('kind', '?')}  {taille_lisible(e.get('size')) if e.get('kind') == 'file' else ''}  "
-              f"[{e.get('id', '?')}  {e.get('revision', '')}]")
+              f"[{shlex.quote(e.get('id', '?'))}  " + (shlex.quote(rev) if rev else T("révision inattendue", "unexpected revision")) + "]")
     return OK
 
 
@@ -1352,8 +1400,12 @@ def cmd_apercu(a):
     else:
         print(T(f"{e.get('name', '?')} : {n['files']} fichier(s), {n['directories']} dossier(s), {taille_lisible(n['size'])}.",
                 f"{e.get('name', '?')}: {n['files']} file(s), {n['directories']} folder(s), {taille_lisible(n['size'])}."))
-        print(T(f"Pour tout supprimer : nc-cloud supprimer {a.id} --revision {e.get('revision', 'REV')} --recursif --arbre {arbre}",
-                f"To delete everything: nc-cloud supprimer {a.id} --revision {e.get('revision', 'REV')} --recursif --arbre {arbre}"))
+        rev = rev_a_copier((r.get("entry") or {}).get("revision") if isinstance(r.get("entry"), dict) else None)
+        if rev is None:
+            print(T("Révision inattendue : aucune commande suggérée.", "Unexpected revision: no command suggested."))
+        else:
+            ligne = shlex.join(["nc-cloud", "supprimer", a.id, "--revision", rev, "--recursif", "--arbre", arbre])
+            print(T(f"Pour tout supprimer : {ligne}", f"To delete everything: {ligne}"))
     return OK
 
 
@@ -1414,9 +1466,10 @@ def cmd_creer(a):
     os.close(os.open(str(source), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
     garder = False
     try:
-        return deposer_un(s, source, a.parent, "create", None, False)
+        return deposer_un(s, source, a.parent, "create", None, False, pour_creer=True)
     except Echec as e:
-        garder = e.code == HORS_LIGNE       # le manifeste vise cette source : nc-cloud reprendre en a besoin
+        # Hors ligne APRÈS l'écriture du manifeste : il vise cette source, nc-cloud reprendre en a besoin ; avant : rien ne reste
+        garder = e.code == HORS_LIGNE and any(m.get("source") == str(source) for _, m in manifestes(ENVOIS))
         raise
     finally:
         if not garder:
@@ -1425,49 +1478,103 @@ def cmd_creer(a):
                 d.rmdir()
 
 
-# Ouvrir : jamais un exécutable, un script ou un lanceur, ni par son nom ni par son contenu
-EXTENSIONS_RISQUEES = {
-    ".desktop", ".sh", ".bash", ".zsh", ".fish", ".csh", ".ksh", ".py", ".pyw", ".pl", ".rb", ".php", ".lua", ".js",
-    ".mjs", ".exe", ".msi", ".bat", ".cmd", ".com", ".scr", ".ps1", ".vbs", ".jar", ".appimage", ".run", ".bin", ".elf",
-    ".deb", ".rpm", ".apk", ".flatpak", ".flatpakref", ".flatpakrepo", ".snap", ".command", ".action", ".workflow", ".url",
-    ".lnk", ".reg", ".so", ".ko", ".service", ".timer", ".kdelnk", ".directory"}
-ENTETES_RISQUEES = (b"\x7fELF", b"#!", b"MZ", b"[Desktop Entry]")
+# Ouvrir : une LISTE BLANCHE de types, lus par le contenu (file) ET par le nom (mimetypes), de la même famille. xdg-open
+# hors d'un bureau connu choisit l'application d'après le contenu : une archive JAR nommée .png partirait à java -jar
+OUVRIR_TEXTES = {"text/plain", "text/markdown", "text/csv"}
+OUVRIR_BUREAU = {"application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.spreadsheet",
+                 "application/vnd.oasis.opendocument.presentation",
+                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                 "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+OUVRIR_MAX = 200 * 1024 * 1024
 OUVERTS_DUREE = 24 * 3600
 
 
-def nom_risque(nom):
-    n = nom.lower().rstrip(" .")
-    return any(n.endswith(x) for x in EXTENSIONS_RISQUEES)
+def famille_sure(mime):
+    """La famille d'un type sûr à ouvrir (image, audio, video, texte, pdf, bureau), ou None : tout le reste, SVG, HTML et
+    XML compris."""
+    m = (mime or "").strip().lower()
+    if m == "image/svg+xml":
+        return None
+    haut = m.split("/", 1)[0]
+    if haut in ("image", "audio", "video") and re.fullmatch(r"[a-z]+/[a-z0-9.+-]+", m):
+        return haut
+    return "texte" if m in OUVRIR_TEXTES else "pdf" if m == "application/pdf" else "bureau" if m in OUVRIR_BUREAU else None
+
+
+def type_par_contenu(chemin):
+    """Le type lu par `file` dans le contenu, ou None (file absent, lent, en échec) : on ne sait pas ce que l'ouvreur
+    déciderait."""
+    outil = shutil.which("file")
+    if not outil:
+        return None
+    try:
+        r = subprocess.run([outil, "--brief", "--mime-type", "--", str(chemin)], stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=10, env=dict(os.environ, LC_ALL="C"))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def type_sur(chemin, nom):
+    """Vrai si le contenu de chemin et le nom nom sont tous deux d'un type sûr, de la même famille."""
+    par_nom = famille_sure(mimetypes.guess_type(nom, strict=False)[0])
+    return par_nom is not None and famille_sure(type_par_contenu(chemin)) == par_nom
 
 
 def nettoyer_ouverts(base):
-    """Les copies ouvertes il y a plus de 24 h sont retirées (sans suivre aucun lien)."""
+    """Les copies ouvertes il y a plus de 24 h sont retirées. Tout passe par des descripteurs de dossier ouverts sans
+    suivre de lien (O_NOFOLLOW) : un dossier remplacé par un lien entre le test et le parcours ne mène jamais ailleurs."""
     limite = time.time() - OUVERTS_DUREE
-    with contextlib.suppress(OSError), os.scandir(str(base)) as sous:
-        for d in sous:
-            if not d.is_dir(follow_symlinks=False):
-                continue
-            with contextlib.suppress(OSError), os.scandir(d.path) as fichiers:
-                for f in fichiers:
-                    if f.stat(follow_symlinks=False).st_mtime < limite:
-                        os.unlink(f.path)
+    drapeaux = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        fb = os.open(str(base), drapeaux)
+    except OSError:
+        return
+    try:
+        with os.scandir(fb) as sous:
+            noms = [x.name for x in sous]
+        for nom in noms:
+            try:
+                fd = os.open(nom, drapeaux, dir_fd=fb)
+            except OSError:
+                continue                      # pas un dossier, ou un lien : rien
+            try:
+                with os.scandir(fd) as fichiers:
+                    contenus = [x.name for x in fichiers]
+                for f in contenus:
+                    with contextlib.suppress(OSError):
+                        st = os.stat(f, dir_fd=fd, follow_symlinks=False)
+                        if st.st_mtime < limite and not stat.S_ISDIR(st.st_mode):
+                            os.unlink(f, dir_fd=fd)
+            finally:
+                os.close(fd)
             with contextlib.suppress(OSError):
-                os.rmdir(d.path)
+                os.rmdir(nom, dir_fd=fb)
+    finally:
+        os.close(fb)
 
 
 def cmd_ouvrir(a):
-    """Une copie locale privée (~/.cache/nc-cloud/ouverts, 0700 / 0600, jamais exécutable), empreinte vérifiée AVANT
-    l'ouverture par l'application par défaut (xdg-open ou gio open, le chemin en argument, jamais un shell). La copie
-    n'est jamais renvoyée au serveur."""
+    """Une copie locale privée (~/.cache/nc-cloud/ouverts, 0700 / 0400, jamais exécutable), relue depuis le disque pour
+    l'empreinte puis ouverte par l'application par défaut (xdg-open ou gio open, le chemin en argument, jamais un shell)
+    seulement si son contenu ET son nom sont d'un type sûr de la même famille. L'empreinte est celle que le serveur
+    annonce lui-même : elle protège d'une coupure ou d'une corruption, pas d'un serveur hostile ; c'est la liste blanche qui
+    protège. La copie n'est jamais renvoyée au serveur."""
     s = Session()
     e = entree(s, a.id, a.dossier or "root", capacites_session(s))
     taille = entier_borne(e.get("size"))
     if e.get("kind") != "file" or taille is None or not re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256"))):
         raise Echec(T("Ce n'est pas un fichier à ouvrir.", "This is not a file to open."))
+    refus_type = Echec(T("Ce type ne s'ouvre pas d'ici : télécharge-le d'abord.", "This type does not open from here: download it first."))
+    if taille > OUVRIR_MAX:
+        raise Echec(T("Fichier de plus de 200 Mio : télécharge-le d'abord.", "File over 200 MiB: download it first."))
     nom = os.path.basename(propre(e.get("name"))).lstrip(".") or "fichier"
-    if nom_risque(nom):
-        raise Echec(T("Fichier exécutable, script ou lanceur : il ne s'ouvre pas d'ici, télécharge-le d'abord.",
-                      "Executable, script or launcher: it does not open from here, download it first."))
+    if len(nom.encode("utf-8", "surrogateescape")) > 255:
+        raise Echec(T("Nom trop long pour un fichier local (plus de 255 octets) : télécharge-le sous un autre nom.",
+                      "Name too long for a local file (over 255 bytes): download it under another name."))
+    if famille_sure(mimetypes.guess_type(nom, strict=False)[0]) is None:
+        raise refus_type                    # rien n'est téléchargé pour un nom déjà refusé
     ouvreur = shutil.which("xdg-open") or shutil.which("gio")
     if not ouvreur:
         raise Echec(T("Ni xdg-open ni gio : rien pour ouvrir le fichier.", "Neither xdg-open nor gio: nothing to open the file."))
@@ -1478,7 +1585,7 @@ def cmd_ouvrir(a):
     dossier_prive(d)
     fd, tmp = tempfile.mkstemp(prefix=".ouvert-", dir=str(d))
     os.fchmod(fd, 0o600)
-    h, recu, debut = hashlib.sha256(), 0, b""
+    recu = 0
     try:
         with os.fdopen(fd, "wb") as f:
             r = s.srv.envoyer("GET", "/files/" + segment(e["id"]) + "/content", entetes=s.entetes(), delai=60)
@@ -1489,26 +1596,39 @@ def cmd_ouvrir(a):
                     except (OSError, http.client.HTTPException):
                         obj = {}
                     raise echec_serveur(r.status, obj) if r.status >= 400 else Echec(T("Réponse du serveur invalide.", "Invalid server response."))
-                try:
-                    for bloc in iter(lambda: r.read(BLOC), b""):
-                        recu += len(bloc)
-                        if recu > taille:
-                            break
-                        if len(debut) < 64:
-                            debut += bloc[:64 - len(debut)]
-                        h.update(bloc)
+                while recu <= taille:
+                    try:
+                        bloc = r.read(BLOC)
+                    except (OSError, http.client.HTTPException):
+                        raise Echec(T("Téléchargement interrompu.", "Download interrupted."), HORS_LIGNE) from None
+                    if not bloc:
+                        break
+                    recu += len(bloc)
+                    if recu > taille:
+                        break
+                    try:
                         f.write(bloc)
-                except (OSError, http.client.HTTPException):
-                    raise Echec(T("Téléchargement interrompu.", "Download interrupted."), HORS_LIGNE) from None
+                    except OSError as err:
+                        raise Echec(T(f"Disque local : {err.strerror or err}.", f"Local disk: {err.strerror or err}."), QUOTA) from None
             finally:
                 r.connexion.close()
-            f.flush()
-            os.fsync(f.fileno())
-        if recu != taille or h.hexdigest() != e["sha256"]:
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except OSError as err:
+                raise Echec(T(f"Disque local : {err.strerror or err}.", f"Local disk: {err.strerror or err}."), QUOTA) from None
+            os.fchmod(f.fileno(), 0o400)
+        # L'empreinte du fichier ÉCRIT, relu depuis le disque (comme telecharger), et c'est lui dont on lit le type
+        h, ecrit = hashlib.sha256(), 0
+        lu = os.open(tmp, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(lu, "rb") as f:
+            for bloc in iter(lambda: f.read(BLOC), b""):
+                h.update(bloc)
+                ecrit += len(bloc)
+        if recu != taille or ecrit != taille or h.hexdigest() != e["sha256"]:
             raise Echec(T("Empreinte fausse : rien n'est ouvert.", "Wrong fingerprint: nothing is opened."), EMPREINTE)
-        if debut.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(ENTETES_RISQUEES):
-            raise Echec(T("Fichier exécutable, script ou lanceur : il ne s'ouvre pas d'ici, télécharge-le d'abord.",
-                          "Executable, script or launcher: it does not open from here, download it first."))
+        if not type_sur(tmp, nom):
+            raise refus_type
         final = d / nom
         os.replace(tmp, str(final))
     except BaseException:
