@@ -998,6 +998,16 @@ elif sys.argv[1] == "clear":
         r = self.nc("lister", "root", "--suite", suite, code=0)
         self.assertEqual([e["name"] for e in r.lignes[-1]["entries"]], ["c"])
 
+    def test_etat_donne_au_panneau_toutes_les_capacites_qu_il_lit(self):
+        """Le panneau ne montre Renommer, Déplacer, Supprimer un dossier que si `nc-cloud etat` les lui transmet."""
+        self.faux.gestion = self.faux.suppression = True
+        self.associer()
+        f = self.nc("etat", code=0).lignes[-1]["features"]
+        for k in ("file_delete", "entry_move", "delete_preview", "directory_delete", "entry_by_id"):
+            self.assertIs(f.get(k), True, k)
+        lues = set(re.findall(r"features\.(\w+)", (REPO / "home/.config/quickshell/nc-ile/CloudEtat.qml").read_text()))
+        self.assertTrue(lues and lues <= set(f), lues - set(f))
+
     def test_noms_a_tiret_apres_double_tiret(self):
         """« -x » et « --json » tapés comme noms, placés après « -- », restent des noms (le panneau passe ainsi)."""
         self.associer()

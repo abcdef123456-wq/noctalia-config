@@ -667,6 +667,10 @@ def cmd_dissocier(a):
     return OK
 
 
+# Les capacités que lit le panneau (CloudEtat.qml) : toutes ici, sinon ses actions n'apparaissent jamais
+FEATURES_PANNEAU = ("file_delete", "entry_by_id", "entry_move", "delete_preview", "directory_delete")
+
+
 def cmd_etat(a):
     st = Session().etat()
     propres = {propre(k, 40): (propre(v) if isinstance(v, str) else v) for k, v in st.items()
@@ -674,7 +678,7 @@ def cmd_etat(a):
     f = st.get("features") if isinstance(st.get("features"), dict) else {}
     if JSON_SORTIE:
         # features : seulement ce que l'interface lit, en vrais booléens
-        evenement(evenement="etat", etat=propres, features={k: f.get(k) is True for k in ("file_delete", "entry_by_id")})
+        evenement(evenement="etat", etat=propres, features={k: f.get(k) is True for k in FEATURES_PANNEAU})
     else:
         for k, v in propres.items():
             print(f"{k} : {taille_lisible(v) if k.endswith('_bytes') and isinstance(v, int) and not isinstance(v, bool) else v}")
