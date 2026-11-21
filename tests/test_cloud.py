@@ -605,6 +605,16 @@ elif sys.argv[1] == "clear":
         r.lignes = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
         return r
 
+    def nc_entree(self, entree, *args, code=None):
+        """nc-cloud avec `entree` (octets) sur son entrée standard."""
+        r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", *args], capture_output=True, timeout=60, env=self.env(), input=entree)
+        r.stdout, r.stderr = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+        self.sorties.append(r.stdout + r.stderr)
+        if code is not None:
+            self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+        r.lignes = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
+        return r
+
     def associer(self):
         self.nc("associer", "portable", code=0)
 
@@ -1256,6 +1266,48 @@ elif sys.argv[1] == "clear":
         self.nc("dissocier", code=0)
         self.assertEqual(self.favoris().read_text(), "")
         self.assertTrue([x for x in self.gi_vu() if x["evt"] == "demonter"])
+
+    def test_note_par_l_entree_standard_dossier_notes_et_nom_pris(self):
+        self.associer()
+        texte = "Idée : acheter du café, éteindre le four !\nDeuxième ligne — été.\n"
+        r = self.nc_entree(texte.encode(), "note", code=0)
+        notes = [e for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["parent"], "root")
+        fichiers = [e for e in self.faux.entries.values() if e["kind"] == "file"]
+        self.assertEqual(len(fichiers), 1)
+        nom = fichiers[0]["name"]
+        self.assertRegex(nom, r"^Idée acheter du café éteindre le four \d{4}-\d{2}-\d{2} \d{2}h\d{2}\.txt$")
+        self.assertEqual(fichiers[0]["parent"], notes[0]["id"])
+        self.assertEqual(self.faux.contenus[fichiers[0]["id"]], texte.encode())
+        self.assertEqual(r.lignes[-1]["evenement"], "note")
+        self.assertEqual(list((self.home / ".local/state/nc-cloud/notes").rglob("*")), [])       # rien ne reste en local
+        # Même texte, même minute : le dossier Notes est réutilisé, le nom prend un suffixe, rien n'est écrasé
+        self.nc_entree(texte.encode(), "note", code=0)
+        self.assertEqual(len([e for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Notes"]), 1)
+        noms = sorted(e["name"] for e in self.faux.entries.values() if e["kind"] == "file")
+        self.assertEqual(len(noms), 2)
+        self.assertTrue(any(n.endswith(" (2).txt") for n in noms), noms)
+
+    def test_note_hors_ligne_reste_en_local_puis_disparait_apres_reprise(self):
+        self.associer()
+        self.faux.pannes.add("couper_apres:0")
+        self.nc_entree("Hors ligne".encode(), "note", code=3)
+        locales = [f for f in (self.home / ".local/state/nc-cloud/notes").rglob("*") if f.is_file()]
+        self.assertEqual(len(locales), 1)
+        self.assertEqual(stat.S_IMODE(locales[0].stat().st_mode), 0o600)
+        self.assertEqual(locales[0].read_bytes(), b"Hors ligne")
+        self.nc("reprendre", "1", code=0)
+        self.assertEqual(list((self.home / ".local/state/nc-cloud/notes").rglob("*")), [])
+        self.assertEqual([self.faux.contenus[e["id"]] for e in self.faux.entries.values() if e["kind"] == "file"], [b"Hors ligne"])
+
+    def test_note_trop_longue_vide_ou_illisible_rien_ne_part(self):
+        self.associer()
+        for entree, mot in ((b"a" * (100 * 1024), "trop longue"), (b"  \n ", "vide"), (b"\xff\xfe", "UTF-8")):
+            with self.subTest(mot):
+                r = self.nc_entree(entree, "note", code=2)
+                self.assertIn(mot, r.lignes[-1]["message"])
+        self.assertFalse([e for e in self.faux.entries.values() if e["kind"] != "directory" or e["name"] == "Notes"])
 
     def test_noms_a_tiret_apres_double_tiret(self):
         """« -x » et « --json » tapés comme noms, placés après « -- », restent des noms (le panneau passe ainsi)."""

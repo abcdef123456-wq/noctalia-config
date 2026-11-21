@@ -108,6 +108,17 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
 dossier Téléchargements.
 
+### Une note glissée sur l'île
+
+Un TEXTE glissé sur l'île fermée (une phrase d'une page, d'un message…) ouvre le panneau avec son aperçu. Rien ne part
+avant « Enregistrer la note ». La note devient un `.txt` (UTF-8) dans le dossier « Notes » de la racine, créé s'il
+manque, nommé d'après ses premiers mots, avec la date et l'heure. Un nom déjà pris reçoit un suffixe « (2) » : rien
+n'est écrasé. 64 Kio au plus. Une adresse de fichier glissée suit l'envoi de fichiers ci-dessus.
+
+Le texte passe par l'entrée standard de `nc-cloud note`, jamais par ses arguments (lisibles de tous dans la liste des
+processus). Le fichier local (`~/.local/state/nc-cloud/notes/`, 0600) disparaît après l'envoi. Il ne reste que si
+l'envoi est interrompu, pour `nc-cloud reprendre`.
+
 ## Associer ce PC
 
 ```sh
@@ -133,6 +144,8 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud lister [ID] [--suite CURSEUR]` | une page d'un dossier (la racine par défaut), avec la commande de la suite |
 | `nc-cloud dossier PARENT NOM` | crée un dossier (`root` pour la racine) |
 | `nc-cloud deposer [--dans ID] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
+| `nc-cloud note` | enregistre le texte lu sur l'entrée standard dans « Notes » (64 Kio au plus) |
+| `nc-cloud examiner FICHIER…` | taille, fichier caché ou refusé, de chaque fichier ; n'envoie rien |
 | `nc-cloud reprendre [N]` | liste les envois interrompus ; avec N, reprend celui-là |
 | `nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]` | télécharge un fichier (de la racine, ou de PARENT) |
 | `nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]` | supprime un fichier, ou un dossier si le serveur le sait (voir plus bas) |

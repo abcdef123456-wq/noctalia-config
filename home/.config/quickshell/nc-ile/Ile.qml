@@ -398,11 +398,14 @@ PanelWindow {
             objectName: "nc-cloud-depot"
             anchors.fill: parent
             enabled: CloudEtat.actif && CloudEtat.associe && !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
-            onEntered: drag => { if (!drag.hasUrls) { drag.accepted = false; return } drag.accept(Qt.CopyAction) }
+            // Des fichiers (adresses file:///) suivent le dépôt de fichiers ; un texte seul devient une note (rien ne part
+            // avant « Enregistrer la note »)
+            onEntered: drag => { if (!drag.hasUrls && !drag.hasText) { drag.accepted = false; return } drag.accept(Qt.CopyAction) }
             onDropped: drop => {
-                if (!drop.hasUrls) return
+                var fichiers = drop.hasUrls && drop.urls.some(u => String(u).startsWith("file:///"))
+                if (!fichiers && !drop.hasText) return
                 drop.accept(Qt.CopyAction)
-                if (CloudEtat.recevoir(drop.urls)) CloudEtat.ouvrirPanneau()
+                if (fichiers ? CloudEtat.recevoir(drop.urls) : CloudEtat.recevoirTexte(drop.text)) CloudEtat.ouvrirPanneau()
             }
         }
         Rectangle {

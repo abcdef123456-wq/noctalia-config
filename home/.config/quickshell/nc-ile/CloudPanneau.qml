@@ -281,6 +281,42 @@ FloatingWindow {
                         }
                     }
                 }
+                // Une note : un texte glissé sur l'île, en aperçu (texte brut), puis « Enregistrer la note » dans « Notes »
+                Rectangle {
+                    objectName: "nc-cloud-note"
+                    visible: cloud.pret && (CloudEtat.note !== "" || CloudEtat.noteRefus !== "" || CloudEtat.noteMessage !== "")
+                    width: parent.width; height: colNote.implicitHeight + 20; radius: 14
+                    color: Couleurs.carte; border.width: CloudEtat.note !== "" ? 1 : 0; border.color: Couleurs.accent
+                    Column {
+                        id: colNote
+                        x: 14; y: 10; width: parent.width - 28; spacing: 8
+                        Texte {
+                            visible: CloudEtat.note !== ""
+                            text: Reglages.t("Note pour le dossier « Notes » :", "Note for the “Notes” folder:"); font.weight: Font.DemiBold
+                        }
+                        Texte {
+                            objectName: "nc-cloud-note-apercu"
+                            visible: CloudEtat.note !== ""
+                            width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 5; elide: Text.ElideRight; secondaire: true
+                            text: CloudEtat.note.slice(0, 600)
+                        }
+                        Texte {
+                            objectName: "nc-cloud-note-message"
+                            visible: CloudEtat.noteRefus !== "" || CloudEtat.noteMessage !== ""
+                            width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12
+                            color: CloudEtat.noteRefus !== "" ? Couleurs.rouge : Couleurs.texteSec
+                            text: CloudEtat.noteRefus || CloudEtat.noteMessage
+                        }
+                        Row {
+                            spacing: 8
+                            CloudBouton { objectName: "nc-cloud-note-enregistrer"; visible: CloudEtat.note !== ""; principal: true
+                                          texte: CloudEtat.noteEnCours ? Reglages.t("Enregistrement…", "Saving…") : Reglages.t("Enregistrer la note", "Save note")
+                                          enabled: !CloudEtat.noteEnCours; onClic: if (enabled) CloudEtat.enregistrerNote() }
+                            CloudBouton { texte: CloudEtat.note !== "" ? Reglages.t("Retirer", "Remove") : Reglages.t("Fermer", "Close")
+                                          enabled: !CloudEtat.noteEnCours; onClic: CloudEtat.oublierNote() }
+                        }
+                    }
+                }
                 Column {
                     objectName: "nc-cloud-envois"
                     visible: cloud.pret && CloudEtat.envois.length > 0

@@ -57,6 +57,30 @@ Singleton {
     readonly property bool recusCaches: recus.some(f => examen[f] && examen[f].cache && !examen[f].refus)
     readonly property var aEnvoyer: recus.filter(f => examen[f] && !examen[f].refus)
     readonly property string maison: Quickshell.env("HOME") || ""
+    // Note : un texte glissé sur l'île, enregistré dans « Notes » par nc-cloud note, le texte par l'ENTRÉE STANDARD
+    readonly property int noteMax: 65536
+    property string note: ""
+    property string noteRefus: ""
+    property string noteMessage: ""
+    readonly property bool noteEnCours: procNote.running
+    function octetsUtf8(t) { var n = 0; for (const ch of t) { var c = ch.codePointAt(0); n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4 } return n }
+    function recevoirTexte(t) {
+        t = String(t || "")
+        if (t.trim() === "") return false
+        noteMessage = ""
+        if (octetsUtf8(t) > noteMax) { note = ""; noteRefus = Reglages.t("Texte trop long pour une note (64 Kio au plus) : rien n'est gardé.",
+                                                                        "Text too long for a note (64 KiB at most): nothing kept."); return true }
+        note = t; noteRefus = ""
+        return true
+    }
+    function oublierNote() { note = ""; noteRefus = ""; noteMessage = "" }
+    function enregistrerNote() {
+        if (!actif || !associe || note === "" || procNote.running) return
+        procNote.texte = note
+        procNote.stdinEnabled = true
+        procNote.command = [bin + "nc-cloud", "--json", "note"]
+        procNote.running = true
+    }
     function court(f) { return maison !== "" && f.startsWith(maison + "/") ? "~" + f.slice(maison.length) : f }
     // [{fichier, nom, dans, etat, envoye, taille, message, actuel, fin}] ; etat : attente, en_cours, publie, conflit,
     // interrompu, annule, echec, refuse
@@ -374,6 +398,20 @@ Singleton {
         id: procEnvoi
         stdout: SplitParser { onRead: data => c.ligneEnvoi(data) }
         onExited: code => c.finLot(code)
+    }
+    Process {
+        id: procNote
+        property string texte: ""
+        onStarted: { write(texte); stdinEnabled = false; texte = "" }
+        stdout: SplitParser { onRead: data => {
+            var d
+            try { d = JSON.parse(data) } catch (x) { return }
+            if (!d || typeof d.message !== "string") return
+            if (d.evenement === "note") { c.note = ""; c.noteMessage = d.message.slice(0, 300) }
+            else if (d.evenement === "erreur" || d.evenement === "conflit" || (d.evenement === "resultat" && d.etat !== "publie"))
+                c.noteMessage = d.message.slice(0, 300)
+        } }
+        onExited: code => { if (code === 0) c.actualiserApresEnvoi() }
     }
     Process {
         id: procChoix

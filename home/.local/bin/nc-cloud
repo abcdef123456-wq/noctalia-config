@@ -8,6 +8,8 @@
   nc-cloud lister [ID] [--suite C]  une page d'un dossier (racine par défaut), avec la suite
   nc-cloud dossier PARENT NOM       crée un dossier
   nc-cloud deposer [--dans ID] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
+  nc-cloud examiner FICHIER…        taille, caché ou refusé, de chaque fichier (rien ne part)
+  nc-cloud note                     le texte de l'entrée standard devient un .txt du dossier « Notes » (64 Kio au plus)
   nc-cloud reprendre [N|CLE]        les envois interrompus ; avec N ou CLE, reprend celui-là
   nc-cloud telecharger ID [DEST] [--dossier PARENT] [--remplacer]   (DEST : le dossier Téléchargements par défaut)
   nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]   un fichier, ou un dossier si le serveur le sait
@@ -1138,6 +1140,90 @@ def examiner_un(f):
     return None, st.st_size, cache, st
 
 
+# ── Note : un texte glissé sur l'île devient un .txt dans le dossier « Notes » de la racine ──────────────────────────────
+NOTE_MAX = 64 * 1024
+NOTES = ETAT / "notes"          # le fichier local, le temps de l'envoi (reste seulement hors ligne, pour reprendre)
+DOSSIER_NOTES = "Notes"
+
+
+def nom_de_note(texte, quand):
+    """Les premiers mots, nettoyés (lettres, chiffres, espaces), puis la date et l'heure : « Idée pour demain 2026-11-21 08h15.txt »."""
+    mots = re.sub(r"[^\w\s-]", " ", texte, flags=re.UNICODE).split()
+    debut = ""
+    for m in mots:
+        if len(debut) + len(m) + 1 > 40:
+            break
+        debut = (debut + " " + m).strip()
+    return ((debut or T("Note", "Note")) + " " + time.strftime("%Y-%m-%d %Hh%M", time.localtime(quand))).strip()
+
+
+def dossier_des_notes(s):
+    """L'id du dossier « Notes » de la racine, créé s'il manque."""
+    for e in s.pages("root"):
+        if e.get("kind") == "directory" and e.get("name") == DOSSIER_NOTES and isinstance(e.get("id"), str):
+            return e["id"]
+    try:
+        _, r = s.json("POST", "/directories", {"parent_id": "root", "parent_revision": revision_dossier(s, "root"), "name": DOSSIER_NOTES})
+    except Echec as e:
+        if e.code != CONFLIT:
+            raise
+        return dossier_des_notes(s)          # créé entre-temps par un autre PC
+    e = entree_propre(r.get("entry")) or {}
+    if not isinstance(e.get("id"), str) or not e["id"]:
+        raise Echec(T("Réponse du serveur invalide.", "Invalid server response."))
+    return e["id"]
+
+
+def menage_notes():
+    """Efface les notes locales qu'aucun envoi en attente ne cite plus (envoyées, refusées, ou reprises depuis)."""
+    if not NOTES.is_dir() or NOTES.is_symlink():
+        return
+    cites = {m.get("source") for _, m in manifestes()}
+    for d in NOTES.iterdir():
+        if d.is_symlink() or not d.is_dir():
+            continue
+        for f in d.iterdir():
+            if str(f) not in cites:
+                with contextlib.suppress(OSError):
+                    f.unlink()
+        with contextlib.suppress(OSError):
+            d.rmdir()                      # seulement s'il est vide
+
+
+def cmd_note(a):
+    """Le texte arrive par l'ENTRÉE STANDARD (jamais par argv, visible de tous dans la liste des processus)."""
+    brut = sys.stdin.buffer.read(NOTE_MAX + 1)
+    if len(brut) > NOTE_MAX:
+        raise Echec(T(f"Note trop longue ({NOTE_MAX // 1024} Kio au plus) : rien n'est envoyé.",
+                      f"Note too long ({NOTE_MAX // 1024} KiB at most): nothing is sent."), USAGE)
+    try:
+        texte = brut.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Echec(T("Note illisible (pas de l'UTF-8) : rien n'est envoyé.", "Unreadable note (not UTF-8): nothing is sent."), USAGE) from None
+    if not texte.strip():
+        raise Echec(T("Note vide : rien n'est envoyé.", "Empty note: nothing is sent."), USAGE)
+    s = Session()
+    s.etat()
+    parent = dossier_des_notes(s)
+    pris = {e.get("name") for e in s.pages(parent)}
+    base = nom_de_note(texte, time.time())
+    nom = next(n for n in [base + ".txt"] + [f"{base} ({i}).txt" for i in range(2, 100)] + [secrets.token_hex(4) + ".txt"]
+               if n not in pris)
+    dossier_prive(NOTES)
+    d = Path(tempfile.mkdtemp(dir=str(NOTES)))
+    f = d / nom
+    fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as o:
+        o.write(texte.encode("utf-8"))
+    try:
+        code = deposer_un(s, f, parent, "create", None, False)
+    finally:
+        menage_notes()                 # hors ligne, le manifeste cite le fichier : il reste pour nc-cloud reprendre
+    if code == OK:
+        dire(T(f"Note enregistrée dans {DOSSIER_NOTES} : {nom}.", f"Note saved in {DOSSIER_NOTES}: {nom}."), evenement="note", nom=nom)
+    return code
+
+
 def cmd_examiner(a):
     """Pour le panneau, avant « Envoyer ici » : chemin, taille, caché ou refusé, de chaque fichier. Rien ne part."""
     l = []
@@ -1174,6 +1260,13 @@ def cmd_deposer(a):
     for p, st in valides:
         code = deposer_un(s, p, a.dans or "root", pol, attendue, annuler, controle=st) or code
     return code
+
+
+def cmd_reprendre_et_menage(a):
+    try:
+        return cmd_reprendre(a)
+    finally:
+        menage_notes()
 
 
 def cmd_reprendre(a):
@@ -2592,12 +2685,13 @@ def analyseur():
     x.add_argument("--si-existe", dest="si_existe")
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_deposer)
+    sous.add_parser("note").set_defaults(f=cmd_note)
     x = sous.add_parser("examiner", aliases=["inspect"])
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_examiner)
     x = sous.add_parser("reprendre", aliases=["resume"])
     x.add_argument("envoi", nargs="?")
-    x.set_defaults(f=cmd_reprendre)
+    x.set_defaults(f=cmd_reprendre_et_menage)
     x = sous.add_parser("telecharger", aliases=["download"])
     x.add_argument("id")
     x.add_argument("dest", nargs="?")

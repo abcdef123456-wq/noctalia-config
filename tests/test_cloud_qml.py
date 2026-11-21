@@ -43,6 +43,8 @@ case "$1" in
   deplacer) printf '%s\n' '{"evenement": "resultat", "message": "Déplacé."}' ;;
   ouvrir) printf '%s\n' '{"evenement": "resultat", "message": "Ouvert : note.txt"}' ;;
   dossier) printf '%s\n' '{"evenement": "dossier", "message": "Dossier créé."}' ;;
+  note) cat > "@ROOT@/note-entree"
+        printf '%s\n' '{"evenement": "note", "nom": "Idee 2026-11-21 08h15.txt", "message": "Note enregistrée dans Notes : Idee 2026-11-21 08h15.txt."}' ;;
   deposer) apres=0
            for a in "$@"; do
              if [ "$apres" = 0 ]; then [ "$a" = "--" ] && apres=1; continue; fi
@@ -151,7 +153,9 @@ class Sources(unittest.TestCase):
         self.assertIn("enabled: CloudEtat.actif && CloudEtat.associe && !fen.ouverte && !fen.banniere && !fen.enCarte", d)
         self.assertIn("drag.accept(Qt.CopyAction)", d)
         self.assertIn("drop.accept(Qt.CopyAction)", d)
-        self.assertIn("if (CloudEtat.recevoir(drop.urls)) CloudEtat.ouvrirPanneau()", d)
+        self.assertIn("if (fichiers ? CloudEtat.recevoir(drop.urls) : CloudEtat.recevoirTexte(drop.text)) CloudEtat.ouvrirPanneau()", d)
+        self.assertIn('drop.urls.some(u => String(u).startsWith("file:///"))', d)          # une adresse de fichier : dépôt normal
+        self.assertNotIn("enregistrerNote", ile)                                              # rien ne part avant le bouton
         self.assertNotIn("envoyerIci", ile)                                                   # rien ne part avant le bouton
         self.assertIn("visible: depotCloud.containsDrag", ile)
         # La page JARVIS garde son propre dépôt (pièces jointes)
@@ -199,6 +203,8 @@ class HorsEcran(unittest.TestCase):
             for e in H.ERREURS:
                 self.assertNotIn(e, sortie, sortie)
             self.assertIn("FINI", sortie, sortie)
+            n = Path(root) / "note-entree"
+            self.note_recue = n.read_text(encoding="utf-8") if n.exists() else None
             return H.journal(root).splitlines()
 
     OUVRIR = '''
@@ -529,6 +535,33 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, fichiers=True)
+
+    def test_texte_glisse_devient_une_note_par_l_entree_standard(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) {
+                    verifier(!vu(corps, "nc-cloud-note"), "rien avant le dépôt")
+                    verifier(!CloudEtat.recevoirTexte("   "), "texte vide ignoré")
+                    verifier(CloudEtat.recevoirTexte("x".repeat(65537)) && CloudEtat.note === "" && vu(corps, "nc-cloud-note-message"), "trop long : refusé")
+                    verifier(!vu(corps, "nc-cloud-note-enregistrer"), "pas de bouton pour un refus")
+                    verifier(CloudEtat.recevoirTexte("é".repeat(32769)) && CloudEtat.note === "", "64 Kio comptés en octets UTF-8")
+                    verifier(CloudEtat.recevoirTexte("Idée secrète\\nmot-de-passe-7Qz"), "texte reçu")
+                    etape++; return }
+                if (etape === 2) {
+                    verifier(trouver(corps, "nc-cloud-note-apercu").text === "Idée secrète\\nmot-de-passe-7Qz", "aperçu")
+                    trouver(corps, "nc-cloud-note-enregistrer").clic(); etape++; return }
+                if (etape === 3 && !CloudEtat.noteEnCours) {
+                    ticks++; if (ticks < 3) return
+                    verifier(CloudEtat.note === "" && trouver(corps, "nc-cloud-note-message").text.indexOf("Note enregistrée") === 0, "message")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertIn("--json note", j)
+        self.assertFalse([x for x in j if "secrète" in x or "7Qz" in x], j)                       # jamais dans argv
+        self.assertEqual(self.note_recue, "Idée secrète\nmot-de-passe-7Qz")
 
     def test_coupure_reprendre_fermer_puis_annuler(self):
         j = self.lancer(self.OUVRIR + '''
