@@ -108,6 +108,23 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
 dossier Téléchargements.
 
+### Annuler une suppression
+
+Le serveur efface pour de bon. Avant de supprimer un fichier depuis le panneau, nc-cloud en garde une copie privée sur
+ce PC (`~/.cache/nc-cloud/corbeille/`, dossiers 0700, fichiers 0600). La copie est téléchargée AVANT la suppression et
+son empreinte est vérifiée. Si la copie échoue, rien n'est supprimé, et la question revient : « supprimer quand même,
+sans copie ? ».
+
+- Après la suppression, un bandeau « Supprimé : nom · Annuler » reste 20 secondes.
+- Une ligne « Corbeille locale » reste dans le panneau tant que la copie existe : « Remettre » redépose le fichier au
+  même endroit. Il reçoit un nouvel identifiant, et l'historique de ses versions est perdu.
+- Une copie est gardée 24 h. Toutes les copies tiennent dans 500 Mio : les plus vieilles cèdent la place.
+- Un fichier de plus de 500 Mio n'a pas de copie : la question le dit avant.
+- Les dossiers n'ont pas de copie : leur question dit toujours « définitive ».
+
+En ligne de commande : `nc-cloud supprimer ID --revision R --copie --dossier PARENT`, `nc-cloud corbeille` (la liste)
+et `nc-cloud corbeille --remettre COPIE`.
+
 ### Place utilisée, dans le centre de contrôle
 
 Le centre de contrôle de l'île a un module « Cloud » : la place utilisée sur le quota (« 1 Mo sur 20 Go »). Il

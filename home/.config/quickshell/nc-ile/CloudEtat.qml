@@ -53,6 +53,21 @@ Singleton {
     property var recus: []                         // chemins locaux reçus, 8 au plus : rien ne part avant « Envoyer ici »
     property string recusRefus: ""                 // ce qui a été écarté (pas un fichier local, au-delà de 8)
     property var recents: []                       // les 5 derniers fichiers envoyés ou ouverts par CE PC (nc-cloud recents, local)
+    // Corbeille locale (nc-cloud corbeille) : une copie privée de chaque fichier supprimé d'ici, 24 h ; « Annuler »
+    // pendant 20 s après la suppression, puis « Remettre » tant que la copie existe. Un fichier de plus de 500 Mio n'a
+    // pas de copie (la question le dit avant) ; une copie ratée : rien n'est supprimé, la question revient « sans copie »
+    property var corbeille: []
+    property var annulable: null                  // { copie, nom } : la dernière suppression, dureeAnnuler ms
+    property int dureeAnnuler: 20000
+    property string sansCopie: ""                 // id dont la copie a échoué : la question suivante dit « sans copie »
+    readonly property real copieMax: 500 * 1024 * 1024
+    function copiable(e) { return !!e && e.kind === "file" && typeof e.size === "number" && e.size <= copieMax }
+    function remettre(copie) {
+        if (!/^[0-9a-f]{32}$/.test(String(copie))) return
+        annulable = null
+        lancer(["corbeille", "--remettre=" + copie], "remettre", copie)
+        lancer(["corbeille"], "corbeille")
+    }
     // Place utilisée, pour le centre de contrôle : lue SEULEMENT à son ouverture, au plus une fois par 10 minutes (gardée
     // en mémoire) ; aussi notée quand le panneau lit l'état. Hors ligne : la dernière valeur, marquée vieille
     property var quota: null
@@ -282,6 +297,7 @@ Singleton {
         lister(false)
         lancer(["reprendre"], "envois")          // la liste des envois interrompus : locale, sans réseau
         lancer(["recents"], "recents")           // les récents de ce PC : locaux, sans réseau
+        lancer(["corbeille"], "corbeille")       // les copies gardées ici : locales, sans réseau
     }
     function ouvrirRecent(i) {
         var r = recents[i]
@@ -368,7 +384,11 @@ Singleton {
             var arbre = apercu.tree
             apercu = null
             lancer(["supprimer", "--revision=" + e.revision, "--recursif", "--arbre=" + arbre, "--", e.id], "supprimer", e.id)
-        } else lancer(["supprimer", "--revision=" + e.revision, "--", e.id], "supprimer", e.id)
+        } else {
+            var copie = copiable(e) && sansCopie !== e.id
+            sansCopie = ""
+            lancer(["supprimer", "--revision=" + e.revision, "--dossier=" + dossier].concat(copie ? ["--copie"] : [], ["--", e.id]), "supprimer", e.id)
+        }
     }
 
     function ligne(texte) {
@@ -414,14 +434,27 @@ Singleton {
             erreur = String(d.message || Reglages.t("Erreur.", "Error.")).slice(0, 300)
             if (q === "telecharger" && d.code === 6) aRemplacer = enCours.id
             // Le dossier a changé depuis l'aperçu : rien n'est supprimé ; nouvel aperçu (après la page relue), nouvelle question
+            if (q === "supprimer" && d.erreur === "copie") { sansCopie = enCours.id; redemander(enCours.id) }
             if (q === "supprimer" && d.erreur === "tree_changed") {
                 suites = [{ args: ["apercu", "--", enCours.id], quoi: "apercu", id: enCours.id }].concat(suites)
                 redemander(enCours.id)
             }
             if (d.code === 4) associe = false
         }
-        else if (typeof d.message === "string" && d.message !== "") { message = d.message.slice(0, 300); erreur = "" }
+        else if (d.evenement === "corbeille") {
+            corbeille = (Array.isArray(d.copies) ? d.copies : []).filter(x => x && /^[0-9a-f]{32}$/.test(String(x.copie)) && typeof x.nom === "string")
+                          .slice(0, 50).map(x => ({ copie: x.copie, nom: x.nom.slice(0, 240), taille: Number(x.taille) || 0 }))
+        }
+        else if (typeof d.message === "string" && d.message !== "") {
+            message = d.message.slice(0, 300); erreur = ""
+            if (q === "supprimer" && d.etat === "supprime" && /^[0-9a-f]{32}$/.test(String(d.copie))) {
+                annulable = { copie: d.copie, nom: String(d.nom || "").slice(0, 240) }
+                finAnnulable.restart()
+                suites = suites.concat([{ args: ["corbeille"], quoi: "corbeille", id: "" }])
+            }
+        }
     }
+    Timer { id: finAnnulable; interval: c.dureeAnnuler; onTriggered: c.annulable = null }
 
     FileView {
         id: appareil
@@ -483,7 +516,7 @@ Singleton {
             var fini = c.enCours
             c.enCours = null
             // Le dossier a changé : sa page est relue avant la suite de la file
-            if (fini && ["dossier", "supprimer", "creer", "renommer", "deplacer"].indexOf(fini.quoi) >= 0
+            if (fini && ["dossier", "supprimer", "creer", "renommer", "deplacer", "remettre"].indexOf(fini.quoi) >= 0
                 && (code === 0 || code === 6))
                 c.suites = [{ args: ["lister", "--", c.dossier], quoi: "page", id: "" }].concat(c.suites)
             if (c.suites.length > 0) {

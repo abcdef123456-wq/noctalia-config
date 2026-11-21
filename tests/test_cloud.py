@@ -1499,6 +1499,91 @@ elif sys.argv[1] == "clear":
         self.nc("supprimer", eid, "--revision", rev, code=1)        # 404 : déjà supprimé
         self.assertFalse(self.manifestes("suppressions"))
 
+    # ── I7 : corbeille locale ──
+
+    def corbeille(self):
+        return self.home / ".cache/nc-cloud/corbeille"
+
+    def test_corbeille_copie_avant_puis_remettre(self):
+        self.faux.suppression = True
+        eid, donnees = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        fin = r.lignes[-1]
+        self.assertEqual((fin["etat"], fin["nom"]), ("supprime", "g.bin"))
+        self.assertIn("copie reste", fin["message"])
+        self.assertEqual(len([x for x in r.lignes if x.get("evenement") == "resultat"]), 1, r.lignes)  # rien du téléchargement
+        self.assertNotIn(eid, self.faux.entries)
+        ordre = [c[0] for c in self.faux.journal if (c[0] == "GET" and c[1].endswith("/content")) or c[0] == "DELETE"]
+        self.assertEqual(ordre[-2:], ["GET", "DELETE"])                                  # la copie AVANT la suppression
+        d = self.corbeille() / fin["copie"]
+        self.assertEqual((d / "g.bin").read_bytes(), donnees)
+        for x, mode in ((self.corbeille(), 0o700), (d, 0o700), (d / "g.bin", 0o600), (d / "copie.json", 0o600)):
+            self.assertEqual(stat.S_IMODE(x.stat().st_mode), mode, x)
+        l = self.nc("corbeille", code=0).lignes[-1]["copies"]
+        self.assertEqual([(c["copie"], c["nom"], c["taille"]) for c in l], [(fin["copie"], "g.bin", 10)])
+        (d / "g.bin").chmod(0)                                                           # les contrôles d'un dépôt : illisible, refusé
+        try:
+            r = self.nc("corbeille", "--remettre", fin["copie"], code=1)
+        finally:
+            (d / "g.bin").chmod(0o600)
+        self.assertIn("illisible", r.lignes[-1]["message"])
+        self.assertTrue(d.exists())                                                      # la copie reste
+        self.nc("corbeille", "--remettre", fin["copie"], code=0)
+        remis = [e for e in self.faux.entries.values() if e["name"] == "g.bin"]
+        self.assertEqual(len(remis), 1)
+        self.assertNotEqual(remis[0]["id"], eid)                                         # nouvel identifiant
+        self.assertEqual(self.faux.contenus[remis[0]["id"]], donnees)
+        self.assertFalse(d.exists())
+        self.nc("corbeille", "--remettre", fin["copie"], code=2)                         # plus de copie
+        self.assertEqual(self.nc("corbeille", code=0).lignes[-1]["copies"], [])
+
+    def test_corbeille_copie_ratee_ou_suppression_refusee_rien_ne_reste(self):
+        self.faux.suppression = True
+        eid, _ = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        self.faux.pannes.add("contenu_faux")
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=12)
+        self.assertEqual(r.lignes[-1]["erreur"], "copie")
+        self.assertIn("rien n'est supprimé", r.lignes[-1]["message"])
+        self.assertIn(eid, self.faux.entries)
+        self.assertFalse([c for c in self.faux.journal if c[0] == "DELETE"])
+        self.assertEqual(list(self.corbeille().iterdir()), [])
+        self.faux.pannes.discard("contenu_faux")
+        self.nc("supprimer", eid, "--revision", "ancienne", "--dossier", "root", "--copie", code=6)  # copie faite, puis refus
+        self.assertIn(eid, self.faux.entries)
+        self.assertEqual(list(self.corbeille().iterdir()), [])
+        self.faux.entries[eid]["size"] = 500 * 1024 ** 2 + 1                             # trop gros : pas de copie, rien supprimé
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=1)
+        self.assertEqual(r.lignes[-1]["erreur"], "copie")
+        self.assertIn(eid, self.faux.entries)
+        self.nc("supprimer", eid, "--revision", rev, "--recursif", "--arbre", "0" * 64, "--copie", code=2)
+
+    def test_corbeille_24_h_et_500_mio_au_total(self):
+        self.faux.suppression = True
+        eid, _ = self.deposer_gros(10)
+        c = self.corbeille()
+        c.mkdir(parents=True, mode=0o700)
+        for nom, age, taille in (("a" * 32, 25 * 3600, 1), ("b" * 32, 60, 500 * 1024 ** 2), ("c" * 32, 30, 1)):
+            (c / nom).mkdir(mode=0o700)
+            with open(c / nom / "x.bin", "wb") as f:
+                f.truncate(taille)                                                       # creux : rien n'occupe le disque
+            (c / nom / "copie.json").write_text(json.dumps({"nom": "x.bin", "parent": "root", "date": time.time() - age}))
+        (c / ("d" * 32)).mkdir()                                                          # abîmée : sans copie.json
+        (c / ("e" * 32)).symlink_to(self.d)
+        (c / ("f" * 32)).mkdir(mode=0o700)                                                # la copie est un lien : effacée
+        (cible := self.d / "ailleurs.bin").write_bytes(b"a moi")
+        (c / ("f" * 32) / "x.bin").symlink_to(cible)
+        (c / ("f" * 32) / "copie.json").write_text(json.dumps({"nom": "x.bin", "parent": "root", "date": time.time()}))
+        self.assertEqual([x["copie"] for x in self.nc("corbeille", code=0).lignes[-1]["copies"]], ["c" * 32, "b" * 32])
+        self.assertEqual(sorted(x.name for x in c.iterdir()), ["b" * 32, "c" * 32])       # la vieille et les abîmées effacées
+        self.assertTrue(self.d.is_dir())
+        self.assertEqual(cible.read_bytes(), b"a moi")
+        # 500 Mio + 1 + 10 : la plus vieille (b) cède la place, la plus récente (c) reste
+        self.nc("supprimer", eid, "--revision", self.faux.entries[eid]["revision"], "--dossier", "root", "--copie", code=0)
+        self.assertEqual(sorted(x["nom"] for x in self.nc("corbeille", code=0).lignes[-1]["copies"]), ["g.bin", "x.bin"])
+        self.assertFalse((c / ("b" * 32)).exists())
+
     def test_supprimer_reponse_perdue_puis_rejeu(self):
         self.faux.suppression = True
         eid, _ = self.deposer_gros(10)

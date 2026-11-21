@@ -148,6 +148,43 @@ FloatingWindow {
                     }
                 }
 
+                // Juste après une suppression (20 s) : « Supprimé · Annuler » remet la copie de ce PC
+                Rectangle {
+                    objectName: "nc-cloud-annulable"
+                    visible: cloud.pret && CloudEtat.annulable !== null
+                    width: parent.width; height: 40; radius: 14; color: Couleurs.carte
+                    Texte { anchors.left: parent.left; anchors.leftMargin: 14; anchors.right: annulerSuppression.left; anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Reglages.t("Supprimé : ", "Deleted: ") + (CloudEtat.annulable ? CloudEtat.annulable.nom : "") }
+                    CloudBouton { id: annulerSuppression; objectName: "nc-cloud-annuler-suppression"
+                                  anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                  texte: Reglages.t("Annuler", "Undo"); principal: true
+                                  onClic: if (CloudEtat.annulable) CloudEtat.remettre(CloudEtat.annulable.copie) }
+                }
+                // Corbeille locale : tant qu'une copie existe (24 h) ; « Remettre » la redépose au même endroit
+                Column {
+                    objectName: "nc-cloud-corbeille"
+                    visible: cloud.pret && CloudEtat.corbeille.length > 0
+                    width: parent.width; spacing: 6
+                    Texte { text: Reglages.t("Corbeille locale", "Local trash"); secondaire: true; font.pixelSize: 12 }
+                    Texte { width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 11
+                            text: Reglages.t("Remis au même endroit, avec un nouvel identifiant : l'historique des versions est perdu.",
+                                             "Put back in the same place, with a new identifier: the version history is lost.") }
+                    Flow {
+                        width: parent.width; spacing: 6
+                        Repeater {
+                            model: CloudEtat.corbeille
+                            CloudBouton {
+                                required property var modelData
+                                objectName: "nc-cloud-remettre-" + modelData.copie
+                                texte: Reglages.t("Remettre ", "Put back ") + (modelData.nom.length > 28 ? modelData.nom.slice(0, 27) + "…" : modelData.nom)
+                                enabled: !CloudEtat.occupe
+                                onClic: CloudEtat.remettre(modelData.copie)
+                            }
+                        }
+                    }
+                }
+
                 // Coupé ou non associé : on dit quoi faire, rien n'est lancé
                 Texte {
                     objectName: "nc-cloud-coupe"
@@ -534,9 +571,15 @@ FloatingWindow {
                                     objectName: "nc-cloud-question-" + ligne.modelData.id
                                     visible: ligne.confirmer; width: parent.width; wrapMode: Text.Wrap
                                     color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold
-                                    text: ligne.fichier
-                                        ? Reglages.t("« " + ligne.modelData.name + " » : suppression définitive, toutes ses versions.",
-                                                     "“" + ligne.modelData.name + "”: permanent deletion, all its versions.")
+                                    text: ligne.fichier && CloudEtat.sansCopie === ligne.modelData.id
+                                        ? Reglages.t("La copie sur ce PC a échoué. Supprimer « " + ligne.modelData.name + " » quand même, sans copie ? C'est définitif.",
+                                                     "The copy on this PC failed. Delete “" + ligne.modelData.name + "” anyway, without a copy? It is permanent.")
+                                        : ligne.fichier && !CloudEtat.copiable(ligne.modelData)
+                                        ? Reglages.t("« " + ligne.modelData.name + " » : trop gros pour une copie sur ce PC (plus de 500 Mio) : suppression définitive, toutes ses versions.",
+                                                     "“" + ligne.modelData.name + "”: too big for a copy on this PC (over 500 MiB): permanent deletion, all its versions.")
+                                        : ligne.fichier
+                                        ? Reglages.t("« " + ligne.modelData.name + " » : supprimé du cloud avec toutes ses versions. Une copie reste sur ce PC 24 h, pour le remettre.",
+                                                     "“" + ligne.modelData.name + "”: deleted from the cloud with all its versions. A copy stays on this PC for 24 h, to put it back.")
                                         : !ligne.apercuPret ? Reglages.t("Calcul de ce que la suppression retirerait…", "Working out what the deletion would remove…")
                                         : Reglages.t("« " + ligne.modelData.name + " » : " + CloudEtat.apercu.files + " fichier(s), " + CloudEtat.apercu.directories
                                                      + " dossier(s), " + cloud.taille(CloudEtat.apercu.size) + " : suppression définitive, toutes les versions.",
@@ -575,11 +618,12 @@ FloatingWindow {
                                                   onClic: { cloud.aSupprimer = ligne.modelData.id; if (!ligne.fichier) CloudEtat.demanderApercu(ligne.modelData) } }
                                     CloudBouton { visible: ligne.confirmer; danger: true
                                                   objectName: "nc-cloud-confirmer-" + ligne.modelData.id
-                                                  texte: Reglages.t("Supprimer définitivement", "Delete permanently")
+                                                  texte: ligne.fichier && CloudEtat.copiable(ligne.modelData) && CloudEtat.sansCopie !== ligne.modelData.id
+                                                         ? Reglages.t("Supprimer", "Delete") : Reglages.t("Supprimer définitivement", "Delete permanently")
                                                   enabled: !CloudEtat.occupe && (ligne.fichier || ligne.apercuPret)
                                                   onClic: { cloud.aSupprimer = ""; CloudEtat.supprimer(ligne.modelData) } }
                                     CloudBouton { visible: ligne.confirmer; objectName: "nc-cloud-annuler-" + ligne.modelData.id
-                                                  texte: Reglages.t("Annuler", "Cancel"); onClic: { cloud.aSupprimer = ""; CloudEtat.apercu = null } }
+                                                  texte: Reglages.t("Annuler", "Cancel"); onClic: { cloud.aSupprimer = ""; CloudEtat.apercu = null; CloudEtat.sansCopie = "" } }
                                     CloudBouton { id: valider; visible: ligne.renommage; principal: true
                                                   objectName: "nc-cloud-valider-nom-" + ligne.modelData.id
                                                   texte: Reglages.t("Renommer", "Rename"); enabled: !CloudEtat.occupe && nouveauNom.text.trim() !== ""
