@@ -54,7 +54,7 @@ class Pipette(unittest.TestCase):
         r = self.lancer()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.copie.read_text(), "#aabbcc")
-        self.assertIn("grim -g 10,20 1x1 -t ppm -", self.notifs())
+        self.assertIn("grim -s 1 -g 10,20 1x1 -t ppm -", self.notifs())
         self.assertIn("#aabbcc", self.notifs())
 
     def test_annulation_de_slurp(self):
@@ -76,8 +76,20 @@ class Pipette(unittest.TestCase):
                 self.faux_prog(outil, sauve.split("\n", 1)[1])
                 self.journal.unlink(missing_ok=True)
 
+    def copie_avec(self, corps):
+        self.faux_prog("grim", corps)
+        r = self.lancer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return self.copie.read_text()
+
+    def test_ppm_2x2_premier_pixel(self):
+        self.assertEqual(self.copie_avec(r"printf 'P6\n2 2\n255\n\1\2\3\252\273\314\0\0\0\377\377\377'"), "#010203")
+
+    def test_entete_avec_espaces(self):
+        self.assertEqual(self.copie_avec(r"printf 'P6 1  1\t255 \252\273\314'"), "#aabbcc")
+
     def test_sortie_de_grim_invalide(self):
-        for corps in ("echo pas-un-ppm", "printf 'P6\\n2 2\\n255\\n123456789012'", "printf 'P6\\n1 1\\n255\\n\\1'", "exit 1"):
+        for corps in ("echo pas-un-ppm", "printf 'P6\\n1 1\\n65535\\n123456'", "printf 'P5\\n1 1\\n255\\n123'", "printf 'P6\\na 1\\n255\\n123'", "printf 'P6\\n0 1\\n255\\n123'", "printf 'P6\\n1 1\\n255\\n12'", "printf 'P6\\n1 1\\n255\\n\\1'", "exit 1"):
             with self.subTest(corps=corps):
                 self.faux_prog("grim", corps)
                 r = self.lancer()

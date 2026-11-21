@@ -21,12 +21,26 @@ point="$(slurp -p 2>/dev/null)"; rc=$?
 [ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause false >/dev/null 2>&1
 [ "$rc" = 0 ] && [ -n "$point" ] || exit 0     # Échap : rien
 
-# slurp -p rend déjà « x,y 1x1 ». Un PPM 1x1 fait toujours 11 octets d'en-tête puis 3 octets de couleur : tout autre chose est refusé
-hex="$(grim -g "$point" -t ppm - 2>/dev/null | od -An -v -tx1 | tr -d ' \n')"
-case "$hex" in
-  50360a3120310a3235350a[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) dire "$(t "Couleur illisible" "Could not read the color")" "$(t "La capture du point a échoué." "Capturing the point failed.")"; exit 1 ;;
-esac
-couleur="#${hex#50360a3120310a3235350a}"
+# slurp -p rend déjà « x,y 1x1 ». « -s 1 » force l'échelle 1 (sinon l'image fait 2x2 ou plus sur un écran HiDPI).
+# On lit au plus 512 octets, on vérifie l'en-tête « P6 largeur hauteur 255 » (blancs libres) et on prend le pixel en haut à gauche.
+hex="$(grim -s 1 -g "$point" -t ppm - 2>/dev/null | head -c 512 | od -An -v -tx1 | tr -d ' \n')"
+ppm_couleur() {   # ppm_couleur HEX : écrit les 6 chiffres du premier pixel, ou rend 1
+  local h="$1" i=4 n tok b
+  [ "${h:0:4}" = 5036 ] || return 1
+  local -a v=()
+  for n in 1 2 3; do
+    case "${h:i:2}" in 20|09|0a|0b|0c|0d) ;; *) return 1 ;; esac      # au moins un blanc avant chaque champ
+    while case "${h:i:2}" in 20|09|0a|0b|0c|0d) true ;; *) false ;; esac; do i=$((i + 2)); done
+    tok=""
+    while b="${h:i:2}"; case "$b" in 3[0-9]) true ;; *) false ;; esac; do tok="$tok${b:1:1}"; i=$((i + 2)); done
+    case "$tok" in ""|???????*) return 1 ;; esac
+    v[n]=$((10#$tok))
+  done
+  case "${h:i:2}" in 20|09|0a|0b|0c|0d) i=$((i + 2)) ;; *) return 1 ;; esac   # un seul blanc avant les données
+  [ "${v[1]}" -ge 1 ] && [ "${v[2]}" -ge 1 ] && [ "${v[3]}" = 255 ] || return 1
+  case "${h:i}" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) printf '%s' "${h:i:6}" ;; *) return 1 ;; esac
+}
+rvb="$(ppm_couleur "$hex")" || { dire "$(t "Couleur illisible" "Could not read the color")" "$(t "La capture du point a échoué." "Capturing the point failed.")"; exit 1; }
+couleur="#$rvb"
 printf '%s' "$couleur" | wl-copy
 ICONE=color-select dire "$couleur" "$(t "Couleur copiée." "Color copied.")"
