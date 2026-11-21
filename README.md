@@ -239,6 +239,10 @@ l'île Quickshell.
   et la vitesse ; à la fin, « Fichier.pdf téléchargé », et un clic sur la pilule ouvre le dossier. Avec `inotifywait`
   (paquet `inotify-tools`, facultatif), la fin est vue à l'instant et rien ne tourne au repos ; sans lui, l'île relève
   le dossier toutes les 6 s (30 s sur batterie). Rien écran éteint, et rien pendant un partage d'écran.
+- **Pause des yeux 20-20-20** (`nc-reglages` → Île, réglage `PAUSE_YEUX`, éteint par défaut) : toutes les 20 minutes
+  d'écran, la pilule dit « Regarde au loin » pendant 20 secondes, sans son. Rien pendant le mode jeu, un partage d'écran
+  ou une fenêtre en plein écran (la pause attend 20 minutes de plus). Écran éteint ou verrouillé, le minuteur s'arrête et
+  repart de zéro au retour. Éteint, aucun minuteur ne tourne.
 - **Actions rapides du presse-papiers** (`nc-reglages` → Île, réglage `ILE_PRESSE_ACTIONS`) : sous un texte copié, la page
   Presse-papiers propose selon ce qu'il est : une couleur (`#rgb`, `#rrggbb`, `rgb(…)`) avec sa pastille et ses
   conversions hex, rgb et hsl ; un lien http(s) avec « Ouvrir » ; un chemin qui existe avec « Ouvrir le dossier » ; un calcul

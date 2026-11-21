@@ -8,6 +8,7 @@ import QtQuick
 import QtQml
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
@@ -617,6 +618,32 @@ Singleton {
         }
     }
     function reglerLuminosite(v) { luminosite = Math.max(0, Math.min(1, v)); luminositeVoulue = luminosite }
+
+    // ── Pause des yeux 20-20-20 (réglage PAUSE_YEUX, non par défaut) : après 20 min d'écran vu, « regarde au loin »
+    // 20 s dans la pilule, sans son. Un seul Timer à un tir, armé seulement si le réglage est à oui ET l'écran vu : à non,
+    // aucun minuteur ; écran éteint ou session verrouillée, il est arrêté (pas de réveil pour rien) et repart de zéro au
+    // retour. Mode jeu, partage d'écran ou fenêtre en plein écran (vidéo, présentation) à l'échéance : pas de pause, et
+    // 20 min de plus.
+    readonly property bool pauseYeuxVoulue: Reglages.val("PAUSE_YEUX", "non") === "oui" && ecranVu
+    property int pauseYeuxIntervalle: 20 * 60 * 1000
+    onPauseYeuxVoulueChanged: pauseYeuxVoulue ? pauseYeux.restart() : pauseYeux.stop()
+    Timer {
+        id: pauseYeux
+        interval: etat.pauseYeuxIntervalle
+        repeat: false
+        Component.onCompleted: if (etat.pauseYeuxVoulue) start()
+        onTriggered: {
+            if (!etat.jeu && !Partage.silence && !etat.pleinEcranActif()) etat.activite("pause-yeux", 20000)
+            if (etat.pauseYeuxVoulue) start()
+        }
+    }
+    // ── fin de la pause des yeux
+
+    // Une fenêtre en plein écran, lue seulement quand on la demande (pas de liaison qui suit chaque événement)
+    function pleinEcranActif() {
+        var t = Hyprland.activeToplevel
+        return !!(t && t.lastIpcObject && (t.lastIpcObject.fullscreen || 0) > 0)
+    }
 
     // ── Mode jeu (fichier de la session, posé et retiré par nc.mode_jeu dans Hyprland) : surveillé, pas sondé ──
     property bool jeu: false

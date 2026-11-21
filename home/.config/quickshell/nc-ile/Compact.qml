@@ -45,7 +45,7 @@ Item {
                                       claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video, partage: partage,
                                       telechargement: telechargement, "telechargement-fini": telechargementFini, chaleur: chaleur,
                                       appel: appel, "appel-muet": appelMuet, "appel-fini": appelFini,
-                                      terminal: terminal, "terminal-fini": terminalFini, resume: resume })[mode] || repos
+                                      terminal: terminal, "terminal-fini": terminalFini, "pause-yeux": pauseYeux, resume: resume })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -361,6 +361,15 @@ Item {
             Accessible.role: Accessible.Button
             Accessible.name: Reglages.t("Envoyer au cloud", "Send to cloud")
         }
+    }
+    // Pause des yeux 20-20-20 (Etat.qml, réglage PAUSE_YEUX) : 20 s, puis la pilule revient à ce qu'elle montrait
+    Fondu {
+        id: pauseYeux
+        objectName: "nc-pause-yeux-pill"
+        montre: c.mode === "pause-yeux"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "visibility"; taille: 17; color: Couleurs.accent }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Regarde au loin", "Look far away"); font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("20 s, à 6 m", "20 s, 20 ft away"); secondaire: true }
     }
     Fondu {
         id: video

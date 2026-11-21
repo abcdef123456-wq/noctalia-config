@@ -586,6 +586,11 @@ REGLAGES = [
     R("ILE_TELECHARGEMENTS", "Île", L("Téléchargements du navigateur dans l'île", "Browser downloads in the island"), "ouinon", "oui",
       L("Firefox, Chrome, Brave, Edge, Vivaldi… : le fichier, la taille reçue et la vitesse, puis « Téléchargé ».",
         "Firefox, Chrome, Brave, Edge, Vivaldi…: the file, the size received and the speed, then “Downloaded”.")),
+    R("PAUSE_YEUX", "Île", L("Pause des yeux (20-20-20)", "Eye break (20-20-20)"), "ouinon", "non",
+      L("Toutes les 20 minutes d'écran, la pilule dit « Regarde au loin » pendant 20 secondes, sans son. Jamais pendant le mode jeu, "
+        "un partage d'écran ou une fenêtre en plein écran ; arrêtée écran éteint ou verrouillé. Non : aucun minuteur.",
+        "Every 20 minutes of screen time, the pill says “Look far away” for 20 seconds, silently. Never during game mode, "
+        "screen sharing or a fullscreen window; stopped while the screen is off or locked. No: no timer at all.")),
     R("ILE_APPEL", "Île", L("Appels dans l'île", "Calls in the island"), "ouinon", "oui",
       L("Une appli enregistre le micro (Discord, navigateur, Zoom, Teams…) : la pilule montre l'appli, sa durée et le niveau du micro ; "
         "la page Appel coupe ou réactive le micro. Appel commencé micro coupé : l'île le dit. Seul le niveau est mesuré, jamais le son.",
@@ -1803,7 +1808,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
+                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
