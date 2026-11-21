@@ -216,7 +216,8 @@ bornes :
   avant tarfile, puis comparés à ce que lit tarfile (mêmes noms, mêmes tailles) ;
 - un nom en double refuse toute l'archive.
 
-L'archive envoyée est écrite en USTAR : une palette dont le chemin dépasse 100 octets est écartée. Le tri des réglages
+L'archive envoyée est écrite en USTAR : une palette dont le chemin dépasse 100 octets est écartée. Au-delà de 500 éléments,
+les palettes les plus récemment modifiées partent, les autres sont écartées, et c'est dit. Le tri des réglages
 (nc-reglages) se fait avant toute écriture : s'il échoue, rien n'est remis. Si le `reglages.conf` de ce PC dépasse
 1 Mo, la reprise est refusée (il n'est jamais coupé).
 

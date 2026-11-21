@@ -476,7 +476,7 @@ def creer_pour_le_cloud(sortie):
     liste blanche, raccourcis d'applications, palettes (fichiers ordinaires d'un seul lien, noms sûrs), photo de profil
     si c'est une image ; en-têtes anonymes."""
     a_poser = []                       # (nom dans l'archive, octets, date)
-    ecartees = retirees = palettes_ecartees = 0
+    ecartees = retirees = palettes_ecartees = trop = 0
     for arc, maxi, un_lien in ((REGLAGES, MAX_REGLAGE, False), (RACCOURCIS, MAX_REGLAGE, False), (".face", MAX_FACE, True)):
         brut, st = lire_sur(os.path.join(*reel(arc)), maxi, un_lien)
         if brut is None:
@@ -489,6 +489,7 @@ def creer_pour_le_cloud(sortie):
             continue
         a_poser.append((arc, brut, st.st_mtime))
     dossier = os.path.join(*reel(PALETTES))
+    palettes = []
     if os.path.isdir(dossier) and not os.path.islink(dossier):
         for e in sorted(os.listdir(dossier)):
             sur = palette_sure(e) and len(os.fsencode(PALETTES + "/" + e)) <= 100     # le champ nom USTAR, sans prefix
@@ -496,7 +497,12 @@ def creer_pour_le_cloud(sortie):
             if brut is None:
                 palettes_ecartees += 1
             else:
-                a_poser.append((PALETTES + "/" + e, brut, st.st_mtime))
+                palettes.append((PALETTES + "/" + e, brut, st.st_mtime))
+        # La reprise refuse une archive de plus de CLOUD_MAX_MEMBRES éléments : les plus récemment modifiées partent
+        palettes.sort(key=lambda x: x[2], reverse=True)
+        place = CLOUD_MAX_MEMBRES - len(a_poser)
+        trop = max(0, len(palettes) - place)
+        a_poser += palettes[:place]
     if not a_poser:
         sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
     fd, tmp = tempfile.mkstemp(prefix=".nc-sauvegarde-", suffix=".tmp", dir=os.path.dirname(os.path.abspath(sortie)))
@@ -525,6 +531,9 @@ def creer_pour_le_cloud(sortie):
         print(T(f"{retirees} ligne(s) de raccourcis écartée(s) : commandes et commentaires (seuls les raccourcis "
                 "d'applications partent).", f"{retirees} shortcut line(s) left out: commands and comments (only app "
                 "shortcuts are sent)."))
+    if trop:
+        print(T(f"{trop} palette(s) non envoyée(s) : trop nombreuses ({CLOUD_MAX_MEMBRES} éléments au plus, les plus récentes "
+                "partent).", f"{trop} palette(s) not sent: too many ({CLOUD_MAX_MEMBRES} items at most, the most recent are sent)."))
     if palettes_ecartees:
         print(T(f"{palettes_ecartees} palette(s) écartée(s) : lien, dossier, nom caché ou étrange, trop grosse.",
                 f"{palettes_ecartees} palette(s) left out: link, folder, hidden or odd name, too big."))

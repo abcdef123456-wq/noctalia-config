@@ -853,6 +853,29 @@ class PourLeCloud(Base):
                 self.assertNotEqual(fin.exception.code, 0)
                 self.assertIn("RecursionError", str(fin.exception.code) + err.getvalue())
 
+    def test_trop_de_palettes_les_plus_recentes_partent(self):
+        """Avec plus de palettes que la limite, creer garde les plus récentes : voir et la reprise acceptent l'archive."""
+        home, env = self.maison("palettes")
+        self.reglages(home, LANGUE="fr")
+        d = home / ".config/noctalia/palettes"
+        d.mkdir(parents=True)
+        for i in range(520):
+            f = d / f"p{i:03}.json"
+            f.write_text("{}")
+            os.utime(f, (1_000_000 + i, 1_000_000 + i))                                 # p519 est la plus récente
+        sortie = self.r / "palettes.tar.gz"
+        r = self.lancer(env, "creer", "--pour-le-cloud", "--sortie", str(sortie))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("21 palette(s) non envoyée(s) : trop nombreuses", r.stdout)       # 500 - reglages.conf = 499 palettes
+        with tarfile.open(sortie) as t:
+            noms = t.getnames()
+        self.assertEqual(len(noms), 500)
+        self.assertIn(".config/noctalia/palettes/p519.json", noms)
+        self.assertNotIn(".config/noctalia/palettes/p020.json", noms)
+        self.assertIn(".config/noctalia/palettes/p021.json", noms)
+        for cmd in ("voir", "restaurer"):
+            self.assertEqual(self.lancer(env, cmd, "--pour-le-cloud", str(sortie)).returncode, 0, cmd)
+
     def test_palette_accentuee_aller_retour_sans_pax(self):
         home, env = self.maison("accent")
         self.reglages(home, LANGUE="fr")
