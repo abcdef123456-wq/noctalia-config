@@ -74,15 +74,22 @@ class PoseRegle(unittest.TestCase):
 
     def test_authentification_impossible_sans_terminal(self):
         sortie = self.lancer(self.APPEL, FAUX_ECHEC="auth")
-        self.assertIn("sudo n'a pas pu demander ton mot de passe : relance dans un terminal", sortie)
+        self.assertIn("sudo n'a pas pu vérifier ton mot de passe (pas de terminal, ou mot de passe refusé)", sortie)
         self.assertNotIn("visudo", self.log())
         self.assertNotIn("install", self.log())
 
     def test_mot_de_passe_refuse_avec_terminal(self):
         sortie = self.lancer(self.APPEL, tty=True, FAUX_ECHEC="auth")
-        self.assertIn("sudo n'a pas pu demander ton mot de passe", sortie)
+        self.assertIn("sudo n'a pas pu vérifier ton mot de passe", sortie)
         self.assertIn("sudo -v", self.log())
         self.assertNotIn("visudo", self.log())
+
+    def test_mode_graphique_sans_terminal_sudo_demande_par_sa_fenetre(self):
+        """Installeur graphique : pas de terminal, mais SUDO_ASKPASS. sudo doit être essayé (« -v »), pas refusé d'avance."""
+        sortie = self.lancer(self.APPEL, SUDO_ASKPASS="/home/user/nc-askpass")
+        self.assertNotIn("CAUSE", sortie)
+        self.assertIn("sudo -v", self.log())
+        self.assertIn("sudo mv", self.log())
 
     def test_copie_echoue(self):
         sortie = self.lancer(self.APPEL, FAUX_ECHEC="copie", FAUX_N="1")
@@ -117,6 +124,11 @@ class PoseRegle(unittest.TestCase):
 
     def test_batterie_demandee_sans_terminal_si_sudo_deja_autorise(self):
         sortie = self.lancer(self.BATT, FAUX_N="1")
+        self.assertIn("QUESTION", sortie)
+        self.assertNotIn("nc-maj", sortie)
+
+    def test_batterie_demandee_en_mode_graphique(self):
+        sortie = self.lancer(self.BATT, SUDO_ASKPASS="/home/user/nc-askpass")
         self.assertIn("QUESTION", sortie)
         self.assertNotIn("nc-maj", sortie)
 

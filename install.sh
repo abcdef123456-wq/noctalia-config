@@ -109,6 +109,8 @@ nc_ui_n_etape() { [ "${NC_UI:-0}" = 1 ] || return 0; NC_UI_N=$((NC_UI_N + 1)); n
 # Pas de terminal utilisable (CI, ssh sans tty, tâche de fond) : le même test pour ask(), choisir() et les options de
 # pacman. Les réponses viennent alors des valeurs par défaut.
 sans_tty() { [ "${NC_UI:-0}" = 1 ] || ! { true </dev/tty; } 2>/dev/null; }
+# sudo peut-il demander le mot de passe ? Par un terminal, ou par la fenêtre du mode graphique (SUDO_ASKPASS, posé plus haut)
+sudo_peut_demander() { [ -n "${SUDO_ASKPASS:-}" ] || { true </dev/tty; } 2>/dev/null; }
 ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
   # « sensible » : démarrage, connexion, pilotes. Sans terminal, la réponse par défaut y est NON, sauf avec --oui.
   local d="${2:-n}" r hint sens=false
@@ -135,8 +137,8 @@ ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en an
 # en cas d'échec. pose_regle <règle à poser> <règle finale> [<outil source> <outil cible>] ; échec : NC_CAUSE dit la vraie cause.
 pose_regle() {
   local src="$1" fin="$2"
-  if ! sudo -n true 2>/dev/null && { sans_tty || ! sudo -v; }; then
-    NC_CAUSE="$(t "sudo n'a pas pu demander ton mot de passe : relance dans un terminal." "sudo couldn't ask for your password: run it again in a terminal.")"; return 1
+  if ! sudo -n true 2>/dev/null && { ! sudo_peut_demander || ! sudo -v; }; then
+    NC_CAUSE="$(t "sudo n'a pas pu vérifier ton mot de passe (pas de terminal, ou mot de passe refusé) : relance nc-maj dans un terminal." "sudo couldn't check your password (no terminal, or password rejected): run nc-maj again in a terminal.")"; return 1
   fi
   if { [ -z "${3:-}" ] || sudo install -Dm0755 -o root -g root "$3" "$4"; } && sudo install -m0440 -o root -g root "$src" "$fin.tmp"; then
     if ! sudo visudo -cf "$fin.tmp" >/dev/null; then
@@ -2443,7 +2445,7 @@ if [ "$MODE" = full ]; then
     else
       info "$(t "Interrupteur « Protéger la batterie » dans la page Système de l'île (charge arrêtée vers 80 %) : un petit" "“Protect Battery” switch on the island's System page (charging stops around 80%): a small")"
       info "$(t "utilitaire qui ne fait que ça (/usr/local/bin/nc-limite-charge), lancé depuis l'île sans mot de passe." "tool that does only that (/usr/local/bin/nc-limite-charge), run from the island without a password.")"
-      if sans_tty && ! sudo -n true 2>/dev/null; then # sans terminal ni sudo déjà autorisé : rien à demander, rien à poser
+      if ! sudo_peut_demander && ! sudo -n true 2>/dev/null; then # sudo ne peut ni demander ni passer sans mot de passe : rien à poser
         info "$(t "Pas de terminal pour sudo : à faire dans un terminal : nc-maj" "No terminal for sudo: do this in a terminal: nc-maj")"
       elif ask "$(t "L'installer ?" "Install it?")" o; then
         t="$(mktemp)"; printf '# noctalia-config : interrupteur « Protéger la batterie » de l'"'"'île\n%s\n' "$ligne" > "$t"
