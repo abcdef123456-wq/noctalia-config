@@ -169,6 +169,8 @@ if not os.environ.get("NC_TEST_ISOLE"):
     for _cle in ("NC_LANGUE", "LC_ALL", "LC_MESSAGES", "LANGUAGE"):
         os.environ.pop(_cle, None)
     os.environ["LANG"] = "C.UTF-8"
+    # Fedora coupe *.debug dans son qtlogging.ini : console.log, donc le « FINI » des tests hors écran, ne sortait plus
+    os.environ["QT_LOGGING_RULES"] = "qml.debug=true;js.debug=true"
     _n = int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)
     for _k, _v in (("gc.auto", "0"), ("maintenance.auto", "false"), ("fetch.writeCommitGraph", "false")):
         os.environ[f"GIT_CONFIG_KEY_{_n}"], os.environ[f"GIT_CONFIG_VALUE_{_n}"] = _k, _v
