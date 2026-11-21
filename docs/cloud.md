@@ -64,7 +64,7 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 - En `https://`, le montage vise le nom du serveur (certificat vérifié par GVfs) ; en `http://` (ce PC, réseau privé,
   Tailscale), il vise l'adresse IP vérifiée par nc-cloud, jamais le nom ; `http://` vers Internet est refusé.
 - Le favori est une ligne du fichier `~/.config/gtk-3.0/bookmarks`, sans identifiants ; les autres lignes ne bougent
-  pas, au caractère près. Si ce fichier ne peut pas être modifié (un lien de dotfiles, par exemple), le cloud est monté
+  pas, au caractère près. Si ce fichier ne peut pas être modifié (un lien de dotfiles, ou pas de dossier `gtk-3.0`), le cloud est monté
   et ouvert quand même, et le message dit que le favori manque. `nc-cloud demonter` et `nc-cloud dissocier` démontent
   l'adresse notée au montage (seulement si la racine du montage est exactement celle du cloud) et retirent le favori.
 - Il faut deux paquets facultatifs, qu'`install.sh` n'installe pas : sans eux, le bouton n'apparaît pas, et

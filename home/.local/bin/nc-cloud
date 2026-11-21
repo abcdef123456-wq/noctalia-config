@@ -2171,8 +2171,11 @@ def favori_changer(adresse=None):
     if st is not None and not stat.S_ISREG(st.st_mode):
         raise Echec(T("Favoris GTK : ce n'est pas un fichier ordinaire (lien refusé), rien n'est changé.",
                       "GTK bookmarks: not a regular file (link refused), nothing changed."))
-    if st is None and (adresse is None or not f.parent.is_dir()):
+    if st is None and adresse is None:
         return False
+    if st is None and not f.parent.is_dir():       # pas « déjà là » : l'appelant doit pouvoir dire que le favori manque
+        raise Echec(T("pas de dossier de favoris GTK sur ce PC (~/.config/gtk-3.0)",
+                      "no GTK bookmarks folder on this PC (~/.config/gtk-3.0)"))
     lignes = f.read_bytes().split(b"\n") if st else [b""]
     def notre(l):
         u, _, nom = l.partition(b" ")

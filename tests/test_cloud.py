@@ -1249,8 +1249,10 @@ elif sys.argv[1] == "clear":
     def test_favori_lien_refuse_dossier_absent_rien_cree_et_dissocier_le_retire(self):
         self.associer()
         self.faux_gi()
-        self.nc("fichiers", code=0)
+        r = self.nc("fichiers", code=0)
         self.assertFalse(self.favoris().exists(), "dossier gtk-3.0 absent : rien n'est créé")
+        self.assertIs(r.lignes[-1]["favori"], False, "profil neuf : le favori n'est pas annoncé s'il n'est pas posé")
+        self.assertIn("Favori non posé", r.lignes[-1]["message"])
         self.favoris().parent.mkdir(parents=True)
         cible = self.d / "ailleurs"
         cible.write_text("x\n")
