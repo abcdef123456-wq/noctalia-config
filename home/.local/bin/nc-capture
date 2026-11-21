@@ -4,6 +4,8 @@
 #   nc-capture zone       zone choisie à la souris                       Super + P, Maj + Impr. écran
 #   nc-capture retouche   zone, ouverte tout de suite dans Swappy        Super + Maj + S
 #   nc-capture texte      le TEXTE d'une zone (image, vidéo, PDF scanné…) copié, prêt à coller   Super + Maj + T
+#   nc-capture ecran --dans 5     capture retardée de 1 à 30 s (le temps d'ouvrir un menu), compte à rebours en notification
+#   nc-capture annuler    annule la capture retardée en attente                                  Ctrl + Maj + Impr. écran
 # Fichier : ~/Images/Captures (dossier « Images » de ta langue), « Capture du 2026-10-15 à 23.25.10.png ».
 # L'image est aussi copiée : Ctrl + V la colle directement. Une notification la montre ; un clic l'ouvre dans Swappy
 # pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
@@ -13,7 +15,21 @@ set -uo pipefail
 umask 077
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
-mode="${1:-zone}"
+mode=""; delai=-
+usage() { t "Usage : nc-capture ecran | zone | retouche | texte [--dans 1..30] | annuler" "Usage: nc-screenshot screen | area | edit | text [--in 1..30] | cancel" >&2; echo >&2; exit 2; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dans|--in) [ $# -ge 2 ] || usage; delai="$2"; shift 2 ;;
+    --dans=*|--in=*) delai="${1#*=}"; shift ;;
+    *) [ -n "$mode" ] || mode="$1"; shift ;;
+  esac
+done
+mode="${mode:-zone}"
+# Délai : un entier de 1 à 30, sinon refus poli
+case "$delai" in
+  -|[1-9]|[1-2][0-9]|30) ;;
+  *) t "Délai refusé : choisis un nombre de secondes entre 1 et 30." "Delay refused: pick a number of seconds between 1 and 30." >&2; echo >&2; exit 2 ;;
+esac
 # Choisir une zone à la souris. La vue des fenêtres (nc-ile), si elle est ouverte, lâche clavier et souris le temps du
 # choix : sinon elle prenait le clic de la sélection.
 choisir_zone() {
@@ -26,8 +42,17 @@ choisir_zone() {
 }
 # Noms anglais des modes (nc-screenshot screen | area | edit | text)
 case "$mode" in
-  screen) mode=ecran ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
+  screen) mode=ecran ;; cancel) mode=annuler ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
 esac
+
+# Capture retardée : un seul fichier de verrou (pid du processus qui attend) dans XDG_RUNTIME_DIR
+verrou="${XDG_RUNTIME_DIR:-}/nc-capture-retard.pid"
+if [ "$mode" = annuler ]; then
+  pid="$(cat "$verrou" 2>/dev/null)"
+  if [ -n "$pid" ] && grep -q nc-capture "/proc/$pid/cmdline" 2>/dev/null && kill "$pid" 2>/dev/null; then exit 0; fi
+  notify-send -a "$(t "Capture d'écran" "Screenshot")" -i dialog-information "$(t "Aucune capture en attente" "No screenshot pending")" 2>/dev/null || true
+  exit 0
+fi
 
 # Un outil absent ne passe plus en silence : une notification nomme le paquet à installer (même nom sur Arch, Debian,
 # Fedora et openSUSE pour grim, slurp, swappy et wl-clipboard)
@@ -45,6 +70,35 @@ case "$mode" in ecran|zone|retouche|texte)
 esac
 # Réglage de nc-reglages (~/.config/nc/reglages.conf)
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+
+# Compte à rebours : une seule notification, remplacée chaque seconde (aucun processus de plus que ce délai). Annulation :
+# « nc-capture annuler » (SIGTERM) ferme la notification et libère le verrou.
+if [ "$delai" != - ] && case "$mode" in ecran|zone|retouche|texte) true ;; *) false ;; esac; then
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] || { t "Capture retardée impossible : pas de dossier d'exécution." "Delayed screenshot impossible: no runtime folder." >&2; echo >&2; exit 1; }
+  if ! ( set -C; echo $$ > "$verrou" ) 2>/dev/null; then
+    ancien="$(cat "$verrou" 2>/dev/null)"
+    if [ -n "$ancien" ] && grep -q nc-capture "/proc/$ancien/cmdline" 2>/dev/null; then
+      avertir "$(t "Une capture est déjà en attente" "A screenshot is already pending")" "$(t "Annule-la avec « nc-capture annuler »." "Cancel it with “nc-screenshot cancel”.")"
+      exit 1
+    fi
+    rm -f "$verrou"; ( set -C; echo $$ > "$verrou" ) 2>/dev/null || exit 1     # verrou resté d'un processus disparu
+  fi
+  nid=""
+  compte() {   # compte TITRE [TEXTE] : affiche, ou remplace, la notification du compte à rebours
+    local r=() i; [ -n "$nid" ] && r=(-r "$nid")
+    i="$(notify-send -p -a "$(t "Capture d'écran" "Screenshot")" -i camera-photo -t 1500 "${r[@]}" "$1" "${2:-}" 2>/dev/null)" || return 0
+    case "$i" in ''|*[!0-9]*) ;; *) nid="$i" ;; esac
+  }
+  trap 'compte "$(t "Capture annulée" "Screenshot cancelled")"; rm -f "$verrou"; exit 0' TERM INT
+  for ((n = delai; n > 0; n--)); do
+    compte "$(t "Capture dans $n s" "Screenshot in $n s")" "$(t "« nc-capture annuler » pour annuler." "“nc-screenshot cancel” to cancel.")"
+    sleep 1
+  done
+  trap - TERM INT
+  rm -f "$verrou"
+  [ -z "$nid" ] || notify-send -a "$(t "Capture d'écran" "Screenshot")" -r "$nid" -t 1 "$(t "Capture…" "Capturing…")" 2>/dev/null
+  sleep 0.3      # laisse la notification se retirer avant que grim ne regarde l'écran
+fi
 
 # Texte d'une zone : lu par tesseract (français et anglais), copié ; rien n'est enregistré
 if [ "$mode" = texte ]; then
@@ -102,7 +156,7 @@ case "$mode" in
     [ -n "$zone" ] || exit 0
     reserver || exit 1
     grim -g "$zone" "$fichier" || { vider; exit 1; } ;;
-  *) t "Usage : nc-capture ecran | zone | retouche | texte" "Usage: nc-screenshot screen | area | edit | text" >&2; echo >&2; exit 2 ;;
+  *) usage ;;
 esac
 
 # Copiée aussi, sauf si coupé dans nc-reglages (CAPTURES_COPIER)

@@ -35,6 +35,8 @@ section « Mes raccourcis » de la fiche).
 | `Impr. écran` | Capture de l'écran |
 | `Super` + `Maj` + `S` | Capture à annoter |
 | `Super` + `Maj` + `T` | Copier le texte d'une zone de l'écran (image, vidéo, PDF scanné) |
+| `Ctrl` + `Impr. écran` | Capture de l'écran dans 5 secondes |
+| `Ctrl` + `Maj` + `Impr. écran` | Annuler la capture en attente |
 
 ## Fenêtres
 

@@ -143,6 +143,8 @@ touche("Print",                 cmd("~/.local/bin/nc-capture ecran"),    trad("A
 touche("SHIFT + Print",         cmd("~/.local/bin/nc-capture zone"))     -- comme Super + P (pas répété dans la fiche)
 touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), trad("Applis et barre|Capture d'une zone à annoter", "Screenshot of an area to annotate"))
 touche(SUPER .. " + SHIFT + code:28", cmd("~/.local/bin/nc-capture texte"), trad("Applis et barre|Copier le texte d'une zone de l'écran", "Copy the text in an area of the screen"))
+touche("CTRL + Print",          cmd("~/.local/bin/nc-capture ecran --dans 5"), trad("Applis et barre|Capture de l'écran dans 5 secondes", "Screenshot of the screen in 5 seconds"))
+touche("CTRL + SHIFT + Print",  cmd("~/.local/bin/nc-capture annuler"), trad("Applis et barre|Annuler la capture en attente", "Cancel the pending screenshot"))
 -- Vidéo de l'écran (nc-video) : zone ou écran entier ; le même raccourci (ou un clic sur l'île) arrête
 touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), trad("Applis et barre|Enregistrer l'écran en vidéo (démarrer / arrêter)", "Record the screen (start / stop)"))
 

@@ -114,6 +114,76 @@ class Capture(Base):
         self.assertIn("[Default]\nsave_dir=%s\n" % self.dossier, texte)
 
 
+class CaptureRetardee(Capture):
+    """--dans N : refus poli hors 1..30, compte à rebours en notification, verrou unique, annulation."""
+
+    def setUp(self):
+        super().setUp()
+        (self.home / "run").mkdir()
+        self.faux_prog("notify-send", 'echo "notif $*" >> "$JOURNAL"; echo 42')
+        self.verrou = self.home / "run/nc-capture-retard.pid"
+
+    def lancer(self, *args, **env):
+        return subprocess.Popen([shutil.which("bash"), str(BIN / "nc-capture"), *args], env=self.env(**env),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL)
+
+    def test_delai_hors_bornes_refuse_sans_capture(self):
+        for d in ("0", "31", "-1", "abc", "5s", ""):
+            r = subprocess.run([shutil.which("bash"), str(BIN / "nc-capture"), "ecran", "--dans", d], env=self.env(),
+                               capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 2, d)
+            self.assertIn("1 et 30", r.stderr)
+        self.assertNotIn("grim", self.journal.read_text())
+
+    def test_compte_a_rebours_puis_capture(self):
+        self.faux_prog("sleep", 'echo "sleep $*" >> "$JOURNAL"')
+        r = self.lancer("ecran", "--dans", "3")
+        r.communicate(timeout=20)
+        self.assertEqual(r.returncode, 0)
+        j = self.journal.read_text()
+        self.assertEqual(j.count("sleep 1"), 3)
+        self.assertIn("Capture dans 3 s", j)
+        self.assertIn("-r 42", j)                       # la même notification est remplacée
+        self.assertLess(j.index("Capture dans 1 s"), j.index("grim"))
+        self.assertFalse(self.verrou.exists())
+        self.assertEqual(len(list(self.dossier.iterdir())), 1)
+
+    def attendre_verrou(self, p):
+        import time
+        for _ in range(100):
+            if self.verrou.exists() or p.poll() is not None:
+                return
+            time.sleep(0.1)
+
+    def test_annuler_et_verrou_unique(self):
+        self.faux_prog("sleep", 'exec /bin/sleep 1')
+        p = self.lancer("ecran", "--dans", "20")
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        self.attendre_verrou(p)
+        self.assertTrue(self.verrou.exists())
+        # Deuxième capture retardée : refusée, la première continue
+        r2 = self.lancer("zone", "--dans", "5")
+        r2.communicate(timeout=20)
+        self.assertEqual(r2.returncode, 1)
+        self.assertIsNone(p.poll())
+        # Annulation : la capture en attente s'arrête, sans image, verrou libéré
+        r3 = self.lancer("annuler")
+        r3.communicate(timeout=20)
+        p.communicate(timeout=20)
+        self.assertEqual(p.returncode, 0)
+        self.assertFalse(self.verrou.exists())
+        self.assertNotIn("grim", self.journal.read_text())
+        self.assertIn("Capture annulée", self.journal.read_text())
+
+    def test_verrou_perime_ignore(self):
+        self.faux_prog("sleep", "exit 0")
+        self.verrou.write_text("999999\n")
+        r = self.lancer("ecran", "--dans", "1")
+        r.communicate(timeout=20)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(len(list(self.dossier.iterdir())), 1)
+
+
 class FondEcran(Base):
     def setUp(self):
         super().setUp()
