@@ -43,6 +43,16 @@ MORCEAU = 64 * 1024
 RLO = chr(0x202E)    # inversion de sens : écrit par son code, jamais en vrai dans le source
 
 
+def ecrire_outil(chemin, texte):
+    """Un faux outil écrit comme un NOUVEAU fichier (O_EXCL, O_NOFOLLOW) : jamais à travers un lien posé là avant (le
+    lien vers le vrai /usr/bin/file du test « avec le vrai file »)."""
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(chemin)
+    fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o755)
+    with os.fdopen(fd, "w") as f:
+        f.write(texte)
+
+
 def png_minimal():
     """Une vraie image PNG de 1 × 1 pixel."""
     def bloc(t, d):
@@ -84,6 +94,7 @@ class Faux:
         self.n = 0
         self.journal = []          # (méthode, chemin complet, en-têtes)
         self.pannes = set()
+        self.curseur_force = None  # un curseur de page imposé (valeurs hostiles)
         self.quota = 10 ** 9
         self.lent = 0.0
         self.morceau = MORCEAU
@@ -254,6 +265,8 @@ class Gestion(http.server.BaseHTTPRequestHandler):
             debut = int(q.get("cursor") or 0)
             page = enfants[debut:debut + 2]           # pages de 2 (100 en vrai) pour tester la suite
             suite = str(debut + 2) if debut + 2 < len(enfants) else None
+            if suite and f.curseur_force:
+                suite = f.curseur_force
             if "nom_hostile" in f.pannes:
                 page = [dict(e, name="../\x1b[31mpiège" + RLO + "\n") for e in page]
             if "demi_paire" in f.pannes:
@@ -1262,7 +1275,7 @@ elif sys.argv[1] == "clear":
         type au contenu comme lui sur ces cas : PNG, PDF, ZIP / JAR, HTML, SVG, script, texte."""
         if file:
             ff = self.bin / "file"
-            ff.write_text("#!" + sys.executable + """
+            ecrire_outil(ff, "#!" + sys.executable + """
 import sys
 b = open(sys.argv[-1], 'rb').read()
 t = b.lstrip()[:200].lower()
@@ -1277,11 +1290,8 @@ else:
     except UnicodeDecodeError: m = 'application/octet-stream'
 print(m)
 """)
-            ff.chmod(0o755)
         appels = self.d / "appels-xdg"
-        x = self.bin / "xdg-open"
-        x.write_text(f'#!/bin/sh\necho "$@" >> "{appels}"\n')
-        x.chmod(0o755)
+        ecrire_outil(self.bin / "xdg-open", f'#!/bin/sh\necho "$@" >> "{appels}"\n')
         return appels
 
     def attendre(self, chemin):
@@ -1341,7 +1351,10 @@ print(m)
         return [("vacances.png", jar(True), False), ("vacances.png", jar(False), False), ("vacances.png", HTML, False),
                 ("page.html", HTML, False), ("dessin.svg", SVG, False), ("photo.jpg", b"bonjour\n", False),
                 ("photo.png", b"#!/bin/sh\nid\n", False), ("script.sh", b"echo\n", False), ("x.jar", jar(True), False),
-                ("lanceur", b"[Desktop Entry]\nExec=id\n", False),
+                ("lanceur", b"[Desktop Entry]\nExec=id\n", False), ("notes", b"bonjour\n", False),
+                ("data:,x.html", b"bonjour\n", False), ("ab:x.txt#.html", b"bonjour\n", False), ("ab:x.png?.desktop", PNG, False),
+                ("http:x.png;.jar", PNG, False), ("ab:x.html#.txt", b"bonjour\n", False), ("liste.m3u", b"#EXTM3U\nhttp://exemple.invalid/a.mp3\n", False),
+                ("x.txt.gz", b"bonjour\n", False), ("photo.PNG", PNG, True),
                 ("image.png", PNG, True), ("doc.pdf", PDF, True), ("note.txt", b"bonjour\n", True), ("liste.csv", b"a,b\n1,2\n", True)]
 
     def verifier_liste_blanche(self, appels):
@@ -1355,7 +1368,11 @@ print(m)
                     self.assertIn("télécharge-le d'abord", r.stdout)
         time.sleep(0.5)
         vus = sorted(Path(x).name for x in self.attendre(appels).split())
-        self.assertEqual(vus, sorted(n for n, _, o in self.contenus_ouvrir() if o), "xdg-open n'a vu que les types sûrs")
+        # La copie porte NOTRE extension, tirée du contenu : photo.PNG devient photo.png ; un CSV que file lit comme texte
+        # simple devient liste.txt
+        self.assertEqual(len(vus), sum(1 for _, _, o in self.contenus_ouvrir() if o), vus)
+        self.assertIn("photo.png", vus)
+        self.assertTrue({"image.png", "doc.pdf", "note.txt"} <= set(vus) and ({"liste.csv", "liste.txt"} & set(vus)), vus)
         restes = [p.name for p in (self.home / ".cache/nc-cloud/ouverts").rglob("*") if p.is_file()]
         self.assertEqual(sorted(restes), vus, "aucune copie refusée ne reste")
 
@@ -1440,15 +1457,35 @@ print(m)
         (fbin / "nc-cloud").chmod(0o755)
         subprocess.run(["bash", "-c", ligne], cwd=cwd, env={"PATH": f"{fbin}:/usr/bin:/bin"}, timeout=10)
         self.assertEqual(list(cwd.iterdir()), [], "rien ne s'exécute au copier-coller")
-        self.assertEqual(json.loads(recu.read_text()), ["supprimer", a, "--revision", piege, "--recursif", "--arbre", self.faux.arbre(a)])
+        self.assertEqual(json.loads(recu.read_text()), ["supprimer", a, "--revision=" + piege, "--recursif", "--arbre=" + self.faux.arbre(a)])
         r = self.brut("entree", a)
         self.assertIn(shlex.quote(piege), r.stdout)
+        self.assertIn(shlex.quote(piege), self.brut("lister", "root").stdout, "lister : la révision aussi protégée")
         for mauvaise in ("a b", "a\nb", 'x"y', "é"):
             self.faux.entries[a]["revision"] = mauvaise
             r = self.brut("apercu", a)
             self.assertIn("aucune commande suggérée", r.stdout, repr(mauvaise))
             self.assertNotIn("supprimer", r.stdout)
             self.assertIn("révision inattendue", self.brut("entree", a).stdout)
+
+    def test_lister_curseur_piege_jamais_execute(self):
+        self.associer()
+        for i in range(3):
+            self.nc("dossier", "root", f"D{i}", code=0)
+        piege = "$(touch${IFS}PIEGE)"
+        self.faux.curseur_force = piege
+        r = self.brut("lister", "root")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        ligne = r.stdout.splitlines()[-1].split(" : ", 1)[1]
+        cwd = self.d / "shell2"
+        cwd.mkdir()
+        subprocess.run([shutil.which("bash") or "/bin/bash", "-c", ligne], cwd=cwd, env={"PATH": "/nulle-part"}, timeout=10,
+                       capture_output=True)
+        self.assertEqual(list(cwd.iterdir()), [], "rien ne s'exécute au copier-coller")
+        self.assertIn(shlex.quote("--suite=" + piege), ligne)
+        self.faux.curseur_force = "a b"
+        r = self.brut("lister", "root")
+        self.assertIn("aucune commande suggérée", r.stdout)
 
     def test_nombres_hostiles(self):
         a, b, f = self.arbre_de_test()
@@ -1536,6 +1573,11 @@ class DansLeProcessus(unittest.TestCase):
         lien_home = h.parent / "lien-home"                 # un HOME derrière un lien (/home -> /var/home) reste permis
         lien_home.symlink_to(h)
         m.dossier_prive(lien_home / ".cache/nc-cloud/ouverts/def")
+        # Un dossier de la chaîne qui n'est pas à l'utilisateur (XDG_CACHE_HOME pointé vers un dossier ouvert à tous)
+        with mock.patch.object(m.os, "getuid", return_value=os.getuid() + 1):
+            with self.assertRaises(m.Echec):
+                m.dossier_prive(h / ".cache/nc-cloud/ouverts/ghi")
+        self.assertFalse((h / ".cache/nc-cloud/ouverts/ghi").exists())
 
     def test_nettoyer_ouverts_sans_suivre_un_lien_meme_en_course(self):
         m = self.charger("http://127.0.0.1:9")

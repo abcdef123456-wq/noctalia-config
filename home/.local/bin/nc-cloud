@@ -193,8 +193,8 @@ def dossier_prive(d):
                 st = os.lstat(x)
             except FileNotFoundError:
                 continue
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-                raise Echec(T(f"{x} n'est pas un vrai dossier.", f"{x} is not a real directory."))
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+                raise Echec(T(f"{x} n'est pas un vrai dossier à toi.", f"{x} is not a real directory of yours."))
     verifier()
     manquants, p = [], d
     while not os.path.lexists(p) and p != p.parent:
@@ -682,19 +682,26 @@ def cmd_etat(a):
 def cmd_lister(a):
     s = Session()
     p = s.page(a.id or "root", a.suite)
-    entrees = [e for e in (entree_propre(x) for x in p.get("entries") or []) if e]
+    bruts = [x for x in p.get("entries") or [] if entree_propre(x)]
+    entrees = [entree_propre(x) for x in bruts]
     suite = propre(p.get("next_cursor"), 512) if p.get("next_cursor") else None
     if JSON_SORTIE:
         evenement(evenement="page", parent=entree_propre(p.get("parent")), entries=entrees, next_cursor=suite)
     else:
-        for e in entrees:
+        for e, b in zip(entrees, bruts):
             genre = "📁" if e.get("kind") == "directory" else "  "
             print(f"{genre} {e.get('name', '?')}  {taille_lisible(e.get('size')) if e.get('kind') == 'file' else ''}  "
-                  f"[{e.get('id', '?')}  {e.get('revision', '')}]")
+                  f"[{id_et_revision(e, b)}]")
         if not entrees:
             print(T("(dossier vide)", "(empty folder)"))
         if suite:
-            print(T(f"Suite : nc-cloud lister {a.id or 'root'} --suite {suite}", f"More: nc-cloud lister {a.id or 'root'} --suite {suite}"))
+            curseur = valeur_a_copier(p.get("next_cursor"), 512)       # la valeur brute, vérifiée, protégée pour le shell
+            if curseur is None:
+                print(T("Il y a une suite, mais son curseur est inattendu : aucune commande suggérée.",
+                        "There is more, but its cursor is unexpected: no command suggested."))
+            else:
+                ligne = shlex.join(["nc-cloud", "lister", a.id or "root", "--suite=" + curseur])
+                print(T(f"Suite : {ligne}", f"More: {ligne}"))
     return OK
 
 
@@ -1264,6 +1271,19 @@ def revision_sure(rev, option="--revision"):
     return rev
 
 
+def valeur_a_copier(v, n=256):
+    """Une valeur du serveur (curseur) à mettre dans une commande suggérée : ASCII imprimable sans espace, n au plus,
+    sinon None. L'appelant la passe encore par shlex.quote."""
+    return v if isinstance(v, str) and 0 < len(v) <= n and all(33 <= ord(c) <= 126 for c in v) else None
+
+
+def id_et_revision(e, brut):
+    """« id  révision » pour l'affichage d'une entrée, prêts à copier : protégés pour le shell, révision brute vérifiée."""
+    rev = rev_a_copier(brut.get("revision") if isinstance(brut, dict) else None)
+    return (shlex.quote(e.get("id", "?")) + "  "
+            + (shlex.quote(rev) if rev else T("révision inattendue", "unexpected revision")))
+
+
 def rev_a_copier(rev):
     """Une révision du serveur à mettre dans une commande suggérée : la règle de revision_sure, sinon None (la commande
     n'est pas suggérée). L'appelant la passe encore par shlex.quote : `$(…)` collé dans un shell ne s'exécute jamais."""
@@ -1346,9 +1366,8 @@ def cmd_entree(a):
     if JSON_SORTIE:
         evenement(evenement="entree", entree=e)
     else:
-        rev = rev_a_copier(brut.get("revision") if isinstance(brut, dict) else None)     # la valeur brute, pas l'affichée
         print(f"{e.get('name', '?')}  {e.get('kind', '?')}  {taille_lisible(e.get('size')) if e.get('kind') == 'file' else ''}  "
-              f"[{shlex.quote(e.get('id', '?'))}  " + (shlex.quote(rev) if rev else T("révision inattendue", "unexpected revision")) + "]")
+              f"[{id_et_revision(e, brut)}]")
     return OK
 
 
@@ -1412,7 +1431,7 @@ def cmd_apercu(a):
         if rev is None:
             print(T("Révision inattendue : aucune commande suggérée.", "Unexpected revision: no command suggested."))
         else:
-            ligne = shlex.join(["nc-cloud", "supprimer", a.id, "--revision", rev, "--recursif", "--arbre", arbre])
+            ligne = shlex.join(["nc-cloud", "supprimer", a.id, "--revision=" + rev, "--recursif", "--arbre=" + arbre])
             print(T(f"Pour tout supprimer : {ligne}", f"To delete everything: {ligne}"))
     return OK
 
@@ -1495,6 +1514,16 @@ OUVRIR_BUREAU = {"application/vnd.oasis.opendocument.text", "application/vnd.oas
                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                  "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
 OUVRIR_MAX = 200 * 1024 * 1024
+# Jamais d'ici : SVG (scripts) et listes de lecture (le lecteur irait chercher des adresses)
+OUVRIR_REFUSES = {"image/svg+xml", "audio/x-mpegurl", "audio/mpegurl", "audio/x-scpls", "audio/scpls", "application/xspf+xml",
+                  "application/vnd.apple.mpegurl"}
+# L'extension de la copie, fixée par NOUS d'après le type lu dans le contenu ; image, audio, vidéo : celle de mimetypes
+OUVRIR_EXTENSIONS = {"text/plain": ".txt", "text/markdown": ".md", "text/csv": ".csv", "application/pdf": ".pdf",
+                     "application/vnd.oasis.opendocument.text": ".odt", "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+                     "application/vnd.oasis.opendocument.presentation": ".odp",
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+                     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx"}
 OUVERTS_DUREE = 24 * 3600
 
 
@@ -1502,7 +1531,7 @@ def famille_sure(mime):
     """La famille d'un type sûr à ouvrir (image, audio, video, texte, pdf, bureau), ou None : tout le reste, SVG, HTML et
     XML compris."""
     m = (mime or "").strip().lower()
-    if m == "image/svg+xml":
+    if m in OUVRIR_REFUSES:
         return None
     haut = m.split("/", 1)[0]
     if haut in ("image", "audio", "video") and re.fullmatch(r"[a-z]+/[a-z0-9.+-]+", m):
@@ -1524,10 +1553,22 @@ def type_par_contenu(chemin):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def type_sur(chemin, nom):
-    """Vrai si le contenu de chemin et le nom nom sont tous deux d'un type sûr, de la même famille."""
-    par_nom = famille_sure(mimetypes.guess_type(nom, strict=False)[0])
-    return par_nom is not None and famille_sure(type_par_contenu(chemin)) == par_nom
+def type_du_nom(nom):
+    """Le type tiré de la SEULE dernière extension du nom (os.path.splitext), jamais de guess_type sur le nom entier, qui
+    lit « schéma:… » comme une adresse ; None sans extension (« notes » : refusé)."""
+    ext = os.path.splitext(nom)[1].lower()
+    return mimetypes.guess_type("fichier" + ext, strict=False)[0] if re.fullmatch(r"\.[a-z0-9]{1,10}", ext) else None
+
+
+def extension_sure(chemin, nom):
+    """L'extension de la copie (fixée par nous d'après le contenu), ou None : le contenu (file) et le nom doivent être
+    d'un type sûr, de la même famille."""
+    contenu = (type_par_contenu(chemin) or "").lower()
+    par_nom = famille_sure(type_du_nom(nom))
+    if par_nom is None or famille_sure(contenu) != par_nom:
+        return None
+    ext = OUVRIR_EXTENSIONS.get(contenu) or mimetypes.guess_extension(contenu, strict=False)
+    return ext if ext and re.fullmatch(r"\.[a-z0-9]{1,10}", ext) and famille_sure(type_du_nom("fichier" + ext)) == par_nom else None
 
 
 def nettoyer_ouverts(base):
@@ -1581,8 +1622,9 @@ def cmd_ouvrir(a):
     if len(nom.encode("utf-8", "surrogateescape")) > 255:
         raise Echec(T("Nom trop long pour un fichier local (plus de 255 octets) : télécharge-le sous un autre nom.",
                       "Name too long for a local file (over 255 bytes): download it under another name."))
-    if famille_sure(mimetypes.guess_type(nom, strict=False)[0]) is None:
-        raise refus_type                    # rien n'est téléchargé pour un nom déjà refusé
+    # « : # ? ; » : un ouvreur pourrait y lire une adresse ou une autre extension ; nom hors liste : rien n'est téléchargé
+    if any(c in nom for c in ":#?;") or famille_sure(type_du_nom(nom)) is None:
+        raise refus_type
     ouvreur = shutil.which("xdg-open") or shutil.which("gio")
     if not ouvreur:
         raise Echec(T("Ni xdg-open ni gio : rien pour ouvrir le fichier.", "Neither xdg-open nor gio: nothing to open the file."))
@@ -1635,16 +1677,18 @@ def cmd_ouvrir(a):
                 ecrit += len(bloc)
         if recu != taille or ecrit != taille or h.hexdigest() != e["sha256"]:
             raise Echec(T("Empreinte fausse : rien n'est ouvert.", "Wrong fingerprint: nothing is opened."), EMPREINTE)
-        if not type_sur(tmp, nom):
+        ext = extension_sure(tmp, nom)
+        if ext is None:
             raise refus_type
-        final = d / nom
+        # Jamais le nom du serveur tel quel : son radical, et l'extension qui dit ce que le contenu est
+        final = d / ((os.path.splitext(nom)[0] or "fichier") + ext)
         os.replace(tmp, str(final))
     except BaseException:
         effacer(Path(tmp))
         raise
     argv = [ouvreur, str(final)] if ouvreur.endswith("xdg-open") else [ouvreur, "open", str(final)]
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    dire(T(f"Ouvert : {nom}", f"Opened: {nom}"), evenement="resultat", etat="ouvert", fichier=str(final))
+    dire(T(f"Ouvert : {final.name}", f"Opened: {final.name}"), evenement="resultat", etat="ouvert", fichier=str(final))
     return OK
 
 

@@ -143,8 +143,9 @@ Chaque action n'existe que si le serveur l'annonce, sinon « ce serveur ne sait 
 - Le script ne demande pas de confirmation : c'est à l'appelant de la demander. Si la réponse se perd, relance la même
   commande : elle rejoue la même demande (même clé, noté dans `~/.local/state/nc-cloud`), sans risque. Rien n'est
   relancé tout seul.
-- Une commande proposée à copier (après `apercu`, ou la révision de `entree`) ne contient que des valeurs vérifiées et
-  protégées pour le shell ; une révision inattendue n'est jamais proposée.
+- Une commande proposée à copier (après `apercu`, la suite de `lister`, les révisions de `entree` et `lister`) ne
+  contient que des valeurs vérifiées et protégées pour le shell, sous la forme `--option=VALEUR` ; une valeur
+  inattendue n'est jamais proposée.
 
 ## Ouvrir
 
@@ -153,8 +154,11 @@ exécutable), la relit depuis le disque pour vérifier son empreinte, puis l'ouv
 Seuls s'ouvrent d'ici les types d'une courte liste : images (sauf SVG), audio, vidéo, texte simple (`.txt`, `.md`,
 `.csv`), PDF, documents OpenDocument et Office (odt, ods, odp, docx, xlsx, pptx). Le type est lu deux fois, dans le
 contenu (`file`) et dans le nom, et les deux doivent être de la même famille : une archive nommée `.png` ne s'ouvre pas,
-car hors d'un bureau connu `xdg-open` choisit l'application d'après le contenu. Tout le reste (HTML, SVG, XML, scripts,
-lanceurs, archives…), un fichier de plus de 200 Mio, ou un PC sans `file` : « télécharge-le d'abord ».
+car hors d'un bureau connu `xdg-open` choisit l'application d'après le contenu. Seule la dernière extension du nom
+compte (`x.txt.gz` : refusé), un nom sans extension ou avec `:`, `#`, `?` ou `;` est refusé, et la copie ne garde jamais
+le nom du serveur tel quel : son extension est fixée d'après le contenu (`photo.PNG` devient `photo.png`, un CSV lu
+comme texte simple devient `.txt`). Tout le reste (HTML, SVG, XML, listes de lecture, scripts, lanceurs, archives…), un
+fichier de plus de 200 Mio, ou un PC sans `file` : « télécharge-le d'abord ».
 L'empreinte vérifiée est celle que le serveur annonce lui-même : elle protège d'une coupure ou d'une corruption, pas
 d'un serveur hostile ; c'est la liste des types qui protège. La copie n'est jamais renvoyée au serveur ; les copies de
 plus de 24 h sont retirées au prochain `ouvrir`.
