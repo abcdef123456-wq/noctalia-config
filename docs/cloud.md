@@ -124,7 +124,7 @@ suppression.
 - La remise a réussi.
 - Elle a plus de 24 h. Une date dans le futur, après une horloge reculée, ne l'efface jamais ; à plus d'une heure dans le
   futur, elle est ramenée une fois à maintenant.
-- Il faut de la place (voir les limites).
+- Il faut de la place : seules les copies « non supprimé » et les copies abîmées cèdent leur place.
 
 Chaque copie a un état :
 
@@ -150,9 +150,10 @@ Dans le panneau :
 
 Les limites :
 
-- Toutes les copies, et celles en cours de préparation (le partiel compris), tiennent dans 500 Mio. La place n'est faite
-  qu'après une copie réussie, jamais aux dépens d'une copie de moins de 10 minutes. Les copies « non supprimé » et les
-  abîmées partent d'abord, puis les plus vieilles.
+- La corbeille ne dépasse jamais 500 Mio, copies en cours de préparation comprises (le partiel aussi). La place n'est
+  faite qu'après une copie réussie, et seulement aux dépens des copies « non supprimé » et abîmées ; la réponse les
+  nomme. Pleine, la corbeille refuse la copie : rien n'est supprimé, et le panneau propose la suppression sans copie,
+  avec la raison.
 - Un fichier de plus de 500 Mio n'a pas de copie : la question le dit avant.
 - Un nom de fichier de secrets (`.pem`, `.key`, `.env`, `id_rsa`…) se supprime avec une copie, mais ne se remet pas
   depuis l'île. La question le dit avant, et la corbeille propose « Ouvrir le dossier » ; le fichier y porte le nom

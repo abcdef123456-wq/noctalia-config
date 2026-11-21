@@ -363,6 +363,7 @@ class HorsEcran(unittest.TestCase):
                     confirmer().clic(); etape++; return }
                 if (etape === 3) {   // copie ratée : rien n'est supprimé, la question revient, « sans copie », définitive
                     verifier(question().indexOf("La copie sur ce PC a échoué") >= 0 && confirmer().texte === "Supprimer définitivement", "sans copie : " + question())
+                    verifier(question().indexOf("Copie locale impossible.") >= 0, "la raison dans la question : " + question())
                     confirmer().clic(); etape++; return }
                 if (etape === 4) {
                     verifier(CloudEtat.sansCopie === "" && !vu(corps, "nc-cloud-annulable"), "supprimé sans copie : rien à annuler")

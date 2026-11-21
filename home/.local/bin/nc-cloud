@@ -1946,17 +1946,17 @@ def cmd_apercu(a):
 # ── Corbeille locale (I7) : le serveur efface pour de bon ; avant de supprimer UN fichier depuis le panneau, une copie
 # privée, empreinte vérifiée, 24 h, 500 Mio au total. « Remettre » la redépose au même endroit (nouvel identifiant,
 # historique perdu).
-# RÈGLE : une copie posée dans la corbeille n'est effacée que par une remise réussie, ses 24 h, ou le budget (jamais
-# avant 10 minutes). JAMAIS par l'issue d'un DELETE, quelle qu'elle soit. Sa note porte son état : « doute » (écrit
+# RÈGLE : une copie posée dans la corbeille n'est effacée que par une remise réussie, ses 24 h, ou le budget, qui ne
+# fait céder QUE les copies « refuse » et abîmées (elles ne protègent rien). JAMAIS par l'issue d'un DELETE. Pleine,
+# la corbeille refuse la copie : aucun DELETE, et le panneau propose « sans copie ». Sa note porte son état : « doute » (écrit
 # avant chaque DELETE), « supprime » (suppression confirmée), « refuse » (4xx au tout premier essai : le fichier est
-# toujours sur le serveur ; elle cède la place en premier). L'état ne redescend jamais vers « refuse », ni de
+# toujours sur le serveur ; elle peut céder la place). L'état ne redescend jamais vers « refuse », ni de
 # « supprime » vers « doute ». Avec --copie, AUCUN DELETE sans une copie VÉRIFIÉE de ce fichier à cette révision.
 # Rangement : corbeille/<32 hex>/contenu (nom fixe) et copie.json (le nom d'origine et le reste) ; une copie se prépare
 # dans corbeille/.attente/, puis entre d'un seul os.rename, sous le verrou (flock) que prend aussi tout ménage
 CORBEILLE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "nc-cloud" / "corbeille"
 CORBEILLE_MAX = 500 * 1024 ** 2
 CORBEILLE_DUREE = 24 * 3600
-CORBEILLE_RECENTE = 600              # une copie de moins de 10 minutes ne cède jamais sa place
 CORBEILLE_FUTUR = 3600               # au-delà, une date du futur est ramenée une fois à maintenant (sinon jamais expirée)
 
 
@@ -2059,21 +2059,23 @@ def verifier_copie(d, m):
     """La copie est là, intacte (taille et empreinte) : sinon AUCUN DELETE."""
     try:
         fd = os.open(str(d / "contenu"), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except OSError:
-        fd = None
-    try:
-        ok = fd is not None and os.fstat(fd).st_size == m["taille"] and empreinte_fd(fd) == m["sha256"]
-    finally:
-        if fd is not None:
+        try:
+            ok = os.fstat(fd).st_size == m["taille"] and empreinte_fd(fd) == m["sha256"]
+        finally:
             os.close(fd)
+    except OSError:                    # droits, trop de fichiers ouverts : illisible pour l'instant, pas abîmée
+        raise Echec(T("La copie sur ce PC est illisible pour l'instant : rien n'est supprimé.",
+                      "The copy on this PC cannot be read right now: nothing is deleted."), erreur="copie") from None
     if not ok:
-        raise Echec(T("La copie sur ce PC a disparu ou changé : rien n'est supprimé.",
-                      "The copy on this PC disappeared or changed: nothing is deleted."), erreur="copie")
+        x = Echec(T("La copie sur ce PC a changé : rien n'est supprimé.", "The copy on this PC changed: nothing is deleted."),
+                  erreur="copie")
+        x.abimee = True
+        raise x
 
 
 def copier_avant(s, a, e, rev):
-    """La copie privée, AVANT la suppression : téléchargée et vérifiée dans .attente, PUIS la place faite (jamais aux
-    dépens d'une copie de moins de 10 minutes) et la copie posée d'un os.rename. Un échec : rien n'est supprimé (erreur
+    """La copie privée, AVANT la suppression : téléchargée et vérifiée dans .attente, PUIS la place faite (seulement aux
+    dépens des copies refusées ou abîmées, nommées dans « cedees ») et la copie posée d'un os.rename. Un échec : rien n'est supprimé (erreur
     « copie » : le panneau redemande « sans copie »), et aucune autre copie n'a été effacée pour rien."""
     d = None
     try:
@@ -2101,21 +2103,22 @@ def copier_avant(s, a, e, rev):
                 retirer(d)
                 return CORBEILLE / meme["copie"], meme
             total = sum(x["taille"] for x in l) + taille_attente(d)
-            # D'abord les copies qui ne protègent rien (refusées, abîmées), puis la plus vieille ; jamais une de moins de 10 min
-            for x in sorted(l, key=lambda x: (x["etat"] != "refuse" and not x["abimee"], x["date"])):
+            # Seules cèdent les copies qui ne protègent rien (refusées, abîmées), la plus vieille d'abord ; une copie
+            # « supprime » ou « doute » reste jusqu'à ses 24 h ou sa remise
+            cedees = []
+            for x in sorted((x for x in l if x["etat"] == "refuse" or x["abimee"]), key=lambda x: x["date"]):
                 if total + e["size"] <= CORBEILLE_MAX:
                     break
-                if time.time() - x["date"] < CORBEILLE_RECENTE:
-                    continue
                 retirer(CORBEILLE / x["copie"])
                 total -= x["taille"]
+                cedees.append(x["nom"])
             if total + e["size"] > CORBEILLE_MAX:
-                raise Echec(T("plus de place dans la corbeille (copies de moins de 10 minutes)",
-                              "no room left in the trash (copies under 10 minutes old)"))
+                raise Echec(T("la corbeille de ce PC est pleine (500 Mio gardés 24 h) : pas de copie possible",
+                              "this PC's trash is full (500 MiB kept 24 h): no copy possible"))
             final = CORBEILLE / d.name
             os.rename(d, final)
             sync_dossier(CORBEILLE)
-        return final, m
+        return final, dict(m, cedees=cedees)
     except Echec as x:
         if d:
             retirer(d)
@@ -2199,7 +2202,9 @@ def cmd_supprimer(a):
             try:
                 verifier_copie(CORBEILLE / deja["copie"], deja)
                 copie = (CORBEILLE / deja["copie"], deja)
-            except Echec:
+            except Echec as x:
+                if not getattr(x, "abimee", False):
+                    raise                              # illisible pour l'instant : aucun DELETE, aucune marque
                 with contextlib.suppress(Echec, OSError):
                     noter(CORBEILLE / deja["copie"], lambda m: m.update(abimee=True))
         if not copie:
@@ -2249,8 +2254,14 @@ def cmd_supprimer(a):
 def introuvable(a):
     """Le fichier n'est pas (ou plus) sur le serveur, vu d'ici : on dit ce qu'on sait. Code 0 seulement s'il reste une
     copie de cet id sur ce PC."""
-    c = next((m for m in corbeille_lire() if m["id"] == a.id and not m["abimee"]), None)
+    l = [m for m in corbeille_lire() if m["id"] == a.id]
+    c = next((m for m in l if not m["abimee"]), None)
     if not c:
+        abimee = next((m for m in l if m["abimee"]), None)
+        if abimee:
+            raise Echec(T(f"Introuvable sur le serveur : cette commande n'a rien supprimé. Une copie abîmée reste dans "
+                          f"{CORBEILLE / abimee['copie']}.", f"Not found on the server: this command deleted nothing. A damaged "
+                          f"copy stays in {CORBEILLE / abimee['copie']}."), erreur="introuvable")
         raise Echec(T("Introuvable sur le serveur : cette commande n'a rien supprimé. Aucune copie sur ce PC.",
                       "Not found on the server: this command deleted nothing. No copy on this PC."), erreur="introuvable")
     dire(T("Introuvable sur le serveur : cette commande n'a rien supprimé. Une copie reste sur ce PC 24 h.",
@@ -2269,6 +2280,11 @@ def confirmer_copie(copie):
 def supprimer_sur_serveur(a, s, features, rev, copie):
     # La copie gardée est annoncée avec le résultat : le panneau propose « Annuler » pendant 20 s
     gardee = {"copie": copie[0].name, "nom": propre(copie[1]["nom"]), "copie_etat": "supprime"} if copie else {"copie": None}
+    cedees = [propre(x) for x in (copie[1].get("cedees") or [])] if copie else []
+    if cedees:
+        gardee["cedees"] = cedees
+    place = T(f" {len(cedees)} copie(s) refusée(s) retirée(s) pour la place : " + ", ".join(cedees) + ".",
+              f" {len(cedees)} refused cop(y/ies) removed for room: " + ", ".join(cedees) + ".") if cedees else ""
     if features.get("directory_delete") is True:
         # DELETE /entries/{id} : fichier ou dossier ; toujours un corps JSON ; un dossier en récursif (même vide) exige
         # l'arbre de l'aperçu (sinon 428)
@@ -2286,8 +2302,8 @@ def supprimer_sur_serveur(a, s, features, rev, copie):
             raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
         confirmer_copie(copie)
         n = entier_borne(r.get("count"))
-        dire(T("Supprimé." + (f" ({n} entrée(s))" if n is not None else "") + (" Une copie reste sur ce PC 24 h." if copie else " Sans copie."),
-               "Deleted." + (f" ({n} entr(y/ies))" if n is not None else "") + (" A copy stays on this PC for 24 h." if copie else " No copy.")),
+        dire(T("Supprimé." + (f" ({n} entrée(s))" if n is not None else "") + (" Une copie reste sur ce PC 24 h." if copie else " Sans copie.") + place,
+               "Deleted." + (f" ({n} entr(y/ies))" if n is not None else "") + (" A copy stays on this PC for 24 h." if copie else " No copy.") + place),
              evenement="resultat", etat="supprime", id=a.id, count=n, **gardee)
         return OK
     if features.get("file_delete") is not True:
@@ -2306,8 +2322,8 @@ def supprimer_sur_serveur(a, s, features, rev, copie):
     if r.get("deleted") is not True:
         raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
     confirmer_copie(copie)
-    dire(T("Fichier supprimé." + (" Une copie reste sur ce PC 24 h." if copie else " Sans copie."),
-           "File deleted." + (" A copy stays on this PC for 24 h." if copie else " No copy.")),
+    dire(T("Fichier supprimé." + (" Une copie reste sur ce PC 24 h." if copie else " Sans copie.") + place,
+           "File deleted." + (" A copy stays on this PC for 24 h." if copie else " No copy.") + place),
          evenement="resultat", etat="supprime", id=propre(r.get("file_id") or a.id), **gardee)
     return OK
 

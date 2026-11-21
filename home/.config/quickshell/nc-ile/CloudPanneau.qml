@@ -611,6 +611,7 @@ FloatingWindow {
                                     text: ligne.fichier && CloudEtat.sansCopie === ligne.modelData.id
                                         ? Reglages.t("La copie sur ce PC a échoué. Supprimer « " + ligne.modelData.name + " » quand même, sans copie ? C'est définitif.",
                                                      "The copy on this PC failed. Delete “" + ligne.modelData.name + "” anyway, without a copy? It is permanent.")
+                                          + (CloudEtat.raisonSansCopie !== "" ? " " + CloudEtat.raisonSansCopie : "")
                                         : ligne.fichier && !CloudEtat.copiable(ligne.modelData)
                                         ? Reglages.t("« " + ligne.modelData.name + " » : trop gros pour une copie sur ce PC (plus de 500 Mio) : suppression définitive, toutes ses versions.",
                                                      "“" + ligne.modelData.name + "”: too big for a copy on this PC (over 500 MiB): permanent deletion, all its versions.")

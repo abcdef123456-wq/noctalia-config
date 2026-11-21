@@ -60,6 +60,7 @@ Singleton {
     property var annulable: null                  // { copie, nom } : la dernière suppression, dureeAnnuler ms
     property int dureeAnnuler: 20000
     property string sansCopie: ""                 // id dont la copie a échoué : la question suivante dit « sans copie »
+    property string raisonSansCopie: ""           // et pourquoi (corbeille pleine…), en texte brut
     readonly property real copieMax: 500 * 1024 * 1024
     function copiable(e) { return !!e && e.kind === "file" && typeof e.size === "number" && e.size <= copieMax }
     property string aRacine: ""                   // copie dont le dossier d'origine n'existe plus : « Remettre à la racine »
@@ -397,7 +398,7 @@ Singleton {
             lancer(["supprimer", "--revision=" + e.revision, "--recursif", "--arbre=" + arbre, "--", e.id], "supprimer", e.id)
         } else {
             var copie = copiable(e) && sansCopie !== e.id
-            sansCopie = ""
+            sansCopie = ""; raisonSansCopie = ""
             lancer(["supprimer", "--revision=" + e.revision, "--dossier=" + dossier].concat(copie ? ["--copie"] : [], ["--", e.id]), "supprimer", e.id)
         }
     }
@@ -445,7 +446,7 @@ Singleton {
             erreur = String(d.message || Reglages.t("Erreur.", "Error.")).slice(0, 300)
             if (q === "telecharger" && d.code === 6) aRemplacer = enCours.id
             // Le dossier a changé depuis l'aperçu : rien n'est supprimé ; nouvel aperçu (après la page relue), nouvelle question
-            if (q === "supprimer" && d.erreur === "copie") { sansCopie = enCours.id; redemander(enCours.id) }
+            if (q === "supprimer" && d.erreur === "copie") { sansCopie = enCours.id; raisonSansCopie = erreur; redemander(enCours.id) }
             if (q === "remettre" && d.erreur === "parent_absent") aRacine = enCours.id
             if (q === "supprimer" && d.erreur === "tree_changed") {
                 suites = [{ args: ["apercu", "--", enCours.id], quoi: "apercu", id: enCours.id }].concat(suites)

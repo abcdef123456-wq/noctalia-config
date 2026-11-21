@@ -1983,18 +1983,61 @@ elif sys.argv[1] == "clear":
         self.assertEqual(self.etat_de(x), "supprime" if autre_issue == "reussi" else "doute")
         self.assertEqual(len([c for c in self.corbeille().glob("[0-9a-f]*") if json.loads((c / "copie.json").read_text())["id"] == x]), 1)
 
-    def test_corbeille_les_copies_refusees_cedent_la_place_en_premier(self):
+    def test_corbeille_le_budget_ne_fait_ceder_que_les_copies_refusees(self):
         self.associer()
         self.faux.suppression = True
-        x = self.deposer_de_plus("place2.bin")
-        vieille = self.fausse_copie("b" * 32, 7200, 250 * 1024 ** 2, etat="supprime")
-        plus_vieille = self.fausse_copie("c" * 32, 9000, 250 * 1024 ** 2, etat="supprime")
-        refusee = self.fausse_copie("a" * 32, 3600, 250 * 1024 ** 2, etat="refuse")
-        # 750 Mio pour 500 : deux copies partent. Sans l'ordre, ce seraient les deux plus vieilles (et la refusée resterait)
-        self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=0)
-        self.assertFalse(refusee.exists())
-        self.assertFalse(plus_vieille.exists())
-        self.assertTrue(vieille.exists())
+        # Q1 : une copie « supprime » ou « doute » ne cède jamais, même vieille : la nouvelle copie est refusée, rien ne part
+        vivante = self.fausse_copie("b" * 32, 7200, 300 * 1024 ** 2, etat="supprime")
+        doute = self.fausse_copie("c" * 32, 9000, 200 * 1024 ** 2, etat="doute")
+        x = self.deposer_de_plus("plein.bin")
+        r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=1)
+        self.assertEqual(r.lignes[-1]["erreur"], "copie")
+        self.assertIn("la corbeille de ce PC est pleine (500 Mio gardés 24 h) : pas de copie possible", r.lignes[-1]["message"])
+        self.assertTrue(vivante.exists() and doute.exists())
+        self.assertIn(x, self.faux.entries)
+        # Une copie refusée (ou abîmée) cède sa place, et le résultat la nomme
+        shutil.rmtree(doute)
+        refusee = self.fausse_copie("a" * 32, 60, 150 * 1024 ** 2, nom_fichier="refusee.bin", etat="refuse")
+        abimee = self.fausse_copie("d" * 32, 30, 100 * 1024 ** 2, nom_fichier="abimee.bin", etat="doute", abimee=True)
+        r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=0)
+        self.assertFalse(refusee.exists())                                                # 550 Mio : la refusée part la première
+        self.assertTrue(abimee.exists() and vivante.exists())
+        self.assertEqual(r.lignes[-1]["cedees"], ["refusee.bin"])
+        self.assertIn("1 copie(s) refusée(s) retirée(s) pour la place : refusee.bin", r.lignes[-1]["message"])
+        # Une copie abîmée cède aussi (elle ne protège rien)
+        self.fausse_copie("e" * 32, 120, 150 * 1024 ** 2, etat="supprime")                # 550 Mio
+        y = self.deposer_de_plus("plein2.bin")
+        self.nc("supprimer", y, "--revision", self.faux.entries[y]["revision"], "--dossier", "root", "--copie", code=0)
+        self.assertFalse(abimee.exists())
+        self.assertTrue(vivante.exists())
+
+    def test_corbeille_copie_illisible_n_est_pas_abimee(self):
+        """Q5 : une copie illisible un instant (droits) : aucun DELETE, aucune marque ; lisible ensuite, elle sert."""
+        self.associer()
+        self.faux.suppression = True
+        x = self.deposer_de_plus("droits.bin")
+        rev = self.faux.entries[x]["revision"]
+        self.faux.pannes.add("delete_503")
+        self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        d = next(d for d in self.corbeille().glob("[0-9a-f]*") if json.loads((d / "copie.json").read_text())["id"] == x)
+        (d / "contenu").chmod(0)
+        n = len([c for c in self.faux.journal if c[0] == "DELETE"])
+        try:
+            r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=1)
+        finally:
+            (d / "contenu").chmod(0o600)
+        self.assertEqual(r.lignes[-1]["erreur"], "copie")
+        self.assertIn("illisible", r.lignes[-1]["message"])
+        self.assertEqual(len([c for c in self.faux.journal if c[0] == "DELETE"]), n)
+        self.assertNotIn("abimee", json.loads((d / "copie.json").read_text()))
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertEqual(r.lignes[-1]["copie"], d.name)
+        # Introuvable ensuite, avec seulement une copie abîmée de cet id : jamais « aucune copie »
+        m = json.loads((d / "copie.json").read_text())
+        (d / "copie.json").write_text(json.dumps(dict(m, abimee=True)))
+        r = self.nc("supprimer", x, "--revision", rev, "--dossier", "root", "--copie", code=1)
+        self.assertIn("Une copie abîmée reste dans", r.lignes[-1]["message"])
+        self.assertNotIn("Aucune copie", r.lignes[-1]["message"])
 
     def test_corbeille_introuvable_sans_copie_n_est_pas_un_succes(self):
         """P3 : un 404 (d'un intermédiaire, ou d'un autre dossier) sur l'entrée : « n'a rien supprimé », code d'erreur."""
@@ -2058,7 +2101,7 @@ elif sys.argv[1] == "clear":
             f.truncate(500 * 1024 ** 2 - 5)
         r = self.nc("supprimer", x, "--revision", self.faux.entries[x]["revision"], "--dossier", "root", "--copie", code=1)
         self.assertEqual(r.lignes[-1]["erreur"], "copie")
-        self.assertIn("plus de place", r.lignes[-1]["message"])
+        self.assertIn("la corbeille de ce PC est pleine (500 Mio gardés 24 h)", r.lignes[-1]["message"])
         self.assertIn(x, self.faux.entries)
         self.assertTrue(a.exists())
 
@@ -2107,16 +2150,15 @@ elif sys.argv[1] == "clear":
         self.assertTrue(vieille.exists())                                                # rien effacé d'avance pour rien
         self.assertEqual(list((self.corbeille() / ".attente").iterdir()), [])
         self.faux.pannes.discard("contenu_faux")
-        # Une copie de moins de 10 minutes ne cède jamais sa place : pas de copie, rien supprimé
+        # Une copie vivante (ici « doute »), même d'une heure, ne cède jamais sa place : pas de copie, rien supprimé
         retirer = json.loads((vieille / "copie.json").read_text())
-        (vieille / "copie.json").write_text(json.dumps(dict(retirer, date=time.time() - 60)))
         r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=1)
-        self.assertIn("plus de place", r.lignes[-1]["message"])
+        self.assertIn("la corbeille de ce PC est pleine (500 Mio gardés 24 h)", r.lignes[-1]["message"])
         self.assertEqual(r.lignes[-1]["erreur"], "copie")
         self.assertIn(eid, self.faux.entries)
         self.assertTrue(vieille.exists())
-        # Assez vieille : elle cède la place
-        (vieille / "copie.json").write_text(json.dumps(dict(retirer, date=time.time() - 3600)))
+        # Refusée (le fichier est toujours sur le serveur) : elle cède la place
+        (vieille / "copie.json").write_text(json.dumps(dict(retirer, etat="refuse")))
         self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
         self.assertFalse(vieille.exists())
         eid2 = self.deposer_de_plus("g2.bin")
