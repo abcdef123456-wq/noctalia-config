@@ -39,6 +39,7 @@ l'adresse du cloud, 15 demande de mot de passe inattendue.
 Le serveur et la clé sont ceux de JARVIS (~/.config/nc/assistant.conf). Aucun relevé en fond : le serveur n'est
 interrogé que quand tu lances une commande. Les envois interrompus sont notés dans ~/.local/state/nc-cloud (sans jeton)."""
 import argparse
+import calendar
 import contextlib
 import errno
 import fcntl
@@ -1575,21 +1576,22 @@ def sauvegarde(*args):
 
 
 def bureau_date(e):
-    """L'heure (epoch) d'une sauvegarde du dossier « Bureau », tirée de son nom, ou None : pas un fichier, nom d'une
-    autre forme, date impossible. Le nom vient du serveur : on ne s'y fie que pour trier, jamais au-delà de maintenant."""
+    """L'heure (epoch) d'une sauvegarde du dossier « Bureau », tirée de son nom (daté en UTC, quel que soit le fuseau du
+    PC qui l'a faite), ou None : pas un fichier, nom d'une autre forme, date impossible. Le nom vient du serveur : on ne
+    s'y fie que pour trier, jamais au-delà de maintenant."""
     m = BUREAU_NOM.fullmatch(str(e.get("name"))) if e.get("kind") == "file" and isinstance(e.get("id"), str) else None
     try:
-        return time.mktime(time.strptime(m[1], "%Y-%m-%d-%H%M%S")) if m else None
+        return calendar.timegm(time.strptime(m[1], "%Y-%m-%d-%H%M%S")) if m else None
     except (ValueError, OverflowError):
         return None
 
 
-BUREAU_FUTUR = 14 * 3600
+BUREAU_FUTUR = 10 * 60              # noms en UTC : seulement des horloges mal réglées
 
 
 def bureau_trier(entrees):
-    """(sauvegardes de la plus récente à la plus vieille, nombre de noms datés de plus de 14 heures dans le futur (l'écart
-    maximal entre deux fuseaux : le nom est en heure locale) : ignorés, ni « plus récente », ni comptés, ni supprimés)."""
+    """(sauvegardes de la plus récente à la plus vieille, nombre de noms datés de plus de 10 minutes dans le futur (en
+    UTC : une horloge très en avance) : ignorés, ni « plus récente », ni comptés, ni supprimés)."""
     l, futur = [], 0
     for e in entrees:
         d = bureau_date(e)
@@ -1621,7 +1623,7 @@ def cmd_bureau(a):
     if a.action == "preparer":                 # local : rien ne part
         bureau_vider()
         dossier_prive(BUREAU)
-        nom = time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz")
+        nom = time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz", time.gmtime())     # UTC : comparable d'un fuseau à l'autre
         code, creer = sauvegarde("creer", "--pour-le-cloud", "--sortie", str(BUREAU / nom))
         if code != 0:
             raise Echec(creer[-1] if creer else T("nc-sauvegarde a échoué.", "nc-backup failed."))
@@ -1701,7 +1703,7 @@ def cmd_bureau(a):
         if code != 0:
             bureau_vider()
             raise Echec(voir[-1] if voir else T("Sauvegarde illisible.", "Unreadable backup."))
-        quand = time.strftime(T("%d/%m/%Y à %H:%M", "%Y-%m-%d at %H:%M"), time.localtime(bureau_date(e)))
+        quand = time.strftime(T("%d/%m/%Y à %H:%M", "%Y-%m-%d at %H:%M"), time.localtime(bureau_date(e)))   # montrée en heure locale
         lignes = [T(f"Sauvegarde du cloud du {quand}. Seuls les réglages listés ici changent, tes autres lignes restent ; "
                     "jamais de code.", f"Cloud backup of {quand}. Only the settings listed here change, your other lines "
                     "stay; never code.")] + voir

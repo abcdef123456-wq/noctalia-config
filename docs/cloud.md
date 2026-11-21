@@ -4,8 +4,8 @@ Le Cloud JARVIS est un espace de fichiers personnel sur **ton** serveur JARVIS. 
 tes PC à l'autre. Il n'y a pas de partage avec d'autres personnes : tous les PC associés au même serveur voient le même
 espace.
 
-`nc-cloud` est le client en terminal. Les réglages ont une section « Cloud JARVIS » (ci-dessous). Le panneau et le
-dépôt d'un fichier sur l'île viendront ensuite ; ils passeront par `nc-cloud --json`.
+`nc-cloud` est le client en terminal. Les réglages ont une section « Cloud JARVIS » (ci-dessous), et l'île a son
+panneau et son dépôt de fichiers (plus bas). Tout passe par `nc-cloud --json`.
 
 ## Activer
 
@@ -37,7 +37,8 @@ ramène à un dossier parent.
 - Un clic choisit une ligne et montre ses actions sous son nom ; un double-clic l'ouvre : un dossier, on y entre ; un
   fichier, une copie privée s'ouvre avec l'application par défaut (`nc-cloud ouvrir`, types sûrs seulement).
 - Créer un dossier ou un fichier vide (le champ en haut). Télécharger un fichier dans le dossier Téléchargements
-  (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé : le bouton devient « Remplacer ».
+  (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé : le bouton devient « Remplacer ». En ligne de
+  commande, `nc-cloud telecharger ID` sans destination utilise ce même dossier.
 - Renommer, et Déplacer… : on parcourt les dossiers, puis « Déplacer ici » (jamais un dossier dans lui-même).
 - Ou glisse une ligne : un aperçu suit le pointeur ; lâchée sur un dossier de la liste, elle y va ; sur « ↑ » (en tête
   du chemin), elle remonte dans le dossier parent sans que tu quittes le dossier affiché. La destination s'allume ; sur
@@ -105,8 +106,7 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
   interrompus ou en conflit), sans rien demander au serveur ni toucher un fichier ; ces lignes partent seules après 24 h.
   La liste vit dans l'île : un redémarrage de l'île la vide (les envois interrompus reviennent, eux).
 
-Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
-dossier Téléchargements.
+Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé.
 
 ### Annuler une suppression
 
@@ -136,8 +136,9 @@ Aucune suppression avec copie ne part sans une copie vérifiée de ce fichier, �
 reprend la copie déjà faite, revérifiée, et ses 24 h repartent de maintenant. Une copie abîmée est marquée, plus jamais
 reprise, et une copie neuve est téléchargée. Si la révision demandée n'est plus celle du serveur, rien n'est fait. Si le
 fichier est introuvable sur le serveur, la réponse le dit : « cette commande n'a rien supprimé », avec « une copie reste
-sur ce PC » (code 0) ou « aucune copie sur ce PC » (une erreur). Deux suppressions du même fichier en même temps ne
-gardent qu'une copie.
+sur ce PC » (code 0), « une copie abîmée reste dans … » ou « aucune copie sur ce PC » (une erreur). C'est aussi la
+réponse quand le fichier est supprimé ailleurs pendant que la copie se fait : jamais « copie impossible ». Deux
+suppressions du même fichier en même temps ne gardent qu'une copie.
 
 Dans le panneau :
 
@@ -167,10 +168,12 @@ et `nc-cloud corbeille --remettre COPIE [--racine]`.
 
 ### Place utilisée, dans le centre de contrôle
 
-Le centre de contrôle de l'île a un module « Cloud » : la place utilisée sur le quota (« 1 Mo sur 20 Go »). Il
+Le centre de contrôle de l'île a un module « Cloud » : la place utilisée sur le quota (« 1 Mo sur 20 Go » ; l'île
+compte en puissances de 1024 et écrit Ko, Mo, Go, donc 1 Mo vaut 1 Mio). Il
 n'existe qu'avec Cloud JARVIS actif et ce PC associé. La valeur est demandée à l'ouverture du centre, au plus une fois
 par 10 minutes, et gardée en mémoire ; île fermée, rien n'est demandé. Hors ligne, la dernière valeur reste, en gris.
 Un clic ouvre le panneau. Comme les autres modules, il se masque et se déplace (le crayon).
+
 ### Mon bureau me suit
 
 Dans les réglages, section Cloud JARVIS, deux boutons, chacun en deux temps :
@@ -223,11 +226,10 @@ les palettes les plus récemment modifiées partent, les autres sont écartées,
 1 Mo, la reprise est refusée (il n'est jamais coupé).
 
 Si le serveur sait supprimer, les 5 sauvegardes les plus récentes sont gardées, jamais celle qu'on vient d'envoyer.
-Un nom daté de plus de 14 heures dans le futur (l'écart maximal entre deux fuseaux) est ignoré : il n'est ni choisi, ni compté, ni supprimé, et c'est dit.
+Le nom d'une sauvegarde est daté en UTC, quel que soit le fuseau du PC qui l'a faite : elles se comparent d'un fuseau à
+l'autre. La date montrée avant « Remettre » est en heure locale. Un nom daté de plus de 10 minutes dans le futur (une
+horloge très en avance) est ignoré : il n'est ni choisi, ni compté, ni supprimé, et c'est dit.
 Un fichier d'une autre forme n'est jamais touché.
-
-Limite : les raccourcis remis remplacent ceux de ce PC (comme `nc-sauvegarde restaurer`). Les anciens sont gardés
-dans `~/.cache/nc/avant-restauration`.
 
 ### Récents
 
@@ -304,6 +306,7 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 
 | Commande | Effet |
 | --- | --- |
+| `nc-cloud fenetre` | ouvre le panneau Cloud JARVIS de l'île (refusé si `CLOUD_JARVIS` n'est pas à `oui`) |
 | `nc-cloud verifier` | serveur configuré, transport sûr, cloud annoncé, `secret-tool`, trousseau ouvert, PC associé |
 | `nc-cloud associer [NOM]` | associe ce PC ; refusé s'il l'est déjà |
 | `nc-cloud dissocier` | révoque ce PC, efface son jeton et ses envois interrompus |
@@ -316,11 +319,14 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud deposer [--dans ID \| --racine NOM] FICHIER…` | envoie jusqu'à 8 fichiers ordinaires (dossiers et liens refusés, un message chacun) |
 | `nc-cloud recents [--effacer]` | les 5 derniers fichiers envoyés ou ouverts par ce PC (liste locale) |
 | `nc-cloud bureau preparer\|envoyer\|telecharger\|restaurer\|oublier` | tes réglages dans « Bureau » du cloud, en deux temps |
+| `nc-cloud presse voir\|envoyer\|voir-cloud\|prendre` | le presse-papiers d'un PC à l'autre, avec aperçu et confirmation (voir plus haut) |
 | `nc-cloud note` | enregistre le texte lu sur l'entrée standard dans « Notes » (64 Kio au plus) |
 | `nc-cloud examiner FICHIER…` | taille, fichier caché ou refusé, de chaque fichier ; n'envoie rien |
 | `nc-cloud reprendre [N]` | liste les envois interrompus ; avec N, reprend celui-là |
-| `nc-cloud telecharger ID DEST [--dossier PARENT] [--remplacer]` | télécharge un fichier (de la racine, ou de PARENT) |
+| `nc-cloud telecharger ID [DEST] [--dossier PARENT] [--remplacer]` | télécharge un fichier (de la racine, ou de PARENT) ; sans DEST, dans le dossier Téléchargements |
 | `nc-cloud supprimer ID --revision REV [--recursif --arbre TREE]` | supprime un fichier, ou un dossier si le serveur le sait (voir plus bas) |
+| `nc-cloud supprimer ID --revision REV --copie --dossier PARENT` | supprime un fichier après en avoir gardé une copie sur ce PC (corbeille locale) |
+| `nc-cloud corbeille [--remettre COPIE [--racine]]` | les copies de la corbeille locale ; avec `--remettre`, redépose celle-là |
 | `nc-cloud entree ID [--dossier PARENT]` | une entrée par son id, avec sa révision actuelle |
 | `nc-cloud deplacer ID --revision REV --vers PARENT [--nom NOM]` | déplace et/ou renomme (même id, même historique) |
 | `nc-cloud renommer ID --revision REV NOM` | renomme dans le même dossier |
@@ -329,8 +335,9 @@ est tout de suite révoqué sur le serveur. `nc-cloud dissocier` révoque ce PC 
 | `nc-cloud ouvrir ID [--dossier PARENT]` | ouvre une copie privée du fichier avec l'application par défaut |
 
 `--json` donne une ligne JSON par événement : `progression`, `resultat` (un par fichier : `publie`, `refuse`, `echec`,
-`annule`, `telecharge`, `supprime`, `deplace`, `ouvert`), `conflit`, `erreur`, et `verification`, `page`, `etat`, `envois`,
-`entree`, `apercu`.
+`annule`, `telecharge`, `supprime`, `deplace`, `ouvert`), `conflit`, `erreur`, `info`, et `verification`, `associe`,
+`dissocie`, `etat`, `page`, `entree`, `dossier`, `apercu`, `envois`, `examen`, `choisis`, `fichiers`, `demonte`,
+`recents`, `corbeille`, `bureau`, `note`, `presse`.
 
 Un fichier refusé (nom refusé, trop d'envois en cours, quota) n'arrête pas les autres : chacun a son résultat. Hors
 ligne, cloud coupé, PC révoqué, transport refusé ou serveur changé arrêtent toute la commande.
@@ -412,9 +419,10 @@ Chaque action n'existe que si le serveur l'annonce, sinon « ce serveur ne sait 
   confirmé. Si quelque chose a changé dans le dossier depuis l'aperçu, rien n'est supprimé (code 6) : refais l'aperçu.
 - Déplacer : un dossier ne va ni dans lui-même ni dans un de ses sous-dossiers, et un nom déjà pris n'est jamais
   écrasé (code 6). Après un déplacement, l'ancien et le nouveau dossier ont changé de révision.
-- Le script ne demande pas de confirmation : c'est à l'appelant de la demander. Si la réponse se perd, relance la même
-  commande : elle rejoue la même demande (même clé, noté dans `~/.local/state/nc-cloud`), sans risque. Rien n'est
-  relancé tout seul.
+- Le script ne demande pas de confirmation : c'est à l'appelant de la demander. Si la réponse se perd (coupure, erreur
+  du serveur), relance la même commande : elle rejoue la même demande (même clé, notée dans `~/.local/state/nc-cloud`),
+  sans risque. Si le serveur a refusé (conflit, révision changée…), la demande notée est oubliée : relancer fait une
+  nouvelle demande, avec une nouvelle clé. Rien n'est relancé tout seul.
 - Une commande proposée à copier (après `apercu`, la suite de `lister`, les révisions de `entree` et `lister`) ne
   contient que des valeurs vérifiées et protégées pour le shell, sous la forme `--option=VALEUR` ; une valeur
   inattendue n'est jamais proposée.

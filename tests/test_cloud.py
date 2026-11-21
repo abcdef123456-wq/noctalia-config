@@ -9,6 +9,7 @@ partout : arguments de secret-tool, sorties, adresses reçues par le serveur, fi
 assistant.conf)."""
 import contextlib
 import fcntl
+import calendar
 import hashlib
 import http.server
 import importlib.machinery
@@ -1396,16 +1397,42 @@ elif sys.argv[1] == "clear":
         self.assertIn("ne sait pas supprimer", r.lignes[-1]["message"])
         self.assertEqual(len([e for e in self.faux.entries.values() if e.get("parent") == bureau and e["name"] not in etrangers]), 6)
 
-    def test_bureau_futur_tolere_14_heures(self):
-        """Un nom en heure locale d'un autre fuseau (jusqu'à 14 h d'avance) reste une sauvegarde ; au-delà, ignoré."""
+    def test_bureau_futur_tolere_10_minutes(self):
+        """Noms en UTC : 9 minutes d'avance (horloge un peu en avance) restent une sauvegarde ; 11 minutes, ignoré."""
         spec = importlib.util.spec_from_loader("ncc_futur", importlib.machinery.SourceFileLoader("ncc_futur", str(NC_CLOUD)))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        nom = lambda h: {"kind": "file", "id": f"i{h}", "name": time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz",
-                                                                            time.localtime(time.time() + h * 3600))}
-        tri, futur = mod.bureau_trier([nom(-1), nom(13), nom(15), {"kind": "file", "id": "x", "name": "nc-bureau-2099-01-01-000000.tar.gz"}])
-        self.assertEqual([e["id"] for e in tri], ["i13", "i-1"])
+        nom = lambda m: {"kind": "file", "id": f"i{m}", "name": time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz",
+                                                                            time.gmtime(time.time() + m * 60))}
+        tri, futur = mod.bureau_trier([nom(-60), nom(9), nom(11), {"kind": "file", "id": "x", "name": "nc-bureau-2099-01-01-000000.tar.gz"}])
+        self.assertEqual([e["id"] for e in tri], ["i9", "i-60"])
         self.assertEqual(futur, 2)
+
+    def test_bureau_d_un_fuseau_a_l_autre(self):
+        """Faite à UTC+14 (Kiritimati), lue à UTC-12 : la plus récente, jamais « du futur » ; date montrée en heure locale."""
+        self.associer()
+        self.faux.suppression = True
+        cfg = self.home / ".config/nc"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "reglages.conf").write_text("LANGUE=fr\nDOCK=non\n")
+        vieille = time.strftime("nc-bureau-%Y-%m-%d-%H%M%S.tar.gz", time.gmtime(time.time() - 3600))
+        self.nc("deposer", "--racine", "Bureau", "--", str(self.fichier(vieille, b"x")), code=0)
+        self.env()
+        self.plus["TZ"] = "Pacific/Kiritimati"
+        self.nc("bureau", "preparer", code=0)
+        self.nc("bureau", "envoyer", code=0)
+        bureau = next(e["id"] for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Bureau")
+        (neuve,) = [e["name"] for e in self.faux.entries.values() if e.get("parent") == bureau and e["name"] != vieille]
+        self.assertLessEqual(abs(calendar.timegm(time.strptime(neuve[10:27], "%Y-%m-%d-%H%M%S")) - time.time()), 120)   # en UTC
+        self.plus["TZ"] = "Etc/GMT+12"
+        avant = time.time()
+        self.nc("bureau", "telecharger", code=0)
+        pret = json.loads((self.home / ".local/state/nc-cloud/bureau/pret.json").read_text())
+        self.assertEqual(pret["fichier"], neuve)
+        self.assertNotIn("futur", " ".join(pret["lignes"]))
+        montre = re.search(r"Sauvegarde du cloud du (\d\d/\d\d/\d{4} à \d\d:\d\d)", pret["lignes"][0])[1]
+        locales = {time.strftime("%d/%m/%Y à %H:%M", time.gmtime(t - 12 * 3600)) for t in range(int(avant) - 180, int(avant) + 60, 30)}
+        self.assertIn(montre, locales)                                                   # l'heure de UTC-12, pas l'UTC
 
     def test_bureau_archive_trop_grosse_ou_absente(self):
         self.associer()
