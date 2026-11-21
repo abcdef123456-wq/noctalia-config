@@ -189,6 +189,9 @@ class Gestion(http.server.BaseHTTPRequestHandler):
         brut = self.corps()
         with f.lock:
             f.journal.append((m, self.path, dict(self.headers)))
+        if m == "POST" and "attente_408" in f.pannes:          # 2a865e6 : corps JSON trop lent, 408 sans enveloppe
+            f.pannes.discard("attente_408")
+            return self.repondre(408, corps=b"Request Timeout")
         u = urllib.parse.urlsplit(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         if not u.path.startswith("/api/cloud/v1/"):
@@ -410,6 +413,8 @@ class Gestion(http.server.BaseHTTPRequestHandler):
                     x["state"], x["chunks"] = "invalidated", {}
             res = dict(ident, deleted=True, file_id=e["id"], revision=e["revision"])
             f.recus_suppression[(dev, cle)] = (e["id"], e["revision"], res)
+            if "suppression_lente" in f.pannes:              # supprimé ; la réponse tarde (le client peut être tué avant)
+                time.sleep(5)
             if "perdre_suppression" in f.pannes:
                 f.pannes.discard("perdre_suppression")
                 return self.couper()
@@ -1578,6 +1583,26 @@ elif sys.argv[1] == "clear":
     def corbeille(self):
         return self.home / ".cache/nc-cloud/corbeille"
 
+    def copies(self):
+        return [c["copie"] for c in self.nc("corbeille", code=0).lignes[-1]["copies"]]
+
+    def fausse_copie(self, nom, age, taille=1, nom_fichier="x.bin", **plus):
+        """Une copie posée à la main dans la corbeille (contenu creux : rien n'occupe le disque)."""
+        d = self.corbeille() / nom
+        d.mkdir(parents=True, mode=0o700)
+        with open(d / "contenu", "wb") as f:
+            f.truncate(taille)
+        (d / "copie.json").write_text(json.dumps({"version": 2, "nom": nom_fichier, "parent": "root", "date": time.time() - age,
+                                                  "taille": taille, "sha256": "0" * 64, **plus}))
+        return d
+
+    def deposer_de_plus(self, nom):
+        return self.nc("deposer", str(self.fichier(nom, os.urandom(10))), code=0).lignes[-1]["entree"]["id"]
+
+    def supprimer_copie(self, eid, *args, code=None, dossier="root"):
+        return self.nc("supprimer", eid, "--revision", self.faux.entries[eid]["revision"] if eid in self.faux.entries else "r1",
+                       "--dossier", dossier, "--copie", *args, code=code)
+
     def test_corbeille_copie_avant_puis_remettre(self):
         self.faux.suppression = True
         eid, donnees = self.deposer_gros(10)
@@ -1591,16 +1616,18 @@ elif sys.argv[1] == "clear":
         ordre = [c[0] for c in self.faux.journal if (c[0] == "GET" and c[1].endswith("/content")) or c[0] == "DELETE"]
         self.assertEqual(ordre[-2:], ["GET", "DELETE"])                                  # la copie AVANT la suppression
         d = self.corbeille() / fin["copie"]
-        self.assertEqual((d / "g.bin").read_bytes(), donnees)
-        for x, mode in ((self.corbeille(), 0o700), (d, 0o700), (d / "g.bin", 0o600), (d / "copie.json", 0o600)):
+        self.assertEqual((d / "contenu").read_bytes(), donnees)                          # sous un nom FIXE
+        note = json.loads((d / "copie.json").read_text())
+        self.assertEqual((note["nom"], note["parent"], note["id"], note["revision"]), ("g.bin", "root", eid, rev))
+        for x, mode in ((self.corbeille(), 0o700), (d, 0o700), (d / "contenu", 0o600), (d / "copie.json", 0o600)):
             self.assertEqual(stat.S_IMODE(x.stat().st_mode), mode, x)
         l = self.nc("corbeille", code=0).lignes[-1]["copies"]
-        self.assertEqual([(c["copie"], c["nom"], c["taille"]) for c in l], [(fin["copie"], "g.bin", 10)])
-        (d / "g.bin").chmod(0)                                                           # les contrôles d'un dépôt : illisible, refusé
+        self.assertEqual([(c["copie"], c["nom"], c["taille"], c["remettable"]) for c in l], [(fin["copie"], "g.bin", 10, True)])
+        (d / "contenu").chmod(0)                                                         # les contrôles d'un dépôt : illisible, refusé
         try:
             r = self.nc("corbeille", "--remettre", fin["copie"], code=1)
         finally:
-            (d / "g.bin").chmod(0o600)
+            (d / "contenu").chmod(0o600)
         self.assertIn("illisible", r.lignes[-1]["message"])
         self.assertTrue(d.exists())                                                      # la copie reste
         self.nc("corbeille", "--remettre", fin["copie"], code=0)
@@ -1610,53 +1637,249 @@ elif sys.argv[1] == "clear":
         self.assertEqual(self.faux.contenus[remis[0]["id"]], donnees)
         self.assertFalse(d.exists())
         self.nc("corbeille", "--remettre", fin["copie"], code=2)                         # plus de copie
-        self.assertEqual(self.nc("corbeille", code=0).lignes[-1]["copies"], [])
+        self.assertEqual(self.copies(), [])
 
-    def test_corbeille_copie_ratee_ou_suppression_refusee_rien_ne_reste(self):
+    def test_corbeille_fichiers_nommes_copie_json_et_contenu(self):
+        self.faux.suppression = True
+        self.associer()
+        for nom in ("copie.json", "contenu"):
+            eid = self.nc("deposer", str(self.fichier(nom, nom.encode() * 3)), code=0).lignes[-1]["entree"]["id"]
+            self.supprimer_copie(eid, code=0)
+        for c in self.copies():
+            self.nc("corbeille", "--remettre", c, code=0)
+        self.assertEqual(sorted((e["name"], self.faux.contenus[e["id"]]) for e in self.faux.entries.values() if e["kind"] == "file"),
+                         [("contenu", b"contenu" * 3), ("copie.json", b"copie.json" * 3)])
+
+    def test_corbeille_dans_le_doute_la_copie_reste_et_le_rejeu_la_reprend(self):
+        self.faux.suppression = True
+        eid, donnees = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        # Réponse perdue après une suppression faite : la copie reste, listée
+        self.faux.pannes.add("perdre_suppression")
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=3)
+        self.assertIn("la copie est gardée", r.lignes[-1]["message"])
+        self.assertNotIn(eid, self.faux.entries)
+        (c,) = self.copies()
+        # Rejeu : la même copie, « supprimé », jamais « copie ratée »
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertEqual((r.lignes[-1]["etat"], r.lignes[-1]["copie"]), ("supprime", c))
+        self.assertEqual(self.copies(), [c])
+        self.assertEqual((self.corbeille() / c / "contenu").read_bytes(), donnees)
+        # Refus net (412) : rien n'est supprimé, la copie de cette demande est effacée
+        eid2 = self.deposer_de_plus("g2.bin")
+        self.nc("supprimer", eid2, "--revision", "ancienne", "--dossier", "root", "--copie", code=6)
+        self.assertIn(eid2, self.faux.entries)
+        self.assertEqual(self.copies(), [c])
+        # Sortie fermée (le lecteur est parti) après la suppression : la copie reste
+        p = subprocess.Popen([sys.executable, str(NC_CLOUD), "--json", "supprimer", eid2, "--revision", self.faux.entries[eid2]["revision"],
+                              "--dossier", "root", "--copie"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env(),
+                             stdin=subprocess.DEVNULL)
+        p.stdout.close()
+        self.sorties.append(p.stderr.read().decode())
+        p.wait(60)
+        self.assertNotIn(eid2, self.faux.entries)
+        self.assertEqual(len(self.copies()), 2)
+        # SIGTERM pendant le DELETE (fait, réponse pas encore là) : la copie reste
+        eid3 = self.deposer_de_plus("g3.bin")
+        self.faux.pannes.add("suppression_lente")
+        p = subprocess.Popen([sys.executable, str(NC_CLOUD), "--json", "supprimer", eid3, "--revision", self.faux.entries[eid3]["revision"],
+                              "--dossier", "root", "--copie"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self.env(),
+                             stdin=subprocess.DEVNULL)
+        for _ in range(100):
+            if eid3 not in self.faux.entries:
+                break
+            time.sleep(0.05)
+        p.send_signal(signal.SIGTERM)
+        self.sorties.append(p.communicate(timeout=60)[0].decode())
+        self.faux.pannes.discard("suppression_lente")
+        self.assertNotIn(eid3, self.faux.entries)
+        self.assertEqual(len(self.copies()), 3)
+        # Route des dossiers : supprimé, puis 500 : la copie reste
+        self.faux.gestion = True
+        eid4 = self.deposer_de_plus("g4.bin")
+        self.faux.pannes.add("erreur_500_gestion")
+        self.nc("supprimer", eid4, "--revision", self.faux.entries[eid4]["revision"], "--dossier", "root", "--copie")
+        self.assertNotIn(eid4, self.faux.entries)
+        self.assertEqual(len(self.copies()), 4)
+
+    def test_corbeille_rejeu_d_une_suppression_sans_copie_n_en_refait_pas(self):
         self.faux.suppression = True
         eid, _ = self.deposer_gros(10)
         rev = self.faux.entries[eid]["revision"]
+        self.faux.pannes.add("perdre_suppression")
+        self.nc("supprimer", eid, "--revision", rev, code=3)                              # fait, réponse perdue, sans copie
+        self.assertNotIn(eid, self.faux.entries)
+        r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertEqual(r.lignes[-1]["etat"], "supprime")
+        self.assertNotIn("copie", r.lignes[-1])
+        self.assertFalse([x for x in r.lignes if x.get("erreur") == "copie"])
+
+    def test_corbeille_copie_abimee_avant_le_delete_rien_ne_part(self):
+        self.faux.suppression = True
+        eid, _ = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        env = self.env()
+        ancien = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            spec = importlib.util.spec_from_loader("ncc_abimee", importlib.machinery.SourceFileLoader("ncc_abimee", str(NC_CLOUD)))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            vrai = mod.copier_avant
+
+            def puis_abimer(*a):
+                d, m = vrai(*a)
+                (d / "contenu").write_bytes(b"X" * m["taille"])                           # même taille, autre contenu
+                return d, m
+            mod.copier_avant = puis_abimer
+            sortie = io.StringIO()
+            with contextlib.redirect_stdout(sortie):
+                code = mod.main(["--json", "supprimer", eid, "--revision", rev, "--dossier", "root", "--copie"])
+        finally:
+            os.environ.clear()
+            os.environ.update(ancien)
+        self.sorties.append(sortie.getvalue())
+        self.assertNotEqual(code, 0)
+        self.assertIn('"erreur": "copie"', sortie.getvalue())
+        self.assertIn(eid, self.faux.entries)
+        self.assertFalse([c for c in self.faux.journal if c[0] == "DELETE"])
+
+    def test_corbeille_copie_ratee_rien_ne_part_ni_ne_se_perd(self):
+        self.faux.suppression = True
+        eid, _ = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        vieille = self.fausse_copie("b" * 32, 3600, taille=500 * 1024 ** 2 - 5)          # la corbeille est pleine
         self.faux.pannes.add("contenu_faux")
         r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=12)
         self.assertEqual(r.lignes[-1]["erreur"], "copie")
         self.assertIn("rien n'est supprimé", r.lignes[-1]["message"])
         self.assertIn(eid, self.faux.entries)
         self.assertFalse([c for c in self.faux.journal if c[0] == "DELETE"])
-        self.assertEqual(list(self.corbeille().iterdir()), [])
+        self.assertTrue(vieille.exists())                                                # rien effacé d'avance pour rien
+        self.assertEqual(list((self.corbeille() / ".attente").iterdir()), [])
         self.faux.pannes.discard("contenu_faux")
-        self.nc("supprimer", eid, "--revision", "ancienne", "--dossier", "root", "--copie", code=6)  # copie faite, puis refus
-        self.assertIn(eid, self.faux.entries)
-        self.assertEqual(list(self.corbeille().iterdir()), [])
-        self.faux.entries[eid]["size"] = 500 * 1024 ** 2 + 1                             # trop gros : pas de copie, rien supprimé
+        # Une copie de moins de 10 minutes ne cède jamais sa place : pas de copie, rien supprimé
+        retirer = json.loads((vieille / "copie.json").read_text())
+        (vieille / "copie.json").write_text(json.dumps(dict(retirer, date=time.time() - 60)))
         r = self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=1)
+        self.assertIn("plus de place", r.lignes[-1]["message"])
         self.assertEqual(r.lignes[-1]["erreur"], "copie")
         self.assertIn(eid, self.faux.entries)
-        self.nc("supprimer", eid, "--revision", rev, "--recursif", "--arbre", "0" * 64, "--copie", code=2)
+        self.assertTrue(vieille.exists())
+        # Assez vieille : elle cède la place
+        (vieille / "copie.json").write_text(json.dumps(dict(retirer, date=time.time() - 3600)))
+        self.nc("supprimer", eid, "--revision", rev, "--dossier", "root", "--copie", code=0)
+        self.assertFalse(vieille.exists())
+        eid2 = self.deposer_de_plus("g2.bin")
+        self.faux.entries[eid2]["size"] = 500 * 1024 ** 2 + 1                             # trop gros : pas de copie, rien supprimé
+        r = self.nc("supprimer", eid2, "--revision", self.faux.entries[eid2]["revision"], "--dossier", "root", "--copie", code=1)
+        self.assertEqual(r.lignes[-1]["erreur"], "copie")
+        self.assertIn(eid2, self.faux.entries)
+        self.nc("supprimer", eid2, "--revision", "r1", "--recursif", "--arbre", "0" * 64, "--copie", code=2)
+        eid3 = self.deposer_de_plus("petit.bin")
+        self.faux.suppression = False                                                    # sans suppression : pas de copie pour rien
+        avant = len(self.copies())
+        r = self.nc("supprimer", eid3, "--revision", self.faux.entries[eid3]["revision"], "--dossier", "root", "--copie", code=1)
+        self.assertIn("ne sait pas supprimer", r.lignes[-1]["message"])
+        self.assertEqual(len(self.copies()), avant)
 
-    def test_corbeille_24_h_et_500_mio_au_total(self):
-        self.faux.suppression = True
-        eid, _ = self.deposer_gros(10)
+    def test_corbeille_menage_24_h_horloge_et_liens(self):
+        self.associer()
         c = self.corbeille()
-        c.mkdir(parents=True, mode=0o700)
-        for nom, age, taille in (("a" * 32, 25 * 3600, 1), ("b" * 32, 60, 500 * 1024 ** 2), ("c" * 32, 30, 1)):
-            (c / nom).mkdir(mode=0o700)
-            with open(c / nom / "x.bin", "wb") as f:
-                f.truncate(taille)                                                       # creux : rien n'occupe le disque
-            (c / nom / "copie.json").write_text(json.dumps({"nom": "x.bin", "parent": "root", "date": time.time() - age}))
-        (c / ("d" * 32)).mkdir()                                                          # abîmée : sans copie.json
+        self.fausse_copie("a" * 32, 25 * 3600)                                            # plus de 24 h : effacée
+        self.fausse_copie("b" * 32, -2)                                                   # 2 s dans le futur : gardée
+        self.fausse_copie("c" * 32, -100 * 3600)                                          # très loin dans le futur : gardée
+        (c / ("d" * 32)).mkdir()                                                          # abîmée : sans note
         (c / ("e" * 32)).symlink_to(self.d)
-        (c / ("f" * 32)).mkdir(mode=0o700)                                                # la copie est un lien : effacée
-        (cible := self.d / "ailleurs.bin").write_bytes(b"a moi")
-        (c / ("f" * 32) / "x.bin").symlink_to(cible)
-        (c / ("f" * 32) / "copie.json").write_text(json.dumps({"nom": "x.bin", "parent": "root", "date": time.time()}))
-        self.assertEqual([x["copie"] for x in self.nc("corbeille", code=0).lignes[-1]["copies"]], ["c" * 32, "b" * 32])
-        self.assertEqual(sorted(x.name for x in c.iterdir()), ["b" * 32, "c" * 32])       # la vieille et les abîmées effacées
-        self.assertTrue(self.d.is_dir())
+        cible = self.d / "a-moi.bin"
+        cible.write_bytes(b"a moi")
+        for nom, lien in (("f" * 32, os.symlink), ("9" * 32, os.link)):                     # contenu : lien symbolique, lien dur
+            d = self.fausse_copie(nom, 60, taille=5)
+            (d / "contenu").unlink()
+            lien(cible, d / "contenu")
+        (c / ".attente").mkdir(mode=0o700)
+        (c / ".attente/en-cours").mkdir()                                                # une copie en préparation : gardée
+        (c / ".attente/oubliee").mkdir()
+        os.utime(c / ".attente/oubliee", (time.time() - 25 * 3600,) * 2)
+        self.assertEqual(sorted(self.copies()), ["b" * 32, "c" * 32])
+        self.assertEqual(sorted(x.name for x in c.iterdir() if not x.name.startswith(".")), ["b" * 32, "c" * 32])
+        self.assertEqual([x.name for x in (c / ".attente").iterdir()], ["en-cours"])
         self.assertEqual(cible.read_bytes(), b"a moi")
-        # 500 Mio + 1 + 10 : la plus vieille (b) cède la place, la plus récente (c) reste
-        self.nc("supprimer", eid, "--revision", self.faux.entries[eid]["revision"], "--dossier", "root", "--copie", code=0)
-        self.assertEqual(sorted(x["nom"] for x in self.nc("corbeille", code=0).lignes[-1]["copies"]), ["g.bin", "x.bin"])
-        self.assertFalse((c / ("b" * 32)).exists())
+        self.assertTrue(self.d.is_dir())
+        # Un lien plus haut (~/.cache/nc-cloud/corbeille) : refus, rien d'effacé ailleurs
+        ailleurs = self.d / "ailleurs"
+        (ailleurs / ("a" * 32)).mkdir(parents=True)
+        retirer = self.corbeille().with_name("corbeille-vraie")
+        c.rename(retirer)
+        c.symlink_to(ailleurs)
+        self.nc("corbeille", code=1)
+        self.assertTrue((ailleurs / ("a" * 32)).is_dir())
+
+    def test_corbeille_menage_pendant_une_copie_n_y_touche_pas(self):
+        self.faux.suppression = True
+        eid, donnees = self.deposer_gros(10)
+        rev = self.faux.entries[eid]["revision"]
+        env = self.env()
+        ancien = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            spec = importlib.util.spec_from_loader("ncc_course", importlib.machinery.SourceFileLoader("ncc_course", str(NC_CLOUD)))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            vrai = mod.cmd_telecharger
+            vus = []
+
+            def avec_un_autre(a):
+                code = vrai(a)
+                vus.append(subprocess.run([sys.executable, str(NC_CLOUD), "--json", "corbeille"], capture_output=True, text=True,
+                                          env=env, stdin=subprocess.DEVNULL).returncode)
+                return code
+            mod.cmd_telecharger = avec_un_autre
+            with open(os.devnull, "w") as muet, contextlib.redirect_stdout(muet):
+                code = mod.main(["--json", "supprimer", eid, "--revision", rev, "--dossier", "root", "--copie"])
+        finally:
+            os.environ.clear()
+            os.environ.update(ancien)
+        self.assertEqual((code, vus), (0, [0]))
+        self.assertNotIn(eid, self.faux.entries)
+        (c,) = self.copies()
+        self.assertEqual((self.corbeille() / c / "contenu").read_bytes(), donnees)
+
+    def test_corbeille_nom_sensible_et_dossier_d_origine_disparu(self):
+        self.faux.suppression = self.faux.par_id = True
+        self.associer()
+        eid = self.nc("deposer", str(self.fichier("cle.txt", b"-----BEGIN-----")), code=0).lignes[-1]["entree"]["id"]
+        self.faux.entries[eid]["name"] = "cle.pem"                                       # (un .pem ne s'envoie pas d'ici)
+        e = next(x for x in self.nc("lister", code=0).lignes[-1]["entries"] if x["id"] == eid)
+        self.assertIs(e.get("sensible"), True)
+        self.supprimer_copie(eid, code=0)
+        (m,) = self.nc("corbeille", code=0).lignes[-1]["copies"]
+        self.assertIs(m["remettable"], False)
+        r = self.nc("corbeille", "--remettre", m["copie"], code=1)
+        self.assertEqual(r.lignes[-1]["erreur"], "sensible")
+        self.assertIn(str(self.corbeille() / m["copie"] / "contenu"), r.lignes[-1]["message"])
+        self.assertEqual(self.copies(), [m["copie"]])
+        # Le dossier noté est celui de l'entrée (pas --dossier) ; disparu : « remets-la à la racine »
+        a = self.nc("dossier", "root", "A", code=0).lignes[-1]["entree"]["id"]
+        f = self.nc("deposer", "--dans", a, str(self.fichier("note.txt", b"note")), code=0).lignes[-1]["entree"]["id"]
+        r = self.supprimer_copie(f, code=0)
+        c = r.lignes[-1]["copie"]
+        self.assertEqual(json.loads((self.corbeille() / c / "copie.json").read_text())["parent"], a)
+        del self.faux.entries[a]
+        r = self.nc("corbeille", "--remettre", c, code=1)
+        self.assertEqual(r.lignes[-1]["erreur"], "parent_absent")
+        self.nc("corbeille", "--remettre", c, "--racine", code=0)
+        self.assertEqual([x["parent"] for x in self.faux.entries.values() if x["name"] == "note.txt"], ["root"])
+
+    def test_408_sans_enveloppe_est_reprenable(self):
+        self.associer()
+        self.faux.pannes.add("attente_408")
+        r = self.nc("dossier", "root", "Lent", code=3)                                   # HORS_LIGNE : passager, pas « inattendu »
+        self.assertIn("relance la même commande", r.lignes[-1]["message"])
+        self.assertNotIn("inattendue", r.stdout + r.stderr)
+        self.nc("dossier", "root", "Lent", code=0)
 
     def test_supprimer_reponse_perdue_puis_rejeu(self):
         self.faux.suppression = True

@@ -62,11 +62,18 @@ Singleton {
     property string sansCopie: ""                 // id dont la copie a échoué : la question suivante dit « sans copie »
     readonly property real copieMax: 500 * 1024 * 1024
     function copiable(e) { return !!e && e.kind === "file" && typeof e.size === "number" && e.size <= copieMax }
-    function remettre(copie) {
+    property string aRacine: ""                   // copie dont le dossier d'origine n'existe plus : « Remettre à la racine »
+    function remettre(copie, racine) {
         if (!/^[0-9a-f]{32}$/.test(String(copie))) return
         annulable = null
-        lancer(["corbeille", "--remettre=" + copie], "remettre", copie)
+        aRacine = ""
+        lancer(["corbeille", "--remettre=" + copie].concat(racine ? ["--racine"] : []), "remettre", copie)
         lancer(["corbeille"], "corbeille")
+    }
+    // Une copie qui ne se remet pas depuis l'île (nom de fichier de secrets) : son dossier, ouvert par xdg-open (argv)
+    readonly property string dossierCorbeille: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/nc-cloud/corbeille/"
+    function ouvrirCopie(copie) {
+        if (/^[0-9a-f]{32}$/.test(String(copie)) && dossierCorbeille.charAt(0) === "/") Quickshell.execDetached(["xdg-open", dossierCorbeille + copie])
     }
     // Place utilisée, pour le centre de contrôle : lue SEULEMENT à son ouverture, au plus une fois par 10 minutes (gardée
     // en mémoire) ; aussi notée quand le panneau lit l'état. Hors ligne : la dernière valeur, marquée vieille
@@ -435,6 +442,7 @@ Singleton {
             if (q === "telecharger" && d.code === 6) aRemplacer = enCours.id
             // Le dossier a changé depuis l'aperçu : rien n'est supprimé ; nouvel aperçu (après la page relue), nouvelle question
             if (q === "supprimer" && d.erreur === "copie") { sansCopie = enCours.id; redemander(enCours.id) }
+            if (q === "remettre" && d.erreur === "parent_absent") aRacine = enCours.id
             if (q === "supprimer" && d.erreur === "tree_changed") {
                 suites = [{ args: ["apercu", "--", enCours.id], quoi: "apercu", id: enCours.id }].concat(suites)
                 redemander(enCours.id)
@@ -443,12 +451,14 @@ Singleton {
         }
         else if (d.evenement === "corbeille") {
             corbeille = (Array.isArray(d.copies) ? d.copies : []).filter(x => x && /^[0-9a-f]{32}$/.test(String(x.copie)) && typeof x.nom === "string")
-                          .slice(0, 50).map(x => ({ copie: x.copie, nom: x.nom.slice(0, 240), taille: Number(x.taille) || 0 }))
+                          .slice(0, 50).map(x => ({ copie: x.copie, nom: x.nom.slice(0, 240), taille: Number(x.taille) || 0,
+                                                    remettable: x.remettable === true }))
         }
         else if (typeof d.message === "string" && d.message !== "") {
             message = d.message.slice(0, 300); erreur = ""
             if (q === "supprimer" && d.etat === "supprime" && /^[0-9a-f]{32}$/.test(String(d.copie))) {
-                annulable = { copie: d.copie, nom: String(d.nom || "").slice(0, 240) }
+                var sup = entrees.find(x => x.id === enCours.id)
+                annulable = { copie: d.copie, nom: String(d.nom || "").slice(0, 240), remettable: !(sup && sup.sensible === true) }
                 finAnnulable.restart()
                 suites = suites.concat([{ args: ["corbeille"], quoi: "corbeille", id: "" }])
             }

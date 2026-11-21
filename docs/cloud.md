@@ -111,19 +111,42 @@ dossier Téléchargements.
 ### Annuler une suppression
 
 Le serveur efface pour de bon. Avant de supprimer un fichier depuis le panneau, nc-cloud en garde une copie privée sur
-ce PC (`~/.cache/nc-cloud/corbeille/`, dossiers 0700, fichiers 0600). La copie est téléchargée AVANT la suppression et
-son empreinte est vérifiée. Si la copie échoue, rien n'est supprimé, et la question revient : « supprimer quand même,
-sans copie ? ».
+ce PC (`~/.cache/nc-cloud/corbeille/`, dossiers 0700, fichiers 0600).
+
+- La copie est téléchargée AVANT la suppression, dans un dossier d'attente, et son empreinte est vérifiée.
+- Elle entre ensuite dans la corbeille d'un seul geste, sous un verrou que prend aussi tout ménage.
+- Juste avant la suppression, elle est vérifiée encore (taille et empreinte).
+- Si la copie échoue, rien n'est supprimé, et la question revient : « supprimer quand même, sans copie ? ».
+
+La règle : une copie n'est effacée que dans trois cas.
+
+- La remise a réussi.
+- Elle a plus de 24 h. Une date dans le futur, après une horloge reculée, ne l'efface jamais.
+- Le serveur a refusé net avant toute suppression : réponse 4xx complète, sauf 404 et 410.
+
+Dans le doute (coupure, erreur 5xx, arrêt, sortie fermée), elle reste. Une suppression rejouée reprend la même copie, ou
+n'en refait pas si le fichier a peut-être déjà disparu ; elle ne répond jamais « copie ratée ».
+
+Dans le panneau :
 
 - Après la suppression, un bandeau « Supprimé : nom · Annuler » reste 20 secondes.
-- Une ligne « Corbeille locale » reste dans le panneau tant que la copie existe : « Remettre » redépose le fichier au
-  même endroit. Il reçoit un nouvel identifiant, et l'historique de ses versions est perdu.
-- Une copie est gardée 24 h. Toutes les copies tiennent dans 500 Mio : les plus vieilles cèdent la place.
+- Une ligne « Corbeille locale » reste tant que la copie existe : « Remettre » redépose le fichier dans son dossier
+  d'origine, par les contrôles d'un dépôt. Il reçoit un nouvel identifiant, et l'historique de ses versions est perdu.
+- Si le dossier d'origine n'existe plus : « Remettre à la racine ».
+
+Les limites :
+
+- Toutes les copies tiennent dans 500 Mio. La place n'est faite qu'après une copie réussie, et jamais aux dépens d'une
+  copie de moins de 10 minutes.
 - Un fichier de plus de 500 Mio n'a pas de copie : la question le dit avant.
+- Un nom de fichier de secrets (`.pem`, `.key`, `.env`, `id_rsa`…) se supprime avec une copie, mais ne se remet pas
+  depuis l'île. La question le dit avant, et la corbeille propose « Ouvrir le dossier ».
 - Les dossiers n'ont pas de copie : leur question dit toujours « définitive ».
 
+Le contenu est rangé sous le nom fixe `contenu`, à côté de `copie.json` qui note son nom d'origine.
+
 En ligne de commande : `nc-cloud supprimer ID --revision R --copie --dossier PARENT`, `nc-cloud corbeille` (la liste)
-et `nc-cloud corbeille --remettre COPIE`.
+et `nc-cloud corbeille --remettre COPIE [--racine]`.
 
 ### Place utilisée, dans le centre de contrôle
 

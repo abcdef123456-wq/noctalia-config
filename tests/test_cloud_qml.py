@@ -40,11 +40,13 @@ case "$1" in
              case "$*" in *--copie*) m=$(cat "@ROOT@/mode-copie" 2>/dev/null)
                if [ "$m" = echec ]; then echo ok > "@ROOT@/mode-copie"
                  printf '%s\n' '{"evenement": "erreur", "code": 12, "erreur": "copie", "message": "Copie locale impossible."}'; exit 12; fi
-               if [ "$m" = ok ]; then printf '%s\n' '[{"copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "taille": 12, "date": 1}, {"copie": "../x", "nom": "y"}]' > "@ROOT@/corbeille.json"
+               if [ "$m" = ok ]; then printf '%s\n' '[{"copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "taille": 12, "date": 1, "remettable": true}, {"copie": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "nom": "cle.pem", "taille": 3, "date": 1, "remettable": false}, {"copie": "../x", "nom": "y"}]' > "@ROOT@/corbeille.json"
                  printf '%s\n' '{"evenement": "resultat", "etat": "supprime", "copie": "cccccccccccccccccccccccccccccccc", "nom": "note.txt", "message": "Fichier supprimé. Une copie reste sur ce PC 24 h."}'; exit 0; fi ;;
              esac
              printf '%s\n' '{"evenement": "resultat", "message": "Supprimé."}' ;;
-  corbeille) case "$*" in *--remettre=*) rm -f "@ROOT@/corbeille.json"; printf '%s\n' '{"evenement": "resultat", "etat": "publie", "message": "Envoyé."}'; exit 0 ;; esac
+  corbeille) case "$*" in *--racine*) ;; *--remettre=*) if [ -f "@ROOT@/parent-absent" ]; then rm -f "@ROOT@/parent-absent"
+                 printf '%s\n' '{"evenement": "erreur", "code": 1, "erreur": "parent_absent", "message": "Le dossier d origine n existe plus."}'; exit 1; fi ;; esac
+             case "$*" in *--remettre=*) rm -f "@ROOT@/corbeille.json"; printf '%s\n' '{"evenement": "resultat", "etat": "publie", "message": "Envoyé."}'; exit 0 ;; esac
              printf '{"evenement": "corbeille", "copies": %s}\n' "$(cat "@ROOT@/corbeille.json" 2>/dev/null || echo '[]')" ;;
   apercu) n=$(cat "@ROOT@/apercus" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "@ROOT@/apercus"
           if [ "$n" = 1 ]; then t=@ARBRE1@; else t=@ARBRE2@; fi
@@ -187,7 +189,7 @@ class Sources(unittest.TestCase):
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
     def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False,
-               etat_echec_apres=None, mode_copie=None):
+               etat_echec_apres=None, mode_copie=None, parent_absent=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -209,6 +211,8 @@ class HorsEcran(unittest.TestCase):
                 (root / "recents.json").write_text(json.dumps(recents))
             if mode_copie:
                 (root / "mode-copie").write_text(mode_copie)
+            if parent_absent:
+                (root / "parent-absent").write_text("1")
             if etat_echec_apres is not None:
                 (root / "etat-echec-apres").write_text(str(etat_echec_apres))
             if associe:
@@ -326,6 +330,12 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 10) {
                     verifier(question().indexOf("trop gros pour une copie") >= 0 && confirmer().texte === "Supprimer définitivement", "gros : " + question())
                     trouver(corps, "nc-cloud-annuler-" + F).clic()
+                    CloudEtat.entrees = [racine.gardees[0], Object.assign({}, racine.gardees[1], { sensible: true })]
+                    CloudEtat.choisir(CloudEtat.entrees[1]); trouver(corps, "nc-cloud-supprimer-" + F).clic(); etape = 11; return }
+                if (etape === 11) {   // nom de fichier de secrets : dit AVANT, avec où restera la copie
+                    verifier(question().indexOf("ne pourra pas être remis depuis l'île") >= 0 && question().indexOf("~/.cache/nc-cloud/corbeille") >= 0,
+                             "sensible : " + question())
+                    trouver(corps, "nc-cloud-annuler-" + F).clic()
                     CloudEtat.entrees = racine.gardees
                     CloudEtat.choisir(CloudEtat.entrees[1]); trouver(corps, "nc-cloud-supprimer-" + F).clic(); etape = 2; return }
                 if (etape === 2) {
@@ -341,10 +351,22 @@ class HorsEcran(unittest.TestCase):
                     verifier(question().indexOf("Une copie reste") >= 0, "la question suivante reprend la copie")
                     confirmer().clic(); etape++; return }
                 if (etape === 6) {
-                    verifier(vu(corps, "nc-cloud-annulable") && CloudEtat.annulable.nom === "note.txt", "Supprimé · Annuler")
-                    verifier(vu(corps, "nc-cloud-corbeille") && CloudEtat.corbeille.length === 1 && vu(corps, "nc-cloud-remettre-@C@"), "corbeille : une copie sûre")
+                    verifier(vu(corps, "nc-cloud-annulable") && CloudEtat.annulable.nom === "note.txt" && CloudEtat.annulable.remettable, "Supprimé · Annuler")
+                    verifier(vu(corps, "nc-cloud-corbeille") && CloudEtat.corbeille.length === 2 && vu(corps, "nc-cloud-remettre-@C@"), "corbeille : deux copies sûres")
+                    // Un nom de fichier de secrets : pas de « Remettre », son dossier à ouvrir
+                    verifier(!vu(corps, "nc-cloud-remettre-@E@") && vu(corps, "nc-cloud-ouvrir-copie-@E@") && !vu(corps, "nc-cloud-ouvrir-copie-@C@"), "copie non remettable")
+                    // Le dossier d'origine a disparu : « Remettre à la racine »
+                    trouver(corps, "nc-cloud-remettre-@C@").clic(); etape = 20; return }
+                if (etape === 20) {
+                    verifier(CloudEtat.aRacine === "@C@" && vu(corps, "nc-cloud-remettre-racine-@C@"), "Remettre à la racine proposé")
+                    trouver(corps, "nc-cloud-remettre-racine-@C@").clic(); etape = 21; return }
+                if (etape === 21) {
+                    verifier(CloudEtat.aRacine === "" && CloudEtat.corbeille.length === 0, "remis à la racine")
+                    // Une nouvelle suppression, pour « Annuler » du bandeau
+                    CloudEtat.choisir(CloudEtat.entrees[1]); trouver(corps, "nc-cloud-supprimer-" + F).clic(); confirmer().clic(); etape = 22; return }
+                if (etape === 22) {
                     verifier(CloudEtat.dureeAnnuler === 20000, "20 s")
-                    trouver(corps, "nc-cloud-annuler-suppression").clic(); etape++; return }
+                    trouver(corps, "nc-cloud-annuler-suppression").clic(); etape = 7; return }
                 if (etape === 7) {
                     verifier(CloudEtat.annulable === null && CloudEtat.corbeille.length === 0 && !vu(corps, "nc-cloud-corbeille"), "remis : corbeille vide")
                     // Sans clic, le bandeau part seul (durée raccourcie pour le test)
@@ -356,8 +378,11 @@ class HorsEcran(unittest.TestCase):
                     verifier(CloudEtat.annulable === null && !vu(corps, "nc-cloud-annulable"), "bandeau parti seul")
                     console.log("FINI"); Qt.exit(0) }
             } }
-        '''.replace("@F@", F).replace("@C@", "c" * 32), reglages={"CLOUD_JARVIS": "oui"}, mode_copie="echec")
+        '''.replace("@F@", F).replace("@C@", "c" * 32).replace("@E@", "e" * 32), reglages={"CLOUD_JARVIS": "oui"}, mode_copie="echec",
+           parent_absent=True)
         self.assertEqual(j[3:], [f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", f"--json supprimer --revision=r9 --dossier=root -- {F}",
+                                 "--json lister -- root", f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", "--json lister -- root",
+                                 "--json corbeille --remettre=" + "c" * 32, "--json corbeille --remettre=" + "c" * 32 + " --racine",
                                  "--json lister -- root", f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", "--json lister -- root",
                                  "--json corbeille --remettre=" + "c" * 32, "--json lister -- root",
                                  f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", "--json lister -- root"])

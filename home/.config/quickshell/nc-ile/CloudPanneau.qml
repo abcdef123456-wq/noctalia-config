@@ -158,8 +158,13 @@ FloatingWindow {
                             text: Reglages.t("Supprimé : ", "Deleted: ") + (CloudEtat.annulable ? CloudEtat.annulable.nom : "") }
                     CloudBouton { id: annulerSuppression; objectName: "nc-cloud-annuler-suppression"
                                   anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                                  texte: Reglages.t("Annuler", "Undo"); principal: true
-                                  onClic: if (CloudEtat.annulable) CloudEtat.remettre(CloudEtat.annulable.copie) }
+                                  texte: CloudEtat.annulable && !CloudEtat.annulable.remettable ? Reglages.t("Ouvrir le dossier", "Open the folder")
+                                                                                                : Reglages.t("Annuler", "Undo")
+                                  principal: true
+                                  onClic: if (CloudEtat.annulable) {
+                                      if (CloudEtat.annulable.remettable) CloudEtat.remettre(CloudEtat.annulable.copie, false)
+                                      else CloudEtat.ouvrirCopie(CloudEtat.annulable.copie)
+                                  } }
                 }
                 // Corbeille locale : tant qu'une copie existe (24 h) ; « Remettre » la redépose au même endroit
                 Column {
@@ -174,12 +179,33 @@ FloatingWindow {
                         width: parent.width; spacing: 6
                         Repeater {
                             model: CloudEtat.corbeille
-                            CloudBouton {
+                            Row {
+                                id: copieLigne
                                 required property var modelData
-                                objectName: "nc-cloud-remettre-" + modelData.copie
-                                texte: Reglages.t("Remettre ", "Put back ") + (modelData.nom.length > 28 ? modelData.nom.slice(0, 27) + "…" : modelData.nom)
-                                enabled: !CloudEtat.occupe
-                                onClic: CloudEtat.remettre(modelData.copie)
+                                readonly property string court: modelData.nom.length > 28 ? modelData.nom.slice(0, 27) + "…" : modelData.nom
+                                spacing: 6
+                                CloudBouton {
+                                    visible: copieLigne.modelData.remettable
+                                    objectName: "nc-cloud-remettre-" + copieLigne.modelData.copie
+                                    texte: Reglages.t("Remettre ", "Put back ") + copieLigne.court
+                                    enabled: !CloudEtat.occupe
+                                    onClic: CloudEtat.remettre(copieLigne.modelData.copie, false)
+                                }
+                                // Le dossier d'origine n'existe plus
+                                CloudBouton {
+                                    visible: copieLigne.modelData.remettable && CloudEtat.aRacine === copieLigne.modelData.copie
+                                    objectName: "nc-cloud-remettre-racine-" + copieLigne.modelData.copie
+                                    texte: Reglages.t("Remettre à la racine", "Put back at the root")
+                                    enabled: !CloudEtat.occupe
+                                    onClic: CloudEtat.remettre(copieLigne.modelData.copie, true)
+                                }
+                                // Un nom de fichier de secrets : pas de remise depuis l'île, la copie est montrée là où elle est
+                                CloudBouton {
+                                    visible: !copieLigne.modelData.remettable
+                                    objectName: "nc-cloud-ouvrir-copie-" + copieLigne.modelData.copie
+                                    texte: Reglages.t("Ouvrir le dossier de ", "Open the folder of ") + copieLigne.court
+                                    onClic: CloudEtat.ouvrirCopie(copieLigne.modelData.copie)
+                                }
                             }
                         }
                     }
@@ -577,6 +603,9 @@ FloatingWindow {
                                         : ligne.fichier && !CloudEtat.copiable(ligne.modelData)
                                         ? Reglages.t("« " + ligne.modelData.name + " » : trop gros pour une copie sur ce PC (plus de 500 Mio) : suppression définitive, toutes ses versions.",
                                                      "“" + ligne.modelData.name + "”: too big for a copy on this PC (over 500 MiB): permanent deletion, all its versions.")
+                                        : ligne.fichier && ligne.modelData.sensible === true
+                                        ? Reglages.t("« " + ligne.modelData.name + " » : supprimé du cloud avec toutes ses versions. Son nom ressemble à un fichier de secrets : il ne pourra pas être remis depuis l'île ; la copie restera 24 h dans ~/.cache/nc-cloud/corbeille.",
+                                                     "“" + ligne.modelData.name + "”: deleted from the cloud with all its versions. Its name looks like a secrets file: it cannot be put back from the island; the copy stays 24 h in ~/.cache/nc-cloud/corbeille.")
                                         : ligne.fichier
                                         ? Reglages.t("« " + ligne.modelData.name + " » : supprimé du cloud avec toutes ses versions. Une copie reste sur ce PC 24 h, pour le remettre.",
                                                      "“" + ligne.modelData.name + "”: deleted from the cloud with all its versions. A copy stays on this PC for 24 h, to put it back.")

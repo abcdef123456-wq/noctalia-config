@@ -10,7 +10,7 @@
   nc-cloud deposer [--dans ID | --racine NOM] [--si-existe garder|remplacer:REVISION|annuler] FICHIER…   (8 au plus)
   nc-cloud examiner FICHIER…        taille, caché ou refusé, de chaque fichier (rien ne part)
   nc-cloud recents [--effacer]      les 5 derniers fichiers envoyés ou ouverts par ce PC (liste locale)
-  nc-cloud corbeille [--remettre COPIE]
+  nc-cloud corbeille [--remettre COPIE [--racine]]
                                     les copies gardées ; --remettre la redépose au même endroit (nouvel identifiant)
   nc-cloud bureau preparer|envoyer|telecharger|restaurer|oublier
                                     tes réglages dans « Bureau » du cloud (nc-sauvegarde, sans code ni clé) ; en deux temps
@@ -463,6 +463,12 @@ def echec_serveur(statut, obj, cle=False):
         EMPREINTE: T("Empreinte refusée par le serveur : le fichier envoyé ne correspond pas.",
                      "Fingerprint refused by the server: the uploaded file does not match."),
     }
+    if statut == 408:
+        # Le serveur a trop attendu le corps d'une demande (lien lent), avec ou sans enveloppe : passager, la demande
+        # n'a pas été traitée ; comme une coupure, les manifestes restent et la même commande reprend
+        return Echec(T("Le serveur a trop attendu la demande (connexion lente) : relance la même commande.",
+                       "The server waited too long for the request (slow connection): run the same command again."),
+                     HORS_LIGNE, err, obj, statut)
     if statut == 429 and err is None:
         # Le limiteur du gateway (detail + Retry-After), pas too_many_transfers : passager, la commande s'arrête
         return Echec(T("Trop de demandes au serveur : réessaie dans un instant.", "Too many requests to the server: try again in a moment."),
@@ -718,6 +724,8 @@ def cmd_lister(a):
     p = s.page(a.id or "root", a.suite)
     bruts = [x for x in p.get("entries") or [] if entree_propre(x)]
     entrees = [entree_propre(x) for x in bruts]
+    entrees = [dict(e, sensible=True) if e.get("kind") == "file" and A.NOM_SENSIBLE.fullmatch(str(e.get("name"))) else e
+               for e in entrees]
     suite = propre(p.get("next_cursor"), 512) if p.get("next_cursor") else None
     if JSON_SORTIE:
         evenement(evenement="page", parent=entree_propre(p.get("parent")), entries=entrees, next_cursor=suite)
@@ -1016,23 +1024,23 @@ class Envoi:
         return CONFLIT
 
 
-def preparer(s, p, parent, pol, attendue, controle=None):
+def preparer(s, p, parent, pol, attendue, controle=None, nom=None):
     """Une intention neuve pour ce fichier : ouvert une fois (le même que celui du contrôle), révision du dossier relue,
     empreinte lue en flux par ce descripteur, nouvelle clé."""
     fd = ouvrir_controle(p, controle)
     try:
-        return preparer_fd(s, p, parent, pol, attendue, fd)
+        return preparer_fd(s, p, parent, pol, attendue, fd, nom)
     except BaseException:
         os.close(fd)
         raise
 
 
-def preparer_fd(s, p, parent, pol, attendue, fd):
+def preparer_fd(s, p, parent, pol, attendue, fd, nom=None):
     rev = revision_dossier(s, parent)
     st = os.fstat(fd)
     taille, mtime = st.st_size, st.st_mtime_ns
     m = {"version": 1, "cle": secrets.token_urlsafe(32), "source": str(p), "mtime_ns": mtime, "cree": time.time(),
-         "parent_id": parent, "parent_revision": rev, "name": unicodedata.normalize("NFC", p.name), "size": taille,
+         "parent_id": parent, "parent_revision": rev, "name": unicodedata.normalize("NFC", nom or p.name), "size": taille,
          "sha256": empreinte_fd(fd), "policy": pol, "expected_revision": attendue, "upload_id": None, "chunk_bytes": None,
          **{k: s.appareil[k] for k in ("server_id", "space_id", "device_id")}}
     envoi = Envoi(s, ENVOIS / (m["cle"] + ".json"), m)
@@ -1043,12 +1051,12 @@ def preparer_fd(s, p, parent, pol, attendue, fd):
     return envoi
 
 
-def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False, controle=None):
+def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False, controle=None, nom=None):
     """Un fichier : code de sortie pour lui. Les codes d'ARRET remontent (toute la commande s'arrête)."""
     for essai in (1, 2):
         envoi = None
         try:
-            envoi = preparer(s, p, parent, pol, attendue, controle)
+            envoi = preparer(s, p, parent, pol, attendue, controle, nom)
             envoi.pour_creer = pour_creer
             if pol == "create":
                 # Le serveur ne refuse un nom pris qu'au commit : on regarde avant, pour ne pas tout envoyer pour rien
@@ -1933,11 +1941,17 @@ def cmd_apercu(a):
 
 
 # ── Corbeille locale (I7) : le serveur efface pour de bon ; avant de supprimer UN fichier depuis le panneau, une copie
-# privée, empreinte vérifiée, 24 h, 500 Mio au total (les plus vieilles cèdent la place). « Remettre » la redépose au
-# même endroit : nouvel identifiant, historique perdu
+# privée, empreinte vérifiée, 24 h, 500 Mio au total. « Remettre » la redépose au même endroit (nouvel identifiant,
+# historique perdu).
+# RÈGLE : une copie n'est effacée que dans trois cas : remise réussie, plus de 24 h, ou refus NET du serveur avant toute
+# suppression (réponse 4xx reçue en entier, ni 404 ni 410). Dans le doute (coupure, 5xx, annulation, sortie fermée),
+# elle reste. Un rejeu (suppression en attente) ne refait pas la copie.
+# Rangement : corbeille/<32 hex>/contenu (nom fixe) et copie.json (le nom d'origine et le reste) ; une copie se prépare
+# dans corbeille/.attente/, puis entre d'un seul os.rename, sous le verrou (flock) que prend aussi tout ménage
 CORBEILLE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "nc-cloud" / "corbeille"
 CORBEILLE_MAX = 500 * 1024 ** 2
 CORBEILLE_DUREE = 24 * 3600
+CORBEILLE_RECENTE = 600              # une copie de moins de 10 minutes ne cède jamais sa place
 
 
 def retirer(d):
@@ -1948,49 +1962,120 @@ def retirer(d):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def corbeille_lire():
-    """Les copies encore bonnes, la plus récente d'abord ; les vieilles (24 h) et les abîmées sont effacées ici."""
-    if not CORBEILLE.is_dir() or CORBEILLE.is_symlink():
-        return []
+@contextlib.contextmanager
+def verrou_corbeille():
+    dossier_prive(CORBEILLE)                       # aucun lien symbolique jusqu'à ~/.cache/nc-cloud
+    fd = os.open(str(CORBEILLE / ".verrou"), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def sync_dossier(d):
+    fd = os.open(str(d), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def corbeille_menage():
+    """Sous le verrou : les copies valides, la plus récente d'abord ; celles de plus de 24 h et les abîmées sont
+    effacées. Une date dans le futur (horloge reculée) n'efface jamais. Une préparation de plus de 24 h est retirée."""
     l = []
     for d in CORBEILLE.iterdir():
+        if d.name == ".attente" and d.is_dir() and not d.is_symlink():
+            for x in d.iterdir():
+                with contextlib.suppress(OSError):
+                    if time.time() - x.lstat().st_mtime > CORBEILLE_DUREE:
+                        retirer(x)
+            continue
+        if d.name == ".verrou":
+            continue
         m = None
         if re.fullmatch(r"[0-9a-f]{32}", d.name) and d.is_dir() and not d.is_symlink():
             with contextlib.suppress(Echec):
                 m = lire_json(d / "copie.json")
-        f = d / m["nom"] if m and nom_valide(m.get("nom")) else None
-        if (not f or not isinstance(m.get("date"), (int, float)) or not 0 <= time.time() - m["date"] < CORBEILLE_DUREE
-                or not ID_SUR.fullmatch(str(m.get("parent"))) or f.is_symlink() or not f.is_file()):
+        f = d / "contenu"
+        try:
+            st = os.lstat(f)
+        except OSError:
+            st = None
+        ok = (m and nom_valide(m.get("nom")) and isinstance(m.get("date"), (int, float)) and ID_SUR.fullmatch(str(m.get("parent")))
+              and st is not None and stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_size == m.get("taille")
+              and re.fullmatch(r"[0-9a-f]{64}", str(m.get("sha256"))))
+        if not ok or time.time() - m["date"] >= CORBEILLE_DUREE:
             retirer(d)
             continue
-        l.append({"copie": d.name, "nom": m["nom"], "parent": m["parent"], "date": m["date"], "taille": f.stat().st_size})
+        l.append({"copie": d.name, "nom": m["nom"], "parent": m["parent"], "date": m["date"], "taille": st.st_size,
+                  "sha256": m["sha256"], "id": m.get("id"), "revision": m.get("revision"),
+                  "remettable": not A.NOM_SENSIBLE.fullmatch(m["nom"])})
     return sorted(l, key=lambda m: m["date"], reverse=True)
 
 
-def copier_avant(s, a):
-    """La copie privée, AVANT la suppression ; un échec, et rien n'est supprimé (erreur « copie » : le panneau redemande)."""
+def corbeille_lire():
+    if not CORBEILLE.parent.is_dir():
+        return []
+    with verrou_corbeille():
+        return corbeille_menage()
+
+
+def verifier_copie(d, m):
+    """La copie est là, intacte (taille et empreinte) : sinon AUCUN DELETE."""
+    try:
+        fd = os.open(str(d / "contenu"), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        fd = None
+    try:
+        ok = fd is not None and os.fstat(fd).st_size == m["taille"] and empreinte_fd(fd) == m["sha256"]
+    finally:
+        if fd is not None:
+            os.close(fd)
+    if not ok:
+        raise Echec(T("La copie sur ce PC a disparu ou changé : rien n'est supprimé.",
+                      "The copy on this PC disappeared or changed: nothing is deleted."), erreur="copie")
+
+
+def copier_avant(s, a, e, rev):
+    """La copie privée, AVANT la suppression : téléchargée et vérifiée dans .attente, PUIS la place faite (jamais aux
+    dépens d'une copie de moins de 10 minutes) et la copie posée d'un os.rename. Un échec : rien n'est supprimé (erreur
+    « copie » : le panneau redemande « sans copie »), et aucune autre copie n'a été effacée pour rien."""
     d = None
     try:
-        e = entree(s, a.id, a.dossier or "root", capacites_session(s))
         if e.get("kind") != "file" or not isinstance(e.get("size"), int) or not nom_valide(e.get("name")):
             raise Echec(T("ce n'est pas un fichier copiable", "this is not a file that can be copied"))
         if e["size"] > CORBEILLE_MAX:
             raise Echec(T("plus de 500 Mio", "over 500 MiB"))
-        l = corbeille_lire()
-        total = sum(m["taille"] for m in l)
-        while l and total + e["size"] > CORBEILLE_MAX:
-            m = l.pop()
-            total -= m["taille"]
-            retirer(CORBEILLE / m["copie"])
-        dossier_prive(CORBEILLE)
-        d = CORBEILLE / secrets.token_hex(16)
+        dossier_prive(CORBEILLE / ".attente")
+        d = CORBEILLE / ".attente" / secrets.token_hex(16)
         dossier_prive(d)
         with open(os.devnull, "w") as muet, contextlib.redirect_stdout(muet):      # ses messages ne sont pas les nôtres
-            code = cmd_telecharger(argparse.Namespace(id=a.id, dest=str(d / e["name"]), dossier=a.dossier, remplacer=False))
+            code = cmd_telecharger(argparse.Namespace(id=a.id, dest=str(d / "contenu"), dossier=a.dossier, remplacer=False,
+                                                      maximum=CORBEILLE_MAX))
         if code != OK:
             raise Echec(T("copie annulée", "copy cancelled"), ANNULE)
-        ecrire_json(d / "copie.json", {"version": 1, "nom": e["name"], "parent": a.dossier or "root", "date": time.time()})
-        return d, e["name"]
+        parent = e["parent"] if ID_SUR.fullmatch(str(e.get("parent"))) else (a.dossier or "root")
+        m = {"version": 2, "nom": e["name"], "parent": parent, "date": time.time(), "taille": e["size"],
+             "sha256": e["sha256"], "id": a.id, "revision": rev}
+        ecrire_json(d / "copie.json", m)
+        sync_dossier(d)
+        with verrou_corbeille():
+            l = corbeille_menage()
+            total = sum(x["taille"] for x in l)
+            for x in reversed(l):                                   # la plus vieille d'abord
+                if total + e["size"] <= CORBEILLE_MAX or time.time() - x["date"] < CORBEILLE_RECENTE:
+                    break
+                retirer(CORBEILLE / x["copie"])
+                total -= x["taille"]
+            if total + e["size"] > CORBEILLE_MAX:
+                raise Echec(T("plus de place dans la corbeille (copies de moins de 10 minutes)",
+                              "no room left in the trash (copies under 10 minutes old)"))
+            final = CORBEILLE / d.name
+            os.rename(d, final)
+            sync_dossier(CORBEILLE)
+        return final, m
     except Echec as x:
         if d:
             retirer(d)
@@ -2005,24 +2090,49 @@ def copier_avant(s, a):
 def cmd_corbeille(a):
     l = corbeille_lire()
     if not a.remettre:
-        evenement(evenement="corbeille", copies=[dict(m, date=int(m["date"])) for m in l])
+        evenement(evenement="corbeille", copies=[{k: m[k] for k in ("copie", "nom", "taille", "remettable")} | {"date": int(m["date"])}
+                                                for m in l])
         if not JSON_SORTIE:
             for m in l:
-                print(f"{m['copie']}  {taille_lisible(m['taille'])}  {propre(m['nom'])}")
+                print(f"{m['copie']}  {taille_lisible(m['taille'])}  {propre(m['nom'])}"
+                      + ("" if m["remettable"] else T("  (à reprendre à la main : ", "  (to take back by hand: ")
+                         + str(CORBEILLE / m["copie"] / "contenu") + ")"))
         return OK
     m = next((m for m in l if m["copie"] == a.remettre), None)
     if not m:
         raise Echec(T("Cette copie n'existe plus (gardée 24 h).", "This copy no longer exists (kept 24 h)."), USAGE)
-    # Les contrôles d'un dépôt (examiner_un, puis le même fichier vérifié à l'envoi). Le dossier est caché (~/.cache) :
-    # rien ne le demande en ligne de commande, et le panneau ne pose « Envoyer quand même » qu'aux fichiers glissés
-    f = CORBEILLE / m["copie"] / m["nom"]
+    d = CORBEILLE / m["copie"]
+    if not m["remettable"]:
+        raise Echec(T(f"« {propre(m['nom'])} » ressemble à un fichier de secrets : il ne se remet pas depuis l'île. La copie "
+                      f"reste 24 h dans {d / 'contenu'}.", f"“{propre(m['nom'])}” looks like a secrets file: it is not put back "
+                      f"from the island. The copy stays 24 h in {d / 'contenu'}."), erreur="sensible")
+    # Les contrôles d'un dépôt (examiner_un, puis le même fichier vérifié à l'envoi), sous le nom d'origine ; le dossier
+    # est caché (~/.cache) : rien ne le demande en ligne de commande, et le panneau ne pose « Envoyer quand même »
+    # qu'aux fichiers glissés
+    f = d / "contenu"
     raison, _, _, st = examiner_un(str(f))
     if raison:
         raise Echec(raison)
-    code = deposer_un(Session(), f, m["parent"], "create", None, False, controle=st)
+    parent = "root" if a.racine else m["parent"]
+    s = Session()
+    try:
+        s.page(parent)
+    except Echec as e:
+        if e.statut == 404:
+            raise Echec(T("Le dossier d'origine n'existe plus : remets-la à la racine.", "The original folder no longer "
+                          "exists: put it back at the root."), erreur="parent_absent") from None
+        raise
+    code = deposer_un(s, f, parent, "create", None, False, controle=st, nom=m["nom"])
     if code == OK:
-        retirer(CORBEILLE / m["copie"])
+        with verrou_corbeille():
+            retirer(d)
     return code
+
+
+def refus_net(e):
+    """Le serveur a refusé net, avant toute suppression : 4xx reçu en entier, sauf 404 et 410 (le fichier n'est peut-être
+    déjà plus là : sa copie est peut-être la seule)."""
+    return e.statut is not None and 400 <= e.statut < 500 and e.statut not in (404, 410) and e.code not in (HORS_LIGNE, SERVEUR_CHANGE)
 
 
 def cmd_supprimer(a):
@@ -2037,18 +2147,37 @@ def cmd_supprimer(a):
         raise Echec(T("--copie : seulement pour un fichier.", "--copie: only for a file."), USAGE)
     s = Session()
     features = capacites_session(s)
-    copie = copier_avant(s, a) if a.copie else None
+    copie = None
+    if a.copie:
+        if features.get("directory_delete") is not True and features.get("file_delete") is not True:
+            raise Echec(T("Ce serveur ne sait pas supprimer.", "This server cannot delete."))
+        # Rejeu : la copie déjà faite pour cette révision sert ; une suppression en attente sans copie : on n'en refait
+        # pas (le fichier a peut-être déjà disparu du serveur), et jamais « copie ratée »
+        deja = next((m for m in corbeille_lire() if m.get("id") == a.id and m.get("revision") == rev), None)
+        attente = any((m.get("demande") or {}).get("id") == a.id for _, m in manifestes(SUPPRESSIONS))
+        if deja:
+            copie = (CORBEILLE / deja["copie"], deja)
+        elif not attente:
+            copie = copier_avant(s, a, entree(s, a.id, a.dossier or "root", features), rev)
+        if copie and not attente:
+            verifier_copie(*copie)                     # juste avant le DELETE : là, intacte, sinon rien
     try:
         return supprimer_sur_serveur(a, s, features, rev, copie)
-    except BaseException:
+    except Echec as e:
+        # La décision se prend ici, AVANT toute écriture sur la sortie (une sortie fermée ne fait rien effacer)
+        if copie and getattr(e, "net", False):
+            with verrou_corbeille():
+                retirer(copie[0])
+            raise
         if copie:
-            retirer(copie[0])
+            raise Echec(f"{e} " + T("Suppression non confirmée : la copie est gardée sur ce PC (24 h).",
+                                    "Deletion not confirmed: the copy is kept on this PC (24 h)."), e.code, e.erreur) from None
         raise
 
 
 def supprimer_sur_serveur(a, s, features, rev, copie):
     # La copie gardée est annoncée avec le résultat : le panneau propose « Annuler » pendant 20 s
-    gardee = {"copie": copie[0].name, "nom": propre(copie[1])} if copie else {}
+    gardee = {"copie": copie[0].name, "nom": propre(copie[1]["nom"])} if copie else {}
     if features.get("directory_delete") is True:
         # DELETE /entries/{id} : fichier ou dossier ; toujours un corps JSON ; un dossier en récursif (même vide) exige
         # l'arbre de l'aperçu (sinon 428)
@@ -2059,7 +2188,9 @@ def supprimer_sur_serveur(a, s, features, rev, copie):
         try:
             r = muter(s, SUPPRESSIONS, demande, "DELETE", "/entries/" + segment(a.id), rev, lambda: corps)
         except Echec as e:
-            raise refus(e, T("L'entrée", "The entry")) from None
+            x = refus(e, T("L'entrée", "The entry"))
+            x.net = refus_net(e)
+            raise x from None
         if r.get("deleted") is not True or r.get("entry_id") != a.id:
             raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
         n = entier_borne(r.get("count"))
@@ -2077,7 +2208,9 @@ def supprimer_sur_serveur(a, s, features, rev, copie):
         r = muter(s, SUPPRESSIONS, {"op": "supprimer", "id": a.id, "revision": rev, "arbre": None}, "DELETE",
                   "/files/" + segment(a.id), rev)
     except Echec as e:
-        raise refus(e, T("Le fichier", "The file")) from None
+        x = refus(e, T("Le fichier", "The file"))
+        x.net = refus_net(e)
+        raise x from None
     if r.get("deleted") is not True:
         raise Echec(T("Suppression non confirmée par le serveur.", "Deletion not confirmed by the server."))
     dire(T("Fichier supprimé." + (" Une copie reste sur ce PC 24 h." if copie else ""),
@@ -3059,6 +3192,7 @@ def analyseur():
     x.set_defaults(f=cmd_supprimer)
     x = sous.add_parser("corbeille", aliases=["trash"])
     x.add_argument("--remettre", metavar="COPIE")
+    x.add_argument("--racine", action="store_true")
     x.set_defaults(f=cmd_corbeille)
     x = sous.add_parser("entree", aliases=["entry"])
     x.add_argument("id")
