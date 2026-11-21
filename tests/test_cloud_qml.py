@@ -29,7 +29,8 @@ echo "$*" >> "@ROOT@/journal"
 for dernier; do :; done      # l'id ou le dossier : toujours le dernier argument, après « -- »
 case "$1" in
   etat) printf '%s\n' '{"evenement": "etat", "etat": {"used_bytes": 1048576, "quota_bytes": 21474836480}, "features": @FEAT@}' ;;
-  lister) if [ "$dernier" = root ]; then cat "@ROOT@/racine.json"; else printf '%s\n' '{"evenement": "page", "entries": [], "next_cursor": null}'; fi ;;
+  lister) if [ "$dernier" = root ]; then cat "@ROOT@/racine.json"; elif [ -f "@ROOT@/sous.json" ]; then cat "@ROOT@/sous.json"
+          else printf '%s\n' '{"evenement": "page", "entries": [], "next_cursor": null}'; fi ;;
   telecharger) case "$*" in *--remplacer*) printf '%s\n' '{"evenement": "resultat", "message": "Téléchargé."}' ;;
                *) printf '%s\n' '{"evenement": "erreur", "code": 6, "message": "note.txt existe déjà."}'; exit 6 ;; esac ;;
   supprimer) case "$*" in *--arbre=@ARBRE1@*) printf '%s\n' '{"evenement": "erreur", "code": 6, "erreur": "tree_changed", "message": "Le dossier a changé."}'; exit 6 ;; esac
@@ -156,7 +157,7 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False):
+    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -171,6 +172,8 @@ class HorsEcran(unittest.TestCase):
             if notifier:
                 H.faux(root, "notify-send")
             (root / "racine.json").write_text(json.dumps(page or PAGE_RACINE) + "\n")
+            if sous:
+                (root / "sous.json").write_text(json.dumps(sous) + "\n")
             if associe:
                 (root / "state/nc-cloud").mkdir(parents=True)
                 (root / "state/nc-cloud/appareil.json").write_text('{"device_id": "d", "name": "pc"}')
@@ -477,6 +480,71 @@ class HorsEcran(unittest.TestCase):
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertEqual(j.count("--json choisir"), 3, j)
+
+    def test_glisser_sur_un_dossier_sur_soi_meme_puis_vers_le_parent(self):
+        sous = {"evenement": "page", "parent": {"id": "dddddddddddddddddddddddddddddddd"}, "next_cursor": None,
+                "entries": [{"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "photo.png", "kind": "file", "size": 3, "revision": "r5", "parent": "dddddddddddddddddddddddddddddddd"}]}
+        j = self.lancer(self.OUVRIR + '''
+            function glisser(de, vers, lacher) {
+                souris.mousePress(de, 60, 20); souris.mouseMove(de, 70, 24); souris.mouseMove(de, 90, 30)
+                souris.mouseMove(vers, 12, 12)
+                if (lacher) souris.mouseRelease(vers, 12, 12)
+            }
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) {
+                    verifier(!vu(corps, "nc-cloud-parent"), "pas de ↑ à la racine")
+                    glisser(trouver(corps, "nc-cloud-entree-ffffffffffffffffffffffffffffffff"), trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), false); etape++; return }
+                if (etape === 2) {
+                    verifier(vu(corps, "nc-cloud-fantome") && trouver(corps, "nc-cloud-fantome").entree.id === "ffffffffffffffffffffffffffffffff", "aperçu sous le pointeur")
+                    verifier(trouver(corps, "nc-cloud-cible-dddddddddddddddddddddddddddddddd").containsDrag, "destination en surbrillance")
+                    verifier(trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd").border.width === 2, "bordure de la destination")
+                    souris.mouseRelease(trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), 12, 12); etape++; return }
+                if (etape === 3) {
+                    verifier(!vu(corps, "nc-cloud-fantome"), "aperçu retiré au lâcher")
+                    glisser(trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), false); etape++; return }
+                if (etape === 4) {
+                    verifier(!trouver(corps, "nc-cloud-cible-dddddddddddddddddddddddddddddddd").containsDrag, "pas de surbrillance sur soi-même")
+                    souris.mouseRelease(trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), 12, 12)
+                    glisser(trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), trouver(corps, "nc-cloud-entree-ffffffffffffffffffffffffffffffff"), false); etape = 40; return }
+                if (etape === 40) {
+                    verifier(!trouver(corps, "nc-cloud-cible-ffffffffffffffffffffffffffffffff").containsDrag, "pas de dépôt sur un fichier")
+                    souris.mouseRelease(trouver(corps, "nc-cloud-entree-ffffffffffffffffffffffffffffffff"), 12, 12)
+                    CloudEtat.deplacerVers(CloudEtat.entrees[1], "root")        // dans son propre dossier : rien
+                    ticks++; if (ticks < 3) return
+                    CloudEtat.aller(CloudEtat.entrees[0]); etape = 5; return }
+                if (etape === 5) {
+                    verifier(CloudEtat.dossier === "dddddddddddddddddddddddddddddddd" && vu(corps, "nc-cloud-parent"), "↑ dans Photos")
+                    glisser(trouver(corps, "nc-cloud-entree-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), trouver(corps, "nc-cloud-parent"), false); etape++; return }
+                if (etape === 6) {
+                    verifier(trouver(corps, "nc-cloud-cible-parent").containsDrag && trouver(corps, "nc-cloud-parent").border.width === 2, "↑ en surbrillance")
+                    souris.mouseRelease(trouver(corps, "nc-cloud-parent"), 12, 12); etape++; return }
+                if (etape === 7) {
+                    verifier(CloudEtat.dossier === "dddddddddddddddddddddddddddddddd", "on reste dans le dossier courant")
+                    CloudEtat.deplacerVers({ id: "dddddddddddddddddddddddddddddddd", name: "Photos", kind: "directory", revision: "r1", parent: "root" }, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")   // dans le chemin
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, features={"entry_move": True, "file_delete": True}, sous=sous)
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre",
+                             "--json deplacer --revision=r9 --vers=dddddddddddddddddddddddddddddddd -- ffffffffffffffffffffffffffffffff", "--json lister -- root",
+                             "--json lister -- dddddddddddddddddddddddddddddddd", "--json deplacer --revision=r5 --vers=root -- aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--json lister -- dddddddddddddddddddddddddddddddd"])
+
+    def test_sans_glisser_sans_entry_move(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem, de = trouver(corps, "nc-cloud-entree-ffffffffffffffffffffffffffffffff"), vers = trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd")
+                if (etape === 1) { souris.mousePress(de, 60, 20); souris.mouseMove(de, 90, 30); souris.mouseMove(vers, 12, 12); etape++; return }
+                verifier(!vu(corps, "nc-cloud-fantome"), "aucun glisser sans entry_move")
+                souris.mouseRelease(vers, 12, 12)
+                CloudEtat.deplacerVers(CloudEtat.entrees[1], "dddddddddddddddddddddddddddddddd")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertNotIn("deplacer", " ".join(j))
 
     def test_sans_suppression_annoncee_aucun_bouton(self):
         j = self.lancer(self.OUVRIR + '''

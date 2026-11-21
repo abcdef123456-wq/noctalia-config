@@ -7,7 +7,8 @@
 // serveur annonce sa capacité. Envoyer : fichiers déposés sur l'île ou « Importer des fichiers… » (le sélecteur du
 // portail), puis « Envoyer ici » ; la liste des envois (progression, conflit, reprise) survit au panneau fermé.
 // Tout vient de CloudEtat.qml (nc-cloud --json) ; rien ne tourne panneau fermé, sauf un envoi lancé. Échap
-// annule la question, le renommage ou le déplacement en cours, sinon ferme. Verre comme Garmin.
+// annule la question, le renommage ou le déplacement en cours, sinon ferme. Une entrée glissée (aperçu sous le pointeur)
+// se dépose sur un dossier de la liste, ou sur ↑ pour la remonter d'un cran sans quitter le dossier. Verre comme Garmin.
 import QtQuick
 import Quickshell
 
@@ -55,6 +56,23 @@ FloatingWindow {
         // Un seul fond, plein, sans arrondi ni contour : Hyprland dessine la bordure et découpe les coins
         Rectangle { anchors.fill: parent; color: Qt.alpha(Couleurs.fond, cloud.verre ? 0.62 : 0.92) }
 
+        // L'aperçu sous le pointeur pendant un glisser (Drag interne au panneau : rien ne sort de la fenêtre)
+        Rectangle {
+            id: fantome
+            objectName: "nc-cloud-fantome"
+            property var entree: null
+            z: 10
+            visible: Drag.active
+            width: Math.min(260, nomFantome.implicitWidth + 50); height: 34; radius: 17
+            color: Couleurs.carteSurvol; border.width: 1; border.color: Couleurs.accent; opacity: 0.94
+            Drag.keys: ["nc-cloud-entree"]
+            Drag.hotSpot.x: 16; Drag.hotSpot.y: 17
+            Ico { x: 12; anchors.verticalCenter: parent.verticalCenter; taille: 16
+                  nom: fantome.entree && fantome.entree.kind === "file" ? "description" : "folder"; color: Couleurs.accent }
+            Texte { id: nomFantome; x: 36; anchors.verticalCenter: parent.verticalCenter; width: Math.min(implicitWidth, 210)
+                    elide: Text.ElideMiddle; text: fantome.entree ? fantome.entree.name : "" }
+        }
+
         Flickable {
             id: defile
             anchors.fill: parent; anchors.margins: 1
@@ -101,10 +119,28 @@ FloatingWindow {
                                      "This PC is not paired: pair it in the settings (⚙, “Pair this PC”).")
                 }
 
-                // Où on est : un bouton par dossier, du cloud au dossier courant
+                // Où on est : un bouton par dossier, du cloud au dossier courant ; ↑ remonte, et reçoit une entrée glissée
                 Flow {
                     visible: cloud.pret
                     width: parent.width; spacing: 6
+                    CloudBouton {
+                        id: parentBouton
+                        objectName: "nc-cloud-parent"
+                        visible: CloudEtat.chemin.length > 1
+                        texte: "↑"
+                        border.width: cibleParent.containsDrag ? 2 : 0; border.color: Couleurs.accent
+                        onClic: CloudEtat.remonter(CloudEtat.chemin.length - 2)
+                        Accessible.name: Reglages.t("Dossier parent", "Parent folder")
+                        DropArea {
+                            id: cibleParent
+                            objectName: "nc-cloud-cible-parent"
+                            anchors.fill: parent
+                            keys: ["nc-cloud-entree"]
+                            readonly property string vers: CloudEtat.chemin.length > 1 ? CloudEtat.chemin[CloudEtat.chemin.length - 2].id : ""
+                            onEntered: drag => { if (!CloudEtat.deposable(fantome.entree, vers)) drag.accepted = false }
+                            onDropped: drop => { if (CloudEtat.deposable(fantome.entree, vers)) { drop.accept(Qt.MoveAction); CloudEtat.deplacerVers(fantome.entree, vers) } }
+                        }
+                    }
                     Repeater {
                         model: cloud.pret ? CloudEtat.chemin : []
                         CloudBouton {
@@ -324,11 +360,37 @@ FloatingWindow {
                             objectName: "nc-cloud-entree-" + modelData.id
                             width: parent.width; height: Math.max(48, colonne.implicitHeight + 16); radius: 14
                             color: choisie || zoneLigne.containsMouse ? Couleurs.carteSurvol : Couleurs.carte
-                            border.width: choisie ? 1 : 0; border.color: Couleurs.accent
-                            // Un clic choisit, un double-clic ouvre ; les actions s'ajoutent SOUS le nom, la ligne ne bouge pas
+                            border.width: cibleLigne.containsDrag ? 2 : (choisie ? 1 : 0); border.color: Couleurs.accent
+                            // Un clic choisit, un double-clic ouvre ; les actions s'ajoutent SOUS le nom, la ligne ne bouge pas.
+                            // Glisser (au-delà du seuil de Qt) : l'aperçu suit le pointeur ; lâché sur un dossier ou sur ↑, on déplace
                             MouseArea { id: zoneLigne; anchors.fill: parent; hoverEnabled: true; z: -1; cursorShape: Qt.PointingHandCursor
+                                        readonly property bool glissable: CloudEtat.peutDeplacer && !!ligne.modelData.revision
+                                                                          && !ligne.renommage && !CloudEtat.deplacement
+                                        drag.target: glissable ? fantome : null
+                                        preventStealing: glissable          // le défilement par la molette reste
+                                        // La MouseArea retient la place de sa cible avant onPressed : l'aperçu est recalé sous le pointeur
+                                        // à chaque mouvement (après le sien)
+                                        function placer(m) { var p = zoneLigne.mapToItem(fantome.parent, m.x, m.y); fantome.x = p.x - 16; fantome.y = p.y - 17 }
+                                        onPressed: m => placer(m)
+                                        onPositionChanged: m => { if (drag.active) placer(m) }
+                                        drag.onActiveChanged: {
+                                            if (drag.active) { fantome.entree = ligne.modelData; fantome.Drag.active = true; return }
+                                            fantome.Drag.drop()
+                                            fantome.Drag.active = false
+                                            fantome.entree = null
+                                        }
                                         onClicked: CloudEtat.choisir(ligne.modelData)
                                         onDoubleClicked: CloudEtat.ouvrirEntree(ligne.modelData) }
+                            DropArea {
+                                id: cibleLigne
+                                objectName: "nc-cloud-cible-" + ligne.modelData.id
+                                anchors.fill: parent
+                                keys: ["nc-cloud-entree"]
+                                enabled: !ligne.fichier
+                                onEntered: drag => { if (!CloudEtat.deposable(fantome.entree, ligne.modelData.id)) drag.accepted = false }
+                                onDropped: drop => { if (CloudEtat.deposable(fantome.entree, ligne.modelData.id)) {
+                                    drop.accept(Qt.MoveAction); CloudEtat.deplacerVers(fantome.entree, ligne.modelData.id) } }
+                            }
                             Ico { id: icoL; x: 14; y: 14; taille: 20
                                   nom: ligne.fichier ? "description" : "folder"; color: ligne.fichier ? Couleurs.texteSec : Couleurs.accent }
                             Column {

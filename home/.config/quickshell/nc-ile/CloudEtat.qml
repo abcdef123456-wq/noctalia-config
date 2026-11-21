@@ -256,14 +256,23 @@ Singleton {
         lancer(["renommer", "--revision=" + e.revision, "--", e.id, nom], "renommer", e.id)
     }
     function commencerDeplacement(e) { if (e && peutDeplacer && e.revision) { deplacement = e; selection = "" } }
-    // « Déplacer ici » : pas dans son propre dossier (rien ne change), ni dans lui-même ou un de ses sous-dossiers
-    readonly property bool deplacementPossible: !!deplacement && dossier !== deplacement.parent
-        && !chemin.some(x => x.id === deplacement.id)
+    // Déplacer e dans le dossier vers (« Déplacer ici », ou glissé sur un dossier de la liste ou sur ↑) : refus local
+    // sur soi-même, dans son propre dossier (rien ne change), ou dans un dossier du chemin qui passe par lui ; le serveur
+    // contrôle le reste. nc-cloud relit la révision du dossier de destination à chaque déplacement, et la page est relue
+    // après : un déplacement vers le parent, puis un autre, part toujours de révisions à jour
+    function deposable(e, vers) {
+        return !!e && peutDeplacer && typeof e.revision === "string" && e.revision !== "" && e.id !== "root"
+            && typeof vers === "string" && vers !== "" && vers !== e.id && vers !== e.parent && !chemin.some(x => x.id === e.id)
+    }
+    function deplacerVers(e, vers) {
+        if (deposable(e, vers)) lancer(["deplacer", "--revision=" + e.revision, "--vers=" + vers, "--", e.id], "deplacer", e.id)
+    }
+    readonly property bool deplacementPossible: deposable(deplacement, dossier)
     function deplacerIci() {
         if (!deplacementPossible) return
         var e = deplacement
         deplacement = null
-        lancer(["deplacer", "--revision=" + e.revision, "--vers=" + dossier, "--", e.id], "deplacer", e.id)
+        deplacerVers(e, dossier)
     }
     // Un dossier : l'aperçu d'abord (ce que la suppression retirerait), la question ensuite ; un fichier : la question directe
     function demanderApercu(e) {

@@ -39,6 +39,9 @@ ramène à un dossier parent.
 - Créer un dossier ou un fichier vide (le champ en haut). Télécharger un fichier dans le dossier Téléchargements
   (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé : le bouton devient « Remplacer ».
 - Renommer, et Déplacer… : on parcourt les dossiers, puis « Déplacer ici » (jamais un dossier dans lui-même).
+- Ou glisse une ligne : un aperçu suit le pointeur ; lâchée sur un dossier de la liste, elle y va ; sur « ↑ » (en tête
+  du chemin), elle remonte dans le dossier parent sans que tu quittes le dossier affiché. La destination s'allume ; sur
+  elle-même, sur un fichier ou dans son propre dossier, rien ne s'allume et rien ne part. Le serveur vérifie le reste.
 - Supprimer… demande d'abord sur la ligne : « suppression définitive, toutes ses versions » ; pour un dossier, d'abord
   l'aperçu (« N fichier(s), M dossier(s), taille »). Si le dossier a changé entre-temps, rien n'est supprimé : nouvel
   aperçu, nouvelle question.
