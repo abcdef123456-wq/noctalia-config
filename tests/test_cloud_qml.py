@@ -28,7 +28,10 @@ echo "$*" >> "@ROOT@/journal"
 [ "$1" = "--json" ] && shift
 for dernier; do :; done      # l'id ou le dossier : toujours le dernier argument, après « -- »
 case "$1" in
-  etat) printf '%s\n' '{"evenement": "etat", "etat": {"used_bytes": 1048576, "quota_bytes": 21474836480}, "features": @FEAT@, "fichiers": @FICHIERS@}' ;;
+  etat) n=$(cat "@ROOT@/etats" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "@ROOT@/etats"
+        if [ -f "@ROOT@/etat-echec-apres" ] && [ "$n" -gt "$(cat "@ROOT@/etat-echec-apres")" ]; then
+          printf '%s\n' '{"evenement": "erreur", "code": 3, "message": "Hors ligne."}'; exit 3; fi
+        printf '%s\n' '{"evenement": "etat", "etat": {"used_bytes": 1048576, "quota_bytes": 21474836480}, "features": @FEAT@, "fichiers": @FICHIERS@}' ;;
   lister) if [ "$dernier" = root ]; then cat "@ROOT@/racine.json"; elif [ -f "@ROOT@/sous.json" ]; then cat "@ROOT@/sous.json"
           else printf '%s\n' '{"evenement": "page", "entries": [], "next_cursor": null}'; fi ;;
   telecharger) case "$*" in *--remplacer*) printf '%s\n' '{"evenement": "resultat", "message": "Téléchargé."}' ;;
@@ -175,7 +178,8 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False):
+    def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False,
+               etat_echec_apres=None):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
@@ -195,6 +199,8 @@ class HorsEcran(unittest.TestCase):
                 (root / "sous.json").write_text(json.dumps(sous) + "\n")
             if recents is not None:
                 (root / "recents.json").write_text(json.dumps(recents))
+            if etat_echec_apres is not None:
+                (root / "etat-echec-apres").write_text(str(etat_echec_apres))
             if associe:
                 (root / "state/nc-cloud").mkdir(parents=True)
                 (root / "state/nc-cloud/appareil.json").write_text('{"device_id": "d", "name": "pc"}')
@@ -594,6 +600,31 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(j[i + 1], "--json recents")                                   # relue après l'ouverture
         self.assertIn("--json recents --effacer", j)
         self.assertFalse([x for x in j if "piège" in x or "--json ouvrir --dossier=../" in x])
+
+    def test_quota_pour_le_centre_une_fois_par_10_minutes_et_hors_ligne(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (!CloudEtat.associe) return
+                if (etape === 0) { CloudEtat.lireQuota(); CloudEtat.lireQuota(); etape++; return }
+                if (etape === 1) {
+                    if (CloudEtat.quotaTexte === "") return
+                    verifier(CloudEtat.quotaTexte === "1 Mo sur 20 Go" && !CloudEtat.quotaVieux, "quota : " + CloudEtat.quotaTexte)
+                    CloudEtat.lireQuota()                                     // moins de 10 minutes : rien n'est relu
+                    etape = 10; return }
+                if (etape === 10) {
+                    ticks++; if (ticks < 4) return
+                    verifier(!CloudEtat.quotaVieux, "relu avant 10 minutes (le serveur, coupé, aurait échoué)")
+                    // 10 minutes plus tard, et le serveur injoignable : la dernière valeur reste, marquée vieille
+                    CloudEtat.quotaEssai = Date.now() - 600001; CloudEtat.lireQuota()
+                    etape = 2; return }
+                if (etape === 2 && CloudEtat.quotaVieux) {
+                    verifier(CloudEtat.quotaTexte === "1 Mo sur 20 Go", "dernière valeur gardée")
+                    CloudEtat.noterQuota({ used_bytes: 2 * 1048576, quota_bytes: 21474836480 })     // le panneau relit l'état
+                    verifier(!CloudEtat.quotaVieux && CloudEtat.quotaTexte === "2 Mo sur 20 Go", "de nouveau à jour")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, voir_recents=True, etat_echec_apres=1)
+        self.assertEqual(j.count("--json etat"), 2, j)
 
     def test_recents_eteints_sans_cloud(self):
         j = self.lancer(self.OUVRIR + '''

@@ -53,6 +53,27 @@ Singleton {
     property var recus: []                         // chemins locaux reçus, 8 au plus : rien ne part avant « Envoyer ici »
     property string recusRefus: ""                 // ce qui a été écarté (pas un fichier local, au-delà de 8)
     property var recents: []                       // les 5 derniers fichiers envoyés ou ouverts par CE PC (nc-cloud recents, local)
+    // Place utilisée, pour le centre de contrôle : lue SEULEMENT à son ouverture, au plus une fois par 10 minutes (gardée
+    // en mémoire) ; aussi notée quand le panneau lit l'état. Hors ligne : la dernière valeur, marquée vieille
+    property var quota: null
+    property real quotaEssai: 0
+    property bool quotaVieux: false
+    readonly property string quotaTexte: quota ? tailleCourte(quota.utilise) + Reglages.t(" sur ", " of ") + tailleCourte(quota.total) : ""
+    function tailleCourte(n) {
+        var u = ["o", "Ko", "Mo", "Go", "To"], i = 0
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
+        return String(i === 0 || n >= 10 ? Math.round(n) : Math.round(n * 10) / 10).replace(".", Reglages.t(",", ".")) + " " + u[i]
+    }
+    function noterQuota(e) {
+        if (e && typeof e.used_bytes === "number" && typeof e.quota_bytes === "number" && e.used_bytes >= 0 && e.quota_bytes > 0) {
+            quota = { utilise: e.used_bytes, total: e.quota_bytes }; quotaVieux = false
+        }
+    }
+    function lireQuota() {
+        if (!actif || !associe || Date.now() - quotaEssai < 600000) return
+        quotaEssai = Date.now()
+        procQuota.running = true
+    }
     property var examen: ({})                      // chemin -> {taille, cache, refus} : nc-cloud examiner, avant « Envoyer ici »
     readonly property bool examenPret: recus.length > 0 && recus.every(f => examen[f] !== undefined)
     readonly property bool recusCaches: recus.some(f => examen[f] && examen[f].cache && !examen[f].refus)
@@ -355,7 +376,7 @@ Singleton {
         try { d = JSON.parse(texte) } catch (x) { return }
         if (!d || typeof d !== "object") return
         var q = enCours ? enCours.quoi : ""
-        if (d.evenement === "etat") { etat = d.etat || ({}); features = d.features || ({}); fichiersPossible = d.fichiers === true }
+        if (d.evenement === "etat") { etat = d.etat || ({}); features = d.features || ({}); fichiersPossible = d.fichiers === true; noterQuota(d.etat) }
         else if (d.evenement === "page") {
             // Seuls les ids sûrs (root ou 32 hex) : un id qui commencerait par un tiret serait lu comme une option
             var l = Array.isArray(d.entries) ? d.entries.filter(x => x && typeof x.id === "string" && /^(root|[0-9a-f]{32})$/.test(x.id)
@@ -414,6 +435,18 @@ Singleton {
         id: procEnvoi
         stdout: SplitParser { onRead: data => c.ligneEnvoi(data) }
         onExited: code => c.finLot(code)
+    }
+    Process {
+        id: procQuota
+        property bool lu: false
+        command: [c.bin + "nc-cloud", "--json", "etat"]
+        onStarted: lu = false
+        stdout: SplitParser { onRead: data => {
+            var d
+            try { d = JSON.parse(data) } catch (x) { return }
+            if (d && d.evenement === "etat") { c.noterQuota(d.etat); procQuota.lu = true }
+        } }
+        onExited: code => { if (code !== 0 || !lu) c.quotaVieux = true }
     }
     Process {
         id: procNote

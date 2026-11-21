@@ -108,6 +108,13 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 Tout passe par `nc-cloud --json` ; panneau fermé, rien ne tourne, sauf un envoi lancé. Sans DEST, `nc-cloud telecharger ID` utilise aussi ce
 dossier Téléchargements.
 
+### Place utilisée, dans le centre de contrôle
+
+Le centre de contrôle de l'île a un module « Cloud » : la place utilisée sur le quota (« 1 Mo sur 20 Go »). Il
+n'existe qu'avec Cloud JARVIS actif et ce PC associé. La valeur est demandée à l'ouverture du centre, au plus une fois
+par 10 minutes, et gardée en mémoire ; île fermée, rien n'est demandé. Hors ligne, la dernière valeur reste, en gris.
+Un clic ouvre le panneau. Comme les autres modules, il se masque et se déplace (le crayon).
+
 ### Récents
 
 En haut du panneau, « Récents » montre les 5 derniers fichiers que CE PC a envoyés ou ouverts ; un clic en ouvre un.

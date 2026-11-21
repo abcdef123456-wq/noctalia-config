@@ -16,7 +16,7 @@ BIN = REPO / "home/.local/bin"
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Centre(unittest.TestCase):
-    def executer(self, scenario, memo=None):
+    def executer(self, scenario, memo=None, cloud=False):
         with tempfile.TemporaryDirectory(prefix="nc-centre-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -30,6 +30,11 @@ class Centre(unittest.TestCase):
             for nom in ("Centre.qml", "Connexion.qml", "Memo.qml", "Module.qml", "Rond.qml", "Glissiere.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: false; readonly property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d}}')
+            # Faux CloudEtat : éteint par défaut (aucun module Cloud) ; il compte les lectures du quota et les ouvertures
+            (root / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool actif: %s; property bool associe: %s; '
+                                                'property string quotaTexte: ""; property bool quotaVieux: false; property int lectures: 0; '
+                                                'property int ouvertures: 0; function lireQuota() { lectures++; quotaTexte = "1 Mo sur 20 Go" } '
+                                                'function ouvrirPanneau() { ouvertures++ }}' % (("true", "true") if cloud else ("true", "false")))
             (root / "Notifs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool concentration: false; function basculerConcentration(){concentration=!concentration}}')
             (root / "Etat.qml").write_text(textwrap.dedent('''\
                 pragma Singleton
@@ -66,8 +71,9 @@ class Centre(unittest.TestCase):
                     function annoncerHauteur(nom, h) { var t = Object.assign({}, hauteurs); t[nom] = Math.round(h); hauteurs = t }
                 }'''))
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("Memo", "Couleurs", "Reglages", "Etat", "Notifs", "Connexion") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Centre", "Connexion", "Memo", "Module", "Rond", "Glissiere", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Notifs")))
+                ("singleton " if n in ("Memo", "Couleurs", "Reglages", "Etat", "Notifs", "Connexion", "CloudEtat") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("Centre", "Connexion", "Memo", "Module", "Rond", "Glissiere", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Notifs",
+                          "CloudEtat")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window
@@ -141,7 +147,7 @@ if (etape === 1) {
     verifier(page.masques.length === 0 && page.ordre.join() === page.defaut.join(), "réinitialiser")
     cliquer("nc-centre-energie-monter"); etapeSuivante()
 } else if (etape === 6) {
-    verifier(page.ordre.join() === "connexions,musique,nuit,jeu,luminosite,energie,volume,ia", "monter : " + page.ordre.join())
+    verifier(page.ordre.join() === "connexions,musique,nuit,jeu,luminosite,energie,volume,ia,cloud", "monter : " + page.ordre.join())
     verifier(pos("nc-centre-ia") === "180,436,168,78", "la pastille IA à côté de la glissière : " + pos("nc-centre-ia"))
     verifier(pos("nc-centre-energie") === "0,360,400,64" && pos("nc-centre-volume") === "0,436,168,168", "bandeau remonté, glissière seule étroite : " + pos("nc-centre-volume"))
     cliquer("nc-centre-energie-monter"); etapeSuivante()
@@ -151,7 +157,7 @@ if (etape === 1) {
     cliquer("nc-centre-terminer"); verifier(!page.edition, "Terminer"); etapeSuivante()
 } else if (etape === 9 && Memo.enAttente === 0 && Memo.courant === null) { Qt.quit() }
 ''' % json.dumps(self.DEFAUT))
-        self.assertEqual(memo, {"ordre": ["connexions", "musique", "nuit", "jeu", "energie", "luminosite", "volume", "ia"], "masques": ["jeu"]})
+        self.assertEqual(memo, {"ordre": ["connexions", "musique", "nuit", "jeu", "energie", "luminosite", "volume", "ia", "cloud"], "masques": ["jeu"]})
 
     def test_largeur_reelle_de_l_ile(self):
         # Dans l'île, la page fait 378 points (432 moins les marges et les points de navigation) : même disposition qu'avant
@@ -169,19 +175,40 @@ Qt.quit()
 if (etape === 0) { creer(); etape++; return }
 if (!page.pret) return
 if (etape === 1) {
-    verifier(page.ordre.join() === "energie,connexions,musique,nuit,jeu,luminosite,volume,ia" && page.masques.join() === "jeu,volume", "disposition non relue : " + page.ordre.join() + " / " + page.masques.join())
+    verifier(page.ordre.join() === "energie,connexions,musique,nuit,jeu,luminosite,volume,ia,cloud" && page.masques.join() === "jeu,volume", "disposition non relue : " + page.ordre.join() + " / " + page.masques.join())
     verifier(pos("nc-centre-energie") === "0,0,400,64" && pos("nc-centre-connexions") === "0,76,168,168" && pos("nc-centre-musique") === "180,76,220,168", "bandeau en premier : " + pos("nc-centre-connexions"))
     verifier(pos("nc-centre-nuit") === "0,256,168,78" && pos("nc-centre-luminosite") === "180,256,168,168", "nuit seule, glissière seule étroite : " + pos("nc-centre-luminosite"))
     page.editer(true); verifier(page.activeFocus && page.choix === 0, "focus clavier")
     clavier.keyClick(Qt.Key_Down); verifier(page.choix === 1 && page.visibles[1] === "connexions", "flèche bas")
-    clavier.keyClick(Qt.Key_Down, Qt.ShiftModifier); verifier(page.ordre.join() === "energie,musique,connexions,nuit,jeu,luminosite,volume,ia" && page.choix === 2, "Maj + bas : " + page.ordre.join())
+    clavier.keyClick(Qt.Key_Down, Qt.ShiftModifier); verifier(page.ordre.join() === "energie,musique,connexions,nuit,jeu,luminosite,volume,ia,cloud" && page.choix === 2, "Maj + bas : " + page.ordre.join())
     clavier.keyClick(Qt.Key_Space); verifier(page.masques.join() === "jeu,volume,connexions", "Espace masque : " + page.masques.join())
     clavier.keyClick(Qt.Key_Up); clavier.keyClick(Qt.Key_Up); clavier.keyClick(Qt.Key_Up); verifier(page.choix === 0, "flèche haut bornée")
     clavier.keyClick(Qt.Key_Escape); verifier(!page.edition, "Échap termine")
     etape++
 } else if (etape === 2 && Memo.enAttente === 0 && Memo.courant === null) { Qt.quit() }
 ''', memo={"ordre": ["energie", "connexions", "musique", "nuit", "jeu", "luminosite", "volume", "inconnu"], "masques": ["jeu", "volume", "inconnu"]})
-        self.assertEqual(memo, {"ordre": ["energie", "musique", "connexions", "nuit", "jeu", "luminosite", "volume", "ia"], "masques": ["jeu", "volume", "connexions"]})
+        self.assertEqual(memo, {"ordre": ["energie", "musique", "connexions", "nuit", "jeu", "luminosite", "volume", "ia", "cloud"], "masques": ["jeu", "volume", "connexions"]})
+
+    def test_module_cloud_seulement_cloud_actif_et_associe(self):
+        # Allumé et associé : la pastille, le quota lu UNE fois à l'ouverture, un clic ouvre le panneau
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!page.pret) return
+verifier(pos("nc-centre-cloud") === "0,526,168,78", "pastille Cloud, sous celle de l'IA : " + pos("nc-centre-cloud"))
+verifier(CloudEtat.lectures === 1, "quota lu à l'ouverture : " + CloudEtat.lectures)
+var pastille = trouver(page, "nc-centre-cloud").children[0].item
+verifier(pastille.sous === "1 Mo sur 20 Go", "quota affiché : " + pastille.sous)
+pastille.clic(); verifier(CloudEtat.ouvertures === 1, "un clic ouvre le panneau")
+Qt.quit()
+''', cloud=True)
+        # Éteint ou non associé : ni module, ni quota lu, ni entrée dans les masqués (même masqué dans le fichier)
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!page.pret) return
+verifier(trouver(page, "nc-centre-cloud") === null && CloudEtat.lectures === 0, "rien sans le cloud")
+page.editer(true); verifier(trouver(page, "nc-centre-masque-cloud") === null, "pas dans les masqués")
+Qt.quit()
+''', memo={"ordre": ["connexions"], "masques": ["cloud"]})
 
     def test_tout_masque_dans_le_fichier_est_repare(self):
         memo = self.executer('''

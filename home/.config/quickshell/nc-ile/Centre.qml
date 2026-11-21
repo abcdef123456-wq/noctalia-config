@@ -1,6 +1,7 @@
 // Centre de contrôle de l'île (île ouverte), dans le langage du Centre de contrôle d'iOS.
 // Appui long (ou clic droit) sur Wi-Fi, Bluetooth ou le volume : page de détails.
-// Modules : connexions, musique, nuit, jeu, luminosité, volume, énergie. Le crayon (en haut à droite) ouvre le mode
+// Modules : connexions, musique, nuit, jeu, luminosité, volume, énergie, IA, et Cloud (seulement avec CLOUD_JARVIS=oui
+// et ce PC associé : la place utilisée, lue par nc-cloud etat à l'ouverture, au plus une fois par 10 minutes). Le crayon (en haut à droite) ouvre le mode
 // édition : œil pour masquer ou remontrer un module, flèches pour le monter ou le descendre, « Réinitialiser »,
 // « Terminer » ; au moins un module reste visible. Clavier en édition : ↑ ↓ choisir, Maj + ↑ ↓ déplacer, Espace ou
 // Entrée masquer / montrer, Échap terminer. L'ordre et les modules masqués sont gardés (Memo « centre ») ; la
@@ -36,12 +37,17 @@ Item {
         luminosite: { nom: Reglages.t("Luminosité", "Brightness"), icone: "light_mode", forme: "flex", maxi: 168 },
         volume: { nom: "Volume", icone: "volume_up", forme: "flex", maxi: 168 },
         energie: { nom: Reglages.t("Énergie", "Power"), icone: "bolt", forme: "bande" },
-        ia: { nom: Reglages.t("IA", "AI"), icone: "auto_awesome", forme: "petit" }
+        ia: { nom: Reglages.t("IA", "AI"), icone: "auto_awesome", forme: "petit" },
+        cloud: { nom: "Cloud", icone: "cloud", forme: "petit" }
     })
-    readonly property var defaut: ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie", "ia"]
+    readonly property var defaut: ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie", "ia", "cloud"]
+    // Cloud éteint (CLOUD_JARVIS=non ou PC non associé) : ni module, ni entrée dans les masqués
+    readonly property bool cloudPossible: CloudEtat.actif && CloudEtat.associe
+    readonly property var masquesMontres: masques.filter(id => id !== "cloud" || cloudPossible)
     property var ordre: defaut
     property var masques: []
-    readonly property var visibles: ordre.filter(id => masques.indexOf(id) < 0 && !(id === "energie" && Etat.profilsAbsents))
+    readonly property var visibles: ordre.filter(id => masques.indexOf(id) < 0 && !(id === "energie" && Etat.profilsAbsents)
+                                                  && !(id === "cloud" && !cloudPossible))
     property bool edition: false
     property int choix: 0                        // module choisi au clavier, en édition
     property bool pret: false                    // disposition gardée relue
@@ -192,7 +198,7 @@ Item {
                 Behavior on y { enabled: centre.pret; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                 Loader {
                     anchors.fill: parent
-                    sourceComponent: ({ connexions: cConnexions, musique: cMusique, nuit: cNuit, jeu: cJeu, luminosite: cLuminosite, volume: cVolume, energie: cEnergie, ia: cIA })[case_.identifiant]
+                    sourceComponent: ({ connexions: cConnexions, musique: cMusique, nuit: cNuit, jeu: cJeu, luminosite: cLuminosite, volume: cVolume, energie: cEnergie, ia: cIA, cloud: cCloud })[case_.identifiant]
                 }
                 // Mode édition : voile, nom, œil et flèches ; le module en dessous ne réagit plus
                 Rectangle {
@@ -252,10 +258,10 @@ Item {
         visible: centre.edition
         Flow {
             width: parent.width; spacing: 6
-            visible: centre.masques.length > 0
+            visible: centre.masquesMontres.length > 0
             Texte { text: Reglages.t("Masqués :", "Hidden:"); secondaire: true; font.pixelSize: 12; height: 28; verticalAlignment: Text.AlignVCenter }
             Repeater {
-                model: centre.masques
+                model: centre.masquesMontres
                 Rectangle {
                     id: masque
                     required property string modelData
@@ -450,6 +456,18 @@ Item {
                 if (Reglages.iaCoupee) Memo.lire("ia-avant", v => Etat.faire([bin, "set", "IA_MODE", v && (v.mode === "manuel" || v.mode === "auto") ? v.mode : "auto"]))
                 else { Memo.ecrire("ia-avant", { mode: Reglages.val("IA_MODE", "auto") }); Etat.faire([bin, "set", "IA_MODE", "non"]) }
             }
+        }
+    }
+    // Cloud JARVIS : la place utilisée, demandée à l'ouverture du centre (au plus une fois par 10 minutes) ; hors ligne,
+    // la dernière valeur connue en gris ; un clic ouvre le panneau
+    Component {
+        id: cCloud
+        Pastille {
+            icone: "cloud"; titre: "Cloud"; couleur: Couleurs.accent
+            actif: CloudEtat.quotaTexte !== "" && !CloudEtat.quotaVieux
+            sous: CloudEtat.quotaTexte || (CloudEtat.quotaVieux ? Reglages.t("Hors ligne", "Offline") : "…")
+            Component.onCompleted: CloudEtat.lireQuota()
+            onClic: CloudEtat.ouvrirPanneau()
         }
     }
     Component {
