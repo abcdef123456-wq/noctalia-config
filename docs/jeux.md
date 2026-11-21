@@ -10,6 +10,27 @@ Dans Steam : clic droit sur le jeu, Propriétés, Options de lancement :
 
 `gamemoderun` démarre gamemode, `mangohud` affiche les images par seconde et les températures.
 
+## Écran externe : le jeu démarre aux dimensions de ton écran
+
+Un jeu X11 ou Proton démarre aux dimensions de l'écran « primaire » de XWayland. noctalia-config le fait suivre l'écran
+où tu es (`nc-xwayland-primaire`, appelé par `nc/ecrans.lua`) : quand l'écran actif change, qu'un écran est branché ou
+débranché, ou que Steam ou un jeu s'ouvre. Rien avec un seul écran, aucun relevé en fond, et XWayland n'est jamais
+démarré pour ça. Il faut `xrandr` (installé avec Steam là où son paquet est vérifié ; sinon `nc-diag` le dit).
+
+Limite connue : un jeu X11 lancé hors de Steam alors qu'aucune appli X11 ne tournait encore n'est corrigé qu'à son
+second lancement (XWayland n'existait pas avant lui).
+
+Jeux en plein écran : nc-reglages → Fenêtres, `JEUX_PLEIN_ECRAN` (non par défaut). À oui, les fenêtres de jeux s'ouvrent
+en plein écran.
+
+## Manettes (Bluetooth, USB)
+
+Pour qu'un jeu voie une manette (DualSense, Xbox…), surtout avec Steam en Flatpak, il faut les règles udev des manettes
+de Steam. Si Steam est là (paquet ou Flatpak), `install.sh` les installe là où le paquet est vérifié et dans un dépôt
+activé par défaut : `steam-devices` sur Debian 13, Fedora et openSUSE Tumbleweed. Sur Arch, le paquet `steam` les porte
+déjà ; avec Steam en Flatpak, `steam-devices` est dans le dépôt multilib, à activer toi-même. `nc-diag` dit ce qui manque.
+Après l'installation, rebranche la manette.
+
 ## Ce qui est installé
 
 - `~/.config/gamemode.ini` : fourni seulement s'il n'existe pas. S'il existe, install.sh le sauvegarde puis ajoute `start=` et `end=` dans `[custom]` sans toucher au reste. Un `start=` ou `end=` déjà écrit par vous n'est jamais remplacé.

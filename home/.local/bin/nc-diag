@@ -572,6 +572,7 @@ def verifier(b):
                    f"Wi-Fi ({carte}) responsive (no sleep between packets)"))
 
     bluetooth_appel(b)
+    jeux_steam(b)
 
     # ── Outils ──
     b.titre(T("Outils utilisés par la config", "Tools used by the config"))
@@ -747,6 +748,66 @@ def bluetooth_appel(b):
                   "to avoid it: echo 'options btusb enable_autosuspend=n' | sudo tee /etc/modprobe.d/nc-btusb.conf "
                   "then reboot (never applied automatically)"),
                 cle="bt_mediatek_autosuspend")
+
+
+# Jeux (Steam) : règles udev des manettes, et xrandr pour l'écran primaire de XWayland (nc-xwayland-primaire). Rien
+# sans Steam. Le paquet n'est nommé que là où son nom et son dépôt sont vérifiés (dépôt activé par défaut, sauf multilib
+# d'Arch, dit tel quel) ; ailleurs, un conseil sans nom de paquet.
+RACINE = os.environ.get("NC_DIAG_RACINE", "/")      # les tests y mettent un faux système (udev, flatpak, os-release)
+REGLES_UDEV = ("usr/lib/udev/rules.d", "lib/udev/rules.d", "etc/udev/rules.d")
+PAQUETS_JEUX = {     # distribution vérifiée : (comment avoir les règles des manettes, paquet de xrandr)
+    "arch": (("active le dépôt multilib, puis : sudo pacman -S steam-devices", "enable the multilib repository, then: sudo pacman -S steam-devices"), "xorg-xrandr"),
+    "debian:trixie": (("sudo apt install steam-devices", "sudo apt install steam-devices"), "x11-xserver-utils"),
+    "fedora": (("sudo dnf install steam-devices", "sudo dnf install steam-devices"), "xrandr"),
+    "opensuse-tumbleweed": (("sudo zypper install steam-devices", "sudo zypper install steam-devices"), "xrandr"),
+}
+
+
+def _distribution_jeux():
+    osr = {}
+    try:
+        for l in open(os.path.join(RACINE, "etc/os-release")):
+            k, _, v = l.strip().partition("=")
+            osr[k] = v.strip('"')
+    except OSError:
+        pass
+    i = osr.get("ID", "")
+    return PAQUETS_JEUX.get(f"{i}:{osr.get('VERSION_CODENAME', '')}" if i == "debian" else i)
+
+
+def steam_present():
+    return a("steam") or any(os.path.isdir(d) for d in (os.path.join(RACINE, "var/lib/flatpak/app/com.valvesoftware.Steam"),
+                                                         os.path.join(HOME, ".local/share/flatpak/app/com.valvesoftware.Steam")))
+
+
+def regles_manettes():
+    return any(glob.glob(os.path.join(RACINE, d, "*steam*input*.rules")) for d in REGLES_UDEV)
+
+
+def jeux_steam(b):
+    if not steam_present():
+        return
+    b.titre(T("Jeux (Steam)", "Games (Steam)"))
+    paquets = _distribution_jeux()
+    if regles_manettes():
+        b.ok(T("règles des manettes de Steam installées", "Steam controller rules installed"))
+    else:
+        b.avert(T("règles udev des manettes de Steam absentes : une manette (Bluetooth ou USB) peut ne pas être vue par les jeux",
+                  "Steam controller udev rules missing: a controller (Bluetooth or USB) may not be seen by games"),
+                T(paquets[0][0], paquets[0][1]) if paquets else
+                T("installe les règles udev des manettes Steam de ta distribution", "install your distribution's Steam controller udev rules"),
+                cle="steam_manettes")
+    if not a("xrandr"):
+        try:
+            ecrans = [m for m in json.loads(sortie(["hyprctl", "monitors", "-j"])[0] or "[]")
+                      if not str(m.get("name", "")).startswith(("HEADLESS", "FALLBACK"))]
+        except (ValueError, AttributeError):
+            ecrans = []
+        if len(ecrans) >= 2:
+            b.avert(T("xrandr absent : un jeu peut démarrer aux dimensions d'un autre écran que le tien",
+                      "xrandr missing: a game may start at the size of another screen than yours"),
+                    T(f"installe le paquet {paquets[1]}", f"install the {paquets[1]} package") if paquets else
+                    T("installe xrandr", "install xrandr"), cle="steam_xrandr")
 
 
 def outils_polices(b, outils):

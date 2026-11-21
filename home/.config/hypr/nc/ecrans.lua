@@ -337,7 +337,7 @@ hl.on("workspace.active", function() primaire_suivre(false) end)
 hl.on("window.active", function() primaire_suivre(false) end)
 -- Steam ou un jeu s'ouvre : Xwayland vient peut-être de démarrer (le script dédoublonne par Xwayland)
 hl.on("window.open", function(w)
-    local c = w and tostring(w.class or "") or ""
+    local c = w and tostring(w.class or ""):lower() or ""        -- « steam » ou « Steam » selon les versions
     if c == "steam" or c == "gamescope" or c:match("^steam_app_") or c:match("%.exe$") then primaire_suivre(true) end
 end)
 -- ── fin du primaire de XWayland

@@ -1341,6 +1341,27 @@ elif [ "$MODE" != files ]; then
     for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "$(t "installé : $p" "installed: $p")" || failed+=("$p"); done
     [ ${#failed[@]} -eq 0 ] && ok "$(t "Paquets installés." "Packages installed.")" || warn "$(t "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}" "Not installed (different name, or missing on your distribution): ${failed[*]}")"
   fi
+  # Jeux (Steam présent : paquet ou Flatpak) : règles udev des manettes (steam-devices) et xrandr (écran primaire de
+  # XWayland, nc-xwayland-primaire), seulement là où le nom et le dépôt sont vérifiés, dépôt activé par défaut :
+  # Debian 13 (main), Fedora, openSUSE Tumbleweed (oss) ; Arch : xorg-xrandr seulement (steam-devices est dans multilib,
+  # et le paquet steam porte déjà les règles). Ailleurs, nc-diag le dit. REGLES_UDEV : les dossiers de règles (les tests)
+  if have steam || [ -d /var/lib/flatpak/app/com.valvesoftware.Steam ] || [ -d "$HOME/.local/share/flatpak/app/com.valvesoftware.Steam" ]; then
+    jeux=(); manettes_ok=0
+    for d in ${REGLES_UDEV:-/usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d}; do
+      for f in "$d"/*steam*input*.rules; do [ -e "$f" ] && manettes_ok=1; done
+    done
+    case "$FAMILY:$OSID:${OSCODE:-}" in
+      debian:debian:trixie)   [ "$manettes_ok" = 1 ] || jeux+=(steam-devices); have xrandr || jeux+=(x11-xserver-utils) ;;
+      fedora:fedora:*)        [ "$manettes_ok" = 1 ] || jeux+=(steam-devices); have xrandr || jeux+=(xrandr) ;;
+      suse:opensuse-tumbleweed:*) [ "$manettes_ok" = 1 ] || jeux+=(steam-devices); have xrandr || jeux+=(xrandr) ;;
+      arch:arch:*)            have xrandr || jeux+=(xorg-xrandr) ;;
+    esac
+    if [ ${#jeux[@]} -gt 0 ]; then
+      info "$(t "Steam : ${jeux[*]} (manettes et écran des jeux)" "Steam: ${jeux[*]} (controllers and game screen)")"
+      if pkg_install "${jeux[@]}"; then ok "$(t "Installé : ${jeux[*]} (rebranche la manette)." "Installed: ${jeux[*]} (reconnect the controller).")"
+      else warn "$(t "Non installé : ${jeux[*]} (nc-diag dit quoi faire)." "Not installed: ${jeux[*]} (nc-diag says what to do).")"; fi
+    fi
+  fi
   case " ${manual[*]} " in
     *" nerdfont "*) fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font" >/dev/null ||
                       info "$(t "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." "The terminal font (CaskaydiaCove Nerd Font) will be offered for download in step 3.")" ;;

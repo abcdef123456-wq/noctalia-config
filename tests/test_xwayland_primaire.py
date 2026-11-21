@@ -151,8 +151,8 @@ feu("monitor.added", {}); voir(n() == 3, "écran branché : reposé (le script d
 feu("monitor.removed", {}); voir(n() == 4, "écran débranché : reposé")
 feu("hyprland.start", {}); voir(n() == 5, "démarrage")
 feu("window.open", { class = "firefox" }); voir(n() == 5, "une fenêtre ordinaire : rien")
-for _, c in ipairs({ "steam", "steam_app_1091500", "gamescope", "Game.exe" }) do feu("window.open", { class = c }) end
-voir(n() == 9, "Steam ou un jeu s'ouvre : appelé")
+for _, c in ipairs({ "steam", "Steam", "steam_app_1091500", "gamescope", "Game.exe", "GAME.EXE" }) do feu("window.open", { class = c }) end
+voir(n() == 11, "Steam ou un jeu s'ouvre (quelle que soit la casse) : appelé")
 ''')
 
     def test_un_seul_ecran_ou_nom_refuse_rien(self):
