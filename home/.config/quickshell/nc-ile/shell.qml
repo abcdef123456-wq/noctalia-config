@@ -13,7 +13,7 @@
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
 //   qs -c nc-ile ipc call ile garmin       panneau Santé Garmin : batterie, sommeil, stress, pas (Super + Alt + S, nc-garmin)
-//   qs -c nc-ile ipc call ile cloud        panneau Cloud JARVIS : parcourir, télécharger (nc-cloud fenetre, CLOUD_JARVIS=oui)
+//   qs -c nc-ile ipc call ile cloud        panneau Cloud JARVIS : parcourir, télécharger (Super + Alt + C, nc-cloud fenetre, CLOUD_JARVIS=oui)
 //   qs -c nc-ile ipc call ile aimant ZONE X Y W H   aperçu d'aimantation pendant un glisser (nc/raccourcis.lua) ; ZONE "" l'efface
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick

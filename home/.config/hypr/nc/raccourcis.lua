@@ -128,6 +128,11 @@ if nc.reglage("GARMIN_ACTIF", "non") == "oui" then
     touche(SUPER .. " + ALT + code:39", cmd("qs -c nc-ile ipc call ile garmin"),
         trad("Applis et barre|Santé Garmin (île)", "Garmin health (island)"))
 end
+-- Panneau Cloud JARVIS de l'île, seulement si le Cloud JARVIS est activé ; coupé ensuite, l'île n'ouvre rien (ouvrirCloud)
+if nc.reglage("CLOUD_JARVIS", "non") == "oui" then
+    touche(SUPER .. " + ALT + code:54", cmd("qs -c nc-ile ipc call ile cloud"),
+        trad("Applis et barre|Cloud JARVIS : tes fichiers sur ton serveur (île)", "JARVIS Cloud: your files on your server (island)"))
+end
 -- La fiche éditable de l'île Quickshell ; sans elle (île de secours, Quickshell absent), celle de Noctalia
 touche(SUPER .. " + code:61", cmd([[sh -c 'qs -c nc-ile ipc call ile fiche >/dev/null 2>&1 || exec ~/.local/bin/nc-shell-msg keys']]),
     trad("Applis et barre|Afficher cette fiche (Modifier : changer, ajouter)", "Show this cheat sheet (Edit: change, add)"))
