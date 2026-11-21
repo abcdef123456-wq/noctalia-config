@@ -216,8 +216,35 @@ FloatingWindow {
                         Texte {
                             objectName: "nc-cloud-recus-liste"
                             width: parent.width; wrapMode: Text.Wrap
-                            text: Reglages.t(CloudEtat.recus.length + " fichier(s) à envoyer : ", CloudEtat.recus.length + " file(s) to upload: ")
-                                  + CloudEtat.recus.map(f => f.slice(f.lastIndexOf("/") + 1)).join(", ")
+                            text: Reglages.t(CloudEtat.recus.length + " fichier(s) reçu(s) :", CloudEtat.recus.length + " file(s) received:")
+                        }
+                        // Chaque fichier : son chemin complet (texte brut, coupé au milieu) et sa taille ; caché en orange, protégé en rouge
+                        Repeater {
+                            model: CloudEtat.recus
+                            Item {
+                                required property string modelData
+                                required property int index
+                                readonly property var ex: CloudEtat.examen[modelData]
+                                width: recus.width; height: 18
+                                Texte {
+                                    objectName: "nc-cloud-recu-" + index
+                                    width: parent.width - tailleRecu.implicitWidth - 10; elide: Text.ElideMiddle; font.pixelSize: 12
+                                    text: CloudEtat.court(parent.modelData)
+                                    color: parent.ex && parent.ex.refus ? Couleurs.rouge : parent.ex && parent.ex.cache ? Couleurs.orange : Couleurs.texte
+                                }
+                                Texte {
+                                    id: tailleRecu
+                                    objectName: "nc-cloud-recu-info-" + index
+                                    anchors.right: parent.right; secondaire: true; font.pixelSize: 12
+                                    text: !parent.ex ? "…" : parent.ex.refus ? Reglages.t("ne partira pas", "won't be sent")
+                                          : (parent.ex.cache ? Reglages.t("fichier caché · ", "hidden file · ") : "") + cloud.taille(parent.ex.taille)
+                                }
+                            }
+                        }
+                        Texte {
+                            visible: CloudEtat.recus.some(f => CloudEtat.examen[f] && CloudEtat.examen[f].refus)
+                            width: parent.width; wrapMode: Text.Wrap; color: Couleurs.rouge; font.pixelSize: 12
+                            text: CloudEtat.recus.map(f => CloudEtat.examen[f] && CloudEtat.examen[f].refus).filter(x => !!x).join(" ")
                         }
                         Texte {
                             width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12
@@ -226,8 +253,10 @@ FloatingWindow {
                         }
                         Row {
                             spacing: 8
-                            CloudBouton { objectName: "nc-cloud-envoyer-ici"; principal: true; texte: Reglages.t("Envoyer ici", "Upload here")
-                                          onClic: CloudEtat.envoyerIci() }
+                            CloudBouton { objectName: "nc-cloud-envoyer-ici"; principal: true
+                                          texte: CloudEtat.recusCaches ? Reglages.t("Envoyer quand même", "Upload anyway") : Reglages.t("Envoyer ici", "Upload here")
+                                          enabled: CloudEtat.examenPret && CloudEtat.aEnvoyer.length > 0
+                                          onClic: if (enabled) CloudEtat.envoyerIci() }
                             CloudBouton { objectName: "nc-cloud-recus-vider"; texte: Reglages.t("Retirer", "Remove"); onClic: CloudEtat.viderRecus() }
                         }
                     }
@@ -271,7 +300,8 @@ FloatingWindow {
                                                  en_cours: Reglages.t("Envoi… ", "Uploading… ") + Math.round(envoi.part * 100) + " %",
                                                  publie: Reglages.t("Envoyé", "Uploaded"), conflit: Reglages.t("Ce nom existe déjà", "This name already exists"),
                                                  interrompu: Reglages.t("Interrompu", "Interrupted"), annule: Reglages.t("Annulé", "Cancelled"),
-                                                 echec: Reglages.t("Échec", "Failed"), refuse: Reglages.t("Refusé", "Refused") })[envoi.modelData.etat] || ""
+                                                 echec: Reglages.t("Échec", "Failed"), refuse: Reglages.t("Refusé", "Refused"),
+                                                 inconnu: Reglages.t("À vérifier", "To check") })[envoi.modelData.etat] || ""
                                     }
                                 }
                                 Rectangle {
@@ -280,7 +310,7 @@ FloatingWindow {
                                     Rectangle { width: parent.width * envoi.part; height: parent.height; radius: 2; color: Couleurs.accent }
                                 }
                                 Texte {
-                                    visible: (envoi.modelData.etat === "echec" || envoi.modelData.etat === "refuse") && envoi.modelData.message !== ""
+                                    visible: ["echec", "refuse", "inconnu"].indexOf(envoi.modelData.etat) >= 0 && envoi.modelData.message !== ""
                                     width: parent.width; wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12; text: envoi.modelData.message
                                 }
                                 Flow {
@@ -289,6 +319,7 @@ FloatingWindow {
                                     CloudBouton { visible: envoi.modelData.etat === "conflit"; objectName: "nc-cloud-garder-" + envoi.index
                                                   texte: Reglages.t("Conserver les deux", "Keep both"); onClic: CloudEtat.resoudre(envoi.index, "garder") }
                                     CloudBouton { visible: envoi.modelData.etat === "conflit" && !!(envoi.modelData.actuel && envoi.modelData.actuel.revision)
+                                                  && envoi.modelData.actuel.kind !== "directory"
                                                   objectName: "nc-cloud-remplacer-envoi-" + envoi.index
                                                   texte: Reglages.t("Remplacer", "Replace"); onClic: CloudEtat.resoudre(envoi.index, "remplacer") }
                                     CloudBouton { visible: envoi.modelData.etat === "conflit"; objectName: "nc-cloud-annuler-envoi-" + envoi.index

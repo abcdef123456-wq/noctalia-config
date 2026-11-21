@@ -980,6 +980,15 @@ def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
             except Annulation:
                 envoi.annulation()
             return envoi.mener(r, tout_lire=True)
+        except OSError:
+            # Illisible entre l'examen et l'empreinte : ce fichier seulement, les autres continuent
+            if envoi is not None:
+                if envoi.m.get("upload_id"):
+                    envoi.annuler_distant()
+                effacer(envoi.cm)
+            dire(T(f"{propre(p.name)} : illisible, non envoyé.", f"{propre(p.name)}: unreadable, not uploaded."),
+                 evenement="resultat", fichier=str(p), etat="refuse", code=SOURCE)
+            return SOURCE
         except Echec as e:
             if envoi is None:
                 if e.code in ARRET:
@@ -1008,6 +1017,62 @@ def deposer_un(s, p, parent, pol, attendue, annuler, pour_creer=False):
     return CONFLIT
 
 
+def chemin_normal(f):
+    """Le chemin tel que donné, s'il est déjà normalisé (« ./ » en tête permis) : jamais de « / » final, de « . » ni de
+    « .. », pour que le panneau et nc-cloud parlent du MÊME chemin."""
+    return os.path.normpath(f) == f or (f.startswith("./") and os.path.normpath(f) == f[2:] and "/./" not in f[1:])
+
+
+def examiner_un(f):
+    """(raison du refus ou None, taille, caché) pour un fichier à envoyer. Refus : chemin non normalisé, introuvable,
+    lien, dossier, spécial, nom invalide, illisible, ou protégé (la liste des pièces jointes de nc-assistant : ~/.ssh,
+    ~/.gnupg, ~/.config/nc, trousseaux, .env, clés…). Caché : un segment en « . » sous le dossier personnel."""
+    p = Path(f)
+    nom = propre(p.name or f)
+    if not chemin_normal(f):
+        return T(f"{propre(f)} : chemin inattendu (/, . ou .. en trop) : non envoyé.", f"{propre(f)}: unexpected path (extra /, . or ..): not uploaded."), None, False
+    try:
+        st = os.lstat(f)
+    except OSError:
+        st = None
+    if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or not nom_valide(p.name):
+        raison = (T("introuvable", "not found") if st is None else T("lien symbolique refusé", "symbolic link refused")
+                  if stat.S_ISLNK(st.st_mode) else T("dossier refusé", "folder refused") if stat.S_ISDIR(st.st_mode)
+                  else T("nom invalide (240 octets au plus, sans caractère de contrôle)", "invalid name (240 bytes at most, no control character)")
+                  if stat.S_ISREG(st.st_mode) else T("pas un fichier ordinaire", "not a regular file"))
+        return f"{propre(f)} : {raison}.", None, False
+    reel = os.path.realpath(f)
+    try:
+        protege = A.fichier_refuse(f, reel) is not None
+    except A.Erreur:
+        protege = True                 # protections incalculables : par prudence, rien ne part
+    if protege:
+        return T(f"{nom} : fichier protégé, non envoyé.", f"{nom}: protected file, not uploaded."), st.st_size, False
+    try:
+        with open(f, "rb"):
+            pass
+    except OSError:
+        return T(f"{nom} : illisible, non envoyé.", f"{nom}: unreadable, not uploaded."), st.st_size, False
+    home = os.path.realpath(str(Path.home()))
+    absolu = os.path.abspath(f)
+    rel = os.path.relpath(absolu, home) if absolu.startswith(home + "/") else ""
+    return None, st.st_size, any(x.startswith(".") for x in Path(rel).parts) if rel else False
+
+
+def cmd_examiner(a):
+    """Pour le panneau, avant « Envoyer ici » : chemin, taille, caché ou refusé, de chaque fichier. Rien ne part."""
+    l = []
+    for f in a.fichiers[:MAX_FICHIERS]:
+        raison, taille, cache = examiner_un(f)
+        l.append({"fichier": f, "taille": taille, "cache": cache, "refus": raison})
+    if JSON_SORTIE:
+        evenement(evenement="examen", fichiers=l)
+    else:
+        for x in l:
+            print(x["refus"] or f"{propre(x['fichier'])}  {taille_lisible(x['taille'])}" + (T("  (caché)", "  (hidden)") if x["cache"] else ""))
+    return OK
+
+
 def cmd_deposer(a):
     if len(a.fichiers) > MAX_FICHIERS:
         raise Echec(T(f"{MAX_FICHIERS} fichiers au plus par envoi.", f"{MAX_FICHIERS} files at most per upload."), USAGE)
@@ -1016,20 +1081,13 @@ def cmd_deposer(a):
         raise Echec(T("remplacer:REVISION vaut pour un seul fichier.", "remplacer:REVISION applies to a single file."), USAGE)
     valides, code = [], OK
     for f in a.fichiers:
-        p = Path(f)
-        try:
-            st = os.lstat(str(p))
-        except OSError:
-            st = None
-        if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or not nom_valide(p.name):
-            raison = (T("introuvable", "not found") if st is None else T("lien symbolique refusé", "symbolic link refused")
-                      if stat.S_ISLNK(st.st_mode) else T("dossier refusé", "folder refused") if stat.S_ISDIR(st.st_mode)
-                      else T("nom invalide (240 octets au plus, sans caractère de contrôle)", "invalid name (240 bytes at most, no control character)")
-                      if stat.S_ISREG(st.st_mode) else T("pas un fichier ordinaire", "not a regular file"))
-            dire(f"{propre(f)} : {raison}.", evenement="resultat", fichier=propre(f), etat="refuse", code=ERREUR)
+        raison, _, _ = examiner_un(f)
+        if raison:
+            dire(raison, evenement="resultat", fichier=propre(f), etat="refuse", code=ERREUR)
             code = code or ERREUR
             continue
-        valides.append(p.resolve())
+        # Le chemin donné (absolu), pas le chemin résolu : les lignes du panneau s'y associent exactement
+        valides.append(Path(os.path.abspath(f)))
     if not valides:
         return code
     s = Session()
@@ -1778,15 +1836,21 @@ BUS_ALIGNE = {"y": 1, "g": 1, "v": 1, "n": 2, "q": 2, "b": 4, "i": 4, "u": 4, "h
               "x": 8, "t": 8, "d": 8, "(": 8, "{": 8}
 
 
-def bus_fin_type(sig, i):
-    """L'indice qui suit le type complet commençant à sig[i]."""
+def bus_fin_type(sig, i, profondeur=0):
+    """L'indice qui suit le type complet commençant à sig[i]. Refus : structure ou entrée vide (« () », « {} » : un
+    tableau d'éléments de zéro octet ferait boucler l'analyse), entrée qui n'a pas deux types, imbrication démesurée."""
+    if profondeur > 32:
+        raise ValueError("trop profond")
     c = sig[i]
     if c == "a":
-        return bus_fin_type(sig, i + 1)
+        return bus_fin_type(sig, i + 1, profondeur + 1)
     if c in "({":
-        j = i + 1
+        j, n = i + 1, 0
         while sig[j] not in ")}":
-            j = bus_fin_type(sig, j)
+            j = bus_fin_type(sig, j, profondeur + 1)
+            n += 1
+        if sig[j] != (")" if c == "(" else "}") or n == 0 or (c == "{" and n != 2):
+            raise ValueError(sig)
         return j + 1
     if c not in BUS_ALIGNE:
         raise ValueError(sig)
@@ -1891,7 +1955,10 @@ class BusLit:
                 raise ValueError("tableau coupé")
             l = []
             while self.p < fin:
+                avant = self.p
                 l.append(self.valeur(sig[1:], profondeur + 1))
+                if self.p <= avant or len(l) > 65536:        # la position avance toujours, et le nombre reste borné
+                    raise ValueError("tableau invalide")
             return dict(l) if sig[1] == "{" else l
         if c in "({":
             self.aligner(8)
@@ -1985,7 +2052,7 @@ class Bus:
             m = self.lire()
             if m and m[0] in (2, 3) and m[1].get(5) == serie:
                 if m[0] == 3:
-                    raise Echec(str(m[1].get(4, "")), ERREUR, erreur=str(m[1].get(4, "")))
+                    raise Echec(propre(m[1].get(4, ""), 200), ERREUR, erreur=propre(m[1].get(4, ""), 200))
                 return m[2]
 
     def appel(self, chemin, interface, membre, dest, sig="", corps=()):
@@ -1999,10 +2066,20 @@ def cmd_choisir(a):
     bus = Bus()
     jeton = "nc_cloud_" + secrets.token_hex(8)
     attendu = "/org/freedesktop/portal/desktop/request/" + bus.nom.lstrip(":").replace(".", "_") + "/" + jeton
+    # Le portail démarré s'il le faut, puis son nom unique : seule SA réponse compte (un autre pair du bus peut en forger)
+    try:
+        bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "StartServiceByName", "org.freedesktop.DBus", "su",
+                  ("org.freedesktop.portal.Desktop", 0))
+        portail = bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", "org.freedesktop.DBus", "s",
+                            ("org.freedesktop.portal.Desktop",))[0]
+    except (Echec, IndexError):
+        raise sans_selecteur from None
+    if not isinstance(portail, str) or not re.fullmatch(r":[0-9.]{3,32}", portail):
+        raise sans_selecteur
 
     def suivre(chemin):
         bus.appel("/org/freedesktop/DBus", "org.freedesktop.DBus", "AddMatch", "org.freedesktop.DBus", "s",
-                  (f"type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{chemin}'",))
+                  (f"type='signal',sender='{portail}',interface='org.freedesktop.portal.Request',member='Response',path='{chemin}'",))
     suivre(attendu)                    # avant l'appel : une réponse immédiate n'est jamais perdue
     demande = None
     fin = time.monotonic() + CHOIX_DUREE
@@ -2028,7 +2105,8 @@ def cmd_choisir(a):
             if not select.select([bus.sock], [], [], min(reste, 60))[0]:
                 continue
             m = bus.lire()
-            if m and m[0] == 4 and m[1].get(1) in (attendu, demande) and m[1].get(3) == "Response" and len(m[2]) == 2:
+            if (m and m[0] == 4 and m[1].get(7) == portail and m[1].get(2) == "org.freedesktop.portal.Request"
+                    and m[1].get(1) in (attendu, demande) and m[1].get(3) == "Response" and len(m[2]) == 2):
                 break
         code, resultats = m[2]
         uris = [u for u in (resultats.get("uris") or []) if isinstance(u, str)] if code == 0 and isinstance(resultats, dict) else []
@@ -2045,7 +2123,7 @@ def cmd_choisir(a):
         evenement(evenement="choisis", fichiers=uris)
     else:
         for u in uris:
-            print(urllib.parse.unquote(u[7:]) if u.startswith("file://") else u)
+            print(propre(urllib.parse.unquote(u[7:]) if u.startswith("file://") else u, 4096))
     return OK
 
 
@@ -2074,6 +2152,9 @@ def analyseur():
     x.add_argument("--si-existe", dest="si_existe")
     x.add_argument("fichiers", nargs="+")
     x.set_defaults(f=cmd_deposer)
+    x = sous.add_parser("examiner", aliases=["inspect"])
+    x.add_argument("fichiers", nargs="+")
+    x.set_defaults(f=cmd_examiner)
     x = sous.add_parser("reprendre", aliases=["resume"])
     x.add_argument("envoi", nargs="?")
     x.set_defaults(f=cmd_reprendre)

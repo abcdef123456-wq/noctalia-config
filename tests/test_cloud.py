@@ -24,6 +24,7 @@ import signal
 import socket
 import socketserver
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -1008,6 +1009,44 @@ elif sys.argv[1] == "clear":
         lues = set(re.findall(r"features\.(\w+)", (REPO / "home/.config/quickshell/nc-ile/CloudEtat.qml").read_text()))
         self.assertTrue(lues and lues <= set(f), lues - set(f))
 
+    def test_deposer_chemins_inattendus_proteges_et_caches(self):
+        self.associer()
+        bon = self.fichier("a.txt", b"abc")
+        ssh = self.home / ".ssh"
+        ssh.mkdir()
+        (ssh / "id_test").write_bytes(b"cle")
+        conf = self.home / ".config/nc/assistant.conf"            # la clé du serveur : jamais envoyée
+        cache = self.home / ".notes/brouillon.txt"
+        cache.parent.mkdir()
+        cache.write_bytes(b"x")
+        args = [str(bon) + "/", str(bon) + "/.", str(bon.parent) + "/../src/a.txt", str(bon.parent) + "//a.txt",
+                str(ssh / "id_test"), str(conf), str(bon)]
+        r = self.nc("deposer", "--", *args, code=1)
+        etats = [(x.get("fichier"), x.get("etat")) for x in r.lignes if x.get("evenement") == "resultat"]
+        self.assertEqual(etats[:6], [(a, "refuse") for a in args[:6]])
+        self.assertEqual(etats[6], (str(bon), "publie"))            # le chemin donné, exact : le panneau s'y retrouve
+        self.assertIn("fichier protégé", r.lignes[4]["message"])
+        self.assertEqual([e["name"] for e in self.faux.entries.values() if e["kind"] == "file"], ["a.txt"])
+        # examiner : taille, caché, refus ; rien ne part
+        r = self.nc("examiner", "--", str(bon), str(cache), str(ssh / "id_test"), str(bon) + "/", code=0)
+        ex = {x["fichier"]: x for x in r.lignes[-1]["fichiers"]}
+        self.assertEqual((ex[str(bon)]["taille"], ex[str(bon)]["cache"], ex[str(bon)]["refus"]), (3, False, None))
+        self.assertEqual((ex[str(cache)]["cache"], ex[str(cache)]["refus"]), (True, None))
+        self.assertIn("protégé", ex[str(ssh / "id_test")]["refus"])
+        self.assertIn("inattendu", ex[str(bon) + "/"]["refus"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root lit tout")
+    def test_fichier_illisible_au_milieu_d_un_lot(self):
+        self.associer()
+        a, b, c = self.fichier("a.txt", b"a"), self.fichier("b.txt", b"b"), self.fichier("c.txt", b"c")
+        b.chmod(0)
+        try:
+            r = self.nc("deposer", str(a), str(b), str(c), code=1)
+        finally:
+            b.chmod(0o600)                 # le tearDown relit chaque fichier
+        etats = {x["fichier"]: x["etat"] for x in r.lignes if x.get("evenement") == "resultat"}
+        self.assertEqual(etats, {str(a): "publie", str(b): "refuse", str(c): "publie"})
+
     def test_noms_a_tiret_apres_double_tiret(self):
         """« -x » et « --json » tapés comme noms, placés après « -- », restent des noms (le panneau passe ainsi)."""
         self.associer()
@@ -1778,15 +1817,23 @@ class FauxBus(threading.Thread):
                     self.envoyer(2, [(5, ("u", serie)), (6, ("s", ":1.42"))], sig, corps)
                 if membre == "Hello":
                     rep("s", (":1.42",))
+                elif membre == "StartServiceByName":
+                    rep("u", (2,))
+                elif membre == "GetNameOwner":
+                    rep("s", (":1.7",))
                 elif membre == "AddMatch":
                     rep()
                 elif membre == "OpenFile":
                     poignee = "/org/freedesktop/portal/desktop/request/1_42/" + valeurs[2]["handle_token"]
                     rep("o", (poignee,))
-                    rp = [(1, ("o", poignee)), (2, ("s", "org.freedesktop.portal.Request")), (3, ("s", "Response")), (6, ("s", ":1.42"))]
+                    rp = [(1, ("o", poignee)), (2, ("s", "org.freedesktop.portal.Request")), (3, ("s", "Response")),
+                          (6, ("s", ":1.42")), (7, ("s", ":1.7"))]
                     if self.mode in ("choisi", "annule"):
-                        # D'abord une réponse pour une AUTRE demande : elle doit être ignorée
+                        # D'abord une réponse pour une AUTRE demande, puis une forgée par un autre pair, puis une d'une autre
+                        # interface : toutes ignorées
                         self.envoyer(4, [(1, ("o", poignee + "x"))] + rp[1:], "ua{sv}", (0, {"uris": ("as", ["file:///piege"])}))
+                        self.envoyer(4, rp[:4] + [(7, ("s", ":1.99"))], "ua{sv}", (0, {"uris": ("as", ["file:///forge"])}))
+                        self.envoyer(4, [rp[0], (2, ("s", "org.exemple.Autre"))] + rp[2:], "ua{sv}", (0, {"uris": ("as", ["file:///autre"])}))
                         self.envoyer(4, rp, "ua{sv}", (0 if self.mode == "choisi" else 1, {"uris": ("as", self.uris)} if self.mode == "choisi" else {}))
                 elif membre == "Close":
                     self.fini.set()
@@ -1843,23 +1890,50 @@ class Selecteur(unittest.TestCase):
         for brut in (b"\xff\xff\xff\x7f", b"\x05\x00\x00\x00ab"):           # tableau ou chaîne plus long que le message
             with self.assertRaises(ValueError):
                 self.m.BusLit(brut).valeur("as" if brut[0] == 0xff else "s")
+        # Types vides ou boiteux : refusés avant toute lecture (un tableau de « () » ferait boucler l'analyse)
+        for sig in ("a()", "a{}", "()", "{s}", "{sss}", "a" * 40 + "s", "(s", "z"):
+            with self.assertRaises((ValueError, IndexError), msg=sig):
+                self.m.bus_types(sig)
+        # Un message entier du bus avec un tel corps : ignoré (None), sans boucler
+        for sig in ("a()", "a{}"):
+            h = self.m.BusEcrit()
+            h.b += b"l" + bytes([4, 1, 1])
+            corps = struct.pack("<I", 8) + b"\0" * 12
+            h.valeur("u", len(corps)); h.valeur("u", 7)
+            h.valeur("a(yv)", [(1, ("o", "/x")), (2, ("s", "a.b")), (3, ("s", "C")), (8, ("g", sig))])
+            h.aligner(8)
+            a, b = socket.socketpair()
+            self.addCleanup(a.close); self.addCleanup(b.close)
+            a.sendall(bytes(h.b) + corps)
+            lecteur = self.m.Bus.__new__(self.m.Bus)
+            lecteur.sock = b
+            b.settimeout(5)
+            debut = time.monotonic()
+            self.assertIsNone(lecteur.lire(), sig)
+            self.assertLess(time.monotonic() - debut, 2)
+        # Même sans le refus des types, l'analyseur ne boucle pas : la position doit avancer à chaque élément
+        with self.assertRaises(ValueError):
+            self.m.BusLit(struct.pack("<I", 8) + b"\0" * 12).valeur("a()")
+        # Un tableau d'octets ordinaire passe toujours (la position avance)
+        self.assertEqual(self.m.BusLit(struct.pack("<I", 3) + b"abc").valeur("ay"), [97, 98, 99])
 
     def test_choisis_seulement_pour_sa_demande(self):
-        b = self.faux_bus("choisi", ["file:///home/x/a%20b.png", "file:///home/x/c.txt"])
+        b = self.faux_bus("choisi", ["file:///home/user/a%20b.png", "file:///home/user/c.txt"])
         r = subprocess.run([sys.executable, str(NC_CLOUD), "--json", "choisir"], capture_output=True, text=True, timeout=60,
                            env=self.env(self.d / "bus"), stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         lignes = [json.loads(x) for x in r.stdout.splitlines() if x.startswith("{")]
-        self.assertEqual(lignes, [{"evenement": "choisis", "fichiers": ["file:///home/x/a%20b.png", "file:///home/x/c.txt"]}])
+        self.assertEqual(lignes, [{"evenement": "choisis", "fichiers": ["file:///home/user/a%20b.png", "file:///home/user/c.txt"]}])
         b.join(10)
         membres = [x[0] for x in b.journal]
-        self.assertEqual(membres[:4], ["AUTH", "Hello", "AddMatch", "OpenFile"], membres)   # le signal suivi AVANT l'appel
+        self.assertEqual(membres[:6], ["AUTH", "Hello", "StartServiceByName", "GetNameOwner", "AddMatch", "OpenFile"], membres)
         self.assertEqual(b.journal[0][1], b"\0AUTH EXTERNAL " + str(os.getuid()).encode().hex().encode() + b"\r\n")
-        jeton = b.journal[3][2][2]["handle_token"]
+        jeton = b.journal[5][2][2]["handle_token"]
         self.assertRegex(jeton, r"^nc_cloud_[0-9a-f]{16}$")
-        self.assertIn(f"path='/org/freedesktop/portal/desktop/request/1_42/{jeton}'", b.journal[2][2][0])
-        self.assertEqual(b.journal[3][1], "/org/freedesktop/portal/desktop")
-        self.assertIs(b.journal[3][2][2]["multiple"], True)
+        self.assertIn(f"path='/org/freedesktop/portal/desktop/request/1_42/{jeton}'", b.journal[4][2][0])
+        self.assertIn("sender=':1.7'", b.journal[4][2][0])
+        self.assertEqual(b.journal[5][1], "/org/freedesktop/portal/desktop")
+        self.assertIs(b.journal[5][2][2]["multiple"], True)
 
     def test_annule_aucune_adresse(self):
         self.faux_bus("annule")
@@ -1889,6 +1963,19 @@ class Selecteur(unittest.TestCase):
                            env=self.env(self.d / "absent"), stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("dépose les fichiers sur l'île", r.stdout.lower())
+
+    def test_illisible_entre_examen_et_empreinte_ce_fichier_seulement(self):
+        with mock.patch.object(self.m, "preparer", side_effect=PermissionError("refusé")):
+            sortie = io.StringIO()
+            with contextlib.redirect_stdout(sortie):
+                self.m.JSON_SORTIE = True
+                try:
+                    code = self.m.deposer_un(object(), Path("/home/user/b.txt"), "root", "create", None, False)
+                finally:
+                    self.m.JSON_SORTIE = False
+        self.assertEqual(code, self.m.SOURCE)
+        ev = json.loads(sortie.getvalue().splitlines()[-1])
+        self.assertEqual((ev["fichier"], ev["etat"]), ("/home/user/b.txt", "refuse"))
 
     def test_nc_diag_sait_si_un_portail_choisit_des_fichiers(self):
         l = importlib.machinery.SourceFileLoader("nc_diag_choix", str(NC_CLOUD.parent / "nc-diag"))

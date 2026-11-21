@@ -50,13 +50,19 @@ Singleton {
     readonly property int maxFichiers: 8
     property var recus: []                         // chemins locaux reçus, 8 au plus : rien ne part avant « Envoyer ici »
     property string recusRefus: ""                 // ce qui a été écarté (pas un fichier local, au-delà de 8)
+    property var examen: ({})                      // chemin -> {taille, cache, refus} : nc-cloud examiner, avant « Envoyer ici »
+    readonly property bool examenPret: recus.length > 0 && recus.every(f => examen[f] !== undefined)
+    readonly property bool recusCaches: recus.some(f => examen[f] && examen[f].cache && !examen[f].refus)
+    readonly property var aEnvoyer: recus.filter(f => examen[f] && !examen[f].refus)
+    readonly property string maison: Quickshell.env("HOME") || ""
+    function court(f) { return maison !== "" && f.startsWith(maison + "/") ? "~" + f.slice(maison.length) : f }
     // [{fichier, nom, dans, etat, envoye, taille, message, actuel, fin}] ; etat : attente, en_cours, publie, conflit,
     // interrompu, annule, echec, refuse
     property var envois: []
     property var lotEnCours: null                  // {args, fichiers, cible} : le nc-cloud deposer ou reprendre en cours
     property var lots: []
     readonly property bool envoie: lotEnCours !== null
-    readonly property var termines: ["publie", "annule", "echec", "refuse"]
+    readonly property var termines: ["publie", "annule", "echec", "refuse", "inconnu"]
     readonly property bool choixOuvert: procChoix.running
     property string choixErreur: ""
     property bool annulation: false                // Annuler demandé : la fin du lot vaut « annulé », même tué avant ses signaux
@@ -70,16 +76,18 @@ Singleton {
         for (var u of urls || []) {
             var t = String(u), chemin = ""
             try { chemin = t.startsWith("file:///") ? decodeURIComponent(t.slice(7)) : "" } catch (x) { chemin = "" }
-            if (chemin === "" || /[\x00-\x1f]/.test(chemin)) { ecartes++; continue }
+            // Un chemin déjà normalisé, le même que celui que nc-cloud verra : ni « / » final ou double, ni « . », ni « .. »
+            var segments = chemin.split("/").slice(1)
+            if (chemin === "" || /[\x00-\x1f]/.test(chemin) || segments.some(x => x === "" || x === "." || x === "..")) { ecartes++; continue }
             if (l.indexOf(chemin) < 0) l.push(chemin)
         }
         if (l.length > maxFichiers) { ecartes += l.length - maxFichiers; l = l.slice(0, maxFichiers) }
-        if (l.length > 0) recus = l
+        if (l.length > 0) { recus = l; examen = ({}); lancer(["examiner", "--"].concat(l), "examen") }
         recusRefus = ecartes ? Reglages.t(ecartes + " écarté(s) : " + maxFichiers + " fichiers locaux au plus.",
                                           ecartes + " left out: " + maxFichiers + " local files at most.") : ""
         return l.length > 0
     }
-    function viderRecus() { recus = []; recusRefus = "" }
+    function viderRecus() { recus = []; recusRefus = ""; examen = ({}) }
     function choisirFichiers() {
         if (!actif || !associe || procChoix.running) return
         choixErreur = ""
@@ -87,11 +95,12 @@ Singleton {
         procChoix.running = true
     }
     function envoyerIci() {
-        if (!actif || !associe || recus.length === 0) return
-        var n = recus.map(f => ({ fichier: f, nom: f.slice(f.lastIndexOf("/") + 1), dans: dossier, etat: "attente", envoye: 0,
+        if (!actif || !associe || !examenPret || aEnvoyer.length === 0) return
+        var partent = aEnvoyer
+        var n = partent.map(f => ({ fichier: f, nom: f.slice(f.lastIndexOf("/") + 1), dans: dossier, etat: "attente", envoye: 0,
                                   taille: 0, message: "", actuel: null, fin: 0 }))
         envois = envois.concat(n)
-        lancerLot(["deposer", "--dans=" + dossier, "--"].concat(recus), recus, "")
+        lancerLot(["deposer", "--dans=" + dossier, "--"].concat(partent), partent, "")
         viderRecus()
     }
     function lancerLot(args, fichiers, cible) {
@@ -105,6 +114,7 @@ Singleton {
     function annulerEnvois() {
         for (var t of lots) for (var f of t.fichiers) changer(trouverEnvoi(f), { etat: "annule", fin: Date.now() })
         lots = []
+        if (lotEnCours) lotEnCours.suite = null          // une reprise annulée ne part pas après la liste
         if (procEnvoi.running) { annulation = true; procEnvoi.running = false }
     }
     // Conflit : conserver les deux, remplacer (la révision vue dans la réponse du serveur), ou annuler (rien ne part)
@@ -114,7 +124,7 @@ Singleton {
         if (!e || e.etat !== "conflit") return
         if (choix === "annuler") { changer(i, { etat: "annule", fin: Date.now(), message: "" }); return }
         var rev = e.actuel && typeof e.actuel.revision === "string" ? e.actuel.revision : ""
-        if (choix === "remplacer" && !/^[!-~]{1,256}$/.test(rev)) return
+        if (choix === "remplacer" && (!/^[!-~]{1,256}$/.test(rev) || e.actuel.kind === "directory")) return
         changer(i, { etat: "attente", message: "", envoye: 0 })
         lancerLot(["deposer", "--dans=" + e.dans, "--si-existe=" + (choix === "remplacer" ? "remplacer:" + rev : "garder"), "--", e.fichier],
                   [e.fichier], "")
@@ -128,11 +138,10 @@ Singleton {
     }
     function effacerTermines() { envois = envois.filter(e => termines.indexOf(e.etat) < 0) }
     function trouverEnvoi(f) {
-        // nc-cloud donne le chemin résolu : le chemin exact, sinon le nom, du plus récent qui n'est pas terminé
-        f = String(f || ""); var nom = f.slice(f.lastIndexOf("/") + 1)
-        for (var passe = 0; passe < 2; passe++)
-            for (var i = envois.length - 1; i >= 0; i--)
-                if (termines.indexOf(envois[i].etat) < 0 && (passe === 0 ? envois[i].fichier === f : envois[i].nom === nom)) return i
+        // Le chemin EXACT (nc-cloud rend le chemin donné, déjà normalisé des deux côtés), du plus récent pas terminé
+        f = String(f || "")
+        for (var i = envois.length - 1; i >= 0; i--)
+            if (termines.indexOf(envois[i].etat) < 0 && envois[i].fichier === f) return i
         return -1
     }
     function changer(i, champs) {
@@ -145,10 +154,9 @@ Singleton {
         if (!d || typeof d !== "object") return
         var lot = lotEnCours, msg = String(d.message || "").slice(0, 300)
         if (d.evenement === "envois" && lot && lot.cible !== "") {
-            // Le manifeste garde le chemin résolu : le chemin exact, sinon le même nom de fichier
+            // Le chemin exact seulement : un manifeste du même nom peut venir d'un autre dossier
             var l = (Array.isArray(d.envois) ? d.envois : []).filter(x => x && typeof x.fichier === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(String(x.cle)))
-            var base = x => x.slice(x.lastIndexOf("/") + 1)
-            var m = l.find(x => x.fichier === lot.cible) || l.find(x => base(x.fichier) === base(lot.cible))
+            var m = l.find(x => x.fichier === lot.cible)
             lot.suite = m ? ["reprendre", "--", m.cle] : null
             if (!m) changer(trouverEnvoi(lot.cible), { etat: "echec", fin: Date.now(),
                 message: Reglages.t("Rien à reprendre sur ce PC : regarde dans le dossier, puis envoie-le à nouveau s'il manque.",
@@ -161,6 +169,7 @@ Singleton {
         else if (d.evenement === "conflit")
             changer(i, { etat: "conflit", message: msg, actuel: d.actuel && typeof d.actuel === "object" ? d.actuel : null })
         else if (d.evenement === "resultat" && termines.indexOf(d.etat) >= 0) {
+            if (i < 0 && d.etat === "publie" && lot) lot.publieInconnu = true     // jamais « Échec » ensuite pour ce lot
             // Une seule relecture par envoi : une ligne publiée est terminée, trouverEnvoi ne la rend plus
             changer(i, { etat: d.etat, message: msg, fin: Date.now() })
             if (d.etat === "publie" && i >= 0) actualiserApresEnvoi()
@@ -188,9 +197,12 @@ Singleton {
         if (annulation) { code = 8; annulation = false }
         for (var f of lot && !lot.suite ? lot.fichiers : []) {
             var j = trouverEnvoi(f)
+            // Sans résultat pour cette ligne : code 0, ou un « publié » vu sans ligne correspondante, ne valent jamais « Échec »
             if (j >= 0 && (envois[j].etat === "attente" || envois[j].etat === "en_cours"))
                 changer(j, code === 8 ? { etat: "annule", fin: Date.now() }
                           : code === 3 || code === 9 ? { etat: "interrompu" }
+                          : code === 0 || lot.publieInconnu ? { etat: "inconnu", fin: Date.now(),
+                                message: Reglages.t("État inconnu : vérifie dans le dossier.", "Unknown state: check the folder.") }
                           : { etat: "echec", fin: Date.now(), message: envois[j].message || Reglages.t("Envoi non confirmé.", "Upload not confirmed.") })
         }
         if (lot && lot.suite) { lancerLot(lot.suite, lot.fichiers, ""); return }
@@ -198,12 +210,14 @@ Singleton {
         notifierFin()
     }
     function notifierFin() {
-        var p = envois.filter(e => e.etat === "publie" && !e.notifie).length, autres = envois.filter(e => e.etat !== "publie" && termines.indexOf(e.etat) >= 0 && !e.notifie).length
+        var p = envois.filter(e => e.etat === "publie" && !e.notifie).length
+        var inconnus = envois.filter(e => e.etat === "inconnu" && !e.notifie).length
+        var autres = envois.filter(e => e.etat !== "publie" && e.etat !== "inconnu" && termines.indexOf(e.etat) >= 0 && !e.notifie).length
         envois = envois.map(e => termines.indexOf(e.etat) >= 0 ? Object.assign({}, e, { notifie: true }) : e)
-        if (p + autres === 0) return
+        if (p + autres + inconnus === 0) return
         Quickshell.execDetached(["notify-send", "-a", "Cloud JARVIS", "-i", "folder-cloud", "--", "Cloud JARVIS",
-            Reglages.t(p + " fichier(s) envoyé(s)" + (autres ? ", " + autres + " non envoyé(s)" : ""),
-                       p + " file(s) uploaded" + (autres ? ", " + autres + " not uploaded" : ""))])
+            Reglages.t(p + " fichier(s) envoyé(s)" + (inconnus ? ", " + inconnus + " à vérifier" : "") + (autres ? ", " + autres + " non envoyé(s)" : ""),
+                       p + " file(s) uploaded" + (inconnus ? ", " + inconnus + " to check" : "") + (autres ? ", " + autres + " not uploaded" : ""))])
     }
 
 
@@ -318,6 +332,14 @@ Singleton {
             var n = x => typeof x === "number" && x >= 0 ? x : -1
             if (n(d.files) >= 0 && n(d.directories) >= 0 && n(d.size) >= 0 && /^[0-9a-f]{64}$/.test(String(d.tree_revision)))
                 apercu = { id: enCours.id, files: d.files, directories: d.directories, size: d.size, tree: d.tree_revision }
+        }
+        else if (d.evenement === "examen" && q === "examen") {
+            var ex = ({})
+            for (var x of Array.isArray(d.fichiers) ? d.fichiers : [])
+                if (x && typeof x.fichier === "string" && recus.indexOf(x.fichier) >= 0)
+                    ex[x.fichier] = { taille: typeof x.taille === "number" ? x.taille : -1, cache: x.cache === true,
+                                      refus: typeof x.refus === "string" ? x.refus.slice(0, 300) : "" }
+            examen = ex
         }
         else if (d.evenement === "envois" && q === "envois") {
             // Envois interrompus de ce PC (après un redémarrage de l'île, une coupure) : une ligne « interrompu » chacun

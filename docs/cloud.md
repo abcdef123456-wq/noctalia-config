@@ -61,7 +61,11 @@ ramène à un dossier parent.
   fichiers sur l'île, et `nc-diag` le signale. Fermer le panneau referme le sélecteur ; il ne reste ouvert qu'une heure
   au plus.
 - 8 fichiers locaux au plus ; le reste est écarté et le panneau le dit. Un dossier, un lien ou un fichier spécial est
-  refusé ligne par ligne.
+  refusé ligne par ligne, comme une adresse qui n'est pas un chemin net (`/` final, `.` ou `..`).
+- Avant « Envoyer ici », chaque fichier montre son chemin complet et sa taille (`nc-cloud examiner`, rien ne part). Un
+  fichier protégé (la liste des pièces jointes de JARVIS : `~/.ssh`, `~/.gnupg`, `~/.config/nc`, trousseaux, `.env`,
+  clés…) ne partira pas, ni par le panneau ni par `nc-cloud deposer`. Un fichier caché du dossier personnel s'affiche
+  en orange, et le bouton devient « Envoyer quand même ».
 - La liste des envois : progression par fichier, « Annuler l'envoi », résultat de chacun. Un nom déjà pris : « Conserver
   les deux », « Remplacer » ou « Annuler ». Une coupure (hors ligne) : « Reprendre / vérifier » ; à l'ouverture du
   panneau, les envois interrompus de ce PC (après un redémarrage, par exemple) y apparaissent aussi.

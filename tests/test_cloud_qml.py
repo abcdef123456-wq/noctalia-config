@@ -51,6 +51,8 @@ case "$1" in
                *coupure*) printf '{"evenement": "progression", "fichier": "%s", "envoye": 5, "taille": 10}\n' "$a"
                           printf '[{"numero": 1, "cle": "CLEabcdefghijklmnop_-", "fichier": "%s", "nom": "coupure.txt", "taille": 10}]' "$a" > "@ROOT@/envois.json"
                           printf '%s\n' '{"evenement": "erreur", "code": 3, "message": "Hors ligne."}'; exit 3 ;;
+               *resolu*) printf '{"evenement": "resultat", "fichier": "/autre%s", "etat": "publie", "message": "Envoyé."}\n' "$a"; exit 1 ;;
+               *dossier-conflit*) printf '{"evenement": "conflit", "fichier": "%s", "actuel": {"id": "e", "kind": "directory", "revision": "rv7"}, "message": "Conflit."}\n' "$a"; exit 6 ;;
                *conflit*) case "$*" in
                             *--si-existe=*) printf '{"evenement": "resultat", "fichier": "%s", "etat": "publie", "message": "Envoyé."}\n' "$a" ;;
                             *) printf '{"evenement": "conflit", "fichier": "%s", "actuel": {"id": "e", "revision": "rv7"}, "message": "Conflit."}\n' "$a"; exit 6 ;;
@@ -59,8 +61,18 @@ case "$1" in
                   printf '{"evenement": "resultat", "fichier": "%s", "etat": "publie", "message": "Envoyé."}\n' "$a" ;;
              esac
            done ;;
+  examiner) apres=0; sep=""; printf '{"evenement": "examen", "fichiers": ['
+            for a in "$@"; do
+              if [ "$apres" = 0 ]; then [ "$a" = "--" ] && apres=1; continue; fi
+              cache=false; refus=null
+              case "$a" in */.*) cache=true ;; esac
+              case "$a" in *.ssh*) cache=false; refus='"id : fichier protégé, non envoyé."' ;; esac
+              printf '%s{"fichier": "%s", "taille": 3, "cache": %s, "refus": %s}' "$sep" "$a" "$cache" "$refus"; sep=", "
+            done
+            printf ']}\n' ;;
   reprendre) if [ "$2" = "--" ]; then printf '%s\n' '{"evenement": "resultat", "fichier": "/tmp/coupure.txt", "etat": "publie", "message": "Envoyé."}'
-             else printf '{"evenement": "envois", "envois": %s}\n' "$(cat "@ROOT@/envois.json" 2>/dev/null || echo '[]')"; fi ;;
+             else printf '{"evenement": "envois", "envois": %s}\n' "$(cat "@ROOT@/envois.json" 2>/dev/null || echo '[]')"
+                  case "$(cat "@ROOT@/envois.json" 2>/dev/null)" in *longue*) exec sleep 30 ;; esac; fi ;;
   choisir) n=$(cat "@ROOT@/choix" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "@ROOT@/choix"
            case $n in
              1) printf '%s\n' '{"evenement": "choisis", "fichiers": ["file:///tmp/1", "file:///tmp/2", "file:///tmp/3", "file:///tmp/4", "file:///tmp/5", "file:///tmp/6", "file:///tmp/7", "file:///tmp/8", "file:///tmp/9"]}' ;;
@@ -404,7 +416,13 @@ class HorsEcran(unittest.TestCase):
                     verifier(CloudEtat.recus.length === 2 && CloudEtat.recus[1] === "/tmp/b conflit.txt", "fichiers locaux seulement : " + CloudEtat.recus)
                     verifier(CloudEtat.recusRefus !== "" && vu(corps, "nc-cloud-recus"), "sélection montrée, écartés dits")
                     verifier(CloudEtat.envois.length === 0, "rien ne part avant Envoyer ici")
-                    trouver(corps, "nc-cloud-envoyer-ici").clic(); etape++; return }
+                    etape = 15; return }
+                if (etape === 15) {
+                    verifier(CloudEtat.examenPret && trouver(corps, "nc-cloud-envoyer-ici").enabled, "examen reçu")
+                    verifier(trouver(corps, "nc-cloud-recu-1").text === "/tmp/b conflit.txt", "chemin complet : " + trouver(corps, "nc-cloud-recu-1").text)
+                    verifier(trouver(corps, "nc-cloud-recu-info-0").text === "3 o", "taille : " + trouver(corps, "nc-cloud-recu-info-0").text)
+                    verifier(trouver(corps, "nc-cloud-envoyer-ici").texte === "Envoyer ici", "pas de fichier caché")
+                    trouver(corps, "nc-cloud-envoyer-ici").clic(); etape = 2; return }
                 if (etape === 2) {
                     verifier(CloudEtat.recus.length === 0, "sélection vidée")
                     verifier(CloudEtat.envois[0].etat === "publie" && CloudEtat.envois[1].etat === "conflit", JSON.stringify(CloudEtat.envois))
@@ -425,11 +443,66 @@ class HorsEcran(unittest.TestCase):
         ''', reglages={"CLOUD_JARVIS": "oui"}, notifier=True)
         self.assertEqual([x for x in j if not x.startswith("notify-send")],
                          ["--json etat", "--json lister -- root", "--json reprendre",
+                          "--json examiner -- /tmp/a.txt /tmp/b conflit.txt",
                           "--json deposer --dans=root -- /tmp/a.txt /tmp/b conflit.txt", "--json etat", "--json lister -- root",
                           "--json deposer --dans=root --si-existe=garder -- /tmp/b conflit.txt", "--json etat", "--json lister -- root"])
         notes = [x for x in j if x.startswith("notify-send")]
         self.assertEqual(len(notes), 2, j)                       # une notification à la fin de chaque envoi
         self.assertIn("1 fichier(s) envoyé(s)", notes[0])
+
+    def test_adresses_non_normalisees_cache_protege_et_publie_sans_ligne(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu || CloudEtat.envoie) return
+                var corps = fen.contentItem
+                if (etape === 1) {
+                    verifier(!CloudEtat.recevoir(["file:///home/user/.ssh/id_ed25519/", "file:///home/user/.ssh/id_ed25519/.",
+                                                  "file:///home/user/a/../.ssh/id", "file:///home/user//a.txt", "file:///home/user/."]),
+                             "formes non normalisées refusées")
+                    verifier(CloudEtat.recus.length === 0, "rien reçu")
+                    CloudEtat.recevoir(["file:///home/user/.notes/a.txt", "file:///home/user/.ssh/id", "file:///tmp/resolu.txt"])
+                    etape++; return }
+                if (etape === 2) {
+                    verifier(trouver(corps, "nc-cloud-recu-info-0").text.indexOf("fichier caché") === 0, trouver(corps, "nc-cloud-recu-info-0").text)
+                    verifier(trouver(corps, "nc-cloud-recu-info-1").text === "ne partira pas", "protégé")
+                    verifier(trouver(corps, "nc-cloud-envoyer-ici").texte === "Envoyer quand même", "second regard")
+                    trouver(corps, "nc-cloud-envoyer-ici").clic(); etape++; return }
+                if (etape === 3) {
+                    var r = CloudEtat.envois.find(e => e.fichier === "/tmp/resolu.txt")
+                    verifier(r && r.etat === "inconnu", "publié sans ligne : jamais Échec (" + (r && r.etat) + ")")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertIn("--json deposer --dans=root -- /home/user/.notes/a.txt /tmp/resolu.txt", j)       # le protégé ne part pas
+
+    def test_annuler_pendant_une_reprise_et_pas_de_remplacer_pour_un_dossier(self):
+        j = self.lancer(self.OUVRIR + '''
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                var corps = fen.contentItem
+                if (etape === 1) { CloudEtat.recevoir(["file:///tmp/coupure-longue.txt", "file:///tmp/dossier-conflit"]); etape++; return }
+                if (etape === 2) { CloudEtat.envoyerIci(); etape++; return }
+                if (etape === 3 && !CloudEtat.envoie) {
+                    verifier(CloudEtat.envois[0].etat === "interrompu", "interrompu : " + CloudEtat.envois[0].etat)
+                    CloudEtat.recevoir(["file:///tmp/dossier-conflit"]); etape++; return }
+                if (etape === 4) { CloudEtat.envoyerIci(); etape++; return }
+                if (etape === 5 && !CloudEtat.envoie) {
+                    var i = CloudEtat.envois.length - 1
+                    verifier(CloudEtat.envois[i].etat === "conflit" && vu(corps, "nc-cloud-garder-" + i), "conflit")
+                    verifier(!vu(corps, "nc-cloud-remplacer-envoi-" + i), "pas de Remplacer pour un dossier")
+                    CloudEtat.resoudre(i, "remplacer")
+                    verifier(CloudEtat.envois[i].etat === "conflit" && !CloudEtat.envoie, "remplacer refusé")
+                    trouver(corps, "nc-cloud-reprendre-0").clic(); etape++; return }
+                if (etape === 6 && CloudEtat.lotEnCours && CloudEtat.lotEnCours.suite) { CloudEtat.annulerEnvois(); etape++; return }
+                if (etape === 7 && !CloudEtat.envoie) {
+                    ticks++; if (ticks < 4) return
+                    verifier(CloudEtat.envois[0].etat === "annule", "reprise annulée : " + CloudEtat.envois[0].etat)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"})
+        self.assertFalse([x for x in j if x.startswith("--json reprendre -- ")], j)          # la reprise annulée ne part pas
 
     def test_coupure_reprendre_fermer_puis_annuler(self):
         j = self.lancer(self.OUVRIR + '''
@@ -437,13 +510,15 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 0) { ouvrir(); etape++; return }
                 if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
                 var corps = fen.contentItem
-                if (etape === 1) { CloudEtat.recevoir(["file:///tmp/coupure.txt"]); CloudEtat.envoyerIci(); etape++; return }
+                if (etape === 1) { CloudEtat.recevoir(["file:///tmp/coupure.txt"]); etape = 10; return }
+                if (etape === 10) { CloudEtat.envoyerIci(); etape = 2; return }
                 if (etape === 2 && !CloudEtat.envoie) {
                     verifier(CloudEtat.envois[0].etat === "interrompu" && vu(corps, "nc-cloud-reprendre-0"), JSON.stringify(CloudEtat.envois))
                     trouver(corps, "nc-cloud-reprendre-0").clic(); etape++; return }
                 if (etape === 3 && !CloudEtat.envoie) {
                     verifier(CloudEtat.envois[0].etat === "publie", "repris : " + CloudEtat.envois[0].etat)
-                    CloudEtat.recevoir(["file:///tmp/lent.txt"]); CloudEtat.envoyerIci(); etape++; return }
+                    CloudEtat.recevoir(["file:///tmp/lent.txt"]); etape = 30; return }
+                if (etape === 30) { CloudEtat.envoyerIci(); etape = 4; return }
                 if (etape === 4 && CloudEtat.envois[1].etat === "en_cours") {
                     verifier(vu(corps, "nc-cloud-envois-annuler"), "Annuler l'envoi montré")
                     CloudEtat.panneauOuvert = false; etape++; return }       // panneau fermé : l'envoi continue
@@ -455,9 +530,10 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"})
-        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json deposer --dans=root -- /tmp/coupure.txt",
+        self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json examiner -- /tmp/coupure.txt",
+                             "--json deposer --dans=root -- /tmp/coupure.txt",
                              "--json reprendre", "--json reprendre -- CLEabcdefghijklmnop_-", "--json etat", "--json lister -- root",
-                             "--json deposer --dans=root -- /tmp/lent.txt"])
+                             "--json examiner -- /tmp/lent.txt", "--json deposer --dans=root -- /tmp/lent.txt"])
 
     def test_selecteur_huit_au_plus_annuler_garde_et_fermer_arrete(self):
         j = self.lancer(self.OUVRIR + '''
