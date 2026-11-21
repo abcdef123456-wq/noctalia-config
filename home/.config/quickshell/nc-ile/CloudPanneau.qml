@@ -244,7 +244,7 @@ FloatingWindow {
                         Column {
                             id: presseColonne
                             x: 10; y: 10; width: parent.width - 20; spacing: 6
-                            readonly property var p: CloudEtat.presse || ({ sens: "", caracteres: 0, lignes: 0, caches: 0, apercu: "" })
+                            readonly property var p: CloudEtat.presse || ({ sens: "", caracteres: 0, lignes: 0, caches: 0, retires: 0, apercu: "" })
                             Texte {
                                 objectName: "nc-cloud-presse-question"
                                 width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; font.weight: Font.DemiBold
@@ -261,6 +261,9 @@ FloatingWindow {
                                       + (presseColonne.p.caches > 0
                                          ? Reglages.t(" " + presseColonne.p.caches + " caractère(s) au milieu ne sont pas montrés.",
                                                       " " + presseColonne.p.caches + " character(s) in the middle are not shown.") : "")
+                                      + (presseColonne.p.retires > 0
+                                         ? Reglages.t(" " + presseColonne.p.retires + " caractère(s) invisible(s) retiré(s).",
+                                                      " " + presseColonne.p.retires + " invisible character(s) removed.") : "")
                             }
                             Texte { objectName: "nc-cloud-presse-apercu"; width: parent.width; wrapMode: Text.WrapAnywhere
                                     secondaire: true; font.pixelSize: 11; text: presseColonne.p.apercu }   // tout l'aperçu : rien de caché

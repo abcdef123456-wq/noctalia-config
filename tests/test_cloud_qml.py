@@ -80,7 +80,7 @@ case "$1" in
            done ;;
   presse) if [ -f "@ROOT@/presse-outil" ]; then printf '%s\n' '{"evenement": "erreur", "code": 1, "erreur": "outil", "message": "Installe wl-clipboard."}'; exit 1; fi
           case "$2" in
-            voir) printf '%s\n' '{"evenement": "presse", "sens": "envoi", "apercu": "bonjour", "caracteres": 7, "lignes": 1, "caches": 120, "empreinte": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
+            voir) printf '%s\n' '{"evenement": "presse", "sens": "envoi", "apercu": "bonjour", "caracteres": 7, "lignes": 1, "caches": 120, "retires": 2, "empreinte": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' ;;
             voir-cloud) printf '%s\n' '{"evenement": "presse", "sens": "prise", "apercu": "ls -la\\nrm x", "caracteres": 11, "lignes": 2, "empreinte": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "id": "p1", "revision": "r7"}' ;;
             envoyer) printf '%s\n' '{"evenement": "presse", "sens": "envoye", "message": "Presse-papiers envoyé."}' ;;
             prendre) printf '%s\n' '{"evenement": "presse", "sens": "pris", "message": "Copié, et retiré du cloud."}' ;;
@@ -370,7 +370,8 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 2) {     // l'aperçu, le compte, l'avertissement ; rien n'est parti
                     verifier(vu(corps, "nc-cloud-presse-confirmation") && trouver(corps, "nc-cloud-presse-apercu").text === "bonjour"
                              && q().indexOf("7 caractère(s), 1 ligne(s)") >= 0 && q().indexOf("mot de passe") >= 0
-                             && q().indexOf("120 caractère(s) au milieu ne sont pas montrés") >= 0, "aperçu de l'envoi : " + q())
+                             && q().indexOf("120 caractère(s) au milieu ne sont pas montrés") >= 0
+                             && q().indexOf("2 caractère(s) invisible(s) retiré(s)") >= 0, "aperçu de l'envoi : " + q())
                     trouver(corps, "nc-cloud-presse-annuler").clic()
                     verifier(CloudEtat.presse === null, "annulé"); trouver(corps, "nc-cloud-presse-envoyer").clic(); etape++; return }
                 if (etape === 3) { trouver(corps, "nc-cloud-presse-confirmer").clic(); etape++; return }
@@ -378,7 +379,7 @@ class HorsEcran(unittest.TestCase):
                     verifier(vu(corps, "nc-cloud-presse-message") && CloudEtat.presseMessage === "Presse-papiers envoyé.", "envoyé")
                     trouver(corps, "nc-cloud-presse-prendre").clic(); etape++; return }
                 if (etape === 5) {     // plusieurs lignes : le rappel du terminal
-                    verifier(q().indexOf("Plusieurs lignes") >= 0 && q().indexOf("retiré du cloud") >= 0 && q().indexOf("au milieu") < 0,
+                    verifier(q().indexOf("Plusieurs lignes") >= 0 && q().indexOf("retiré du cloud") >= 0 && q().indexOf("au milieu") < 0 && q().indexOf("invisible") < 0,
                              "aperçu de la prise : " + q())
                     trouver(corps, "nc-cloud-presse-confirmer").clic(); etape++; return }
                 if (etape === 6) {

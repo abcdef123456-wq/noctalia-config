@@ -276,8 +276,9 @@ Dans le panneau, « Envoyer mon presse-papiers » et « Prendre celui du cloud �
   passe (il le signale au presse-papiers) n'est jamais envoyé, ni une clé privée ou une clé d'API.
 - Sur le cloud, un seul fichier, `Presse-papiers/presse-papiers.txt`, qui s'écrase : pas d'historique. Une fois pris
   par un autre PC, il est retiré du cloud ; si le retrait échoue, c'est dit.
-- Le texte pris perd ses caractères de contrôle et ses caractères invisibles (sauf retour à la ligne et tabulation) :
-  aucune séquence du terminal ne passe. Les séparateurs de ligne et de paragraphe Unicode deviennent des retours à la
+- Le texte, envoyé comme pris, perd ses caractères de contrôle et ses caractères invisibles (sauf retour à la ligne
+  et tabulation) : aucune séquence du terminal ne passe, et ce qui est montré est ce qui part. L'aperçu dit combien de
+  caractères invisibles ont été retirés. Les séparateurs de ligne et de paragraphe Unicode deviennent des retours à la
   ligne. Un texte de plusieurs lignes est signalé : collé dans un terminal, il peut lancer des commandes.
 - Un envoi refusé le dit : un autre PC vient d'envoyer (recommence), quota dépassé, serveur injoignable.
 - Le texte ne passe jamais par la ligne de commande d'un programme ni par un journal. Le fichier local ne dure que le

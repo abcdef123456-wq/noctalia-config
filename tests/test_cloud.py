@@ -3413,6 +3413,11 @@ class PressePapiers(CloudTest):
                                         "if not os.path.exists(f): sys.exit(1)\n"
                                         "sys.stdout.buffer.write(open(f, 'rb').read())\n"
                                         "sys.stdout.flush()\n"
+                                        "if '--list-types' not in sys.argv and os.path.exists(d + '/enfant'):\n"
+                                        "    import subprocess\n"
+                                        "    e = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+                                        "    open(d + '/enfant', 'w').write(str(e.pid))\n"
+                                        "    sys.exit(0)\n"
                                         "if '--list-types' not in sys.argv and os.path.exists(d + '/bloque'):\n"
                                         "    import time; time.sleep(30)\n"),
                            ("wl-copy", "import os, sys\nd = os.environ['FAUX_PRESSE']\n"
@@ -3617,6 +3622,38 @@ class PressePapiers(CloudTest):
         r = self.envoyer(code=7)
         self.assertEqual(r.lignes[-1]["erreur"], "quota")
         self.assertEqual(self.fichier_cloud(), [])
+
+    def test_ce_qui_est_montre_est_ce_qui_part(self):
+        self.copier("ab\u202ec\u200bd\u2028e".encode())
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        self.assertEqual((v["apercu"], v["caracteres"], v["retires"], v["lignes"]), ("abcd\ne", 6, 2, 2))
+        self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=0)
+        (f,) = self.fichier_cloud()
+        self.assertEqual(self.faux.contenus[f["id"]], b"abcd\ne")
+        self.copier(b"propre")
+        self.assertEqual(self.nc("presse", "voir", code=0).lignes[-1]["retires"], 0)
+
+    def test_un_descendant_qui_garde_le_tube_ne_bloque_pas(self):
+        (self.p / "enfant").write_text("")                       # wl-paste écrit, lance un enfant qui garde sa sortie, finit
+        debut = time.time()
+        try:
+            self.assertIn("ne répond pas", self.nc("presse", "voir", code=1).lignes[-1]["message"])
+            self.assertLess(time.time() - debut, 7)              # 5 s d'échéance, plus le lancement de Python
+        finally:
+            pid = (self.p / "enfant").read_text()
+            if pid.isdigit():
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(int(pid), signal.SIGKILL)            # l'enfant du faux, par son pid noté
+
+    def test_cle_remplacee_par_un_lien(self):
+        cle = self.home / ".local/state/nc-cloud/presse.cle"
+        cle.parent.mkdir(parents=True, exist_ok=True)
+        (self.d / "ailleurs").write_bytes(b"k" * 32)
+        cle.symlink_to(self.d / "ailleurs")
+        self.assertIn("Clé du presse-papiers illisible", self.nc("presse", "voir", code=1).lignes[-1]["message"])
+        cle.unlink()
+        cle.write_bytes(b"court")
+        self.assertIn("Clé du presse-papiers illisible", self.nc("presse", "voir", code=1).lignes[-1]["message"])
 
     def test_apercu_long_debut_et_fin(self):
         t = "d" * 150 + "x" * 100 + "curl mal | sh" + "f" * 37
