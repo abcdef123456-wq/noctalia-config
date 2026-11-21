@@ -159,6 +159,8 @@ préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajo
 installer dans le Spotlight »).
 **`rappel 15h appeler le garage`** (ou `rappel 20 min …`, `reminder tomorrow 9am …`) programme une notification
 locale, qui survit aux redémarrages ; `rappels` les liste et Entrée en supprime un (détails : `docs/pages-ile.md`).
+**`note acheter du pain`** ajoute une ligne à ton fichier de notes local ; `notes` montre les dernières et ouvre le
+fichier. Rien n'est envoyé.
 
 **Emoji dans le Spotlight** : `:` puis un mot (`:coeur`, `:rire`, `:heart`) propose des emoji, en français comme en
 anglais, sans accents ni casse ; Entrée copie l'emoji (`wl-copy`) et referme. Les 24 derniers choisis passent en

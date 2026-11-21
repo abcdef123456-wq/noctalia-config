@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""nc-note : la note rapide du Spotlight (« note acheter du pain »), une ligne par note, dans un fichier local.
+
+  nc-note ajouter < TEXTE   ajoute « - AAAA-MM-JJ HH:MM  texte » à la fin du fichier
+  nc-note liste [N]         les N dernières notes (20 par défaut), la plus récente d'abord, en JSON
+  nc-note ouvrir            ouvre le fichier avec l'application par défaut (créé vide s'il manque)
+
+Fichier : $XDG_DATA_HOME/nc/notes.md (~/.local/share/nc/notes.md), en 0600, jamais au bout d'un lien. Le texte arrive
+par l'entrée standard (jamais par argv ni par un shell) ; retours à la ligne et caractères de contrôle ou invisibles
+deviennent des espaces : une note reste une ligne. Rien n'est envoyé nulle part, rien n'est journalisé.
+Codes : 0 fait, 1 erreur locale, 2 usage ou note vide ou trop longue."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import unicodedata
+
+FICHIER = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "nc/notes.md"
+MAX = 1000                  # caractères d'une note
+LU_MAX = 256 * 1024         # la fin du fichier lue pour la liste
+
+
+def une_ligne(t):
+    """Tout caractère de catégorie C (contrôle, format, privé, non attribué) devient un espace, puis les espaces sont
+    resserrés (split() coupe aussi sur les séparateurs de ligne et de paragraphe Unicode)."""
+    return " ".join("".join(" " if unicodedata.category(c)[0] == "C" else c for c in t).split())
+
+
+def ouvrir_fd(drapeaux):
+    """Le fichier des notes, jamais au bout d'un lien (O_NOFOLLOW) et seulement un fichier ordinaire, remis en 0600 ;
+    O_NONBLOCK : un tube nommé à sa place ne bloque pas l'ouverture (puis il est refusé)."""
+    FICHIER.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(str(FICHIER), drapeaux | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not (st.st_mode & 0o170000 == 0o100000):
+            raise OSError("pas un fichier ordinaire")
+        if st.st_mode & 0o777 != 0o600:
+            os.fchmod(fd, 0o600)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def ajouter():
+    brut = sys.stdin.buffer.read(MAX * 4 + 1)
+    texte = une_ligne(brut.decode("utf-8", "replace"))
+    if not texte:
+        print(json.dumps({"erreur": "vide"}))
+        return 2
+    if len(texte) > MAX or len(brut) > MAX * 4:
+        print(json.dumps({"erreur": "trop_long", "max": MAX}))
+        return 2
+    ligne = "- " + time.strftime("%Y-%m-%d %H:%M") + "  " + texte + "\n"
+    fd = ouvrir_fd(os.O_RDWR | os.O_CREAT | os.O_APPEND)
+    try:
+        if os.fstat(fd).st_size and os.pread(fd, 1, os.fstat(fd).st_size - 1) != b"\n":
+            ligne = "\n" + ligne                  # fichier modifié à la main sans retour final : la note reste une ligne
+        os.write(fd, ligne.encode("utf-8"))       # O_APPEND, une seule écriture : deux notes ne se mêlent pas
+    finally:
+        os.close(fd)
+    print(json.dumps({"fait": True}))
+    return 0
+
+
+def liste(n):
+    try:
+        fd = ouvrir_fd(os.O_RDONLY)
+    except FileNotFoundError:
+        print(json.dumps({"notes": [], "fichier": str(FICHIER)}))
+        return 0
+    with os.fdopen(fd, "rb") as f:
+        taille = os.fstat(f.fileno()).st_size
+        f.seek(max(0, taille - LU_MAX))
+        lignes = f.read(LU_MAX).decode("utf-8", "replace").split("\n")
+    if taille > LU_MAX:
+        lignes = lignes[1:]                       # la première est peut-être coupée
+    notes = []
+    for l in reversed(lignes):
+        l = une_ligne(l)
+        if not l:
+            continue
+        if l.startswith("- ") and len(l) > 19 and l[2:6].isdigit() and l[6] == "-" and l[15] == ":":
+            notes.append({"date": l[2:18], "texte": l[18:].strip()})
+        else:
+            notes.append({"date": "", "texte": l.lstrip("- ").strip()})
+        if len(notes) >= n:
+            break
+    print(json.dumps({"notes": notes, "fichier": str(FICHIER)}, ensure_ascii=False))
+    return 0
+
+
+def ouvrir():
+    os.close(ouvrir_fd(os.O_WRONLY | os.O_CREAT | os.O_APPEND))
+    subprocess.Popen(["xdg-open", str(FICHIER)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
+def main(argv):
+    try:
+        if argv[:1] == ["ajouter"] and len(argv) == 1:
+            return ajouter()
+        if argv[:1] == ["liste"] and len(argv) <= 2:
+            n = int(argv[1]) if len(argv) == 2 and argv[1].isdigit() else 20
+            return liste(max(1, min(n, 200)))
+        if argv == ["ouvrir"]:
+            return ouvrir()
+    except OSError as e:
+        print(json.dumps({"erreur": "local", "message": e.strerror or str(e)}, ensure_ascii=False))
+        return 1
+    print(__doc__.split("\n\n")[0] + "\nusage : nc-note ajouter < texte | liste [N] | ouvrir", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -124,6 +124,34 @@ Item {
         }
     }
     Process {
+        id: lireNotes
+        command: [Etat.bin + "nc-note", "liste", "20"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var d = null
+                try { d = JSON.parse(text) } catch (e) {}
+                r.notes = d && Array.isArray(d.notes) ? d.notes.filter(x => x && typeof x.texte === "string").slice(0, 20) : []
+                r.notesLues = true
+                r.chercher()
+            }
+        }
+    }
+    Process {
+        id: noteur
+        command: [Etat.bin + "nc-note", "ajouter"]
+        stdout: StdioCollector { id: sortieNote }
+        onStarted: { write(r.noteEnvoi); r.noteEnvoi = ""; stdinEnabled = false }
+        onExited: code => {
+            var d = {}
+            try { d = JSON.parse(sortieNote.text) || {} } catch (e) {}
+            if (code === 0) { r.notesLues = false; champ.text = "notes"; return }    // la liste, avec la nouvelle en tête
+            r.noteErreur = d.erreur === "trop_long" ? Reglages.t("Note trop longue (1000 caractères au plus) : rien n'est noté.", "Note too long (1000 characters at most): nothing noted.")
+                         : d.erreur === "vide" ? Reglages.t("Note vide : rien n'est noté.", "Empty note: nothing noted.")
+                         : Reglages.t("Note non enregistrée (", "Note not saved (") + (typeof d.message === "string" ? d.message.slice(0, 120) : "code " + code) + ")"
+            r.chercher()
+        }
+    }
+    Process {
         id: executeur
         stdout: StdioCollector { id: sortieExec }
         stderr: StdioCollector { id: erreurExec }
@@ -223,6 +251,19 @@ Item {
 
     property var applis: []
     property var sessions: []                // dispositions enregistrées (nc-session) : « session NOM » ou leur nom
+    // Note rapide (nc-note) : « note TEXTE » l'ajoute, « note » ou « notes » seul montre les dernières ; le texte passe
+    // par l'entrée standard de nc-note, jamais par argv ni par un shell
+    property var notes: []
+    property bool notesLues: false
+    property string noteErreur: ""
+    property string noteEnvoi: ""
+    function noter(t) {
+        if (noteur.running || t.trim() === "") return
+        noteEnvoi = t; noteErreur = ""
+        noteur.stdinEnabled = true
+        noteur.running = true
+    }
+    function ouvrirNotes() { Quickshell.execDetached([Etat.bin + "nc-note", "ouvrir"]) }
     property var fenetres: []
     property var usage: ({})
     property var fichiers: []
@@ -323,6 +364,7 @@ Item {
         lireDock.running = true
         lireFenetres.running = true
         lireSessions.running = true
+        notesLues = false; noteErreur = ""
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
@@ -606,7 +648,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?)(\s|$))/i.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?|notes?)(\s|$))/i.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -661,7 +703,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?|notes?)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -910,6 +952,26 @@ Item {
             resultats = [{ titre: demandeA || Reglages.t("Dis ce que l'IA doit faire", "Say what the AI should do"),
                            sous: Reglages.t("Elle propose, tu confirmes · ", "It proposes, you confirm · ") + (nomIATexte === "-" ? Reglages.t("aucune IA sans outils", "no AI without tools") : nomIATexte),
                            glyphe: "smart_toy", garder: true, f: () => r.lancerAgent(demandeA) }]
+            return
+        }
+        // « note acheter du pain » : une ligne dans le fichier local des notes ; « note » ou « notes » seul : les dernières
+        if (/^\s*notes?(\s|$)/i.test(champ.text)) {
+            let texteN = champ.text.replace(/^\s*notes?\s*/i, "").trim()
+            let lignesN = noteErreur !== "" ? [{ titre: noteErreur, sous: "", glyphe: "error", garder: true, f: () => {} }] : []
+            if (texteN !== "") {
+                lignesN.push({ titre: Reglages.t("Noter : ", "Note: ") + texteN,
+                               sous: Reglages.t("Entrée pour noter · fichier local, rien n'est envoyé", "Enter to note · local file, nothing is sent"),
+                               glyphe: "edit_note", garder: true, f: () => r.noter(texteN) })
+            } else {
+                if (!notesLues && !lireNotes.running) lireNotes.running = true
+                lignesN.push({ titre: Reglages.t("Ouvrir mes notes", "Open my notes"),
+                               sous: Reglages.t("« note » puis le texte pour en ajouter une", "“note” then the text to add one"),
+                               glyphe: "description", garder: false, f: () => r.ouvrirNotes() })
+                notes.forEach(x => lignesN.push({ titre: x.texte, sous: typeof x.date === "string" ? x.date : "", glyphe: "sticky_note_2",
+                                                  garder: false, f: () => r.ouvrirNotes() }))
+            }
+            resultats = lignesN
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
         // « rappel 15h appeler le garage » / « rappels » : l'heure comprise est montrée AVANT Entrée ; texte brut, jamais interprété

@@ -104,3 +104,10 @@ liste, Entrée sur l'un le supprime. À l'heure, une notification sort (bouton �
 échu pendant que l'île ou le PC était éteint s'affiche une fois au démarrage. Les rappels sont gardés dans un fichier
 privé. Attention : `1h30` collé veut dire 01:30 ; pour une durée, écris `dans 1h30` ou `1 h 30`. Limite : un rappel échu
 pendant la veille s'affiche au retour de l'écran (écran rallumé ou session déverrouillée).
+
+**Note rapide dans le Spotlight** : `note acheter du pain` puis Entrée ajoute une ligne datée à la fin de
+`~/.local/share/nc/notes.md` (`$XDG_DATA_HOME/nc/notes.md`). `note` ou `notes` seul montre les 20 dernières, la plus
+récente en haut ; Entrée ouvre le fichier avec l'application par défaut. Une note reste une ligne : les retours à la
+ligne et les caractères invisibles deviennent des espaces. 1000 caractères au plus. Le fichier est privé (0600) et
+n'est jamais suivi s'il est remplacé par un lien. Rien n'est envoyé nulle part. Le fichier est un simple texte : tu peux
+le modifier à la main. En ligne de commande : `nc-note ajouter < texte`, `nc-note liste`, `nc-note ouvrir`.
