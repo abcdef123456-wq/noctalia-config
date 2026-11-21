@@ -121,11 +121,17 @@ ce PC (`~/.cache/nc-cloud/corbeille/`, dossiers 0700, fichiers 0600).
 La règle : une copie n'est effacée que dans trois cas.
 
 - La remise a réussi.
-- Elle a plus de 24 h. Une date dans le futur, après une horloge reculée, ne l'efface jamais.
-- Le serveur a refusé net avant toute suppression : réponse 4xx complète, sauf 404 et 410.
+- Elle a plus de 24 h. Une date dans le futur, après une horloge reculée, ne l'efface jamais ; à plus d'une heure dans le
+  futur, elle est ramenée une fois à maintenant (la copie vit encore 24 h).
+- Le serveur a refusé net avant toute suppression : réponse 4xx complète, sauf 404 et 410, et seulement au premier
+  essai. Si un essai précédent a pu atteindre le serveur, seuls les 24 h ou la remise l'effacent.
 
-Dans le doute (coupure, erreur 5xx, arrêt, sortie fermée), elle reste. Une suppression rejouée reprend la même copie, ou
-n'en refait pas si le fichier a peut-être déjà disparu ; elle ne répond jamais « copie ratée ».
+Dans le doute (coupure, erreur 5xx, arrêt, sortie fermée), elle reste.
+
+Aucune suppression avec copie ne part sans une copie vérifiée de ce fichier, à cette révision. Une suppression rejouée
+reprend la copie déjà faite, revérifiée ; sinon le fichier est copié à nouveau. S'il n'est déjà plus sur le serveur, la
+réponse le dit : « Déjà supprimé du serveur », avec « une copie reste sur ce PC » ou « aucune copie sur ce PC ». Deux
+suppressions du même fichier en même temps ne gardent qu'une copie.
 
 Dans le panneau :
 
@@ -136,11 +142,12 @@ Dans le panneau :
 
 Les limites :
 
-- Toutes les copies tiennent dans 500 Mio. La place n'est faite qu'après une copie réussie, et jamais aux dépens d'une
+- Toutes les copies, et celles en cours de préparation, tiennent dans 500 Mio. La place n'est faite qu'après une copie réussie, et jamais aux dépens d'une
   copie de moins de 10 minutes.
 - Un fichier de plus de 500 Mio n'a pas de copie : la question le dit avant.
 - Un nom de fichier de secrets (`.pem`, `.key`, `.env`, `id_rsa`…) se supprime avec une copie, mais ne se remet pas
-  depuis l'île. La question le dit avant, et la corbeille propose « Ouvrir le dossier ».
+  depuis l'île. La question le dit avant, et la corbeille propose « Ouvrir le dossier » ; le fichier y porte le nom
+  `contenu`, et le panneau rappelle son nom d'origine.
 - Les dossiers n'ont pas de copie : leur question dit toujours « définitive ».
 
 Le contenu est rangé sous le nom fixe `contenu`, à côté de `copie.json` qui note son nom d'origine.

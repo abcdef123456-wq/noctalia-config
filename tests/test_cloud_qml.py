@@ -202,6 +202,7 @@ class HorsEcran(unittest.TestCase):
                                            .replace("@FICHIERS@", "true" if fichiers else "false"))
             (bin_ / "nc-cloud").chmod(0o755)
             H.faux(root, "nc-reglages")
+            H.faux(root, "xdg-open")                       # « Ouvrir le dossier » : jamais le vrai
             if notifier:
                 H.faux(root, "notify-send")
             (root / "racine.json").write_text(json.dumps(page or PAGE_RACINE) + "\n")
@@ -355,6 +356,10 @@ class HorsEcran(unittest.TestCase):
                     verifier(vu(corps, "nc-cloud-corbeille") && CloudEtat.corbeille.length === 2 && vu(corps, "nc-cloud-remettre-@C@"), "corbeille : deux copies sûres")
                     // Un nom de fichier de secrets : pas de « Remettre », son dossier à ouvrir
                     verifier(!vu(corps, "nc-cloud-remettre-@E@") && vu(corps, "nc-cloud-ouvrir-copie-@E@") && !vu(corps, "nc-cloud-ouvrir-copie-@C@"), "copie non remettable")
+                    // Le dossier montre « contenu » : le nom d'origine est dit
+                    trouver(corps, "nc-cloud-ouvrir-copie-@E@").clic()
+                    verifier(CloudEtat.message.indexOf("« contenu »") >= 0 && CloudEtat.message.indexOf(CloudEtat.corbeille.find(x => x.copie === "@E@").nom) >= 0,
+                             "nom d'origine : " + CloudEtat.message)
                     // Le dossier d'origine a disparu : « Remettre à la racine »
                     trouver(corps, "nc-cloud-remettre-@C@").clic(); etape = 20; return }
                 if (etape === 20) {
@@ -380,6 +385,10 @@ class HorsEcran(unittest.TestCase):
             } }
         '''.replace("@F@", F).replace("@C@", "c" * 32).replace("@E@", "e" * 32), reglages={"CLOUD_JARVIS": "oui"}, mode_copie="echec",
            parent_absent=True)
+        ouvert = [x for x in j if x.startswith("xdg-open ")]               # le dossier de la copie, en argv, une seule fois
+        self.assertEqual(len(ouvert), 1, j)
+        self.assertTrue(ouvert[0].endswith("/nc-cloud/corbeille/" + "e" * 32), ouvert)
+        j = [x for x in j if not x.startswith("xdg-open ")]
         self.assertEqual(j[3:], [f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", f"--json supprimer --revision=r9 --dossier=root -- {F}",
                                  "--json lister -- root", f"--json supprimer --revision=r9 --dossier=root --copie -- {F}", "--json lister -- root",
                                  "--json corbeille --remettre=" + "c" * 32, "--json corbeille --remettre=" + "c" * 32 + " --racine",

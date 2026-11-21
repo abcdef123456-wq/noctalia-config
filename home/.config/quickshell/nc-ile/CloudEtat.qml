@@ -72,8 +72,12 @@ Singleton {
     }
     // Une copie qui ne se remet pas depuis l'île (nom de fichier de secrets) : son dossier, ouvert par xdg-open (argv)
     readonly property string dossierCorbeille: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/nc-cloud/corbeille/"
-    function ouvrirCopie(copie) {
-        if (/^[0-9a-f]{32}$/.test(String(copie)) && dossierCorbeille.charAt(0) === "/") Quickshell.execDetached(["xdg-open", dossierCorbeille + copie])
+    function ouvrirCopie(copie, nom) {
+        if (!/^[0-9a-f]{32}$/.test(String(copie)) || dossierCorbeille.charAt(0) !== "/") return
+        Quickshell.execDetached(["xdg-open", dossierCorbeille + copie])
+        // Le dossier montre « contenu » et « copie.json » : le nom d'origine est dit ici
+        message = Reglages.t("Le fichier s'y appelle « contenu » ; son nom était « " + String(nom || "").slice(0, 240) + " ».",
+                             "The file is named “contenu” there; its name was “" + String(nom || "").slice(0, 240) + "”.")
     }
     // Place utilisée, pour le centre de contrôle : lue SEULEMENT à son ouverture, au plus une fois par 10 minutes (gardée
     // en mémoire) ; aussi notée quand le panneau lit l'état. Hors ligne : la dernière valeur, marquée vieille

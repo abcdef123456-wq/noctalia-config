@@ -163,7 +163,7 @@ FloatingWindow {
                                   principal: true
                                   onClic: if (CloudEtat.annulable) {
                                       if (CloudEtat.annulable.remettable) CloudEtat.remettre(CloudEtat.annulable.copie, false)
-                                      else CloudEtat.ouvrirCopie(CloudEtat.annulable.copie)
+                                      else CloudEtat.ouvrirCopie(CloudEtat.annulable.copie, CloudEtat.annulable.nom)
                                   } }
                 }
                 // Corbeille locale : tant qu'une copie existe (24 h) ; « Remettre » la redépose au même endroit
@@ -204,7 +204,7 @@ FloatingWindow {
                                     visible: !copieLigne.modelData.remettable
                                     objectName: "nc-cloud-ouvrir-copie-" + copieLigne.modelData.copie
                                     texte: Reglages.t("Ouvrir le dossier de ", "Open the folder of ") + copieLigne.court
-                                    onClic: CloudEtat.ouvrirCopie(copieLigne.modelData.copie)
+                                    onClic: CloudEtat.ouvrirCopie(copieLigne.modelData.copie, copieLigne.modelData.nom)
                                 }
                             }
                         }
