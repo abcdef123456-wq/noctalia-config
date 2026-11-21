@@ -267,16 +267,22 @@ fichier glissé : rien ne part avant « Envoyer ici ». Un fichier caché, ou un
 Dans le panneau, « Envoyer mon presse-papiers » et « Prendre celui du cloud ». Jamais automatique, jamais en fond.
 
 - Seulement du texte : 64 Kio au plus, en UTF-8. Une image, un fichier, un texte vide ou trop long est refusé.
-- Avant d'envoyer comme avant de prendre, le panneau montre un aperçu (200 caractères), le nombre de caractères et de
-  lignes, puis demande de confirmer. C'est exactement ce texte-là qui part ou arrive (son empreinte est vérifiée).
+- Avant d'envoyer comme avant de prendre, le panneau montre un aperçu, le nombre de caractères et de lignes, puis
+  demande de confirmer. Un texte de plus de 200 caractères montre son début et sa fin, et dit combien de caractères du
+  milieu ne sont pas montrés. C'est exactement ce texte-là qui part ou arrive : son empreinte est vérifiée, à la prise
+  sur les octets reçus. Cette empreinte est calculée avec une clé propre à ce PC (`~/.local/state/nc-cloud/presse.cle`) :
+  elle ne permet pas de retrouver un texte court.
 - Rien ne reconnaît un mot de passe : c'est l'aperçu qui protège. Un texte copié depuis un gestionnaire de mots de
   passe (il le signale au presse-papiers) n'est jamais envoyé, ni une clé privée ou une clé d'API.
 - Sur le cloud, un seul fichier, `Presse-papiers/presse-papiers.txt`, qui s'écrase : pas d'historique. Une fois pris
   par un autre PC, il est retiré du cloud ; si le retrait échoue, c'est dit.
-- Le texte pris perd ses caractères de contrôle (sauf retour à la ligne et tabulation) : aucune séquence du terminal ne
-  passe. Un texte de plusieurs lignes est signalé : collé dans un terminal, il peut lancer des commandes.
-- Le texte ne passe jamais par la ligne de commande d'un programme ni par un journal. Il ne reste aucun fichier sur ce
-  PC, même après une coupure (aucun envoi à reprendre plus tard).
+- Le texte pris perd ses caractères de contrôle et ses caractères invisibles (sauf retour à la ligne et tabulation) :
+  aucune séquence du terminal ne passe. Les séparateurs de ligne et de paragraphe Unicode deviennent des retours à la
+  ligne. Un texte de plusieurs lignes est signalé : collé dans un terminal, il peut lancer des commandes.
+- Un envoi refusé le dit : un autre PC vient d'envoyer (recommence), quota dépassé, serveur injoignable.
+- Le texte ne passe jamais par la ligne de commande d'un programme ni par un journal. Le fichier local ne dure que le
+  temps de l'envoi ou de la lecture. Si nc-cloud est tué entre-temps, il est effacé au plus tard à la commande presse
+  suivante, ou à la liste des envois à reprendre. Un envoi du presse-papiers n'est jamais repris.
 - Il faut `wl-clipboard` (wl-paste, wl-copy) et une session Wayland ; sinon les boutons sont grisés.
 
 En ligne de commande : `nc-cloud presse voir`, `nc-cloud presse envoyer --empreinte H`, `nc-cloud presse voir-cloud`,

@@ -43,6 +43,7 @@ import contextlib
 import errno
 import fcntl
 import hashlib
+import hmac
 import importlib.machinery
 import importlib.util
 import json
@@ -61,6 +62,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import urllib.parse
@@ -1245,75 +1247,136 @@ def cmd_note(a):
 # ── Presse-papiers d'un PC à l'autre, à la demande (jamais en fond) ─────────────────────────────────────────────────────
 # Un seul fichier, « Presse-papiers/presse-papiers.txt », qui s'écrase : un passage, pas un stockage (« prendre » le
 # retire du cloud). Texte seulement, 64 Kio, UTF-8. Le texte ne passe JAMAIS par argv (wl-copy le reçoit sur son entrée,
-# wl-paste le donne sur sa sortie), ni par un fichier hors du dossier privé (le temps d'un envoi ou d'une lecture), ni par
-# un journal. Chaque envoi et chaque prise est d'abord montré (aperçu, caractères, lignes), puis confirmé par son
-# empreinte : ce qui part ou arrive est exactement ce qui a été vu.
+# wl-paste le donne sur sa sortie), ni par un fichier hors du dossier privé (le temps d'un envoi ou d'une lecture, vidé
+# au plus tard à la commande presse suivante), ni par un journal. Chaque envoi et chaque prise est d'abord montré
+# (aperçu, caractères, lignes), puis confirmé par son empreinte : ce qui part ou arrive est exactement ce qui a été vu.
+# L'empreinte est un HMAC à clé locale : dans l'argv du panneau, elle ne permet pas de retrouver un texte court.
 PRESSE_MAX = 64 * 1024
 PRESSE_DOSSIER, PRESSE_NOM = "Presse-papiers", "presse-papiers.txt"
 PRESSE = ETAT / "presse"
+PRESSE_CLE = ETAT / "presse.cle"
 PRESSE_INDICE_MDP = "x-kde-passwordManagerHint"          # posé par les gestionnaires de mots de passe (KeePassXC…)
-# Retirés du texte pris : caractères de contrôle (sauf \n et \t : ESC, donc les séquences du terminal et OSC 52), C1,
-# caractères invisibles et de sens d'écriture
-INVISIBLES = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def nettoyer(t):
+    """Sans aucun caractère de catégorie C (contrôle, format, privé, non attribué) sauf \\n et \\t : ni séquence du
+    terminal (ESC, OSC 52), ni invisible, ni sens d'écriture ; U+2028 et U+2029 deviennent des retours à la ligne."""
+    t = t.replace("\u2028", "\n").replace("\u2029", "\n")
+    return "".join(c for c in t if c in "\n\t" or unicodedata.category(c)[0] != "C")
+
+
+def presse_empreinte(brut):
+    """HMAC-SHA-256 de `brut`, avec une clé aléatoire de ce PC (32 octets, 0600, posée d'un lien : jamais lue à moitié)."""
+    dossier_prive(ETAT)
+    if not PRESSE_CLE.exists():
+        tmp = ETAT / f".presse.cle.{secrets.token_hex(8)}"
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as o:
+                o.write(secrets.token_bytes(32))
+            with contextlib.suppress(FileExistsError):
+                os.link(tmp, PRESSE_CLE)        # un autre nc-cloud l'a posée avant : la sienne compte
+        finally:
+            tmp.unlink()
+    fd = os.open(str(PRESSE_CLE), os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as f:
+        cle = f.read(33)
+    if len(cle) != 32:
+        raise Echec(T(f"Clé du presse-papiers illisible : efface {PRESSE_CLE}.", f"Unreadable clipboard key: delete {PRESSE_CLE}."))
+    return hmac.new(cle, brut, "sha256").hexdigest()
+
+
+def presse_vider():
+    """Rien du presse-papiers ne reste sur ce PC : ni fichier, ni envoi à reprendre (même après un SIGKILL)."""
+    for cm, m in manifestes():
+        if str(m.get("source") or "").startswith(str(PRESSE) + os.sep):
+            effacer(cm)
+    shutil.rmtree(PRESSE, ignore_errors=True)       # un lien à la place : refusé, puis par dossier_prive
 
 
 def presse_session():
     if A.reglage_conf("CLOUD_JARVIS", "non") != "oui":
         raise Echec(T("Le Cloud JARVIS est coupé : rien n'est lu ni envoyé.", "The JARVIS Cloud is off: nothing is read or sent."),
                     DESACTIVE)
+    presse_vider()
     return Session()
 
 
 def presse_outil(argv, entree=None):
-    """wl-paste ou wl-copy, argv fixe, 5 s au plus ; le texte seulement par l'entrée ou la sortie standard."""
+    """wl-copy (le texte sur son entrée) ou wl-paste (au plus PRESSE_MAX + 1 octets lus) : argv fixe, 5 s au plus,
+    puis arrêté par son pid. (code, octets lus)."""
     if not os.environ.get("WAYLAND_DISPLAY"):
         raise Echec(T("Presse-papiers : seulement dans une session Wayland.", "Clipboard: only in a Wayland session."), erreur="outil")
+    muet = T("Le presse-papiers ne répond pas.", "The clipboard does not answer.")
     try:
-        # shortcut: la sortie de wl-paste est lue en entier avant la borne de 64 Kio, une lecture bornée si cela gêne
-        return subprocess.run(argv, input=entree, stdout=subprocess.PIPE if entree is None else subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, stdin=None if entree is not None else subprocess.DEVNULL, timeout=5)
+        if entree is not None:
+            return subprocess.run(argv, input=entree, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode, b""
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
         raise Echec(T("Installe wl-clipboard (wl-paste, wl-copy) pour le presse-papiers.",
                       "Install wl-clipboard (wl-paste, wl-copy) for the clipboard."), erreur="outil") from None
     except (OSError, subprocess.TimeoutExpired):
-        raise Echec(T("Le presse-papiers ne répond pas.", "The clipboard does not answer.")) from None
+        raise Echec(muet) from None
+    expire = threading.Event()
+    minuterie = threading.Timer(5, lambda: (expire.set(), p.kill()))
+    minuterie.start()
+    brut = b""
+    try:
+        brut = p.stdout.read(PRESSE_MAX + 1)
+    finally:
+        if len(brut) > PRESSE_MAX:
+            p.kill()                                # assez lu : la suite n'est jamais lue
+        code = p.wait()                             # la minuterie couvre un wl-paste qui ne finit pas
+        minuterie.cancel()
+        p.stdout.close()
+    if expire.is_set():
+        raise Echec(muet)
+    return code, brut
 
 
 def presse_valider(brut, envoi):
+    """Le texte à envoyer (tel quel) ou pris (nettoyé), ou un refus ; les contrôles portent sur le texte nettoyé."""
     if len(brut) > PRESSE_MAX:
         raise Echec(T(f"Texte trop long ({PRESSE_MAX // 1024} Kio au plus) : rien n'est fait.",
                       f"Text too long ({PRESSE_MAX // 1024} KiB at most): nothing is done."), USAGE, "trop_long")
     try:
+        if b"\0" in brut:
+            raise UnicodeDecodeError("utf-8", brut, 0, 1, "NUL")
         texte = brut.decode("utf-8")
     except UnicodeDecodeError:
         raise Echec(T("Ce n'est pas du texte UTF-8 : rien n'est fait.", "This is not UTF-8 text: nothing is done."), USAGE, "pas_texte") from None
-    if not texte.strip():
+    vu = nettoyer(texte)
+    if not vu.strip():
         raise Echec(T("Le presse-papiers est vide : rien n'est fait.", "The clipboard is empty: nothing is done."), USAGE, "vide")
-    if A.contenu_sensible(brut):
+    if A.contenu_sensible(brut) or A.contenu_sensible(vu.encode("utf-8")):
         raise Echec(T("Ça ressemble à un secret (clé privée ou clé d'API) : rien n'est " + ("envoyé." if envoi else "pris."),
                       "This looks like a secret (private key or API key): nothing is " + ("sent." if envoi else "taken.")), USAGE, "secret")
-    return texte
+    return texte if envoi else vu
 
 
 def presse_lire():
     """Le texte du presse-papiers de ce PC (octets, texte), ou un refus clair."""
-    r = presse_outil(["wl-paste", "--list-types"])
-    types = r.stdout.decode("utf-8", "replace").split() if r.returncode == 0 else []
+    code, sortie = presse_outil(["wl-paste", "--list-types"])
+    types = sortie.decode("utf-8", "replace").split() if code == 0 else []
     if PRESSE_INDICE_MDP in types:
         raise Echec(T("Copié depuis un gestionnaire de mots de passe : rien n'est envoyé.",
                       "Copied from a password manager: nothing is sent."), USAGE, "mot_de_passe")
     if not any(t == "text/plain" or t.startswith("text/plain;") for t in types):
         raise Echec(T("Le presse-papiers ne contient pas de texte (image, fichier…) : rien n'est envoyé.",
                       "The clipboard holds no text (image, file…): nothing is sent."), USAGE, "pas_texte")
-    r = presse_outil(["wl-paste", "--no-newline", "--type", "text/plain"])
-    if r.returncode != 0:
+    code, brut = presse_outil(["wl-paste", "--no-newline", "--type", "text/plain"])
+    if code != 0 and len(brut) <= PRESSE_MAX:
         raise Echec(T("Le presse-papiers est vide : rien n'est envoyé.", "The clipboard is empty: nothing is sent."), USAGE, "vide")
-    return r.stdout, presse_valider(r.stdout, True)
+    return brut, presse_valider(brut, True)
 
 
-def presse_apercu(texte):
-    """Ce qui est montré avant de confirmer : 200 caractères (sans caractère invisible), le nombre de caractères et de lignes."""
-    return {"apercu": INVISIBLES.sub("", texte)[:200], "caracteres": len(texte), "lignes": texte.count("\n") + 1}
+def presse_apercu(texte, brut):
+    """Ce qui est montré avant de confirmer : le texte nettoyé, son début ET sa fin s'il dépasse 200 caractères, le
+    nombre de caractères et de lignes, l'empreinte (HMAC) des octets."""
+    vu = nettoyer(texte)
+    caches = max(0, len(vu) - 200)
+    return {"apercu": vu[:150] + "…" + vu[-50:] if caches else vu, "caches": caches, "caracteres": len(vu),
+            "lignes": vu.count("\n") + 1, "empreinte": presse_empreinte(brut)}
 
 
 def presse_entree(s, creer):
@@ -1329,88 +1392,93 @@ def presse_entree(s, creer):
     return parent, e
 
 
-def presse_fichier_prive():
-    dossier_prive(PRESSE)
-    return Path(tempfile.mkdtemp(dir=str(PRESSE)))
-
-
-def presse_ranger(d, f=None):
-    """Le fichier local ne reste jamais : ni lui, ni un envoi à reprendre plus tard (le presse-papiers aurait changé)."""
-    if f is not None:
-        for cm, m in manifestes():
-            if m.get("source") == str(f):
-                effacer(cm)
-    shutil.rmtree(d, ignore_errors=True)
-
-
-def presse_telecharger(s, parent, e):
-    """Le texte du cloud (octets, texte nettoyé), lu dans le dossier privé puis effacé."""
+def presse_telecharger(parent, e):
+    """Le texte du cloud (octets reçus, texte nettoyé), lu dans le dossier privé puis effacé."""
     if not isinstance(e.get("size"), int) or e["size"] > PRESSE_MAX:
         raise Echec(T(f"Le presse-papiers du cloud dépasse {PRESSE_MAX // 1024} Kio : rien n'est pris.",
                       f"The cloud clipboard is over {PRESSE_MAX // 1024} KiB: nothing is taken."), erreur="trop_long")
-    d = presse_fichier_prive()
+    dossier_prive(PRESSE)
+    d = Path(tempfile.mkdtemp(dir=str(PRESSE)))
     try:
         with open(os.devnull, "w") as muet, contextlib.redirect_stdout(muet):
             code = cmd_telecharger(argparse.Namespace(id=e["id"], dest=str(d / "texte"), dossier=parent, remplacer=False,
                                                       maximum=PRESSE_MAX))
         if code != OK:
             raise Echec(T("Lecture du presse-papiers du cloud annulée.", "Reading the cloud clipboard was cancelled."), code)
-        fd = os.open(str(d / "texte"), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(str(d / "texte"), os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, "rb") as f:
             brut = f.read(PRESSE_MAX + 1)
     finally:
-        presse_ranger(d)
-    return brut, INVISIBLES.sub("", presse_valider(brut, False))
+        presse_vider()
+    return brut, presse_valider(brut, False)
+
+
+def presse_envoyer(s, a):
+    brut, _ = presse_lire()
+    if not hmac.compare_digest(presse_empreinte(brut), a.empreinte):
+        raise Echec(T("Le presse-papiers a changé depuis l'aperçu : rien n'est envoyé.",
+                      "The clipboard changed since the preview: nothing is sent."), CONFLIT, "change")
+    s.etat()
+    parent, e = presse_entree(s, True)
+    dossier_prive(PRESSE)
+    f = Path(tempfile.mkdtemp(dir=str(PRESSE))) / PRESSE_NOM
+    try:
+        fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as o:
+            o.write(brut)
+        with open(os.devnull, "w") as muet, contextlib.redirect_stdout(muet):
+            code = deposer_un(s, f, parent, "replace" if e else "create", e.get("revision") if e else None, False)
+    finally:
+        presse_vider()
+    if code == CONFLIT:
+        raise Echec(T("Un autre PC vient d'envoyer son presse-papiers : recommence.",
+                      "Another PC just sent its clipboard: try again."), CONFLIT, "conflit")
+    if code == QUOTA:
+        raise Echec(T("Quota du cloud dépassé, ou disque du serveur plein : rien n'est envoyé.",
+                      "Cloud quota exceeded, or server disk full: nothing is sent."), QUOTA, "quota")
+    if code != OK:
+        raise Echec(T(f"Envoi du presse-papiers refusé (code {code}) : rien n'est envoyé.",
+                      f"Clipboard upload refused (code {code}): nothing is sent."), code)
+    dire(T(f"Presse-papiers envoyé dans « {PRESSE_DOSSIER} » : il remplace le précédent.",
+           f"Clipboard sent to “{PRESSE_DOSSIER}”: it replaces the previous one."), evenement="presse", sens="envoye")
+    return OK
 
 
 def cmd_presse(a):
+    if a.action in ("envoyer", "prendre") and not re.fullmatch(r"[0-9a-f]{64}", a.empreinte or ""):
+        raise Echec(T("--empreinte : celle de l'aperçu (nc-cloud presse voir ou voir-cloud).",
+                      "--empreinte: the one from the preview (nc-cloud presse voir or voir-cloud)."), USAGE)
     s = presse_session()
     if a.action == "voir":                       # rien ne part : ce PC seulement
         brut, texte = presse_lire()
-        evenement(evenement="presse", sens="envoi", empreinte=hashlib.sha256(brut).hexdigest(), **presse_apercu(texte))
+        vu = presse_apercu(texte, brut)
+        evenement(evenement="presse", sens="envoi", **vu)
         if not JSON_SORTIE:
-            print(presse_apercu(texte)["apercu"])
+            print(vu["apercu"])
         return OK
     if a.action == "envoyer":
-        if not re.fullmatch(r"[0-9a-f]{64}", a.empreinte or ""):
-            raise Echec(T("--empreinte : celle de nc-cloud presse voir.", "--empreinte: the one from nc-cloud presse voir."), USAGE)
-        brut, _ = presse_lire()
-        if hashlib.sha256(brut).hexdigest() != a.empreinte:
-            raise Echec(T("Le presse-papiers a changé depuis l'aperçu : rien n'est envoyé.",
-                          "The clipboard changed since the preview: nothing is sent."), CONFLIT, "change")
-        s.etat()
-        parent, e = presse_entree(s, True)
-        d = presse_fichier_prive()
-        f = d / PRESSE_NOM
-        try:
-            fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "wb") as o:
-                o.write(brut)
-            with open(os.devnull, "w") as muet, contextlib.redirect_stdout(muet):
-                code = deposer_un(s, f, parent, "replace" if e else "create", e.get("revision") if e else None, False)
-        finally:
-            presse_ranger(d, f)
-        if code == OK:
-            dire(T(f"Presse-papiers envoyé dans « {PRESSE_DOSSIER} » : il remplace le précédent.",
-                   f"Clipboard sent to “{PRESSE_DOSSIER}”: it replaces the previous one."), evenement="presse", sens="envoye")
-        return code
+        return presse_envoyer(s, a)
     s.etat()
     parent, e = presse_entree(s, False)
     if e is None:
         raise Echec(T("Rien dans le presse-papiers du cloud.", "Nothing in the cloud clipboard."), erreur="vide")
     if a.action == "voir-cloud":
-        _, texte = presse_telecharger(s, parent, e)
+        brut, texte = presse_telecharger(parent, e)
+        vu = presse_apercu(texte, brut)
         evenement(evenement="presse", sens="prise", id=propre(e["id"]), revision=propre(e.get("revision")),
-                  empreinte=propre(e.get("sha256")), date=propre(e.get("modified")), **presse_apercu(texte))
+                  date=propre(e.get("modified")), **vu)
         if not JSON_SORTIE:
-            print(presse_apercu(texte)["apercu"])
+            print(vu["apercu"])
         return OK
-    # prendre : exactement ce qui a été vu (id, révision, empreinte), puis retiré du cloud
-    if (e.get("id"), e.get("revision"), e.get("sha256")) != (a.id, a.revision, a.empreinte):
+    # prendre : exactement ce qui a été vu (l'entrée, puis les octets reçus), puis retiré du cloud
+    if (e.get("id"), e.get("revision")) != (a.id, a.revision):
         raise Echec(T("Le presse-papiers du cloud a changé depuis l'aperçu : rien n'est pris.",
                       "The cloud clipboard changed since the preview: nothing is taken."), CONFLIT, "change")
-    _, texte = presse_telecharger(s, parent, e)
-    if presse_outil(["wl-copy", "--type", "text/plain"], texte.encode("utf-8")).returncode != 0:
+    brut, texte = presse_telecharger(parent, e)
+    if not hmac.compare_digest(presse_empreinte(brut), a.empreinte):
+        raise Echec(T("Le texte du cloud a changé depuis l'aperçu : rien n'est copié.",
+                      "The cloud text changed since the preview: nothing is copied."), CONFLIT, "change")
+    if presse_outil(["wl-copy", "--type", "text/plain"], texte.encode("utf-8"))[0] != 0:
         raise Echec(T("wl-copy a échoué : rien n'est copié, le texte reste sur le cloud.",
                       "wl-copy failed: nothing is copied, the text stays on the cloud."))
     try:
@@ -1687,6 +1755,7 @@ def cmd_reprendre_et_menage(a):
 
 
 def cmd_reprendre(a):
+    presse_vider()                      # un envoi du presse-papiers coupé n'est jamais repris (le texte aurait changé)
     liste = manifestes()
     if not a.envoi:
         if not liste:

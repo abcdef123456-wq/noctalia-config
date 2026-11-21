@@ -244,23 +244,26 @@ FloatingWindow {
                         Column {
                             id: presseColonne
                             x: 10; y: 10; width: parent.width - 20; spacing: 6
-                            readonly property var p: CloudEtat.presse || ({ sens: "", caracteres: 0, lignes: 0, apercu: "" })
+                            readonly property var p: CloudEtat.presse || ({ sens: "", caracteres: 0, lignes: 0, caches: 0, apercu: "" })
                             Texte {
                                 objectName: "nc-cloud-presse-question"
                                 width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; font.weight: Font.DemiBold
                                 readonly property string compte: presseColonne.p.caracteres + Reglages.t(" caractère(s), ", " character(s), ")
                                                                  + presseColonne.p.lignes + Reglages.t(" ligne(s)", " line(s)")
-                                text: presseColonne.p.sens === "envoi"
+                                text: (presseColonne.p.sens === "envoi"
                                     ? Reglages.t("Envoyer ce texte au cloud (" + compte + ") ? Rien ne reconnaît un mot de passe : regarde l'aperçu.",
                                                  "Send this text to the cloud (" + compte + ")? Nothing can recognise a password: check the preview.")
                                     : Reglages.t("Copier ce texte dans le presse-papiers de ce PC (" + compte + ") ? Il sera retiré du cloud.",
-                                                 "Copy this text to this PC's clipboard (" + compte + ")? It will be removed from the cloud.")
+                                                 "Copy this text to this PC's clipboard (" + compte + ")? It will be removed from the cloud."))
                                       + (presseColonne.p.sens === "prise" && presseColonne.p.lignes > 1
                                          ? Reglages.t(" Plusieurs lignes : collé dans un terminal, ce texte peut lancer des commandes.",
                                                       " Several lines: pasted into a terminal, this text can run commands.") : "")
+                                      + (presseColonne.p.caches > 0
+                                         ? Reglages.t(" " + presseColonne.p.caches + " caractère(s) au milieu ne sont pas montrés.",
+                                                      " " + presseColonne.p.caches + " character(s) in the middle are not shown.") : "")
                             }
-                            Texte { objectName: "nc-cloud-presse-apercu"; width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 6
-                                    elide: Text.ElideRight; secondaire: true; font.pixelSize: 11; text: presseColonne.p.apercu }
+                            Texte { objectName: "nc-cloud-presse-apercu"; width: parent.width; wrapMode: Text.WrapAnywhere
+                                    secondaire: true; font.pixelSize: 11; text: presseColonne.p.apercu }   // tout l'aperçu : rien de caché
                             Row {
                                 spacing: 6
                                 CloudBouton { objectName: "nc-cloud-presse-confirmer"; principal: true

@@ -63,7 +63,7 @@ Singleton {
     property string raisonSansCopie: ""           // et pourquoi (corbeille pleine…), en texte brut
     // Presse-papiers d'un PC à l'autre (nc-cloud presse) : toujours un aperçu, puis la confirmation de CE texte (son
     // empreinte) ; le texte ne passe que par la sortie de nc-cloud, jamais par un argv ni par console.log
-    property var presse: null                     // { sens: "envoi" | "prise", apercu, caracteres, lignes, empreinte, id, revision }
+    property var presse: null                     // { sens: "envoi" | "prise", apercu, caracteres, lignes, caches, empreinte, id, revision }
     property string presseMessage: ""
     property bool presseIndispo: false            // wl-clipboard absent ou hors Wayland : boutons grisés
     readonly property real copieMax: 500 * 1024 * 1024
@@ -488,7 +488,7 @@ Singleton {
         else if (d.evenement === "presse" && q === "presse") {
             var n = x => typeof x === "number" && x >= 0 ? x : 0
             if ((d.sens === "envoi" || d.sens === "prise") && typeof d.apercu === "string" && /^[0-9a-f]{64}$/.test(String(d.empreinte)))
-                presse = { sens: d.sens, apercu: d.apercu.slice(0, 200), caracteres: n(d.caracteres), lignes: n(d.lignes),
+                presse = { sens: d.sens, apercu: d.apercu.slice(0, 201), caracteres: n(d.caracteres), lignes: n(d.lignes), caches: n(d.caches),
                            empreinte: d.empreinte, id: String(d.id || ""), revision: String(d.revision || "") }
             else if (typeof d.message === "string") presseMessage = d.message.slice(0, 300)
         }
