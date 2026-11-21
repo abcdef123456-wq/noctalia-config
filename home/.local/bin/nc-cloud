@@ -1834,9 +1834,10 @@ def analyseur():
 def main(argv=None):
     global JSON_SORTIE
     argv = sys.argv[1:] if argv is None else argv
-    # --json accepté avant ou après la sous-commande
-    JSON_SORTIE = "--json" in argv
-    a = analyseur().parse_args([x for x in argv if x != "--json"])
+    # --json accepté avant ou après la sous-commande, jamais après « -- » (un nom tapé « --json » reste un nom)
+    n = argv.index("--") if "--" in argv else len(argv)
+    JSON_SORTIE = "--json" in argv[:n]
+    a = analyseur().parse_args([x for x in argv[:n] if x != "--json"] + argv[n:])
     signal.signal(signal.SIGINT, interrompre)
     signal.signal(signal.SIGTERM, interrompre)
     try:

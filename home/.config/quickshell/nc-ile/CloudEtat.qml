@@ -66,7 +66,7 @@ Singleton {
         proc.command = [bin + "nc-cloud", "--json"].concat(args)
         proc.running = true
     }
-    function lister(plus) { lancer(plus && suite ? ["lister", dossier, "--suite", suite] : ["lister", dossier], plus ? "suite" : "page") }
+    function lister(plus) { lancer(plus && suite ? ["lister", "--suite=" + suite, "--", dossier] : ["lister", "--", dossier], plus ? "suite" : "page") }
     function aller(e) {
         if (!e || e.kind !== "directory" || occupe) return
         if (deplacement && deplacement.id === e.id) return          // jamais dans le dossier qu'on déplace
@@ -82,16 +82,16 @@ Singleton {
     function ouvrirEntree(e) {
         if (!e || occupe) return
         if (e.kind === "directory") aller(e)
-        else if (e.kind === "file") lancer(["ouvrir", e.id, "--dossier", dossier], "ouvrir", e.id)
+        else if (e.kind === "file") lancer(["ouvrir", "--dossier=" + dossier, "--", e.id], "ouvrir", e.id)
     }
     function creerFichier(nom) {
         nom = String(nom || "").trim()
-        if (nom !== "") lancer(["creer", dossier, nom], "creer")
+        if (nom !== "") lancer(["creer", "--", dossier, nom], "creer")
     }
     function renommer(e, nom) {
         nom = String(nom || "").trim()
         if (!e || !peutDeplacer || !e.revision || nom === "" || nom === e.name) return
-        lancer(["renommer", e.id, "--revision", e.revision, nom], "renommer", e.id)
+        lancer(["renommer", "--revision=" + e.revision, "--", e.id, nom], "renommer", e.id)
     }
     function commencerDeplacement(e) { if (e && peutDeplacer && e.revision) { deplacement = e; selection = "" } }
     // « Déplacer ici » : pas dans son propre dossier (rien ne change), ni dans lui-même ou un de ses sous-dossiers
@@ -101,22 +101,22 @@ Singleton {
         if (!deplacementPossible) return
         var e = deplacement
         deplacement = null
-        lancer(["deplacer", e.id, "--revision", e.revision, "--vers", dossier], "deplacer", e.id)
+        lancer(["deplacer", "--revision=" + e.revision, "--vers=" + dossier, "--", e.id], "deplacer", e.id)
     }
     // Un dossier : l'aperçu d'abord (ce que la suppression retirerait), la question ensuite ; un fichier : la question directe
     function demanderApercu(e) {
         apercu = null
-        if (e && e.kind === "directory" && peutSupprimerDossier) lancer(["apercu", e.id], "apercu", e.id)
+        if (e && e.kind === "directory" && peutSupprimerDossier) lancer(["apercu", "--", e.id], "apercu", e.id)
     }
     function actualiser() { if (!occupe) { entrees = []; suite = ""; lu = false; lancer(["etat"], "etat"); lister(false) } }
     function creerDossier(nom) {
         nom = String(nom || "").trim()
-        if (nom !== "") lancer(["dossier", dossier, nom], "dossier")
+        if (nom !== "") lancer(["dossier", "--", dossier, nom], "dossier")
     }
     function telecharger(e, remplacer) {
         if (!e || e.kind !== "file") return
         aRemplacer = ""
-        lancer(["telecharger", e.id, "--dossier", dossier].concat(remplacer ? ["--remplacer"] : []), "telecharger", e.id)
+        lancer(["telecharger", "--dossier=" + dossier].concat(remplacer ? ["--remplacer"] : [], ["--", e.id]), "telecharger", e.id)
     }
     // Seulement après la question du panneau ; un dossier, seulement avec l'arbre de SON aperçu confirmé
     function supprimer(e) {
@@ -125,8 +125,8 @@ Singleton {
             if (!apercu || apercu.id !== e.id || !/^[0-9a-f]{64}$/.test(apercu.tree)) return
             var arbre = apercu.tree
             apercu = null
-            lancer(["supprimer", e.id, "--revision", e.revision, "--recursif", "--arbre", arbre], "supprimer", e.id)
-        } else lancer(["supprimer", e.id, "--revision", e.revision], "supprimer", e.id)
+            lancer(["supprimer", "--revision=" + e.revision, "--recursif", "--arbre=" + arbre, "--", e.id], "supprimer", e.id)
+        } else lancer(["supprimer", "--revision=" + e.revision, "--", e.id], "supprimer", e.id)
     }
 
     function ligne(texte) {
@@ -136,7 +136,9 @@ Singleton {
         var q = enCours ? enCours.quoi : ""
         if (d.evenement === "etat") { etat = d.etat || ({}); features = d.features || ({}) }
         else if (d.evenement === "page") {
-            var l = Array.isArray(d.entries) ? d.entries.filter(x => x && typeof x.id === "string" && typeof x.name === "string") : []
+            // Seuls les ids sûrs (root ou 32 hex) : un id qui commencerait par un tiret serait lu comme une option
+            var l = Array.isArray(d.entries) ? d.entries.filter(x => x && typeof x.id === "string" && /^(root|[0-9a-f]{32})$/.test(x.id)
+                                                                     && typeof x.name === "string") : []
             entrees = q === "suite" ? entrees.concat(l) : l
             suite = typeof d.next_cursor === "string" ? d.next_cursor : ""
             lu = true
@@ -151,7 +153,7 @@ Singleton {
             if (q === "telecharger" && d.code === 6) aRemplacer = enCours.id
             // Le dossier a changé depuis l'aperçu : rien n'est supprimé ; nouvel aperçu (après la page relue), nouvelle question
             if (q === "supprimer" && d.erreur === "tree_changed") {
-                suites = [{ args: ["apercu", enCours.id], quoi: "apercu", id: enCours.id }].concat(suites)
+                suites = [{ args: ["apercu", "--", enCours.id], quoi: "apercu", id: enCours.id }].concat(suites)
                 redemander(enCours.id)
             }
             if (d.code === 4) associe = false
@@ -176,7 +178,7 @@ Singleton {
             // Le dossier a changé : sa page est relue avant la suite de la file
             if (fini && ["dossier", "supprimer", "creer", "renommer", "deplacer"].indexOf(fini.quoi) >= 0
                 && (code === 0 || code === 6))
-                c.suites = [{ args: ["lister", c.dossier], quoi: "page", id: "" }].concat(c.suites)
+                c.suites = [{ args: ["lister", "--", c.dossier], quoi: "page", id: "" }].concat(c.suites)
             if (c.suites.length > 0) {
                 var s = c.suites[0]
                 c.suites = c.suites.slice(1)

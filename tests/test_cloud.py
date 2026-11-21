@@ -998,6 +998,14 @@ elif sys.argv[1] == "clear":
         r = self.nc("lister", "root", "--suite", suite, code=0)
         self.assertEqual([e["name"] for e in r.lignes[-1]["entries"]], ["c"])
 
+    def test_noms_a_tiret_apres_double_tiret(self):
+        """« -x » et « --json » tapés comme noms, placés après « -- », restent des noms (le panneau passe ainsi)."""
+        self.associer()
+        self.nc("dossier", "--", "root", "-x", code=0)
+        self.nc("creer", "--", "root", "--json", code=0)
+        r = self.nc("lister", "--", "root", code=0)
+        self.assertEqual(sorted(e["name"] for e in r.lignes[-1]["entries"]), ["--json", "-x"])
+
     def test_nom_hostile(self):
         self.associer()
         p = self.fichier("a.txt", b"abc")
