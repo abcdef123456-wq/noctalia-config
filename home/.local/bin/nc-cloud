@@ -2133,7 +2133,7 @@ def copier_avant(s, a, e, rev):
 def cmd_corbeille(a):
     l = corbeille_lire()
     if not a.remettre:
-        evenement(evenement="corbeille", copies=[{k: m[k] for k in ("copie", "nom", "taille", "remettable", "etat", "abimee")} | {"date": int(m["date"])}
+        evenement(evenement="corbeille", copies=[dict({k: m[k] for k in ("copie", "nom", "taille", "remettable", "etat", "abimee")}, date=int(m["date"]))
                                                 for m in l])
         if not JSON_SORTIE:
             for m in l:
