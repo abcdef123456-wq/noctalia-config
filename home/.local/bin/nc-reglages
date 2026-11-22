@@ -4820,46 +4820,73 @@ def liens_web_fichier():
     return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "nc", "liens-web.conf")
 
 
+def liens_web_nom_ok(nom):
+    """Le nom ne porte ni contrôle ni caractère de sens d'écriture (catégories C*, Zl, Zp)."""
+    return not any(unicodedata.category(c)[0] == "C" or unicodedata.category(c) in ("Zl", "Zp") for c in nom)
+
+
 def liens_web_valide(prefixe, nom, url):
     """Vrai si les trois champs suivent les règles (préfixe [a-z0-9]{1,12} hors mots réservés, nom de 40 caractères au
-    plus sans contrôle, URL http(s) avec un seul « %s »)."""
+    plus sans contrôle ni sens d'écriture, URL http(s) avec un seul « %s »)."""
     return bool(re.fullmatch(r"[a-z0-9]{1,12}", prefixe) and prefixe not in LIENS_RESERVES
-                and 1 <= len(nom) <= 40 and not re.search(r"[\x00-\x1f\x7f-\x9f]", nom)
+                and 1 <= len(nom) <= 40 and liens_web_nom_ok(nom)
                 and re.fullmatch(r"https?://[^\s\x00-\x1f\x7f-\x9f]+", url) and url.count("%s") == 1)
 
 
-def liens_web_lire():
-    """[(préfixe, nom, URL)] ; [] si le fichier manque, est trop gros, trop long ou n'est pas un fichier ordinaire."""
+def liens_web_lignes():
+    """Lignes brutes du fichier (liste vide s'il manque) ; ValueError s'il est hors bornes, illisible ou pas ordinaire :
+    on n'écrit alors rien."""
+    chemin = liens_web_fichier()
     try:
-        fd = os.open(liens_web_fichier(), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
         return []
+    except OSError:
+        raise ValueError(T("liens-web.conf est illisible ou n'est pas un fichier ordinaire : rien n'est écrit",
+                           "liens-web.conf is unreadable or not a regular file: nothing written"))
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return []
+            raise ValueError(T("liens-web.conf n'est pas un fichier ordinaire : rien n'est écrit",
+                               "liens-web.conf is not a regular file: nothing written"))
         brut = os.read(fd, LIENS_MAX_OCTETS + 1)
+    except OSError:
+        raise ValueError(T("liens-web.conf est illisible : rien n'est écrit", "liens-web.conf is unreadable: nothing written"))
     finally:
         os.close(fd)
-    if len(brut) > LIENS_MAX_OCTETS:
-        return []
-    lignes = brut.decode("utf-8", "replace").split("\n")
+    lignes = brut.decode("utf-8", "surrogateescape").split("\n")
     if lignes[-1] == "":
         lignes.pop()
-    if len(lignes) > LIENS_MAX_LIGNES:
+    if len(brut) > LIENS_MAX_OCTETS or len(lignes) > LIENS_MAX_LIGNES:
+        raise ValueError(T("liens-web.conf dépasse 16 Kio ou 50 lignes : rien n'est écrit, réduis-le à la main",
+                           "liens-web.conf is over 16 KiB or 50 lines: nothing written, trim it by hand"))
+    return lignes
+
+
+def liens_web_comprise(ligne):
+    """(préfixe, nom, URL) si la ligne est un lien valide, sinon None."""
+    c = ligne.rstrip("\r").split("\t")
+    return tuple(c) if len(c) == 3 and not ligne.startswith("#") and liens_web_valide(*c) else None
+
+
+def liens_web_lire():
+    """[(préfixe, nom, URL)] ; [] si le fichier manque ou est refusé (bornes, type)."""
+    try:
+        lignes = liens_web_lignes()
+    except ValueError:
         return []
     res = []
     for l in lignes:
-        c = l.rstrip("\r").split("\t")
-        if len(c) == 3 and not l.startswith("#") and liens_web_valide(*c) and all(c[0] != x[0] for x in res):
-            res.append(tuple(c))
+        c = liens_web_comprise(l)
+        if c and all(c[0] != x[0] for x in res):
+            res.append(c)
     return res
 
 
-def liens_web_ecrire(liens):
-    """Fichier temporaire (0600) dans le même dossier, puis renommage : jamais à moitié écrit ; un lien symbolique à la
-    place du fichier est remplacé, pas suivi."""
-    texte = "".join("\t".join(x) + "\n" for x in liens)
-    if len(liens) > LIENS_MAX_LIGNES or len(texte.encode("utf-8")) > LIENS_MAX_OCTETS:
+def liens_web_ecrire(lignes):
+    """Écrit les lignes brutes : fichier temporaire (0600) dans le même dossier, puis renommage : jamais à moitié écrit ;
+    un lien symbolique à la place du fichier est remplacé, pas suivi."""
+    texte = "".join(l + "\n" for l in lignes)
+    if len(lignes) > LIENS_MAX_LIGNES or len(texte.encode("utf-8", "surrogateescape")) > LIENS_MAX_OCTETS:
         raise ValueError(T("trop de liens", "too many links"))
     chemin = liens_web_fichier()
     dossier = os.path.dirname(chemin)
@@ -4868,7 +4895,7 @@ def liens_web_ecrire(liens):
     os.makedirs(dossier, mode=0o700, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".nc-", suffix=".tmp", dir=dossier)       # mkstemp crée en 0600
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write(texte)
         os.replace(tmp, chemin)
     except BaseException:
@@ -4887,10 +4914,19 @@ def liens_web_ajouter(prefixe, nom, url):
                            "avec un seul %s)",
                            "link refused (prefix a-z 0-9, 1 to 12 characters, name up to 40 characters, http(s) URL "
                            "with a single %s)"))
-    liens = liens_web_lire()
-    if any(x[0] == prefixe for x in liens):
+    lignes = liens_web_lignes()
+    if any((liens_web_comprise(l) or ("",))[0] == prefixe for l in lignes):
         raise ValueError(T(f"le préfixe {prefixe} existe déjà", f"prefix {prefixe} already exists"))
-    liens_web_ecrire(liens + [(prefixe, nom, url)])
+    liens_web_ecrire(lignes + ["\t".join((prefixe, nom, url))])
+
+
+def liens_web_retirer(prefixe):
+    """Retire la seule ligne du préfixe ; les autres lignes restent telles quelles."""
+    lignes = liens_web_lignes()
+    reste = [l for l in lignes if (liens_web_comprise(l) or ("",))[0] != prefixe]
+    if len(reste) == len(lignes):
+        raise ValueError(T(f"pas de lien {prefixe}", f"no link {prefixe}"))
+    liens_web_ecrire(reste)
 
 
 def liens_web_saisie(texte):
@@ -4914,10 +4950,8 @@ def liens_web_cli(a):
         except (OSError, ValueError) as e:
             sys.exit(f"nc-reglages : {e}")
     elif a[:1] == ["retirer"] and len(a) == 2:
-        if all(x[0] != a[1] for x in liens):
-            sys.exit(T(f"nc-reglages : pas de lien {a[1]}", f"nc-settings: no link {a[1]}"))
         try:
-            liens_web_ecrire([x for x in liens if x[0] != a[1]])
+            liens_web_retirer(a[1])
         except (OSError, ValueError) as e:
             sys.exit(f"nc-reglages : {e}")
     else:

@@ -137,6 +137,9 @@ epingler() {
     if [ -L "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then
       t "Épinglage refusé : « $1 » n'est pas un fichier image ordinaire." "Refused: “$1” is not a regular image file." >&2; echo >&2; return 1
     fi
+    if [ "$(stat -c %s -- "$f" 2>/dev/null || echo 99999999999)" -gt 52428800 ]; then
+      t "Épinglage refusé : l'image dépasse 50 Mio." "Refused: the image is over 50 MiB." >&2; echo >&2; return 1
+    fi
     case "$(head -c 8 < "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in
       89504e470d0a1a0a) ext=png ;;
       ffd8ff*) ext=jpg ;;

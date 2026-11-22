@@ -52,6 +52,23 @@ class Pures(unittest.TestCase):
         self.assertEqual(prefixes("abc\t\thttps://x.fr/%s"), [])
         self.assertEqual(prefixes("abc\tn\x07n\thttps://x.fr/%s"), [])
 
+    def test_nom_sans_sens_d_ecriture(self):
+        """Contrôles, séparateurs de ligne et caractères de sens d'écriture refusés ; accents et emoji acceptés."""
+        for cp in (0x7, 0x85, 0x200B, 0x200E, 0x2028, 0x2029, 0x202A, 0x202E, 0x2066, 0x2069, 0xFEFF):
+            self.assertEqual(prefixes("abc\tn" + chr(cp) + "n\thttps://x.fr/%s"), [], hex(cp))
+        self.assertEqual(prefixes("abc\tCafé crème\thttps://x.fr/%s"), ["abc"])
+        self.assertEqual(prefixes("abc\t\u65e5\u672c\thttps://x.fr/%s"), ["abc"])
+
+    def test_reserves_identiques_a_nc_reglages(self):
+        """Les deux listes de mots réservés (Saisies.js et nc-reglages) sont les mêmes."""
+        loader = importlib.machinery.SourceFileLoader("ncreglages_liens", str(REGLAGES))
+        spec = importlib.util.spec_from_loader("ncreglages_liens", loader)
+        mod = importlib.util.module_from_spec(spec)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            loader.exec_module(mod)
+        self.assertEqual(sorted(js("RESERVES")), sorted(mod.LIENS_RESERVES))
+
     def test_mots_reserves(self):
         for p in ("g", "yt", "w", "heure", "time", "mdp", "password", "port", "processus", "session", "note", "rappel"):
             self.assertEqual(prefixes(f"{p}\tN\thttps://x.fr/%s"), [], p)
@@ -121,16 +138,10 @@ class Reglages(unittest.TestCase):
         self.f.write_text("#" * 16385)
         self.assertEqual(cli(self.d, "liste").stdout, "")
 
-    def test_ecriture_atomique_sans_lien_suivi(self):
-        cible = self.d / "cible"
-        cible.write_text("intact\n")
-        self.f.parent.mkdir(parents=True)
-        self.f.symlink_to(cible)
-        self.assertEqual(cli(self.d, "liste").stdout, "", "un lien symbolique n'est pas lu")
+    def test_ecriture_atomique(self):
+        self.ecrire("a0\tN\thttps://x.fr/%s\n")
         r = cli(self.d, "ajouter", "amz", "Amazon", "https://x.fr/%s")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(cible.read_text(), "intact\n", "le lien n'est pas suivi")
-        self.assertFalse(self.f.is_symlink())
         self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
         self.assertEqual([p.name for p in self.f.parent.iterdir()], ["liens-web.conf"], "pas de temporaire laissé")
 
@@ -146,6 +157,91 @@ class Reglages(unittest.TestCase):
             self.assertEqual(cli(self.d, "ajouter", f"a{i}", "N", "https://x.fr/%s").returncode, 0)
         self.assertNotEqual(cli(self.d, "ajouter", "plus", "N", "https://x.fr/%s").returncode, 0)
         self.assertEqual(len(self.f.read_text().splitlines()), 50)
+
+    def ecrire(self, texte):
+        self.f.parent.mkdir(parents=True, exist_ok=True)
+        self.f.write_bytes(texte if isinstance(texte, bytes) else texte.encode())
+
+    def test_lignes_inconnues_gardees(self):
+        """Ajouter puis retirer gardent commentaires, lignes mal écrites et lignes vides, telles quelles."""
+        avant = "# mes liens\n\nbad ligne\nytb\tY\thttps://y.fr/%s\nG\tN\thttps://x.fr/%s\n# fin\n"
+        self.ecrire(avant)
+        self.assertEqual(cli(self.d, "ajouter", "amz", "Amazon", "https://x.fr/%s").returncode, 0)
+        self.assertEqual(self.f.read_text(), avant + "amz\tAmazon\thttps://x.fr/%s\n")
+        self.assertEqual(cli(self.d, "retirer", "ytb").returncode, 0)
+        self.assertEqual(self.f.read_text(), avant.replace("ytb\tY\thttps://y.fr/%s\n", "") + "amz\tAmazon\thttps://x.fr/%s\n")
+        self.assertEqual(cli(self.d, "retirer", "amz").returncode, 0)
+        self.assertEqual(self.f.read_text(), avant.replace("ytb\tY\thttps://y.fr/%s\n", ""))
+        self.assertNotEqual(cli(self.d, "retirer", "inconnu").returncode, 0)
+
+    def test_octets_invalides_gardes(self):
+        brut = b"# note \xff\xfe\nbad\xc3\n"
+        self.ecrire(brut)
+        self.assertEqual(cli(self.d, "ajouter", "amz", "Amazon", "https://x.fr/%s").returncode, 0)
+        self.assertEqual(self.f.read_bytes(), brut + b"amz\tAmazon\thttps://x.fr/%s\n")
+
+    def test_surrogateescape_seulement_pour_les_liens(self):
+        """Les écrivains généraux (reglages.conf…) gardent leur rigueur : un surrogate isolé y lève une erreur. Seul le
+        chemin des liens web relit et réécrit les octets non UTF-8 tels quels."""
+        import ast
+        src = (REPO / "home/.local/bin/nc-reglages").read_text(encoding="utf-8")
+        fonctions = {n.name: ast.get_source_segment(src, n) for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)}
+        for nom in ("ouvrir_atomique", "_ecrire"):
+            self.assertNotIn("surrogateescape", fonctions[nom], nom)
+        avec = sorted(n for n, corps in fonctions.items() if "surrogateescape" in corps)
+        self.assertEqual(avec, ["liens_web_ecrire", "liens_web_lignes"])
+
+    def refus_sans_rien_ecrire(self, contenu):
+        import hashlib
+        self.ecrire(contenu)
+        avant = hashlib.sha256(self.f.read_bytes()).hexdigest()
+        for a in (("ajouter", "nouveau", "N", "https://x.fr/%s"), ("retirer", "a0")):
+            r = cli(self.d, *a)
+            self.assertNotEqual(r.returncode, 0, a)
+            self.assertIn("rien n'est écrit", r.stderr)
+            self.assertEqual(hashlib.sha256(self.f.read_bytes()).hexdigest(), avant, "fichier identique à l'octet")
+            self.assertEqual([p.name for p in self.f.parent.iterdir()], ["liens-web.conf"])
+        r = self.reglage("nouveau Nom https://x.fr/%s")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(hashlib.sha256(self.f.read_bytes()).hexdigest(), avant, "chemin graphique : identique aussi")
+
+    def test_trop_de_lignes_refuse(self):
+        self.refus_sans_rien_ecrire("".join(f"a{i}\tN\thttps://x.fr/%s\n" for i in range(51)))
+
+    def test_trop_d_octets_refuse(self):
+        self.refus_sans_rien_ecrire("a0\tN\thttps://x.fr/%s\n" + "# " + "x" * 16400 + "\n")
+
+    def test_commentaires_comptent_dans_la_borne(self):
+        self.refus_sans_rien_ecrire("a0\tN\thttps://x.fr/%s\n" + "# c\n" * 50)
+
+    def test_fichier_pas_ordinaire_refuse(self):
+        cible = self.d / "cible"
+        cible.write_text("a0\tN\thttps://x.fr/%s\n")
+        self.f.parent.mkdir(parents=True)
+        self.f.symlink_to(cible)
+        for a in (("ajouter", "nouveau", "N", "https://x.fr/%s"), ("retirer", "a0")):
+            r = cli(self.d, *a)
+            self.assertNotEqual(r.returncode, 0, a)
+            self.assertIn("rien n'est écrit", r.stderr)
+            self.assertTrue(self.f.is_symlink(), "le lien est laissé en place")
+            self.assertEqual(cible.read_text(), "a0\tN\thttps://x.fr/%s\n")
+        os.remove(self.f)
+        os.mkfifo(self.f)
+        r = cli(self.d, "ajouter", "nouveau", "N", "https://x.fr/%s")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(stat.S_ISFIFO(self.f.lstat().st_mode))
+
+    def test_nom_avec_sens_d_ecriture_refuse_en_ecriture(self):
+        for cp in (0x7, 0x2028, 0x202E, 0x2066, 0x200F):
+            self.assertNotEqual(cli(self.d, "ajouter", "amz", "n" + chr(cp) + "n", "https://x.fr/%s").returncode, 0, hex(cp))
+            if cp != 0x2028:
+                self.assertNotEqual(self.reglage("amz Nom" + chr(cp) + "x https://x.fr/%s").returncode, 0, hex(cp))
+        self.assertFalse(self.f.exists())
+        self.assertEqual(cli(self.d, "ajouter", "amz", "Café crème", "https://x.fr/%s").returncode, 0)
+
+    def test_nom_avec_sens_d_ecriture_ignore_en_lecture(self):
+        self.ecrire("amz\tn" + chr(0x202E) + "n\thttps://x.fr/%s\nytb\tY\thttps://y.fr/%s\n")
+        self.assertEqual(cli(self.d, "liste").stdout, "ytb\tY\thttps://y.fr/%s\n")
 
     def reglage(self, saisie):
         env = {"PATH": os.environ["PATH"], "HOME": str(self.d), "XDG_CONFIG_HOME": str(self.d / "config"),
@@ -266,8 +362,7 @@ FAUX_BIN = {
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class RechercheHorsEcran(unittest.TestCase):
     def test_prefixe_du_fichier_donne_une_ligne_et_entree_ouvre(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="ncm-", dir="/tmp/claude-1000") as d:
+        with tempfile.TemporaryDirectory(prefix="ncm-") as d:
             root = Path(d)
             q = root / "qml"
             shutil.copytree(QML, q)

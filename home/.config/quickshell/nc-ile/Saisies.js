@@ -142,7 +142,7 @@ function analyseLiens(texte) {
         if (c.length !== 3) continue
         var p = c[0], nom = c[1], url = c[2]
         if (!/^[a-z0-9]{1,12}$/.test(p) || RESERVES.indexOf(p) >= 0 || vus[p]) continue
-        if (nom.length < 1 || nom.length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(nom)) continue
+        if (nom.length < 1 || nom.length > 40 || /[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ue000-\uf8ff]/.test(nom)) continue
         if (!/^https?:\/\/[^\s\u0000-\u001f\u007f-\u009f]+$/.test(url) || url.split("%s").length !== 2) continue
         vus[p] = true
         liens.push({ p: p, nom: nom, url: url })

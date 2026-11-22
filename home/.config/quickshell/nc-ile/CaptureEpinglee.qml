@@ -31,6 +31,7 @@ FloatingWindow {
         source: ce.chemin !== "" ? "file://" + ce.chemin : ""
         fillMode: Image.PreserveAspectFit
         cache: false
+        sourceSize: Qt.size(Math.min(4096, ce.largeurEcran), Math.min(4096, ce.hauteurEcran))     // borne la mémoire d'une grosse image
         asynchronous: true
         smooth: true
         focus: true

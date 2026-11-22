@@ -378,6 +378,7 @@ Item {
         lireSessions.running = true
         notesLues = false; noteErreur = ""
         liensVoulus = true
+        if (fichierLiens.path !== "") fichierLiens.reload()      // un lien ajouté depuis la dernière ouverture
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true

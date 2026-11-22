@@ -12,7 +12,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
 OUTILS = ("bash", "sh", "sed", "tail", "tr", "mkdir", "date", "cat", "grep", "head", "rm", "env", "cmp", "awk", "mktemp",
-          "chmod", "mv", "cut", "sleep", "python3", "paste", "dirname", "basename", "timeout", "od")
+          "chmod", "mv", "cut", "sleep", "python3", "paste", "dirname", "basename", "timeout", "od", "stat")
 
 
 class Base(unittest.TestCase):

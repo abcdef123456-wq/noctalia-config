@@ -1,6 +1,7 @@
 """nc-capture epingler : copie 0600 dans un dossier 0700 de XDG_RUNTIME_DIR, original intact, refus des formats autres
 que PNG et JPEG, bouton « Épingler » de la notification ; fenêtre CaptureEpinglee.qml (borne 40 %, Échap, effacement
 à la fermeture), règle Hyprland précise, ménage au démarrage. Faux grim, slurp, notify-send et qs dans un HOME temporaire."""
+import os
 import re
 import shutil
 import stat
@@ -53,6 +54,22 @@ class Epingler(Base):
                 self.assertEqual(copie.read_bytes(), octets)
                 self.assertEqual(src.read_bytes(), octets)
                 self.assertIn("ipc call ile epingler " + str(copie), self.journal.read_text())
+
+    def test_plus_de_50_mio_refuse(self):
+        src = self.home / "gros.png"
+        src.write_bytes(PNG)
+        os.truncate(src, 50 * 1024 * 1024 + 1)
+        r = self.lancer(str(src))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.copies(), [], "aucune copie faite")
+        self.assertNotIn("ipc call ile epingler", self.journal.read_text() if self.journal.exists() else "")
+        os.truncate(src, 50 * 1024 * 1024)
+        r = self.lancer(str(src))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_source_size_borne(self):
+        qml = (Path(__file__).resolve().parent.parent / "home/.config/quickshell/nc-ile/CaptureEpinglee.qml").read_text()
+        self.assertIn("sourceSize: Qt.size(Math.min(4096, ce.largeurEcran)", qml)
 
     def test_zone_choisie_avec_slurp_et_grim(self):
         r = self.lancer()
