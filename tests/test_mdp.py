@@ -279,7 +279,10 @@ class Script(unittest.TestCase):
         self.assertIn(f.lire("age").strip(), ("0", "1"))
         self.assertEqual(f.lire("capture"), "")
         self.assertEqual(f.marque.stat().st_mode & 0o777, 0o600)
-        self.assertGreaterEqual(f.marque.stat().st_mtime, float(f.lire("fin")), "marque rafraîchie après la fin de wl-copy")
+        # Deux heures de fichiers (même horloge du noyau, précise à quelques ms) : jamais une heure de fichier contre
+        # celle de « date », plus fine, qui a donné 0,3 ms d'écart sur openSUSE
+        self.assertGreaterEqual(f.marque.stat().st_mtime_ns, (f.etat / "appel-0.fin").stat().st_mtime_ns,
+                                "marque rafraîchie après la fin de wl-copy")
         # Contrôle du contrôle : la même capture, marque périmée, garde la copie
         vieux = time.time() - 30
         os.utime(str(f.marque), (vieux, vieux))
