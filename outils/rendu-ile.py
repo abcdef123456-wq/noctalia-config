@@ -24,6 +24,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
+import struct
+import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
@@ -54,6 +57,7 @@ FAUX_LECTEUR = """readonly property var lecteurs: [fauxLecteur]
     }"""
 
 # Ce que fait le pilote pour chaque état (« etat » est le singleton de l'île).
+MARGE = 24
 ACTIONS = {
     "fermee": "",
     "musique": "",
@@ -72,6 +76,8 @@ PILOTE = """
     Timer {
         id: grab; interval: %(attente)d
         onTriggered: vs.instances[0].cible.grabToImage(function(r) {
+            var i = vs.instances[0].ilot
+            console.log("CADRE " + JSON.stringify([i.x, i.y, i.width, i.height, i.parent.width, i.parent.height]))
             console.log("RENDU " + (r.saveToFile(Quickshell.env("NCR_PNG")) ? "ok" : "echec"))
             Qt.quit()
         })
@@ -141,8 +147,14 @@ def preparer(root, etat, reglages, palette):
     for f in ile.glob("*.qml"):
         t = f.read_text()
         if "PanelWindow {" in t:
-            # « cible » : la fenêtre ne se capture pas (pas de moteur QML), on capture l'île elle-même
-            t = sans_couche(t).replace("id: fen\n", "id: fen\n    readonly property Item cible: ile\n", 1)
+            # « cible » : le contenu de la fenêtre (contour et lueur y sont dessinés derrière l'île), « ilot » : l'île
+            t = sans_couche(t).replace("id: fen\n", "id: fen\n    readonly property Item cible: racine\n    readonly property Item ilot: ile\n", 1)
+            if f.name == "Ile.qml":    # tout le dessin dans un Item de la scène : seul un Item se capture (la fenêtre, non)
+                t = t.replace("    Item {\n        id: fondClic", "    Item {\n    id: racine\n    anchors.fill: parent\n    Item {\n        id: fondClic", 1)
+                t = t.rstrip()
+                t = t[:t.rindex("}")] + "}\n}\n"
+                t = re.sub(r"(implicitHeight:).*", r"\1 700", t, count=1)    # fenêtre assez haute pour les pages ouvertes
+                t = re.sub(r"(implicitWidth:).*", r"\1 800", t, count=1)     # et assez large, même quand l'échelle réduit l'écran
             if f.name == "Ile.qml":    # hors écran l'écran n'a pas de nom : « "" === "" » ouvrirait l'île
                 t = re.sub(r"\b((?:fen\.)?modelData\.name)\b", r'(\1 || "ecran-rendu")', t)
         f.write_text(t)
@@ -192,8 +204,95 @@ def environnement(root, png, polices=None, echelle=1):
     return env
 
 
+def lire_png(chemin):
+    """PNG 8 bits RGB ou RGBA (ce que Qt écrit) -> (largeur, hauteur, octets par pixel, lignes d'octets)."""
+    d = Path(chemin).read_bytes()
+    i, idat, w = 8, b"", None
+    while i < len(d):
+        n, k = struct.unpack(">I4s", d[i:i + 8])
+        c = d[i + 8:i + 8 + n]
+        if k == b"IHDR":
+            w, h, prof, typ = struct.unpack(">IIBB", c[:10])
+            if prof != 8 or typ not in (2, 6):
+                raise ValueError("PNG inattendu")
+        elif k == b"IDAT":
+            idat += c
+        i += 12 + n
+    bpp = 3 if typ == 2 else 4
+    brut, ligne, lignes = zlib.decompress(idat), w * bpp, []
+    prec = bytearray(ligne)
+    for y in range(h):
+        f, cur = brut[y * (ligne + 1)], bytearray(brut[y * (ligne + 1) + 1:(y + 1) * (ligne + 1)])
+        for x in range(ligne):
+            a = cur[x - bpp] if x >= bpp else 0
+            b = prec[x]
+            c = prec[x - bpp] if x >= bpp else 0
+            if f == 1:
+                cur[x] = (cur[x] + a) & 255
+            elif f == 2:
+                cur[x] = (cur[x] + b) & 255
+            elif f == 3:
+                cur[x] = (cur[x] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                cur[x] = (cur[x] + (a if pa <= pb and pa <= pc else (b if pb <= pc else c))) & 255
+        lignes.append(bytes(cur))
+        prec = cur
+    return w, h, bpp, lignes
+
+
+def ecrire_png(chemin, w, h, bpp, lignes):
+    def bloc(k, c):
+        return struct.pack(">I", len(c)) + k + c + struct.pack(">I", zlib.crc32(k + c) & 0xffffffff)
+    brut = b"".join(b"\0" + l for l in lignes)
+    Path(chemin).write_bytes(b"\x89PNG\r\n\x1a\n" + bloc(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2 if bpp == 3 else 6, 0, 0, 0))
+                             + bloc(b"IDAT", zlib.compress(brut)) + bloc(b"IEND", b""))
+
+
+def recadrer(png, cadre):
+    """Ne garde de la fenêtre que l'île et MARGE px autour (contour, lueur) ; hors fenêtre : noir."""
+    x, y, ew, eh, pw, ph = cadre
+    w, h, bpp, lignes = lire_png(png)
+    e = w / pw if pw else 1
+    x0, y0 = int(round((x - MARGE) * e)), int(round((y - MARGE) * e))
+    lw, lh = int(round((ew + 2 * MARGE) * e)), int(round((eh + 2 * MARGE) * e))
+    noir = bytes(bpp) * lw
+    sortie = []
+    for j in range(y0, y0 + lh):
+        if not 0 <= j < h:
+            sortie.append(noir)
+            continue
+        a, b = max(x0, 0), min(x0 + lw, w)
+        sortie.append(bytes(bpp) * (a - x0) + lignes[j][a * bpp:b * bpp] + bytes(bpp) * max(0, x0 + lw - b))
+    ecrire_png(png, lw, lh, bpp, sortie)
+
+
+def png_valide(chemin):
+    """Vrai si le PNG est en RGBA (type 6, octet 25 de l'en-tête) et si son coin haut gauche (la marge) est transparent."""
+    try:
+        with open(str(chemin), "rb") as f:
+            if f.read(8) != b"\x89PNG\r\n\x1a\n":
+                return False
+            f.seek(25)
+            if f.read(1) != b"\x06":
+                return False
+        _, _, bpp, lignes = lire_png(chemin)
+        return bpp == 4 and lignes[0][3] == 0
+    except (OSError, ValueError, IndexError, zlib.error):
+        return False
+
+
 def rendre(etat, sortie, reglages, palette, polices=None, echelle=1):
-    """Un qs par état. Retourne (chemin du PNG ou None, journal)."""
+    """Un qs par état ; Qt sort parfois du RGB (coins noirs) : jusqu'à 3 essais. Retourne (chemin du PNG ou None, journal)."""
+    journal = ""
+    for _ in range(3):
+        png, journal = essai(etat, sortie, reglages, palette, polices, echelle)
+        if png and png_valide(png):
+            return png, journal
+    return None, "PNG sans transparence (RGB au lieu de RGBA) après 3 essais\n" + journal
+
+
+def essai(etat, sortie, reglages, palette, polices, echelle):
     racine = Path(tempfile.mkdtemp(prefix="nci-", dir="/tmp"))
     png = Path(sortie) / (etat + ".png")
     try:
@@ -209,7 +308,11 @@ def rendre(etat, sortie, reglages, palette, polices=None, echelle=1):
             except subprocess.TimeoutExpired:
                 p.kill()
                 journal, _ = p.communicate()
-        return (png if png.exists() and "RENDU ok" in (journal or "") else None), journal or ""
+        m = re.search(r"CADRE (\[.*?\])", journal or "")
+        if not (png.exists() and "RENDU ok" in (journal or "") and m):
+            return None, journal or ""
+        recadrer(png, json.loads(m.group(1)))
+        return png, journal
     finally:
         shutil.rmtree(str(racine), ignore_errors=True)
 

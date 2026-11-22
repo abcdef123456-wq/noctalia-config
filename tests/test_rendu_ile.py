@@ -61,11 +61,11 @@ def est_unie(w, lignes):
     return len({l[i:i + n] for l in lignes for i in range(0, len(l), n)}) <= 1
 
 
-def faire_png(w, h, rgb_par_ligne):
+def faire_png(w, h, rgb_par_ligne, couleur=2):
     def bloc(t, c):
         return struct.pack(">I", len(c)) + t + c + struct.pack(">I", zlib.crc32(t + c))
     brut = b"".join(b"\x00" + rgb_par_ligne(y) for y in range(h))
-    return (b"\x89PNG\r\n\x1a\n" + bloc(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+    return (b"\x89PNG\r\n\x1a\n" + bloc(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, couleur, 0, 0, 0))
             + bloc(b"IDAT", zlib.compress(brut)) + bloc(b"IEND", b""))
 
 
@@ -77,6 +77,23 @@ class AssistantsPng(unittest.TestCase):
             (t / "v.png").write_bytes(faire_png(4, 4, lambda y: bytes([y * 40, 0, 9]) * 4))
             self.assertTrue(est_unie(*lire_png(t / "u.png")[::2]))
             self.assertFalse(est_unie(*lire_png(t / "v.png")[::2]))
+        finally:
+            shutil.rmtree(str(t), ignore_errors=True)
+
+
+    def test_controle_refuse_le_rgb_et_accepte_le_rgba_transparent(self):
+        m = charger_outil()
+        t = Path(tempfile.mkdtemp(prefix="nct-"))
+        try:
+            (t / "rgb.png").write_bytes(faire_png(4, 4, lambda y: b"\x00\x00\x00" * 4))
+            (t / "rgba.png").write_bytes(faire_png(4, 4, lambda y: b"\x00\x00\x00\x00" * 4, 6))
+            (t / "opaque.png").write_bytes(faire_png(4, 4, lambda y: b"\x00\x00\x00\xff" * 4, 6))
+            (t / "vide.png").write_bytes(b"")
+            self.assertFalse(m.png_valide(t / "rgb.png"))
+            self.assertFalse(m.png_valide(t / "opaque.png"))
+            self.assertFalse(m.png_valide(t / "vide.png"))
+            self.assertFalse(m.png_valide(t / "absent.png"))
+            self.assertTrue(m.png_valide(t / "rgba.png"))
         finally:
             shutil.rmtree(str(t), ignore_errors=True)
 
@@ -202,6 +219,43 @@ class Rendu(unittest.TestCase):
             w2, h2, _ = lire_png(png)
             self.assertAlmostEqual(w2 / w1, 2, delta=0.2)
             self.assertAlmostEqual(h2 / h1, 2, delta=0.2)
+
+    def marge_opaque(self, reglages):
+        """Nombre de pixels non transparents dans la marge de MARGE px autour de l'île (page, échelle 1)."""
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            conf = Path(t) / "r.conf"
+            conf.write_text(reglages)
+            png, journal = m.rendre("page", t, str(conf), None, None, 1)
+            self.assertIsNotNone(png, journal)
+            self.assertEqual(Path(png).read_bytes()[25], 6)
+            w, h, bpp, lignes = m.lire_png(png)
+            self.assertEqual(bpp, 4)
+            n = 0
+            for y in range(h):
+                for x in range(w):
+                    if (x < m.MARGE or y < m.MARGE or x >= w - m.MARGE or y >= h - m.MARGE) and lignes[y][x * 4 + 3]:
+                        n += 1
+            return n
+
+    def test_contour_et_lueur_visibles_dans_la_marge(self):
+        self.assertGreater(self.marge_opaque("ILE_LUEUR=oui\nILE_CONTOUR=degrade\n"), 50)
+
+    def test_echelle_2_ile_entiere_cote_gauche_et_droit(self):
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            conf = Path(t) / "r.conf"
+            conf.write_text("ILE_LUEUR=oui\nILE_CONTOUR=degrade\n")
+            png, journal = m.rendre("page", t, str(conf), None, None, 2)
+            self.assertIsNotNone(png, journal)
+            w, h, bpp, lignes = m.lire_png(png)
+            e = 2 * m.MARGE
+            for nom, xs in (("gauche", range(e)), ("droite", range(w - e, w))):
+                n = sum(1 for y in range(h) for x in xs if lignes[y][x * 4 + 3])
+                self.assertGreater(n, 50, "bord " + nom + " : île rognée ou sans lueur")
+
+    def test_sans_contour_ni_lueur_la_marge_est_transparente(self):
+        self.assertEqual(self.marge_opaque("ILE_LUEUR=non\nILE_CONTOUR=aucun\n"), 0)
 
     def test_rien_de_reel_dans_les_images_ni_le_journal(self):
         m = charger_outil()
