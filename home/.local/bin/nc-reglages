@@ -2332,6 +2332,61 @@ def dossier_themes():
     return os.environ.get("NC_THEMES_DIR") or os.path.join(HOME, ".local/share/nc/themes")
 
 
+def _nb(a, b):
+    return lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and a <= v <= b
+
+
+def _ent(a, b):
+    return lambda v: isinstance(v, int) and not isinstance(v, bool) and a <= v <= b
+
+
+def _ch(*ok):
+    return lambda v: isinstance(v, str) and v in ok
+
+
+def _bool(v):
+    return isinstance(v, bool)
+
+
+def _couleur(v):    # rôle en snake_case ou #RGB, #RGBA, #RRGGBB, #RRGGBBAA (docs.noctalia.dev/noctalia/bar/)
+    return isinstance(v, str) and re.fullmatch(r"[a-z][a-z_]{0,31}|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", v) is not None
+
+
+# Widgets de la barre : ceux de config.toml (+ les pilules nc/vpn et nc/garmin que nc-reglages ajoute lui-même)
+_WIDGETS_BARRE = {"logo", "workspaces", "nc/fenetres:titre", "nc/ile:pilule", "group:sys", "group:status", "tray",
+                  "power_profile", "notifications", "cpu", "temp", "ram", "network",
+                  "bluetooth", "volume", "nc/batterie:batterie"}
+
+
+def _widgets(v):
+    return (isinstance(v, list) and len(v) <= 24 and all(isinstance(w, str) for w in v)
+            and all(w in _WIDGETS_BARRE or w in (PILULE_VPN, PILULE_GARMIN) for w in v))
+
+
+# Liste blanche de la table « noctalia » d'un thème : rien d'autre (ni compositor_blur, ni flou, ni verrou, ni fond).
+# Clés et valeurs : home/.config/noctalia/config.toml ([bar.default] l.57-75, [widget.workspaces] l.94-103, [dock] l.173-192),
+# docs.noctalia.dev/noctalia/bar/ (barre) et /noctalia/bar/widgets/workspaces/ ; theme.pure_black_dark : thème oled.
+_NOCT_PERMIS = {
+    "bar.default": {
+        "position": _ch("top", "bottom", "left", "right"), "thickness": _nb(16, 64), "margin_edge": _nb(0, 40),
+        "margin_ends": _nb(0, 40), "concave_edge_corners": _bool, "background_opacity": _nb(0, 1), "shadow": _bool,
+        "capsule": _bool, "capsule_fill": _couleur, "capsule_opacity": _nb(0, 1), "capsule_thickness": _nb(0.2, 1),
+        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000),
+        "start": _widgets, "center": _widgets, "end": _widgets},
+    "widget.workspaces": {
+        "style": _ch("regular", "minimal", "focus_hint"), "label_source": _ch("id", "name"), "show_labels": _bool,
+        "labels_only_when_occupied": _bool, "max_label_chars": _ent(1, 8), "pill_scale": _nb(0.2, 4),
+        "active_pill_size": _nb(0.2, 6), "inactive_pill_size": _nb(0.2, 6), "hide_when_empty": _bool,
+        "focused_color": _couleur, "occupied_color": _couleur, "empty_color": _couleur, "urgent_color": _couleur},
+    "dock": {
+        "enabled": _bool, "position": _ch("bottom", "left", "right"), "auto_hide": _bool, "icon_size": _nb(28, 72),
+        "magnification": _bool, "magnification_scale": _nb(1, 2), "background_opacity": _nb(0, 1), "radius": _nb(0, 60),
+        "border_width": _nb(0, 8), "shadow": _bool, "margin_edge": _nb(0, 40), "item_spacing": _nb(0, 40),
+        "show_dots": _bool},
+    "theme": {"pure_black_dark": _bool},
+}
+
+
 def _verifier_theme(nom, d):
     """Thème validé et normalisé, ou ValueError avec un message clair (FR/EN)."""
     def refus(fr, en):
@@ -2389,11 +2444,14 @@ def _verifier_theme(nom, d):
         refus("« noctalia » : une table par clé de table Noctalia", "\"noctalia\": one table per Noctalia table")
     for t, kv in noct.items():
         texte(t, "noctalia")
+        if t not in _NOCT_PERMIS:
+            refus(f"« noctalia.{t} » : table non permise ({', '.join(_NOCT_PERMIS)})",
+                  f"\"noctalia.{t}\": table not allowed ({', '.join(_NOCT_PERMIS)})")
         for k, v in kv.items():
             texte(k, f"noctalia.{t}")
-            if not isinstance(v, (bool, int, float, str)):
-                refus(f"« noctalia.{t}.{k} » : booléen, nombre ou texte",
-                      f"\"noctalia.{t}.{k}\": boolean, number or text")
+            if k not in _NOCT_PERMIS[t] or not _NOCT_PERMIS[t][k](v):
+                refus(f"« noctalia.{t}.{k} » : clé inconnue ou valeur refusée",
+                      f"\"noctalia.{t}.{k}\": unknown key or refused value")
     sync = d.get("theme_sync", {"bordure": "degrade", "ombre": "coloree"})
     objet(sync, "theme_sync", {"bordure", "ombre"}, ("bordure", "ombre"))
     if sync["bordure"] not in ("degrade", "gris") or sync["ombre"] not in ("coloree", "noire"):
@@ -2948,7 +3006,7 @@ def appliquer_noctalia(vals):
     try:
         for table, kv in theme_choisi(style_vals().get("STYLE", "noctalia"))["noctalia"].items():
             for cle, v in kv.items():
-                mettre(table, cle, v)
+                tables.setdefault(table, {}).setdefault(cle, v)     # le thème complète : ce qui est déjà réglé gagne
     except ValueError:
         pass
     TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
