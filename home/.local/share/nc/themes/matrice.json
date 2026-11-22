@@ -95,15 +95,9 @@
   "widgets": [
     {
       "type": "horloge-geante",
-      "coin": "haut-droite",
+      "coin": "haut-gauche",
       "taille": "grand",
       "chiffres": "points"
-    },
-    {
-      "type": "date",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte-ronde"
     },
     {
       "type": "meteo",
