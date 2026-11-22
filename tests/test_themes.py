@@ -216,7 +216,7 @@ class Validation(Base):
                 self.assertEqual(d["nom"], f.stem)
                 self.assertEqual(set(d["libelle"]), {"fr", "en"})
                 self.assertIn(d["palette"]["source"], ("builtin", "custom", "fond"))
-                self.assertEqual(d["widgets"], [])
+                self.assertIsInstance(d["widgets"], list)      # leur contenu : test_widgets_theme.ThemesDuDepot
                 self.assertIn(d["theme_sync"]["bordure"], ("degrade", "gris"))
                 self.assertIn(d["theme_sync"]["ombre"], ("coloree", "noire"))
                 if d["fonds"]:

@@ -35,7 +35,11 @@
     "ANIM_BUREAUX": "slidevert",
     "VERROU_COULEUR": "accent",
     "DOCK": "non",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "oui",
+    "ILE_FORME": "point",
+    "WIDGETS_BUREAU": "oui",
+    "WIDGETS_POLICE": "Doto, JetBrains Mono",
+    "FENETRES_MAITRE_CENTRE_AIR": "oui"
   },
   "noctalia": {
     "bar.default": {
@@ -86,7 +90,38 @@
     "ombre": "coloree"
   },
   "fonds": "matrice",
-  "fond_de_depart": "matrice-relief.jpg",
+  "fond_de_depart": "matrice-planete.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-geante",
+      "coin": "haut-droite",
+      "taille": "grand",
+      "chiffres": "points"
+    },
+    {
+      "type": "date",
+      "coin": "bas-droite",
+      "taille": "moyen",
+      "style": "carte-ronde"
+    },
+    {
+      "type": "meteo",
+      "coin": "bas-droite",
+      "taille": "moyen",
+      "style": "carte-ronde"
+    },
+    {
+      "type": "anneau",
+      "coin": "bas-droite",
+      "taille": "moyen",
+      "style": "carte-ronde"
+    },
+    {
+      "type": "musique",
+      "coin": "bas-droite",
+      "taille": "moyen",
+      "style": "carte"
+    }
+  ]
 }
