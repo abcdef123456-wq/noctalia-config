@@ -152,6 +152,8 @@ function demandeProcessus(q) {
 // Raccourcis web de l'utilisateur (liens-web.conf : « préfixe<TAB>nom<TAB>URL », « %s » = la saisie). Mêmes règles que
 // nc-reglages (liens_web_valide) : préfixe [a-z0-9]{1,12} hors mots réservés, URL http(s) avec un seul « %s », nom de
 // 40 caractères au plus sans contrôle. Fichier borné à 16 Kio et 50 lignes ; une ligne fausse est ignorée sans bruit.
+// Contrôles, séparateurs de ligne, sens d'écriture et invisibles (sans regex Unicode : Qt 6.8 de Debian 13)
+var CONTROLES = /[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ue000-\uf8ff]/
 var RESERVES = ["g", "yt", "w", "heure", "time", "mdp", "password", "port", "processus", "session", "sessions",
                 "note", "notes", "rappel", "rappels", "reminder", "reminders"]
 function analyseLiens(texte) {
@@ -167,7 +169,7 @@ function analyseLiens(texte) {
         if (c.length !== 3) continue
         var p = c[0], nom = c[1], url = c[2]
         if (!/^[a-z0-9]{1,12}$/.test(p) || RESERVES.indexOf(p) >= 0 || vus[p]) continue
-        if (nom.length < 1 || nom.length > 40 || /[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ue000-\uf8ff]/.test(nom)) continue
+        if (nom.length < 1 || nom.length > 40 || CONTROLES.test(nom)) continue
         if (!/^https?:\/\/[^\s\u0000-\u001f\u007f-\u009f]+$/.test(url) || url.split("%s").length !== 2) continue
         vus[p] = true
         liens.push({ p: p, nom: nom, url: url })
@@ -181,4 +183,52 @@ function lienWeb(q, liens) {
     for (var i = 0; i < liens.length; i++)
         if (liens[i].p === m[1]) return { nom: liens[i].nom, terme: m[2], url: liens[i].url.replace("%s", encodeURIComponent(m[2])) }
     return null
+}
+
+// Snippets de l'utilisateur (snippets.conf : « mot<TAB>titre<TAB>texte[<TAB>secret] », texte échappé : \\ \n \t). Mêmes
+// règles que nc-reglages (snippet_comprise) : mot [a-z0-9]{1,12} hors RESERVES, titre de 1 à 40 signes sans contrôle,
+// texte de 1 à 2 000 signes (retour à la ligne et tabulation permis). Mêmes bornes de fichier que liens-web.conf.
+// Signes : des points de code, comme len() en Python (un emoji compte pour un)
+function points(s) { return String(s).match(/[\ud800-\udbff][\udc00-\udfff]|[\s\S]/g) || [] }
+function echapper(t) { return String(t).replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\t/g, "\\t") }
+// null si une barre oblique inverse n'est pas suivie de \, n ou t
+function deseschapper(s) {
+    if (!/^(?:[^\\]|\\[\\nt])*$/.test(s)) return null
+    return s.replace(/\\([\\nt])/g, function (m, c) { return c === "n" ? "\n" : c === "t" ? "\t" : "\\" })
+}
+function analyseSnippets(texte) {
+    var t = String(texte || ""), vus = {}, res = []
+    if (t.length > 16384) return []
+    var lignes = t.split("\n")
+    if (lignes[lignes.length - 1] === "") lignes.pop()
+    if (lignes.length > 50) return []
+    for (var i = 0; i < lignes.length; i++) {
+        var l = lignes[i].replace(/\r$/, "")
+        if (l === "" || l.charAt(0) === "#") continue
+        var c = l.split("\t")
+        if ((c.length !== 3 && c.length !== 4) || (c.length === 4 && c[3] !== "secret")) continue
+        var mot = c[0], titre = c[1], clair = deseschapper(c[2])
+        if (!/^[a-z0-9]{1,12}$/.test(mot) || RESERVES.indexOf(mot) >= 0 || vus[mot]) continue
+        var nt = points(titre).length
+        if (nt < 1 || nt > 40 || CONTROLES.test(titre) || clair === null) continue
+        var nc = points(clair).length
+        if (nc < 1 || nc > 2000 || CONTROLES.test(clair.replace(/[\n\t]/g, ""))) continue
+        vus[mot] = true
+        res.push({ mot: mot, titre: titre, texte: clair, secret: c.length === 4 })
+    }
+    return res
+}
+// « ;ad » → 3 cartes au plus, pour les mots qui commencent par la saisie : { mot, titre, sous }. Le sous-titre est le
+// texte aplati sur une ligne, coupé à 80 signes ; pour un secret, seulement motSecret : la carte ne porte jamais son texte
+function cartesSnippets(q, liste, motSecret) {
+    var s = String(q || "")
+    if (s.charAt(0) !== ";") return []
+    var debut = s.slice(1).trim().toLowerCase(), res = []
+    for (var i = 0; i < liste.length && res.length < 3; i++) {
+        var x = liste[i]
+        if (x.mot.indexOf(debut) !== 0) continue
+        var p = points(x.texte.replace(/\s+/g, " ").trim())
+        res.push({ mot: x.mot, titre: x.titre, sous: x.secret ? motSecret : (p.length > 80 ? p.slice(0, 79).join("") + "…" : p.join("")) })
+    }
+    return res
 }

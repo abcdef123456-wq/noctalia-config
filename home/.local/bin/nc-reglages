@@ -4597,15 +4597,16 @@ def catalogue(vals):
     # Raccourcis web du Spotlight : à la fin de Barre et dock, « Retirer » par lien ; l'ajout se fait au terminal
     fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Barre et dock"), default=len(res))
     lignes = []
-    for s in lignes_liens_web():
-        ligne = dict(cle=s["cle"], section="Barre et dock", sectionNom=nom_section("Barre et dock"), nom=s["nom"],
+    # Snippets ensuite, dans leur propre section, juste après Barre et dock
+    for sec, s in [("Barre et dock", x) for x in lignes_liens_web()] + [("Snippets", x) for x in lignes_snippets()]:
+        ligne = dict(cle=s["cle"], section=sec, sectionNom=nom_section(sec), nom=s["nom"],
                      genre="info", defaut="", aide=s["aide"], choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
                      valeur="", affiche="", modifie=False, groupe="")
         if "retirer" in s:
-            ligne.update(genre="action", commande=["nc-reglages", "liens-web", "retirer", s["retirer"]], relire=True,
+            ligne.update(genre="action", commande=["nc-reglages", s.get("cli", "liens-web"), "retirer", s["retirer"]], relire=True,
                          affiche=T("Retirer", "Remove"))
         else:
-            ligne.update(genre="texte")                  # Entrée : « nc-reglages set LIEN_AJOUTER <saisie> »
+            ligne.update(genre="texte")                  # Entrée : « nc-reglages set LIEN_AJOUTER <saisie> » (snippet : par stdin)
         lignes.append(ligne)
     res[fin:fin] = lignes
     # Santé Garmin : quatre actions à la fin de la section (argv fixes) ; « Installer » dans un terminal s'il y en a un
@@ -4938,32 +4939,34 @@ def liens_web_valide(prefixe, nom, url):
                 and re.fullmatch(r"https?://[^\s\x00-\x1f\x7f-\x9f]+", url) and url.count("%s") == 1)
 
 
-def liens_web_lignes():
-    """Lignes brutes du fichier (liste vide s'il manque) ; ValueError s'il est hors bornes, illisible ou pas ordinaire :
-    on n'écrit alors rien."""
-    chemin = liens_web_fichier()
+def liens_web_lignes(chemin=None):
+    """Lecteur des fichiers de lignes (liens-web.conf par défaut, snippets.conf) : lignes brutes (liste vide s'il manque) ;
+    ValueError s'il est hors bornes, illisible ou pas ordinaire : on n'écrit alors rien. Le nom reste celui des liens :
+    seuls liens_web_lignes et liens_web_ecrire gardent les octets non UTF-8 tels quels (test_liens_web)."""
+    chemin = chemin or liens_web_fichier()
+    nom = os.path.basename(chemin)
     try:
         fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return []
     except OSError:
-        raise ValueError(T("liens-web.conf est illisible ou n'est pas un fichier ordinaire : rien n'est écrit",
-                           "liens-web.conf is unreadable or not a regular file: nothing written"))
+        raise ValueError(T(f"{nom} est illisible ou n'est pas un fichier ordinaire : rien n'est écrit",
+                           f"{nom} is unreadable or not a regular file: nothing written"))
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ValueError(T("liens-web.conf n'est pas un fichier ordinaire : rien n'est écrit",
-                               "liens-web.conf is not a regular file: nothing written"))
+            raise ValueError(T(f"{nom} n'est pas un fichier ordinaire : rien n'est écrit",
+                               f"{nom} is not a regular file: nothing written"))
         brut = os.read(fd, LIENS_MAX_OCTETS + 1)
     except OSError:
-        raise ValueError(T("liens-web.conf est illisible : rien n'est écrit", "liens-web.conf is unreadable: nothing written"))
+        raise ValueError(T(f"{nom} est illisible : rien n'est écrit", f"{nom} is unreadable: nothing written"))
     finally:
         os.close(fd)
     lignes = brut.decode("utf-8", "surrogateescape").split("\n")
     if lignes[-1] == "":
         lignes.pop()
     if len(brut) > LIENS_MAX_OCTETS or len(lignes) > LIENS_MAX_LIGNES:
-        raise ValueError(T("liens-web.conf dépasse 16 Kio ou 50 lignes : rien n'est écrit, réduis-le à la main",
-                           "liens-web.conf is over 16 KiB or 50 lines: nothing written, trim it by hand"))
+        raise ValueError(T(f"{nom} dépasse 16 Kio ou 50 lignes : rien n'est écrit, réduis-le à la main",
+                           f"{nom} is over 16 KiB or 50 lines: nothing written, trim it by hand"))
     return lignes
 
 
@@ -4973,27 +4976,53 @@ def liens_web_comprise(ligne):
     return tuple(c) if len(c) == 3 and not ligne.startswith("#") and liens_web_valide(*c) else None
 
 
-def liens_web_lire():
-    """[(préfixe, nom, URL)] ; [] si le fichier manque ou est refusé (bornes, type)."""
+def lignes_lire(chemin, comprise):
+    """Les entrées comprises (tuples, clé en tête) d'un fichier de lignes, la première pour chaque clé ; [] si le fichier
+    manque ou est refusé (bornes, type)."""
     try:
-        lignes = liens_web_lignes()
+        lignes = liens_web_lignes(chemin)
     except ValueError:
         return []
     res = []
     for l in lignes:
-        c = liens_web_comprise(l)
+        c = comprise(l)
         if c and all(c[0] != x[0] for x in res):
             res.append(c)
     return res
 
 
-def liens_web_ecrire(lignes):
-    """Écrit les lignes brutes : fichier temporaire (0600) dans le même dossier, puis renommage : jamais à moitié écrit ;
-    un lien symbolique à la place du fichier est remplacé, pas suivi."""
+def lignes_ajouter(chemin, comprise, ligne, deja):
+    """Ajoute une ligne à la fin si sa clé (premier champ compris) n'y est pas encore ; ValueError(deja) sinon. Les lignes
+    non comprises restent telles quelles."""
+    lignes = liens_web_lignes(chemin)
+    cle = comprise(ligne)[0]
+    if any((comprise(l) or ("",))[0] == cle for l in lignes):
+        raise ValueError(deja)
+    liens_web_ecrire(lignes + [ligne], chemin)
+
+
+def lignes_retirer(chemin, comprise, cle, absent):
+    """Retire les seules lignes de la clé ; les autres restent telles quelles. ValueError(absent) s'il n'y en a pas."""
+    lignes = liens_web_lignes(chemin)
+    reste = [l for l in lignes if (comprise(l) or ("",))[0] != cle]
+    if len(reste) == len(lignes):
+        raise ValueError(absent)
+    liens_web_ecrire(reste, chemin)
+
+
+def liens_web_lire():
+    """[(préfixe, nom, URL)] ; [] si le fichier manque ou est refusé (bornes, type)."""
+    return lignes_lire(liens_web_fichier(), liens_web_comprise)
+
+
+def liens_web_ecrire(lignes, chemin=None):
+    """Écrivain des fichiers de lignes (liens-web.conf par défaut) : fichier temporaire (0600) dans le même dossier, puis
+    renommage : jamais à moitié écrit ; un lien symbolique à la place du fichier est remplacé, pas suivi."""
     texte = "".join(l + "\n" for l in lignes)
+    chemin = chemin or liens_web_fichier()
     if len(lignes) > LIENS_MAX_LIGNES or len(texte.encode("utf-8", "surrogateescape")) > LIENS_MAX_OCTETS:
-        raise ValueError(T("trop de liens", "too many links"))
-    chemin = liens_web_fichier()
+        raise ValueError(T(f"{os.path.basename(chemin)} dépasserait 16 Kio ou 50 lignes : rien n'est écrit",
+                           f"{os.path.basename(chemin)} would exceed 16 KiB or 50 lines: nothing written"))
     dossier = os.path.dirname(chemin)
     if os.path.islink(dossier):
         raise OSError(T("le dossier nc est un lien symbolique", "the nc folder is a symbolic link"))
@@ -5019,19 +5048,13 @@ def liens_web_ajouter(prefixe, nom, url):
                            "avec un seul %s)",
                            "link refused (prefix a-z 0-9, 1 to 12 characters, name up to 40 characters, http(s) URL "
                            "with a single %s)"))
-    lignes = liens_web_lignes()
-    if any((liens_web_comprise(l) or ("",))[0] == prefixe for l in lignes):
-        raise ValueError(T(f"le préfixe {prefixe} existe déjà", f"prefix {prefixe} already exists"))
-    liens_web_ecrire(lignes + ["\t".join((prefixe, nom, url))])
+    lignes_ajouter(liens_web_fichier(), liens_web_comprise, "\t".join((prefixe, nom, url)),
+                   T(f"le préfixe {prefixe} existe déjà", f"prefix {prefixe} already exists"))
 
 
 def liens_web_retirer(prefixe):
     """Retire la seule ligne du préfixe ; les autres lignes restent telles quelles."""
-    lignes = liens_web_lignes()
-    reste = [l for l in lignes if (liens_web_comprise(l) or ("",))[0] != prefixe]
-    if len(reste) == len(lignes):
-        raise ValueError(T(f"pas de lien {prefixe}", f"no link {prefixe}"))
-    liens_web_ecrire(reste)
+    lignes_retirer(liens_web_fichier(), liens_web_comprise, prefixe, T(f"pas de lien {prefixe}", f"no link {prefixe}"))
 
 
 def liens_web_saisie(texte):
@@ -5074,10 +5097,144 @@ def lignes_liens_web():
     return res
 
 
+# ── Snippets de la recherche (~/.config/nc/snippets.conf) ──────────────────────────────────────────────────────────
+# Une ligne par snippet : mot<TAB>titre<TAB>texte[<TAB>secret], le texte échappé (\\ \n \t). Mêmes règles que Saisies.js
+# (analyseSnippets) et le même lecteur et écrivain que liens-web.conf. Gardés EN CLAIR (secrets compris), en 0600.
+SNIPPETS_MAX_TEXTE = 2000
+SNIPPETS_ECHAPPEMENTS = {"\\": "\\", "n": "\n", "t": "\t"}
+
+
+def snippets_fichier():
+    return os.path.join(os.path.dirname(liens_web_fichier()), "snippets.conf")
+
+
+def snippet_echapper(texte):
+    return texte.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+
+
+def snippet_deseschapper(brut):
+    """Le texte, ou None si une barre oblique inverse n'est pas suivie de \\, n ou t."""
+    if not re.fullmatch(r"(?:[^\\]|\\[\\nt])*", brut):
+        return None
+    return re.sub(r"\\([\\nt])", lambda m: SNIPPETS_ECHAPPEMENTS[m[1]], brut)
+
+
+def snippet_valide(mot, titre, texte):
+    """Mot [a-z0-9]{1,12} hors mots réservés (ceux des liens), titre de 1 à 40 caractères sans contrôle ni sens
+    d'écriture, texte de 1 à 2 000 caractères où seuls le retour à la ligne et la tabulation sont permis en plus."""
+    return bool(re.fullmatch(r"[a-z0-9]{1,12}", mot) and mot not in LIENS_RESERVES
+                and 1 <= len(titre) <= 40 and liens_web_nom_ok(titre)
+                and 1 <= len(texte) <= SNIPPETS_MAX_TEXTE and liens_web_nom_ok(texte.replace("\n", "").replace("\t", "")))
+
+
+def snippet_comprise(ligne):
+    """(mot, titre, texte déséchappé, secret) si la ligne est un snippet valide, sinon None."""
+    c = ligne.rstrip("\r").split("\t")
+    if ligne.startswith("#") or len(c) not in (3, 4) or c[3:] not in ([], ["secret"]):
+        return None
+    texte = snippet_deseschapper(c[2])
+    return (c[0], c[1], texte, len(c) == 4) if texte is not None and snippet_valide(c[0], c[1], texte) else None
+
+
+def snippets_lire():
+    """[(mot, titre, texte, secret)] ; [] si le fichier manque ou est refusé."""
+    return lignes_lire(snippets_fichier(), snippet_comprise)
+
+
+def snippets_ajouter(mot, titre, texte, secret=False):
+    """Ajoute un snippet (CLI et fenêtre) : ValueError avec un message clair, jamais le texte, si refusé (rien n'est écrit)."""
+    if mot in LIENS_RESERVES:
+        raise ValueError(T(f"« {mot} » est un mot de la recherche, choisis-en un autre",
+                           f"\"{mot}\" is a search keyword, pick another one"))
+    if not snippet_valide(mot, titre, texte):
+        raise ValueError(T("snippet refusé (mot a-z 0-9 de 1 à 12 signes, titre de 40 signes au plus, texte de 1 à 2 000 "
+                           "signes sans caractère de contrôle hors retour à la ligne et tabulation)",
+                           "snippet refused (word a-z 0-9, 1 to 12 characters, title up to 40 characters, text of 1 to "
+                           "2,000 characters without control characters besides newline and tab)"))
+    ligne = "\t".join((mot, titre, snippet_echapper(texte)) + (("secret",) if secret else ()))
+    lignes_ajouter(snippets_fichier(), snippet_comprise, ligne, T(f"le mot {mot} existe déjà", f"word {mot} already exists"))
+
+
+def snippets_retirer(mot):
+    lignes_retirer(snippets_fichier(), snippet_comprise, mot, T(f"pas de snippet {mot}", f"no snippet {mot}"))
+
+
+def snippets_entree():
+    """Le texte de l'entrée standard (« - » : jamais en argv), 16 Kio au plus, UTF-8 strict ; un seul retour à la ligne
+    final retiré (printf ou echo)."""
+    brut = sys.stdin.buffer.read(LIENS_MAX_OCTETS + 1) if sys.stdin else b""
+    if len(brut) > LIENS_MAX_OCTETS:
+        raise ValueError(T("entrée trop longue", "input too long"))
+    try:
+        texte = brut.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(T("entrée qui n'est pas en UTF-8", "input is not UTF-8")) from None
+    return texte[:-1] if texte.endswith("\n") else texte
+
+
+def snippets_saisie(texte):
+    """Champ de la fenêtre « [!]mot titre : texte » (! devant = secret ; \\n, \\t et \\\\ dans le texte) : ajoute ;
+    ValueError si refusé, sans jamais redire le texte."""
+    secret = texte.startswith("!")
+    tete, sep, corps = texte[secret:].partition(" : ")
+    m = tete.split(None, 1)
+    if not sep or len(m) < 2:
+        raise ValueError(T("écris : mot, titre, « : », puis le texte (ex. adr Mon adresse : 1 rue des Lilas) ; ! devant "
+                           "le mot pour un secret", "type: word, title, \" : \", then the text (e.g. adr My address : 1 Main "
+                           "Street); ! before the word for a secret"))
+    clair = snippet_deseschapper(corps)
+    if clair is None:
+        raise ValueError(T("texte refusé : \\n pour un retour à la ligne, \\t pour une tabulation, \\\\ pour une barre "
+                           "oblique inverse", "text refused: \\n for a newline, \\t for a tab, \\\\ for a backslash"))
+    snippets_ajouter(m[0], m[1].strip(), clair, secret)
+
+
+def snippets_cli(a):
+    """nc-reglages snippets liste | ajouter [--secret] MOT TITRE TEXTE|- | retirer MOT"""
+    try:
+        if a == ["liste"]:
+            for mot, titre, texte, secret in snippets_lire():
+                print(f"{mot}\t{titre}\t" + (T("(secret, non affiché)", "(secret, not shown)") if secret
+                                              else snippet_echapper(texte)))
+        elif a[:1] == ["ajouter"] and len(a) in (4, 5) and (len(a) == 4 or a[1] == "--secret"):
+            mot, titre, texte = a[-3:]
+            snippets_ajouter(mot, titre, snippets_entree() if texte == "-" else texte, len(a) == 5)
+        elif a[:1] == ["retirer"] and len(a) == 2:
+            snippets_retirer(a[1])
+        else:
+            sys.exit("nc-reglages snippets liste | ajouter [--secret] MOT TITRE TEXTE|- (- : texte lu sur l'entrée "
+                     "standard) | retirer MOT")
+    except (OSError, ValueError) as e:
+        sys.exit(f"nc-reglages : {e}")
+
+
+def lignes_snippets():
+    """Lignes de la fenêtre graphique : titre et mot (jamais le texte), un « Retirer » par snippet, puis le champ d'ajout."""
+    res = [{"cle": "SNIPPET_" + mot, "nom": f"{titre} (;{mot})", "retirer": mot, "cli": "snippets",
+            "aide": T("Secret : le texte n'est jamais affiché.", "Secret: the text is never shown.") if secret
+            else T(f"Snippet : « ;{mot} » dans la recherche de l'île le copie.", f"Snippet: \";{mot}\" in the island search copies it.")}
+           for mot, titre, _texte, secret in snippets_lire()]
+    res.append({"cle": "SNIPPET_AJOUTER", "nom": T("Ajouter un snippet", "Add a snippet"),
+                "aide": T("Écris : mot, titre, « : », puis le texte, et Entrée (\\n pour un retour à la ligne, \\\\ pour une "
+                          "barre oblique inverse). « !mot titre : texte » (point d'exclamation devant) = secret : jamais "
+                          "affiché, copié comme un mot de passe. Ex. adr Mon adresse : 1 rue des Lilas, puis « ;adr » dans "
+                          "la recherche. Attention : les snippets, secrets compris, sont gardés EN CLAIR dans "
+                          "~/.config/nc/snippets.conf (fichier 0600 de ton dossier personnel).",
+                          "Type: word, title, \" : \", then the text, and Enter (\\n for a newline, \\\\ for a backslash). "
+                          "\"!word title : text\" (exclamation mark first) = secret: never shown, copied like a password. "
+                          "E.g. adr My address : 1 Main Street, then \";adr\" in the search. Note: snippets, secrets "
+                          "included, are stored IN PLAIN TEXT in ~/.config/nc/snippets.conf (a 0600 file in your home "
+                          "folder).")})
+    return res
+
+
 def cli(a):
     vals = lire()
     if a[0] == "liens-web":
         liens_web_cli(a[1:])
+        return
+    if a[0] == "snippets":
+        snippets_cli(a[1:])
         return
     if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
         code, message = verifier_assistant()
@@ -5158,6 +5315,12 @@ def cli(a):
     elif a[0] == "set" and len(a) == 3 and a[1] == "LIEN_AJOUTER":
         try:
             liens_web_saisie(a[2])
+        except (OSError, ValueError) as e:
+            sys.exit(f"nc-reglages : {e}")
+    elif a[0] == "set" and len(a) == 3 and a[1] == "SNIPPET_AJOUTER":
+        # La fenêtre passe « - » et la saisie sur l'entrée standard : un secret n'est jamais dans argv (/proc)
+        try:
+            snippets_saisie(snippets_entree() if a[2] == "-" else a[2])
         except (OSError, ValueError) as e:
             sys.exit(f"nc-reglages : {e}")
     elif a[0] == "set" and len(a) == 3 and a[1] in PAR_CLE:

@@ -122,7 +122,13 @@ FloatingWindow {
     function charger() { if (lecture.running) relire = true; else lecture.running = true }
     // Une valeur : nc-reglages set (ou reset pour revenir à la config) ; les demandes se suivent une par une
     function commande(args) { file.push([bin + "nc-reglages"].concat(args)); file = file; suivant() }
-    function regler(cle, valeur) { localement(cle, String(valeur)); commande(["set", cle, String(valeur)]) }
+    function regler(cle, valeur) {
+        localement(cle, String(valeur))
+        // Un snippet (peut-être secret) : « - » en argv, la saisie sur l'entrée standard (argv se lit dans /proc)
+        if (cle === "SNIPPET_AJOUTER") { entrees.push(String(valeur)); commande(["set", cle, "-"]) }
+        else commande(["set", cle, String(valeur)])
+    }
+    property var entrees: []
     function remettre(cle) { var r = reglage(cle); if (r) localement(cle, r.defaut); commande(["reset", cle]) }
     // Retour immédiat au clic : la nouvelle valeur est affichée avant la fin de nc-reglages ; le catalogue relu ensuite
     // la confirme, ou rétablit la vraie valeur (et le message en rouge) si la valeur est refusée
@@ -140,7 +146,11 @@ FloatingWindow {
     }
     function suivant() {
         if (ecriture.running || !file.length) return
-        ecriture.command = file.shift(); file = file
+        var c = file.shift(); file = file
+        // Entrée standard ouverte puis fermée même vide : « set SNIPPET_AJOUTER - » n'attend jamais
+        ecriture.stdinEnabled = c[2] === "SNIPPET_AJOUTER" && c[3] === "-"
+        ecriture.entree = ecriture.stdinEnabled ? (entrees.shift() || "") : ""
+        ecriture.command = c
         ecriture.running = true
     }
     // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin.
@@ -261,6 +271,8 @@ FloatingWindow {
     }
     Process {
         id: ecriture
+        property string entree: ""
+        onStarted: if (stdinEnabled) { write(entree); entree = ""; stdinEnabled = false }
         stdout: StdioCollector { onStreamFinished: { fen.message = text.trim().split("\n").pop() || ""; fen.erreur = false } }
         stderr: StdioCollector { onStreamFinished: if (text.trim()) { fen.message = text.trim().split("\n").pop(); fen.erreur = true } }
         onExited: (code, status) => { if (code !== 0 && !fen.erreur) { fen.message = Reglages.t("Valeur refusée.", "Value rejected."); fen.erreur = true }; fen.charger(); fen.suivant() }
@@ -512,6 +524,8 @@ FloatingWindow {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
                             color: Couleurs.texte; selectionColor: Couleurs.accent; font.pixelSize: 12
                             text: ligne.r.valeur
+                            // « !mot titre : texte » : un snippet secret, masqué pendant la frappe
+                            echoMode: ligne.r.cle === "SNIPPET_AJOUTER" && text.charAt(0) === "!" ? TextInput.Password : TextInput.Normal
                             onAccepted: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, text); liste.forceActiveFocus() }
                             Keys.onEscapePressed: { text = ligne.r.valeur; liste.forceActiveFocus() }
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }

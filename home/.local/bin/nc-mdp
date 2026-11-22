@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """nc-mdp N : génère un mot de passe de N caractères (8 à 64) et le COPIE ; il n'est jamais affiché.
+nc-mdp --stdin : copie de la même façon le texte lu sur l'entrée standard (un snippet secret de l'île) : 1 à 2 000
+caractères en UTF-8 valide, 8 Kio lus au plus ; sinon refus (code 2), sans jamais redire le texte.
 
 Lettres, chiffres et quelques symboles faciles à taper, au moins un de chaque. Tirage par le module `secrets`.
 Le mot de passe va au presse-papiers par l'entrée standard de wl-copy (jamais par argv, jamais par un shell) ;
@@ -11,7 +13,8 @@ wl-copy recopie son entrée dans un fichier de $TMPDIR (effacé aussitôt, gard�
 (0700) sous $XDG_RUNTIME_DIR, en mémoire. Sans XDG_RUNTIME_DIR, ou si la marque ne peut pas être posée : rien n'est
 copié. wl-clipboard plus ancien que 2.3 ignore TMPDIR et passe par /tmp.
 Rien n'est journalisé, rien ne sort sur stdout/stderr hors les messages d'erreur (jamais le mot de passe).
-Codes : 0 copié, 1 copie impossible, 2 usage (N absent, non entier ou hors 8..64)."""
+Codes : 0 copié, 1 copie impossible, 2 usage (N absent, non entier ou hors 8..64 ; entrée vide, trop longue ou pas en
+UTF-8)."""
 import os
 import secrets
 import shutil
@@ -24,6 +27,7 @@ import tempfile
 import time
 
 MIN, MAX = 8, 64
+MAX_TEXTE, MAX_ENTREE = 2000, 8192     # --stdin : caractères, octets lus au plus (2 000 caractères de 4 octets au pire)
 CLASSES = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "-_.,:;+=@#%!?")
 DELAI = 10          # secondes au plus pour wl-copy ; au-delà : tué, « copie impossible »
 RAFRAICHIR = 0.5    # la marque reste fraîche pendant tout ce temps (la capture la croit moins de 5 s)
@@ -36,6 +40,16 @@ def generer(n):
     c += [secrets.choice(tout) for _ in range(n - len(c))]
     secrets.SystemRandom().shuffle(c)
     return "".join(c)
+
+
+def lire_entree():
+    """--stdin : le texte de l'entrée standard (1 à 2 000 caractères, UTF-8 valide), ou None. Jamais affiché."""
+    try:
+        brut = sys.stdin.buffer.read(MAX_ENTREE + 1)
+        texte = brut.decode("utf-8")
+    except (AttributeError, OSError, ValueError):       # pas d'entrée, illisible, UTF-8 invalide (ou coupé à la borne)
+        return None
+    return texte if len(brut) <= MAX_ENTREE and 1 <= len(texte) <= MAX_TEXTE else None
 
 
 def marquer(chemin):
@@ -60,7 +74,7 @@ def copier(cmd, mot, marque, prive):
     """wl-copy avec le mot de passe sur son entrée ; la marque est rafraîchie tant qu'il tourne, et après."""
     try:
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
-                             env=dict(os.environ, TMPDIR=prive))
+                             encoding="utf-8", env=dict(os.environ, TMPDIR=prive))      # UTF-8 quelle que soit la locale
     except OSError:
         return False
     fin, entree, ok = time.monotonic() + DELAI, mot, False
@@ -91,7 +105,14 @@ def arreter(signum, _cadre):
 def main(argv):
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(s, arreter)
-    if len(argv) != 2 or not 1 <= len(argv[1]) <= 2 or not argv[1].isascii() or not argv[1].isdigit() \
+    texte = None
+    if argv[1:] == ["--stdin"]:
+        texte = lire_entree()
+        if texte is None:
+            print("nc-mdp : --stdin : entrée vide, de plus de %d caractères ou pas en UTF-8 : rien n'a été copié" % MAX_TEXTE,
+                  file=sys.stderr)
+            return 2
+    elif len(argv) != 2 or not 1 <= len(argv[1]) <= 2 or not argv[1].isascii() or not argv[1].isdigit() \
             or not MIN <= int(argv[1]) <= MAX:
         print("nc-mdp : usage : nc-mdp N, avec N entre %d et %d" % (MIN, MAX), file=sys.stderr)
         return 2
@@ -121,7 +142,7 @@ def main(argv):
         if not prive or not marquer(marque):
             print("nc-mdp : impossible de préparer la copie dans XDG_RUNTIME_DIR : rien n'a été copié", file=sys.stderr)
             return 1
-        ok = copier(cmd, generer(int(argv[1])), marque, prive)
+        ok = copier(cmd, generer(int(argv[1])) if texte is None else texte, marque, prive)
     finally:
         if prive:
             try:

@@ -276,6 +276,9 @@ Item {
     // Raccourcis web de l'utilisateur (liens-web.conf) : lus une seule fois, à la première ouverture
     property bool liensVoulus: false
     property var liensWeb: []
+    // Snippets (snippets.conf) : lus seulement quand la saisie commence par « ; », oubliés dès qu'elle n'y commence plus
+    property var snippets: []
+    property bool retourSnippet: false             // vrai : la dernière copie a échoué
     property var zonesHeure: []
     property string heureZone: ""
     property string heureSortie: ""
@@ -382,6 +385,7 @@ Item {
         notesLues = false; noteErreur = ""
         liensVoulus = true
         if (fichierLiens.path !== "") fichierLiens.reload()      // un lien ajouté depuis la dernière ouverture
+        if (fichierSnippets.path !== "") fichierSnippets.reload()
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
@@ -526,6 +530,22 @@ Item {
                 : { ok: false, titre: Reglages.t("Copie impossible", "Copy failed") }
             r.chercher()
         }
+    }
+    // « ;mot » : le texte d'un snippet passe par l'ENTRÉE STANDARD (jamais argv, jamais un shell) : wl-copy, ou nc-mdp
+    // --stdin pour un secret (marque nc-secret-copie, --sensitive). L'île se referme une fois la copie finie
+    function copierSnippet(mot) {
+        var s = snippets.find(x => x.mot === mot)
+        if (!s || copieurSnippet.running) return
+        copieurSnippet.texte = s.texte
+        copieurSnippet.command = s.secret ? [Etat.bin + "nc-mdp", "--stdin"] : ["wl-copy", "--type", "text/plain;charset=utf-8"]
+        copieurSnippet.stdinEnabled = true
+        copieurSnippet.running = true
+    }
+    Process {
+        id: copieurSnippet
+        property string texte: ""
+        onStarted: { write(texte); texte = ""; stdinEnabled = false }
+        onExited: code => { texte = ""; if (code === 0) Etat.fermer(); else { r.retourSnippet = true; r.chercher() } }
     }
     // « port 8080 » / « processus firefox » : la saisie passe par la liste blanche de Saisies.js, puis nc-processus la
     // revérifie. Lecture seule : aucune ligne n'agit sur un processus
@@ -713,6 +733,13 @@ Item {
         path: r.liensVoulus ? (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/nc/liens-web.conf" : ""
         printErrors: false
         onLoaded: { r.liensWeb = Saisies.analyseLiens(text()); if (r.q !== "") r.chercher() }
+    }
+    FileView {
+        id: fichierSnippets
+        path: r.q.startsWith(";") ? (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/nc/snippets.conf" : ""
+        printErrors: false
+        onPathChanged: if (path === "") r.snippets = []
+        onLoaded: { r.snippets = Saisies.analyseSnippets(text()); if (r.q !== "") r.chercher() }
     }
     Process {
         id: lireHorloges
@@ -951,7 +978,7 @@ Item {
     }
 
     onQChanged: { if (modeDiag && q !== diagPour) { modeDiag = false; diag.annuler() }
-                  sel = 0; annulerSuppr(); retourSession = null; retourMdp = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+                  sel = 0; annulerSuppr(); retourSession = null; retourMdp = null; retourSnippet = false; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -981,6 +1008,15 @@ Item {
         let lienUtil = Saisies.lienWeb(q, liensWeb)
         if (lienUtil) {
             resultats = [{ titre: lienUtil.terme, sous: Reglages.t("Rechercher sur ", "Search ") + lienUtil.nom, glyphe: "travel_explore", f: () => Qt.openUrlExternally(lienUtil.url) }]
+            return
+        }
+        if (q.startsWith(";")) {
+            let cartes = Saisies.cartesSnippets(q, snippets, Reglages.t("secret", "secret"))
+            resultats = retourSnippet ? [{ titre: Reglages.t("Copie impossible", "Copy failed"), sous: "Snippets", glyphe: "error", garder: true, f: () => { r.retourSnippet = false; r.chercher() } }]
+                      : cartes.length ? cartes.map(c => ({ titre: Reglages.t("Copier : ", "Copy: ") + c.titre, sous: c.sous, glyphe: "content_paste", garder: true, f: () => r.copierSnippet(c.mot) }))
+                      : [{ titre: Reglages.t("Aucun snippet pour ce mot", "No snippet for this word"), sous: Reglages.t("Réglages · Ajouter un snippet", "Settings · Add a snippet"),
+                           glyphe: "content_paste", f: () => r.ouvrirReglage(Reglages.t("Ajouter un snippet", "Add a snippet")) }]
+            sel = 0
             return
         }
         if (q.startsWith("?")) {
@@ -1400,7 +1436,7 @@ Item {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if (!applisLues && !/^([?>+!@:]|sessions? |(mdp|password)(\s|$))/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+        if (!applisLues && !/^([?>+!@:;]|sessions? |(mdp|password)(\s|$))/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
             && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
