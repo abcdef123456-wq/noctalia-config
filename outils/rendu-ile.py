@@ -292,10 +292,15 @@ def ecrire_png(chemin, w, h, bpp, lignes):
                              + bloc(b"IDAT", zlib.compress(brut)) + bloc(b"IEND", b""))
 
 
-def recadrer(png, cadre):
-    """Ne garde de la fenêtre que l'île et MARGE px autour (contour, lueur) ; hors fenêtre : noir."""
+def recadrer(png, cadre, forcer_alpha=False):
+    """Ne garde de la fenêtre que l'île et MARGE px autour (contour, lueur) ; hors fenêtre : noir.
+    forcer_alpha : si Qt a écrit du RGB (le transparent est devenu noir), rend du RGBA : opaque dans le cadre de l'île, transparent autour."""
     x, y, ew, eh, pw, ph = cadre
     w, h, bpp, lignes = lire_png(png)
+    if forcer_alpha and bpp == 3:
+        lignes = [b"".join(l[i:i + 3] + (b"\xff" if x <= i // 3 < x + ew and y <= j < y + eh else b"\0") for i in range(0, w * 3, 3))
+                  for j, l in enumerate(lignes)]
+        bpp = 4
     e = w / pw if pw else 1
     x0, y0 = int(round((x - MARGE) * e)), int(round((y - MARGE) * e))
     lw, lh = int(round((ew + 2 * MARGE) * e)), int(round((eh + 2 * MARGE) * e))
@@ -328,14 +333,15 @@ def png_valide(chemin):
 def rendre(etat, sortie, reglages, palette, polices=None, echelle=1):
     """Un qs par état ; Qt sort parfois du RGB (coins noirs) : jusqu'à 3 essais. Retourne (chemin du PNG ou None, journal)."""
     journal = ""
-    for _ in range(3):
-        png, journal = essai(etat, sortie, reglages, palette, polices, echelle)
+    for k in range(3):
+        # dernier essai : Qt s'obstine en RGB (île carrée et opaque), on refait l'alpha d'après le cadre
+        png, journal = essai(etat, sortie, reglages, palette, polices, echelle, k == 2)
         if png and (etat in SANS_ALPHA or png_valide(png)):
             return png, journal
     return None, "PNG sans transparence (RGB au lieu de RGBA) après 3 essais\n" + journal
 
 
-def essai(etat, sortie, reglages, palette, polices, echelle):
+def essai(etat, sortie, reglages, palette, polices, echelle, forcer_alpha=False):
     racine = Path(tempfile.mkdtemp(prefix="nci-", dir="/tmp"))
     png = Path(sortie) / (etat + ".png")
     try:
@@ -354,7 +360,7 @@ def essai(etat, sortie, reglages, palette, polices, echelle):
         m = re.search(r"CADRE (\[.*?\])", journal or "")
         if not (png.exists() and "RENDU ok" in (journal or "") and m):
             return None, journal or ""
-        recadrer(png, json.loads(m.group(1)))
+        recadrer(png, json.loads(m.group(1)), forcer_alpha)
         return png, journal
     finally:
         shutil.rmtree(str(racine), ignore_errors=True)
