@@ -1438,6 +1438,21 @@ def preparer(action, p):
             raise Refus(T("wl-paste (ou xclip) introuvable.", "wl-paste (or xclip) not found."))
 
         async def executer(budget=None):
+            # Marqué secret (gestionnaire de mots de passe, wl-copy --sensitive) : jamais lu, comme l'historique de l'île
+            types_ = [coller, "--list-types"] if coller else [xclip, "-selection", "clipboard", "-t", "TARGETS", "-o"]
+            # Échec ou délai dépassé : refus (côté sûr), jamais de lecture à l'aveugle ; sortie bornée
+            try:
+                code_t, types, _ = await lancer(types_, delai=5)
+            except asyncio.TimeoutError:
+                raise Refus(T("Le presse-papiers n'a pas répondu en 5 s : pas lu.",
+                              "The clipboard did not answer within 5 s: not read."), "refusé (types : délai)")
+            types = types[:65536]
+            if code_t != 0:
+                raise Refus(T("Presse-papiers vide ou illisible : pas lu.", "Clipboard empty or unreadable: not read."),
+                            "refusé (types illisibles)")
+            if b"x-kde-passwordManagerHint" in types or b"x-nc-secret" in types:
+                raise Refus(T("Le presse-papiers est marqué secret (mot de passe) : pas lu.",
+                              "The clipboard is marked secret (password): not read."), "refusé (marqué secret)")
             args = [coller, "--no-newline"] if coller else [xclip, "-selection", "clipboard", "-o"]
             code, out, _ = await lancer(args, delai=10)
             texte = out[:MAX_SORTIE].decode("utf-8", "replace")

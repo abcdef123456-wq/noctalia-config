@@ -65,7 +65,8 @@ echo oui
     "loginctl": ENTETE + 'echo "loginctl $*" >> "$H/appels"\n',
     "systemctl": ENTETE + 'echo "systemctl $*" >> "$H/appels"\n',
     "wl-copy": ENTETE + 'echo "wl-copy $(cat)" >> "$H/appels"\n',
-    "wl-paste": ENTETE + 'echo "wl-paste $*" >> "$H/appels"; if [ -f "$H/presse" ]; then cat "$H/presse"; '
+    "wl-paste": ENTETE + 'printf "%s\\n" "wl-paste $*" >> "$H/appels"; if [ "$1" = --list-types ]; then '
+                         '[ -f "$H/types-echec" ] && exit 1; cat "$H/types" 2>/dev/null || echo text/plain; elif [ -f "$H/presse" ]; then cat "$H/presse"; '
                          'else printf "texte copié"; fi\n',
     "grim": ENTETE + 'echo "grim $*" >> "$H/appels"; printf "\\211PNG\\r\\n\\032\\nfausse-capture" > "$1"\n',
     # Sans île : <home>/notif dit si notify-send connaît --action et quel bouton est pressé
@@ -1777,6 +1778,55 @@ class Revue(ModuleCharge):
         self.assertFalse(r["success"])
         self.assertNotIn("482913", json.dumps(r))
         self.assertIn("refusé (ressemble à un code)", self.journal())
+
+    def test_presse_papiers_marque_secret_jamais_lu(self):
+        m = self.charger()
+        (self.home / "presse").write_text("mot-de-passe-tres-secret")
+        noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+        for marque in ("x-kde-passwordManagerHint", "x-nc-secret"):
+            with self.subTest(marque=marque):
+                (self.home / "types").write_text("text/plain\n" + marque + "\n")
+                r = asyncio.run(noeud.decider("clipboard_read", {}, "r", 20))
+                self.assertFalse(r["success"])
+                self.assertNotIn("mot-de-passe-tres-secret", json.dumps(r))
+                self.assertIn("refusé (marqué secret)", self.journal())
+                self.assertNotIn("wl-paste --no-newline", self.appels(), "le contenu n'est jamais lu")
+        (self.home / "types").write_text("text/plain\n")
+        r = asyncio.run(noeud.decider("clipboard_read", {}, "r", 20))
+        self.assertTrue(r["success"])
+        self.assertEqual(r["clipboard"], "mot-de-passe-tres-secret")
+
+    def test_presse_papiers_types_illisibles_jamais_lu(self):
+        """--list-types qui échoue (ou presse-papiers vide) : refus, le contenu n'est pas lu à l'aveugle."""
+        m = self.charger()
+        (self.home / "presse").write_text("mot-de-passe-tres-secret")
+        (self.home / "types-echec").write_text("")
+        noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+        r = asyncio.run(noeud.decider("clipboard_read", {}, "r", 20))
+        self.assertFalse(r["success"])
+        self.assertNotIn("mot-de-passe-tres-secret", json.dumps(r))
+        self.assertIn("refusé (types illisibles)", self.journal())
+        self.assertNotIn("wl-paste --no-newline", self.appels())
+
+    def test_presse_papiers_types_trop_lents_jamais_lu(self):
+        m = self.charger()
+        (self.home / "presse").write_text("mot-de-passe-tres-secret")
+        noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+        vrai = m.lancer
+
+        async def lent(args, **kw):
+            if "--list-types" in args:
+                raise asyncio.TimeoutError
+            return await vrai(args, **kw)
+        m.lancer = lent
+        try:
+            r = asyncio.run(noeud.decider("clipboard_read", {}, "r", 20))
+        finally:
+            m.lancer = vrai
+        self.assertFalse(r["success"])
+        self.assertNotIn("mot-de-passe-tres-secret", json.dumps(r))
+        self.assertIn("refusé (types : délai)", self.journal())
+        self.assertIn("5 s", json.dumps(r, ensure_ascii=False))
 
     def test_rendre_visible(self):
         m = self.charger()

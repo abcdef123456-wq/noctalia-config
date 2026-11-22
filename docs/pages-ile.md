@@ -120,9 +120,10 @@ passe (module `secrets`, lettres, chiffres et symboles, au moins un de chaque), 
 `wl-copy` et l'île dit « copié », sans jamais l'afficher ; « Copie impossible » si `wl-copy` échoue ou dépasse 10 s.
 Pendant toute la copie, une marque vide et datée (`$XDG_RUNTIME_DIR/nc-secret-copie`) dit à l'historique de l'île de ne
 pas la garder ; une copie que tu fais toi-même dans les 5 secondes qui suivent n'y entre pas non plus. `--sensitive` est
-ajouté si ton `wl-copy` (wl-clipboard 2.3 ou plus) le connaît : les lecteurs qui respectent cet indice l'ignorent aussi,
-pas les autres. Sans lui (Debian 13 : 2.2.1), seul l'historique de l'île l'ignore. Un lecteur qui ne regarde pas
-l'indice voit le mot de passe (cliphist de Noctalia s'il est activé, `nc-cloud presse` si tu l'envoies). Le mot de passe reste dans le presse-papiers jusqu'à ta
+ajouté si ton `wl-copy` (wl-clipboard 2.3 ou plus) le connaît : les lecteurs qui respectent cet indice l'ignorent aussi
+(`nc-cloud presse` et `nc-noeud clipboard_read` refusent alors de le lire), pas les autres (cliphist de Noctalia s'il est
+activé et ne regarde pas l'indice). Sans lui (Debian 13 : 2.2.1), seul l'historique de l'île l'ignore : `nc-cloud presse`,
+`nc-noeud clipboard_read` et tout autre lecteur voient le mot de passe. Le mot de passe reste dans le presse-papiers jusqu'à ta
 copie suivante. `wl-copy` le recopie dans un fichier effacé aussitôt : `nc-mdp` lui donne un dossier privé en mémoire
 (sous `$XDG_RUNTIME_DIR`, rien n'est copié sans lui) ; wl-clipboard avant 2.3 (Debian 13) ignore ce dossier : son
 fichier, déjà effacé mais encore ouvert, est sous `/tmp`, donc sur le disque si `/tmp` n'est pas un tmpfs, tant que le mot
