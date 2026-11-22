@@ -37,7 +37,8 @@
     "DOCK": "oui",
     "DOCK_POSITION": "right",
     "DOCK_AUTO": "non",
-    "DOCK_TAILLE": "40"
+    "DOCK_TAILLE": "40",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {

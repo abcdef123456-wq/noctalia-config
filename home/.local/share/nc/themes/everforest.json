@@ -34,7 +34,8 @@
     "FENETRES_OMBRE": "22",
     "ANIM_BUREAUX": "slidefade",
     "VERROU_COULEUR": "accent",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {

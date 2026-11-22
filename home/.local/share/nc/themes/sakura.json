@@ -44,7 +44,7 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 8,
-      "thickness": 26,
+      "thickness": 31,
       "capsule": true,
       "background_opacity": 1.0
     },
