@@ -80,11 +80,13 @@ FloatingWindow {
         }
 
         Text {
+            textFormat: Text.PlainText
             anchors.horizontalCenter: parent.horizontalCenter; y: 14
             text: Reglages.t("Choisir un thème", "Choose a theme")
             color: Couleurs.texte; font.pixelSize: 15; font.bold: true; font.family: Couleurs.police
         }
         Text {
+            textFormat: Text.PlainText
             anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - 28
             text: Reglages.t("← → choisir · Entrée appliquer · Échap fermer", "← → choose · Enter apply · Esc close")
             color: Couleurs.texteSec; font.pixelSize: 11; font.family: Couleurs.police
@@ -140,6 +142,7 @@ FloatingWindow {
                         border.width: contour === "aucun" ? 0 : Math.max(1, Math.round(ct.nombre(c.t, "ILE_CONTOUR_EPAISSEUR", 2, 4) / 2))
                         border.color: contour === "discret" ? Qt.alpha(c.primaire, 0.4) : c.primaire
                         Text {
+                            textFormat: Text.PlainText
                             anchors.centerIn: parent
                             text: { var s = Reglages.t("Île 12:30", "Island 12:30"); return ct.rv(c.t, "ILE_MAJUSCULES", "non") === "oui" ? s.toUpperCase() : s }
                             color: c.col.onSurface || "#e3e3e8"
@@ -169,12 +172,14 @@ FloatingWindow {
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     anchors.horizontalCenter: parent.horizontalCenter; y: 194; width: parent.width - 16
                     horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     text: c.t ? c.t.libelle : ""
                     color: Couleurs.texte; font.pixelSize: 13; font.bold: c.d === 0; font.family: Couleurs.police
                 }
                 Text {
+                    textFormat: Text.PlainText
                     anchors.horizontalCenter: parent.horizontalCenter; y: 214
                     visible: c.t !== null && c.t.actif === true
                     text: Reglages.t("Actif", "Active")
