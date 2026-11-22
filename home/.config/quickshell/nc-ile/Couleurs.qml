@@ -52,7 +52,7 @@ Singleton {
         "vif":     { raideur: 5.5, amortiL: 0.28, amortiH: 0.3,  duree: 200, courbe: Easing.OutBack,  contour: 150, spot: 120 },
         "sec":     { raideur: 8,   amortiL: 1,    amortiH: 1,    duree: 120, courbe: Easing.Linear,   contour: 100, spot: 90 }
     })
-    readonly property string animNom: animations[Reglages.val("ILE_ANIM", "ressort")] !== undefined ? Reglages.val("ILE_ANIM", "ressort") : "ressort"
+    readonly property string animNom: Object.keys(animations).indexOf(Reglages.val("ILE_ANIM", "ressort")) >= 0 ? Reglages.val("ILE_ANIM", "ressort") : "ressort"
     readonly property var anim: animations[animNom]
 
     FileView {
