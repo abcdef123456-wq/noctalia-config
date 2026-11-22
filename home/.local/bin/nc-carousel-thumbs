@@ -54,25 +54,10 @@ cle_dossier() {
 }
 # -- FIN cle
 
-# Dans un thème, le carrousel montre les fonds du thème PUIS ceux de l'utilisateur : les deux dossiers sont surveillés et
-# ont leurs miniatures. « Dans un thème » : style.conf pose FONDS_DOSSIER et le dossier de Noctalia (src) n'est pas celui
-# de l'utilisateur. Dossier de l'utilisateur (même règle dans panel.luau, dossiersDuCarrousel, testée des deux côtés) :
-# son FONDS_DOSSIER de reglages.conf (~ développé, sans « / » final), sinon ~/Pictures/Wallpapers.
-valeur_conf() {
-  sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | tail -n 1 | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/'
-}
-sans_final() {
-  local d="$1"
-  while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d="${d%/}"; done
-  printf '%s' "$d"
-}
-dossiers=("$src")
-if [ -n "$(valeur_conf "$HOME/.config/nc/style.conf" FONDS_DOSSIER)" ]; then
-  u=$(valeur_conf "$HOME/.config/nc/reglages.conf" FONDS_DOSSIER)
-  [ -n "$u" ] || u="$FONDS_DEFAUT"
-  u=$(sans_final "${u/#\~/$HOME}")
-  [ "$u" != "$src" ] && dossiers+=("$u")
-fi
+# Deux dossiers, jamais d'autres : celui de Noctalia (dans la base : la racine, ses dossiers de thèmes ne sont pas lus) et
+# son sous-dossier mes-fonds (« Mes fonds », à toi, jamais livré ni touché par une mise à jour). Même règle dans
+# panel.luau (groupesDuCarrousel, testée des deux côtés).
+dossiers=("$src" "$src/mes-fonds")
 
 # --surveillance : fait surveiller par nc-carousel-thumbs.path le vrai dossier (drop-in dossier.conf ; aucun pour le
 # dossier par défaut, déjà dans l'unité : le drop-in disparaît au retour au défaut). Appelé par nc-reglages (à chaque
@@ -80,10 +65,10 @@ fi
 if [ "${1:-}" = "--surveillance" ]; then
   dropin="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/nc-carousel-thumbs.path.d/dossier.conf"
   want=""
-  # Dans un thème (deux dossiers) : une ligne par dossier qui existe ; seul : le dossier de Noctalia s'il n'est pas le défaut
+  # Les deux dossiers, même absents (systemd guette leur création) ; le défaut et son mes-fonds sont déjà dans l'unité
   lignes=""
   for d in "${dossiers[@]}"; do
-    if [ ${#dossiers[@]} -gt 1 ]; then [ -d "$d" ] || continue; elif [ "$d" = "$FONDS_DEFAUT" ]; then continue; fi
+    [ "$src" = "$FONDS_DEFAUT" ] && break
     real=$(realpath -m -- "$d" 2>/dev/null) || real="$d"
     case "$real" in /*) ;; *) real="" ;; esac
     case "$real" in *$'\n'*|*'\') real="" ;; esac     # saut de ligne ou \ final : illisible pour systemd, on laisse le défaut

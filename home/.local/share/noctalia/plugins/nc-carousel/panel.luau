@@ -8,8 +8,8 @@
 -- fond calé sur le cadre du panneau.
 -- Défilement animé : la position suit la cible avec un amorti exponentiel (onFrameTick).
 -- Ouverture : noctalia msg panel-toggle nc/carousel:main
--- Dans un thème : les fonds du thème, puis ceux de l'utilisateur (voir plus bas). La rotation ne change pas : dans un thème,
--- elle ne tourne que dans les fonds du thème ; un fond à toi choisi dans le carrousel peut être remplacé à la rotation suivante.
+-- Deux groupes, jamais d'autres fonds : ceux du dossier de Noctalia (le thème, ou la racine dans la base), puis « Mes fonds »
+-- (son sous-dossier mes-fonds, à toi, qu'aucune mise à jour ne touche). Un titre au-dessus de la bande dit le groupe.
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
 local function env(nom)
@@ -53,14 +53,14 @@ local function fenetre(n, c, fl, reach)
   return lo, lo + n - 1
 end
 
--- Dans un thème (style.conf pose FONDS_DOSSIER et Noctalia lit un autre dossier que celui de l'utilisateur), le carrousel
--- montre les fonds du thème, PUIS ceux de l'utilisateur. Dossier de l'utilisateur (règle écrite ici une fois, même
--- règle dans nc-carousel-thumbs, dossier_utilisateur, testée des deux côtés) : son FONDS_DOSSIER de reglages.conf
--- (~ développé, sans « / » final), sinon ~/Pictures/Wallpapers.
-local function sansFinal(d)
-  while #d > 1 and d:sub(-1) == "/" do d = d:sub(1, -2) end
-  return d
+-- Groupes du carrousel (règle écrite ici une fois ; même règle dans nc-carousel-thumbs, dossiers, testée des deux côtés) :
+-- le dossier de Noctalia (dans la base : la racine, les dossiers des thèmes ne sont pas lus), puis son sous-dossier
+-- mes-fonds. Jamais la racine dans un thème, jamais un autre thème.
+local function groupesDuCarrousel(dir)
+  while #dir > 1 and dir:sub(-1) == "/" do dir = dir:sub(1, -2) end
+  return { { dossier = dir }, { dossier = dir .. "/mes-fonds", perso = true } }
 end
+-- Dernière valeur de CLE dans un fichier .conf (guillemets retirés)
 local function valeurConf(conf, cle)
   local v
   for l in string.gmatch(conf or "", "[^\n]+") do
@@ -69,23 +69,12 @@ local function valeurConf(conf, cle)
   end
   return v
 end
-local function dossiersDuCarrousel(dir, reglages, style, home)
-  dir = sansFinal(dir)
-  local liste = { dir }
-  local theme = valeurConf(style, "FONDS_DOSSIER")
-  if theme and theme ~= "" then
-    local u = valeurConf(reglages, "FONDS_DOSSIER")
-    if not u or u == "" then u = "~/Pictures/Wallpapers" end
-    u = sansFinal((u:gsub("^~", function() return sansFinal(home) end)))
-    if u ~= dir then table.insert(liste, u) end
-  end
-  return liste
-end
--- Images de chaque dossier à la suite ; chacune garde son dossier (chemin complet) et ses vignettes (clé de SON dossier).
--- api : listDir, fileInfo, fileExists ; exts : extensions d'images
-local function listerFonds(dossiers, racine, api, exts)
+-- Images de chaque groupe à la suite ; chacune garde son dossier (chemin complet), son groupe (g, perso) et ses vignettes
+-- (clé de SON dossier). api : listDir, fileInfo, fileExists ; exts : extensions d'images
+local function listerFonds(groupes, racine, api, exts)
   local out = {}
-  for _, d in ipairs(dossiers) do
+  for g, gr in ipairs(groupes) do
+    local d = gr.dossier
     local thumbs = racine .. cleDossier(d) .. "/"
     local files = api.listDir(d .. "/") or {}
     table.sort(files, function(a, b) return a:lower() < b:lower() end)
@@ -98,7 +87,7 @@ local function listerFonds(dossiers, racine, api, exts)
           -- Vignette absente (pas encore découpée) : rien n'est affiché, jamais l'image d'origine (jusqu'à 8K)
           local tw, tn = thumbs .. f .. ".W.webp", thumbs .. f .. ".N.webp"
           table.insert(out, {
-            path = path, file = f,
+            path = path, file = f, g = g, perso = gr.perso or false,
             thumbW = api.fileExists(tw) and tw or nil,
             thumbN = api.fileExists(tn) and tn or nil,
           })
@@ -117,6 +106,7 @@ local SK = 0.30              -- inclinaison
 local SPACE = 4              -- écart entre tranches
 local REACH = 3              -- tranches de chaque côté (au moins ; plus sur un écran large : portee)
 local ROW_H = CH + 30
+local BANDE, TEXTE = 44, 15  -- bandes au-dessus (titre du groupe) et au-dessous de la bande de tranches ; taille du texte
 local SCREEN_W = 1600
 local SMOOTH_MS = 55         -- plus petit = plus rapide
 local REPEAT_DELAY = 280     -- flèche maintenue : délai puis cadence
@@ -128,7 +118,8 @@ local ECO = (env("NOCTALIA_CONFIG_HOME") or env("XDG_CONFIG_HOME") or noctalia.e
   .. "/noctalia/zz-economie.toml"
 local eco = false
 
-local all = {}        -- { path, file, title, thumbW, thumbN }
+local all = {}        -- { path, file, title, thumbW, thumbN, g, perso, rang, total }
+local dansTheme = false
 local shown = {}      -- liste filtrée par la recherche
 local target = 1      -- index cible, non replié (peut dépasser n : carrousel infini)
 local pos = 1         -- position affichée (réelle), tend vers target
@@ -157,10 +148,16 @@ local function loadList()
   all = {}
   local dir = noctalia.wallpaperDirectory()
   if not dir then return end
-  local dossiers = dossiersDuCarrousel(dir, noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or "",
-    noctalia.readFile(noctalia.expandPath("~/.config/nc/style.conf")) or "", noctalia.expandPath("~/"))
-  all = listerFonds(dossiers, THUMBS, noctalia, EXTS)
-  for _, w in ipairs(all) do w.title = prettify(w.file) end
+  -- Dans un thème : style.conf pose FONDS_DOSSIER
+  dansTheme = (valeurConf(noctalia.readFile(noctalia.expandPath("~/.config/nc/style.conf")) or "", "FONDS_DOSSIER") or "") ~= ""
+  all = listerFonds(groupesDuCarrousel(dir), THUMBS, noctalia, EXTS)
+  local total = {}
+  for _, w in ipairs(all) do
+    w.title = prettify(w.file)
+    total[w.g] = (total[w.g] or 0) + 1
+    w.rang = total[w.g]
+  end
+  for _, w in ipairs(all) do w.total = total[w.g] end
 end
 
 -- Écran de référence : celui qui a le focus, sinon le premier (focusedOutputName() peut être nil)
@@ -190,6 +187,7 @@ local function setZoom()
   -- Fond : exactement le cadre du panneau
   if o then BGW, BGH = o.width - 2 * BORD, o.height - HAUT_BARRE - 2 * BORD else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
+  BANDE, TEXTE = px(44), px(15)
   SCREEN_W = o and o.width or 1600
 end
 
@@ -308,6 +306,15 @@ local function strip()
   return ui.row({ height = ROW_H, width = contentW + 2 * math.abs(s) + 60, align = "center", justify = "center", gap = SPACE }, cards)
 end
 
+-- Groupe du fond au centre : « Fonds du thème » (« Fonds » dans la base) puis « Mes fonds », avec le rang dans le groupe
+local function titreGroupe()
+  local w = #shown > 0 and shown[wrap(target)]
+  if not w then return "" end
+  local nom = w.perso and tr("Mes fonds", "My wallpapers")
+    or (dansTheme and tr("Fonds du thème", "Theme wallpapers") or tr("Fonds", "Wallpapers"))
+  return nom .. "  ·  " .. w.rang .. " / " .. w.total
+end
+
 function render()
   local middle
   if #shown == 0 then
@@ -323,9 +330,15 @@ function render()
   -- Remonté pour que le fond commence en haut du cadre (le contenu du panneau commence plus bas)
   panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = (HAUT_BARRE + BORD) - HAUT_PANNEAU - 1, opacity = ease }, {
     ui.box({ width = 1, height = 1, opacity = 0 }),
-    ui.column({ minWidth = BGW, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2 }, {   -- minWidth : sinon rétréci aux marges du panneau
+    ui.column({ minWidth = BGW, align = "center", justify = "start", gap = -(BGH + ROW_H + 2 * BANDE) / 2 }, {   -- minWidth : sinon rétréci aux marges du panneau
       bg and ui.image({ path = bg, width = BGW, height = BGH, fit = "cover", radius = RAYON }) or ui.box({ width = BGW, height = BGH, opacity = 0 }),
-      ui.column({ height = ROW_H, width = BGW, align = "center", justify = "center" }, { middle }),
+      ui.column({ height = ROW_H + 2 * BANDE, width = BGW, align = "center", justify = "center" }, {
+        ui.row({ height = BANDE, align = "center", justify = "center" }, {
+          ui.label({ text = titreGroupe(), fontSize = TEXTE, fontWeight = "bold", color = "on_surface" }),
+        }),
+        middle,
+        ui.row({ height = BANDE, align = "center", justify = "center", gap = 10 }, {}),
+      }),
     }),
   }))
 end

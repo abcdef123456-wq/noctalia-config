@@ -1081,10 +1081,10 @@ REGLAGES = [
       [("auto", L("Automatique", "Automatic")), ("plein-ecran", L("En plein écran", "In fullscreen")), ("oui", L("Toujours", "Always")), ("non", L("Jamais", "Never"))], groupe="hypr"),
     # Fonds d'écran
     R("FONDS_ROTATION", "Fonds d'écran", L("Changer de fond automatiquement", "Change wallpaper automatically"),
-      "ouinon", "oui", L("Dans un thème, la rotation ne tourne que dans les fonds du thème ; un fond à toi choisi dans le "
-                          "carrousel peut être remplacé à la rotation suivante.",
-                          "In a theme, the rotation only cycles through the theme's wallpapers; a wallpaper of yours "
-                          "picked in the carousel can be replaced at the next rotation."), groupe="noctalia"),
+      "ouinon", "oui", L("Dans un thème, la rotation passe par les fonds du thème puis par « Mes fonds » ; dans la base, "
+                          "par les fonds de la base seulement.",
+                          "In a theme, the rotation goes through the theme's wallpapers, then “My wallpapers”; in the "
+                          "base, through the base wallpapers only."), groupe="noctalia"),
     R("FONDS_INTERVALLE", "Fonds d'écran", L("Toutes les", "Every"), "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
     R("FOND_ANIME", "Fonds d'écran", L("Fond animé", "Animated wallpaper"), "choix", "non",
       L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. Vivant : l'aurore "
@@ -1100,10 +1100,6 @@ REGLAGES = [
     R("FOND_ANIME_BATTERIE", "Fonds d'écran", L("Fond animé aussi sur batterie", "Animated wallpaper on battery too"),
       "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
     R("FONDS_DOSSIER", "Fonds d'écran", L("Dossier des fonds d'écran", "Wallpaper folder"), "dossier", "~/Pictures/Wallpapers",
-      L("Dans un thème, le carrousel montre les fonds du thème, puis ceux de ce dossier ; la rotation ne tourne que dans "
-        "les fonds du thème, et un fond à toi choisi dans le carrousel peut être remplacé à la rotation suivante.",
-        "In a theme, the carousel shows the theme's wallpapers, then those of this folder; the rotation only cycles "
-        "through the theme's wallpapers, and a wallpaper of yours picked in the carousel can be replaced at the next rotation."),
       groupe="noctalia"),
     R("FONDS_JOUR_DE", "Fonds d'écran", L("Le fond du jour commence à", "The day wallpaper starts at"), "entier", "7",
       L("L'heure (0 à 22) où le fond du dossier « jour » remplace celui de la nuit. Utile avec « Un fond pour le jour, un pour la nuit ».",
@@ -3481,7 +3477,11 @@ def appliquer_noctalia(vals):
         # Un fond pour le jour et un pour la nuit passe devant le changement automatique de fond
         mettre("wallpaper.automation", "enabled", False)
     if "FONDS_DOSSIER" in vals:
-        mettre("wallpaper", "directory", os.path.expanduser(vals["FONDS_DOSSIER"]))
+        d = os.path.expanduser(vals["FONDS_DOSSIER"])
+        mettre("wallpaper", "directory", d)
+        # Dans un thème, la rotation passe aussi par ses « Mes fonds » (sous-dossier mes-fonds) ; à la racine, jamais
+        # (elle prendrait les fonds de tous les thèmes)
+        mettre("wallpaper.automation", "recursive", d.rstrip("/") == os.path.expanduser(style_vals().get("FONDS_DOSSIER", "")).rstrip("/") != "")
 
     if vals.get("EFFETS") == "aucun":
         # Plus aucun effet : en dernier, passe devant les choix d'animations et de transitions (qui restent gardés)

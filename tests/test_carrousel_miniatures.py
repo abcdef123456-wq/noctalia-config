@@ -87,7 +87,8 @@ class Miniatures(unittest.TestCase):
         r = self.lance("--surveillance")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.dropin.read_text(),
-                         f"[Path]\nPathChanged=\nPathChanged={self.home}/Mes fonds 100%% beaux\n")
+                         f"[Path]\nPathChanged=\nPathChanged={self.home}/Mes fonds 100%% beaux\n"
+                         f"PathChanged={self.home}/Mes fonds 100%% beaux/mes-fonds\n")
         j = self.journal.read_text()
         self.assertIn("systemctl --user daemon-reload", j)
         self.assertIn("systemctl --user restart nc-carousel-thumbs.path", j)
@@ -357,85 +358,87 @@ io.write("ok")
         r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
         self.assertEqual(r.stdout, "ok", r.stderr)
 
-    # B5 : dans un thème, les fonds du thème PUIS ceux de l'utilisateur
+    # F2 : dans un thème, seulement les fonds du thème, puis « Mes fonds » (son mes-fonds) ; jamais la racine ni un
+    # autre thème. Contrôle du contrôle : la version de 9dc038d (le mélange) est lancée aussi, et le test la voit mélanger.
 
-    def theme(self, dossier_theme, utilisateur=None):
-        # Noctalia lit le dossier du thème ; style.conf pose FONDS_DOSSIER ; reglages.conf : le dossier de l'utilisateur
+    def ancien(self, chemin):
+        """Le fichier tel qu'au commit 9dc038d (le mélange), ou None hors d'un dépôt git complet."""
+        r = subprocess.run(["git", "-C", str(REPO), "show", f"9dc038d:{chemin}"], capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else None
+
+    def theme(self, dossier_theme):
+        # Noctalia lit le dossier du thème ; style.conf pose FONDS_DOSSIER
         self.config(dossier_theme)
         nc = self.home / ".config/nc"
         nc.mkdir(parents=True, exist_ok=True)
         (nc / "style.conf").write_text(f'FONDS_DOSSIER="{dossier_theme}"\n')
-        if utilisateur:
-            (nc / "reglages.conf").write_text(f'FONDS_DOSSIER="{utilisateur}/"\n')
 
-    def dossier_theme(self, nom="Fonds du thème"):
-        d = self.home / nom
-        d.mkdir()
-        (d / "t.png").write_text("img")
-        return d
+    def installe(self):
+        # racine : un fond de la base, deux thèmes ; chacun ses « Mes fonds »
+        self.image("base.png")
+        for rel in ("mes-fonds/r.png", "nord/n.png", "nord/mes-fonds/m.png", "dracula/d.png"):
+            (self.fonds / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.fonds / rel).write_text("img")
+        return self.fonds / "nord"
 
-    def test_theme_surveille_les_deux_dossiers(self):
-        t = self.dossier_theme()
-        self.image("u.png")
+    def vignettes(self):
+        return sorted(str(p.relative_to(self.racine)) for p in self.racine.rglob("*.W.webp"))
+
+    def test_theme_ni_racine_ni_autre_theme(self):
+        t = self.installe()
+        self.theme(t)
+        self.assertEqual(self.lance().returncode, 0)
+        j = self.journal.read_text()
+        self.assertIn(f"magick {t}/n.png[0]", j)
+        self.assertIn(f"magick {t}/mes-fonds/m.png[0]", j)
+        self.assertEqual(j.count("magick"), 6)                        # deux fonds, trois découpes chacun
+        self.assertTrue((self.cache(t / "mes-fonds") / "m.png.W.webp").exists())
+        self.assertFalse((self.cache(t) / "m.png.W.webp").exists())  # chaque groupe a son cache
+        for x in ("base.png", "r.png", "d.png"):
+            self.assertNotIn(x, j)
+        ancien = self.ancien("home/.local/bin/nc-carousel-thumbs")
+        if ancien is None:
+            self.skipTest("9dc038d absent (clone partiel)")
+        vieux = self.r / "vieux-thumbs"
+        vieux.write_text(ancien)
+        vieux.chmod(0o755)
+        self.journal.write_text("")
+        subprocess.run([str(vieux)], env=self.env, capture_output=True, text=True, timeout=60, check=False)
+        self.assertIn("base.png", self.journal.read_text(), "contrôle : l'ancien code mélangeait la racine au thème")
+
+    def test_base_racine_et_mes_fonds_sans_les_themes(self):
+        self.installe()
+        self.lance()
+        j = self.journal.read_text()
+        self.assertIn(f"magick {self.fonds}/base.png[0]", j)
+        self.assertIn(f"magick {self.fonds}/mes-fonds/r.png[0]", j)
+        self.assertNotIn("n.png", j)
+        self.assertNotIn("d.png", j)
+        self.assertNotIn("m.png", j)
+
+    def test_surveillance_du_theme_et_de_ses_mes_fonds_meme_absents(self):
+        t = self.fonds / "nord"
+        t.mkdir()
         self.theme(t)
         self.lance("--surveillance")
-        self.assertEqual(self.dropin.read_text(), f"[Path]\nPathChanged=\nPathChanged={t}\nPathChanged={self.fonds}\n")
+        self.assertEqual(self.dropin.read_text(), f"[Path]\nPathChanged=\nPathChanged={t}\nPathChanged={t}/mes-fonds\n")
+        self.assertNotIn(f"PathChanged={self.fonds}\n", self.dropin.read_text())
 
-    def test_theme_dossier_de_l_utilisateur_des_reglages(self):
-        t = self.dossier_theme()
-        u = self.home / "Mes fonds"
-        u.mkdir()
-        self.theme(t, u)
-        self.lance("--surveillance")
-        self.assertEqual(self.dropin.read_text(), f"[Path]\nPathChanged=\nPathChanged={t}\nPathChanged={u}\n")
+    def test_unite_surveille_mes_fonds_de_la_base(self):
+        self.assertIn("PathChanged=%h/Pictures/Wallpapers/mes-fonds\n", UNITE.read_text())
 
-    def test_theme_sans_doublon_si_meme_dossier(self):
-        u = self.home / "Mes fonds"
-        u.mkdir()
-        self.theme(u, u)                            # le dossier de Noctalia est celui de l'utilisateur : pas dans un thème
-        self.lance("--surveillance")
-        self.assertEqual(self.dropin.read_text(), f"[Path]\nPathChanged=\nPathChanged={u}\n")
-        (u / "a.png").write_text("img")
-        self.lance()
-        self.assertEqual(self.journal.read_text().count("magick"), 3)       # un seul passage, pas deux
-
-    def test_retour_a_noctalia_retire_le_dropin(self):
-        t = self.dossier_theme()
-        self.image("u.png")
+    def test_retour_a_la_base_retire_le_dropin(self):
+        t = self.installe()
         self.theme(t)
         self.lance("--surveillance")
         self.assertTrue(self.dropin.exists())
-        (self.home / ".config/nc/style.conf").write_text("")      # plus de thème
+        (self.home / ".config/nc/style.conf").write_text("")
         self.config(self.fonds)
         self.lance("--surveillance")
         self.assertFalse(self.dropin.exists())
 
-    def test_theme_dossier_absent_sans_erreur_ni_ligne(self):
-        t = self.dossier_theme()
-        self.theme(t, self.home / "Absent")
-        r = self.lance("--surveillance")
-        self.assertEqual((r.returncode, r.stderr), (0, ""))
-        self.assertEqual(self.dropin.read_text(), f"[Path]\nPathChanged=\nPathChanged={t}\n")
-        r = self.lance()
-        self.assertEqual((r.returncode, r.stderr), (0, ""))
-        self.assertTrue((self.cache(t) / "t.png.W.webp").exists())
-
-    def test_theme_vignettes_des_deux_dossiers(self):
-        t = self.dossier_theme()
-        self.image("u.png")
-        self.theme(t)
-        self.lance()
-        self.assertTrue((self.cache(t) / "t.png.W.webp").exists())
-        self.assertTrue((self.cache(self.fonds) / "u.png.W.webp").exists())
-        self.assertFalse((self.cache(t) / "u.png.W.webp").exists())
-        j = self.journal.read_text()
-        self.assertIn(f"magick {t}/t.png[0]", j)
-        self.assertIn(f"magick {self.fonds}/u.png[0]", j)
-        self.assertEqual(j.count("magick"), 6)
-
-    def test_borne_de_32_garde_les_deux_dossiers_du_theme(self):
-        t = self.dossier_theme()
-        self.image("u.png")
+    def test_borne_de_32_garde_les_deux_groupes(self):
+        t = self.installe()
         self.theme(t)
         self.lance()
         for i in range(40):
@@ -443,38 +446,43 @@ io.write("ok")
             d.mkdir()
             os.utime(d, (1000 + i, 1000 + i))
         os.utime(self.cache(t), (10, 10))             # les plus anciens, mais en cours
-        os.utime(self.cache(self.fonds), (11, 11))
+        os.utime(self.cache(t / "mes-fonds"), (11, 11))
         self.lance()
-        self.assertTrue(self.cache(t).exists() and self.cache(self.fonds).exists())
+        self.assertTrue(self.cache(t).exists() and self.cache(t / "mes-fonds").exists())
 
-    def test_aide_rotation_dans_un_theme(self):
+    def test_rotation_dans_un_theme_passe_par_mes_fonds(self):
         src = (REPO / "home/.local/bin/nc-reglages").read_text(encoding="utf-8")
-        self.assertIn("la rotation ne tourne que dans", src)
-        self.assertIn("les fonds du thème", src)
-        self.assertIn("peut être remplacé à la rotation suivante", src)
-        self.assertIn("the rotation only cycles", src)
+        self.assertIn('mettre("wallpaper.automation", "recursive", ', src)
+        self.assertIn("puis par « Mes fonds »", src)
+        self.assertNotIn("peut être remplacé à la rotation suivante", src)
 
-    def lance_liste(self, dir_, reglages="", style="", home="/h/u/"):
-        # la logique pure du panneau (bloc « cle »), avec une fausse API de Noctalia ; renvoie « chemin|vignette »
-        bloc = PANEL.read_text(encoding="utf-8").split("-- DEBUT cle", 1)[1].split("-- FIN cle", 1)[0].split("\n", 1)[1]
-        prog = (f"local DIR, REGLAGES, STYLE, HOME = [==[{dir_}]==], [==[{reglages}]==], [==[{style}]==], [==[{home}]==]\n"
-                + bloc + r"""
+    FAUX_FS = r"""
 local fichiers = {
-  ["/h/u/Theme"] = { "b.png", "A.jpg", "note.txt" },
-  ["/h/u/Pictures/Wallpapers"] = { "z.png" },
-  ["/h/u/Mes fonds"] = { "m.png" },
+  ["/h/u/Pictures/Wallpapers"] = { "z.png", "nord", "dracula", "mes-fonds", "CREDITS.tsv" },
+  ["/h/u/Pictures/Wallpapers/mes-fonds"] = { "r.png" },
+  ["/h/u/Pictures/Wallpapers/nord"] = { "b.png", "A.jpg", "note.txt", "mes-fonds" },
+  ["/h/u/Pictures/Wallpapers/nord/mes-fonds"] = { "m.png" },
+  ["/h/u/Pictures/Wallpapers/dracula"] = { "d.png" },
 }
 local api = {
   listDir = function(d) local l = fichiers[(d:gsub("/$", ""))]; if not l then return nil end
     local c = {} for i, f in ipairs(l) do c[i] = f end return c end,
-  fileInfo = function() return { isDir = false } end,
+  fileInfo = function(p) return { isDir = fichiers[p] ~= nil } end,
   fileExists = function() return true end,
 }
+"""
+
+    def lance_liste(self, appel, bloc=None):
+        # la logique pure du panneau (bloc « cle »), avec une fausse API de Noctalia ; renvoie « chemin|vignette|perso »
+        src = bloc if bloc is not None else PANEL.read_text(encoding="utf-8")
+        bloc = src.split("-- DEBUT cle", 1)[1].split("-- FIN cle", 1)[0].split("\n", 1)[1]
+        prog = bloc + self.FAUX_FS + f"local groupes = {appel}\n" + r"""
 local out = {}
-local dossiers = dossiersDuCarrousel(DIR, REGLAGES, STYLE, HOME)
-for _, w in ipairs(listerFonds(dossiers, "/c/", api, { png = true, jpg = true })) do out[#out + 1] = w.path .. "|" .. w.thumbW end
+for _, w in ipairs(listerFonds(groupes, "/c/", api, { png = true, jpg = true })) do
+  out[#out + 1] = w.path .. "|" .. w.thumbW .. "|" .. tostring(w.perso)
+end
 io.write(table.concat(out, "\n"))
-""")
+"""
         f = self.r / "liste.lua"
         f.write_text(prog, encoding="utf-8")
         r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
@@ -482,25 +490,26 @@ io.write(table.concat(out, "\n"))
         return r.stdout.split("\n") if r.stdout else []
 
     @unittest.skipUnless(LUA, "lua absent")
-    def test_liste_theme_puis_utilisateur(self):
-        l = self.lance_liste("/h/u/Theme/", 'FONDS_DOSSIER="~/Pictures/Wallpapers/"\n', 'FONDS_DOSSIER="/h/u/Theme"\n')
-        self.assertEqual([x.split("|")[0] for x in l], ["/h/u/Theme/A.jpg", "/h/u/Theme/b.png", "/h/u/Pictures/Wallpapers/z.png"])
-        self.assertIn("Theme", l[0].split("|")[1])
-        self.assertIn("Pictures", l[2].split("|")[1])
-        self.assertNotIn("Theme", l[2].split("|")[1])
+    def test_liste_theme_puis_mes_fonds_seulement(self):
+        l = self.lance_liste('groupesDuCarrousel("/h/u/Pictures/Wallpapers/nord/")')
+        self.assertEqual([x.split("|")[0] for x in l], ["/h/u/Pictures/Wallpapers/nord/A.jpg",
+                                                        "/h/u/Pictures/Wallpapers/nord/b.png",
+                                                        "/h/u/Pictures/Wallpapers/nord/mes-fonds/m.png"])
+        self.assertEqual([x.split("|")[2] for x in l], ["false", "false", "true"])
+        self.assertIn("nord%2Fmes-fonds", l[2].split("|")[1])          # la vignette du cache de SON dossier
+        ancien = self.ancien("home/.local/share/noctalia/plugins/nc-carousel/panel.luau")
+        if ancien is None:
+            self.skipTest("9dc038d absent (clone partiel)")
+        vieux = self.lance_liste('dossiersDuCarrousel("/h/u/Pictures/Wallpapers/nord", "", '
+                                 '[[FONDS_DOSSIER="/h/u/Pictures/Wallpapers/nord"]], "/h/u")', ancien)
+        self.assertIn("/h/u/Pictures/Wallpapers/z.png", [x.split("|")[0] for x in vieux],
+                      "contrôle : l'ancien code mélangeait la racine au thème")
 
     @unittest.skipUnless(LUA, "lua absent")
-    def test_liste_dossier_des_reglages_et_tilde(self):
-        l = self.lance_liste("/h/u/Theme", 'FONDS_DOSSIER="~/Mes fonds/"\n', 'FONDS_DOSSIER="/h/u/Theme"\n')
-        self.assertEqual(l[-1].split("|")[0], "/h/u/Mes fonds/m.png")
-
-    @unittest.skipUnless(LUA, "lua absent")
-    def test_liste_sans_doublon_ni_theme(self):
-        # même dossier des deux côtés, ou pas de thème : un seul passage
-        l = self.lance_liste("/h/u/Pictures/Wallpapers", "", 'FONDS_DOSSIER="/h/u/Pictures/Wallpapers"\n')
-        self.assertEqual([x.split("|")[0] for x in l], ["/h/u/Pictures/Wallpapers/z.png"])
-        l = self.lance_liste("/h/u/Theme", "", "")
-        self.assertEqual([x.split("|")[0] for x in l], ["/h/u/Theme/A.jpg", "/h/u/Theme/b.png"])
+    def test_liste_base_sans_les_dossiers_des_themes(self):
+        l = self.lance_liste('groupesDuCarrousel("/h/u/Pictures/Wallpapers")')
+        self.assertEqual([x.split("|")[0] for x in l], ["/h/u/Pictures/Wallpapers/z.png",
+                                                        "/h/u/Pictures/Wallpapers/mes-fonds/r.png"])
 
     # B3 : jamais l'image brute
 
