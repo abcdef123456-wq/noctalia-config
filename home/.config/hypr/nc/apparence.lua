@@ -1,6 +1,14 @@
 -- Apparence : sombre, épurée, rayons alignés sur Noctalia.
 -- Couleurs des bordures et du halo : nc/couleurs.lua (généré). Flou, ombres et animations selon le profil : nc/energie.lua.
 
+-- Famille des fenêtres réglable par un thème (nc-reglages) : « auto », absent ou inconnu = les valeurs d'origine.
+local disposition = ({ dwindle = "dwindle", master = "master", scrolling = "scrolling" })[nc.reglage("FENETRES_DISPOSITION", "dwindle")] or "dwindle"
+-- Orientation de la grande fenêtre : seulement en master (sinon rien n'est posé)
+local maitre_orientation = (disposition == "master")
+    and ({ gauche = "left", droite = "right", haut = "top", bas = "bottom", centre = "center" })[nc.reglage("FENETRES_MAITRE_ORIENTATION", "auto")] or nil
+local fond = ({ auto = "rgb(0b0d12)", noir = "rgb(000000)" })[nc.reglage("FENETRES_FOND", "auto")] or "rgb(0b0d12)"
+local ombre_decalage = ({ auto = { 0, 4 }, aucun = { 0, 0 }, bas = { 0, 8 }, dure = { 8, 8 } })[nc.reglage("FENETRES_OMBRE_DECALAGE", "auto")] or { 0, 4 }
+
 hl.config({
     general = {
         -- Espaces et bordure : réglables avec nc-reglages
@@ -10,8 +18,8 @@ hl.config({
         resize_on_border        = nc.reglage("FENETRES_BORDURE_REDIM", true),
         extend_border_grab_area = 20,
         allow_tearing           = false,
-        -- Disposition des fenêtres (nc-reglages) : dwindle (spirale) ou master (une grande + une pile)
-        layout                  = (nc.reglage("FENETRES_DISPOSITION", "dwindle") == "master") and "master" or "dwindle",
+        -- Disposition des fenêtres (nc-reglages) : dwindle (spirale), master (une grande + une pile) ou scrolling
+        layout                  = disposition,
 
         -- Aimantation des fenêtres flottantes aux bords de l'écran et aux autres fenêtres
         snap = {
@@ -38,7 +46,7 @@ hl.config({
             enabled        = true,
             range          = math.max(0, nc.reglage("FENETRES_OMBRE", 22)),   -- nc-reglages (0 : pas d'ombre)
             render_power   = 3,
-            offset         = { 0, 4 },
+            offset         = ombre_decalage,   -- nc-reglages
             color          = "rgba(00000088)",
             color_inactive = "rgba(00000044)",
         },
@@ -86,14 +94,15 @@ hl.config({
     },
 
     master = {
-        new_status = "master",
+        new_status  = "master",
+        orientation = maitre_orientation,   -- nil (rien de posé) hors master ou en auto
     },
 
     misc = {
         force_default_wallpaper  = 0,
         disable_hyprland_logo    = true,
         disable_splash_rendering = true,
-        background_color         = "rgb(0b0d12)",
+        background_color         = fond,   -- nc-reglages
         animate_manual_resizes   = false,
         focus_on_activate        = nc.reglage("FENETRES_FOCUS_DEMANDE", true),
         middle_click_paste       = nc.reglage("COLLER_CLIC_MILIEU", true),   -- nc-reglages

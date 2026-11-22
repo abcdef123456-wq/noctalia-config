@@ -34,6 +34,10 @@ Niveau 1 (sans root) :
 | `ILE_METEO`, `ILE_PRESSE`, `ILE_TELECHARGEMENTS` | `oui`, `non` | |
 | `FENETRES_FLOU`, `FENETRES_ANIMATIONS` | `oui`, `non` | |
 | `FENETRES_CARACTERE` | `auto`, `doux`, `vif`, `sec`, `rebond`, `aucun` | Caractère des animations (courbes et durée) ; `auto` = comme avant. L'Économie coupe toujours les animations. |
+| `FENETRES_DISPOSITION` | `dwindle`, `master`, `scrolling` | Disposition des fenêtres ; un thème peut la changer, ton réglage gagne toujours. |
+| `FENETRES_MAITRE_ORIENTATION` | `auto`, `gauche`, `droite`, `haut`, `bas`, `centre` | Côté de la grande fenêtre, seulement en `master` ; `auto` = comme avant. |
+| `FENETRES_FOND` | `auto`, `noir` | Couleur derrière les fenêtres (`misc.background_color`) ; `auto` = comme avant. |
+| `FENETRES_OMBRE_DECALAGE` | `auto`, `aucun`, `bas`, `dure` | Décalage de l'ombre (`shadow.offset`) ; `auto` = comme avant. |
 | `FENETRES_OMBRE` | 0, 22 | |
 | `HZ_PERFORMANCE`, `HZ_BALANCED_AC` | `max` | écran |
 | `HZ_BALANCED_BAT`, `HZ_ECO` | `max` ; `60` seulement dans un profil marqué « film sur batterie » (écran de plus de 60 Hz) | écran |
