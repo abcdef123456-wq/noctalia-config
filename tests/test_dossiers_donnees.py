@@ -85,7 +85,8 @@ class Sources(unittest.TestCase):
                 # vk=${vk:-…} : repli quand aucun fichier Vulkan n'est trouvé (rien à chercher)
                 # une ligne qui lit déjà XDG_DATA_DIRS avec le défaut XDG est juste
                 # nc-navigateurs : les dossiers standard ajoutés EN PLUS de XDG_DATA_DIRS (un XDG_DATA_DIRS partiel ne les cache pas)
-                repli = "vk=${vk:-" in code or "if p not in dirs" in code
+                # les fuseaux ne sont pas des données XDG : glibc lit TZDIR (posé par NixOS), puis /usr/share/zoneinfo
+                repli = "vk=${vk:-" in code or "if p not in dirs" in code or 'Quickshell.env("TZDIR") ||' in code
                 if "/usr/share" in code and "XDG_DATA_DIRS" not in code and not repli and not l.lstrip().startswith(("#", "//")):
                     # un message ou un commentaire de fin de ligne n'est pas une recherche
                     if re.search(r"""(T\(|print\(|echo |printf |notify|"""  # noqa

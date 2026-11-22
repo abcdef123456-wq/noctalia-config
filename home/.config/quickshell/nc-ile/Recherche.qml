@@ -641,7 +641,8 @@ Item {
     }
     FileView {
         id: fichierZones
-        path: r.zonesVoulues ? "/usr/share/zoneinfo/zone1970.tab" : ""      // lu une seule fois, au premier « heure … » tapé
+        // lu une seule fois, au premier « heure … » tapé ; TZDIR d'abord (NixOS), comme glibc pour « date » ensuite
+        path: r.zonesVoulues ? (Quickshell.env("TZDIR") || "/usr/share/zoneinfo") + "/zone1970.tab" : ""
         printErrors: false
         onLoaded: { r.zonesHeure = Saisies.listeZones(text()); r.zonesIllisibles = r.zonesHeure.length === 0; attente.restart() }
         onLoadFailed: { r.zonesIllisibles = true; r.chercher() }

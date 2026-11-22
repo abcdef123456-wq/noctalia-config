@@ -141,7 +141,7 @@ class Branchement(unittest.TestCase):
     def test_fichier_lu_a_la_demande_et_sans_erreur_affichee(self):
         m = re.search(r"FileView \{\s*id: fichierZones.*?\n    \}", RECHERCHE, re.S)
         self.assertIsNotNone(m)
-        self.assertIn('r.zonesVoulues ? "/usr/share/zoneinfo/zone1970.tab" : ""', m[0])
+        self.assertIn('r.zonesVoulues ? (Quickshell.env("TZDIR") || "/usr/share/zoneinfo") + "/zone1970.tab" : ""', m[0])
         self.assertIn("printErrors: false", m[0])
         self.assertIn("onLoadFailed: { r.zonesIllisibles = true", m[0])
 
