@@ -24,7 +24,9 @@ PanelWindow {
     WlrLayershell.namespace: "nc-bureau"
     color: "transparent"
     mask: Region {}
-    visible: !Etat.widgetsCaches
+    // Un thème qui a ses propres widgets (WidgetsTheme.qml) remplace l'horloge et la date d'ici
+    readonly property bool remplace: Reglages.val("WIDGETS_THEME", "") !== ""
+    visible: !Etat.widgetsCaches && !remplace
     readonly property Item cible: plaque               // pour outils/rendu-ile.py
 
     property string heure: Etat.heure
@@ -35,7 +37,7 @@ PanelWindow {
         minute.interval = Math.min(60000, 60000 - Date.now() % 60000 + 50)     // prochaine minute pile
     }
     readonly property bool avecPlaque: Reglages.val("WIDGETS_PLAQUE", "oui") !== "non"
-    readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches
+    readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches && !remplace
     onVuChanged: if (vu) maj()
     Component.onCompleted: maj()
     // Un changement de format (ILE_HEURE) se voit tout de suite

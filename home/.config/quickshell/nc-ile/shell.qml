@@ -283,6 +283,11 @@ ShellRoot {
         model: Reglages.val("WIDGETS_BUREAU", "non") === "oui" ? Quickshell.screens : []
         Bureau {}
     }
+    // Widgets choisis par le thème (champ « widgets ») : un seul objet, ses fenêtres sont par écran ; rien en mémoire sans eux
+    LazyLoader {
+        active: Reglages.val("WIDGETS_BUREAU", "non") === "oui" && Reglages.val("WIDGETS_THEME", "") !== ""
+        WidgetsTheme {}
+    }
 
     IpcHandler {
         target: "ile"
