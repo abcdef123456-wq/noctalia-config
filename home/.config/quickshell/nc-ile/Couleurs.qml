@@ -11,7 +11,7 @@ pragma Singleton
 //   ILE_RAYON=auto ou normal (rayons d'origine, 100) | carre (0) | doux (50) | rond (200) ; ou 0 à 200 : % des rayons d'origine, plafonné à la demi-taille
 //   ILE_CONTOUR_EPAISSEUR=2 (0 à 4 px) ; ILE_VERRE=100 (85 à 100 % d'opacité du fond, sans flou)
 //   ILE_POLICE=Adwaita Sans, ou une liste « A, B » : la première installée (aucune : Adwaita Sans) ; ILE_MAJUSCULES=non | oui
-//   ILE_FORME=pilule (par défaut) | encoche (collée au bord haut, coins du haut carrés) | rectangle (coins faibles) | cadre (bordure d'accent, fond presque transparent) | point (fermée : un point d'accent de 10 px)
+//   ILE_FORME=pilule (par défaut) | encoche (collée au bord haut, coins du haut carrés) | rectangle (coins faibles) | cadre (bordure d'accent fine, voile du fond à 72 % : le texte reste lisible sur un fond clair) | point (fermée : un point d'accent de 10 px)
 //   ILE_ANIM=ressort (allure d'origine) | doux | vif | sec ; ILE_LUEUR=non | oui (halo autour de l'île ouverte)
 import QtQuick
 import Quickshell

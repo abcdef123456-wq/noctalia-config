@@ -175,10 +175,11 @@ class BandeSource(unittest.TestCase):
         self.assertEqual(zone, b["thickness"] + b["margin_edge"])        # une bannière ne déborde pas plus qu'avant
         self.assertGreaterEqual(zone, ILE_Y + ILE_FERMEE + 3)
         ile = (QML / "Ile.qml").read_text(encoding="utf-8")
-        self.assertIn('y: Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "%d")) || %d)'
-                      % (ILE_Y, ILE_Y), ile)
+        # l'encoche est collée au bord ; sinon centrée (ILE_Y) ou dans la bande
+        self.assertIn('y: Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : '
+                      '(parseInt(Reglages.val("ILE_Y", "%d")) || %d))' % (ILE_Y, ILE_Y), ile)
         self.assertGreaterEqual(zone, 6 + ILE_FERMEE + 6)                  # dans la bande : 6 au-dessus, 6 dessous
-        self.assertRegex(ile, r"fen\.hauteurBanniere : %d\)" % ILE_FERMEE)
+        self.assertRegex(ile, r"fen\.hauteurBanniere : (?:\(pointFerme \? 10 : )?%d\)" % ILE_FERMEE)   # forme « point » : 10
 
 
 def charger_rendu():

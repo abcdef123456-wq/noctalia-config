@@ -2,7 +2,7 @@
 
 - Hors écran avec le vrai qs (outils/rendu-ile.py, « -p ») : pilule = mêmes octets que le commit 3c8f7e3 (extrait dans un
   dossier temporaire) ; encoche = collée au bord haut (le pixel y = 0 au centre est de la couleur de l'île) ; rectangle =
-  coin rempli ; cadre = centre presque transparent, bord de la couleur d'accent ; point = fermée, un point plein
+  coin rempli ; cadre = voile du fond (texte lisible sur tout fond d'écran), bord de la couleur d'accent ; point = fermée, un point plein
   d'accent (centre) et rien à 20 px.
 - nc-reglages : les 5 valeurs acceptées, les autres refusées, clé acceptée dans un thème, pas dans DISTANT_PERMIS."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
@@ -54,7 +54,7 @@ def rendre_brut(dossier, forme):
     m = importlib.util.module_from_spec(importlib.util.spec_from_loader("rendu_ile_brut", l))
     l.exec_module(m)
     vus = []
-    m.recadrer = lambda png, cadre: vus.append(cadre)
+    m.recadrer = lambda png, cadre, forcer_alpha=False: vus.append(cadre)   # image brute : pas de recadrage
     d = Path(dossier) / ("brut-" + forme)
     d.mkdir()
     conf = d / "r.conf"
@@ -124,14 +124,23 @@ class Rendu(unittest.TestCase):
         self.assertGreater(coin("rectangle"), 200)
         self.assertLess(coin("pilule"), 100)
 
-    def test_cadre_centre_transparent_et_bord_accent(self):
+    def test_cadre_voile_lisible_et_bord_accent(self):
         w, h, lignes = self.png["cadre"]
         ys = [y for y in range(h) if any(lignes[y][i] > 0 for i in range(3, w * 4, 4))]
         y0, y1 = ys[0], ys[-1]
         xs = [x for x in range(w) if any(l[x * 4 + 3] > 0 for l in lignes)]
-        # un point sans texte (près du bord gauche, à mi-hauteur) : le fond est presque transparent
+        # un point sans texte (près du bord gauche, à mi-hauteur) : un voile du fond, ni plein ni presque transparent
         centre = pixel(self.png["cadre"], xs[0] + 6, (y0 + y1) // 2)
-        self.assertLess(centre[3], 80)
+        self.assertTrue(150 <= centre[3] <= 220, centre)
+        # le texte (blanc, palette par défaut) sur ce voile posé sur le PIRE fond d'écran (blanc) : 4,5 au moins
+        a = centre[3] / 255
+        dessous = [c * a + 255 * (1 - a) for c in centre[:3]]
+
+        def lum(rgb):
+            v = [x / 255 for x in rgb]
+            v = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in v]
+            return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+        self.assertGreaterEqual((lum((255, 255, 255)) + 0.05) / (lum(dessous) + 0.05), 4.5)
         bord = pixel(self.png["cadre"], w // 2, y0)
         self.assertGreater(bord[3], 150)        # un trait net
         # le bord est coloré (accent), alors que le verre de l'île est noir sans teinte

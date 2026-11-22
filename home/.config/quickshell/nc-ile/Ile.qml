@@ -245,7 +245,7 @@ PanelWindow {
         width: cibleLargeur
         height: cibleHauteur
         radius: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
-        color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.12 : Couleurs.verre)
+        color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
         border.width: Couleurs.forme === "cadre" ? 1 : 0
         border.color: Couleurs.accent
         opacity: fen.pilCachee ? 0 : 1
