@@ -30,7 +30,7 @@ PanelWindow {
     // (InOutQuad : 0,5 vers 85 ms, la page est déjà partie, même pour une page de 560 px ou plus).
     // Depuis la pilule : 1 tout de suite, le fondu suit seulement la largeur (déjà validé). Sans animation en pause.
     property real fonduSpot: 1
-    NumberAnimation { id: entreeSpot; target: fen; property: "fonduSpot"; from: 0; to: 1; duration: 170; easing.type: Easing.InOutQuad }
+    NumberAnimation { id: entreeSpot; target: fen; property: "fonduSpot"; from: 0; to: 1; duration: Couleurs.anim.spot; easing.type: Easing.InOutQuad }
     onRechercheChanged: {
         entreeSpot.stop(); fonduSpot = 1
         if (recherche) {
@@ -195,15 +195,30 @@ PanelWindow {
 
     // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
     // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
+    // Lueur (ILE_LUEUR) : trois filets d'accent très clairs, de plus en plus larges, derrière le contour ; sans flou ni effet
+    Repeater {
+        model: Couleurs.lueur ? [10, 6, 3] : []
+        Rectangle {
+            required property int modelData
+            x: ile.x - modelData; y: ile.y - modelData
+            width: ile.width + 2 * modelData; height: ile.height + 2 * modelData
+            radius: ile.radius + modelData
+            color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
+            opacity: fen.ouverte ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
+        }
+    }
+
     Rectangle {
         id: cadre
-        readonly property real e: Couleurs.aContour ? 2 : 0
+        readonly property real e: Couleurs.aContour ? Couleurs.epaisseur : 0
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
-        opacity: Couleurs.aContour && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0
+        opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0
         visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
-        Behavior on opacity { NumberAnimation { duration: 220 } }
+        Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
@@ -223,8 +238,8 @@ PanelWindow {
                                                    : (fen.banniere ? fen.hauteurBanniere : 30)))))
         width: cibleLargeur
         height: cibleHauteur
-        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
-        color: Couleurs.fond
+        radius: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15), cibleLargeur, cibleHauteur)
+        color: Qt.alpha(Couleurs.fond, Couleurs.verre)
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
@@ -264,9 +279,9 @@ PanelWindow {
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
         // sont coupées (Loader plus bas, retirées sans attendre) et le contenu sensible masqué ; un cadre qui saute à
         // chaque page faisait une île « trop brute » en stream
-        Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
-        Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
-        Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: Couleurs.anim.raideur; damping: Couleurs.anim.amortiL; epsilon: 0.25 } }
+        Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: Couleurs.anim.raideur; damping: Couleurs.anim.amortiH; epsilon: 0.25 } }
+        Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: Couleurs.anim.duree; easing.type: Couleurs.anim.courbe } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()
         // Spotlight : son contenu apparaît avec la largeur de l'île (0 à 300 px, 1 à 560 px), et la pilule ne s'efface qu'à

@@ -7,6 +7,11 @@ pragma Singleton
 // Réglages (nc-reglages, ~/.config/nc/reglages.conf) :
 //   ILE_STYLE=terminal (par défaut) | noir (île noire d'iPhone, couleurs d'Apple)
 //   ILE_CONTOUR=degrade (par défaut, l'accent fondu au milieu) | discret (filet de l'accent) | aucun
+//   Allure (par défaut : celle d'avant, rien ne change) :
+//   ILE_RAYON=auto (rayons d'origine) | carre | doux | pilule (ou 0 à 100 : part du demi-côté le plus court)
+//   ILE_CONTOUR_EPAISSEUR=2 (0 à 4 px) ; ILE_VERRE=100 (85 à 100 % d'opacité du fond, sans flou)
+//   ILE_POLICE=Adwaita Sans (une police absente : retour à celle-ci) ; ILE_MAJUSCULES=non | oui
+//   ILE_ANIM=ressort (allure d'origine) | doux | vif | sec ; ILE_LUEUR=non | oui (halo autour de l'île ouverte)
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -18,6 +23,37 @@ Singleton {
     readonly property string style: Reglages.val("ILE_STYLE", "terminal") === "noir" ? "noir" : "terminal"
     readonly property string contour: ["degrade", "discret", "aucun"].indexOf(Reglages.val("ILE_CONTOUR", "")) >= 0
                                       ? Reglages.val("ILE_CONTOUR", "") : "degrade"
+
+    // Allure : chaque valeur invalide retombe sur celle d'origine
+    readonly property real rayonPct: {
+        const r = Reglages.val("ILE_RAYON", "auto")
+        const noms = { "carre": 0, "doux": 50, "pilule": 100 }
+        if (noms[r] !== undefined) return noms[r]
+        const n = /^[0-9]+$/.test(r) ? parseInt(r) : -1
+        return n >= 0 && n <= 100 ? n : -1          // -1 : rayons d'origine
+    }
+    // Rayon d'un élément de taille w x h : « base » est le rayon d'origine ; un rayon ne dépasse jamais la demi-taille
+    function rayon(base, w, h) { return rayonPct < 0 ? base : Math.min(w, h) / 2 * rayonPct / 100 }
+    function entier(cle, defaut, mini, maxi) {
+        const r = Reglages.val(cle, "")
+        const n = /^[0-9]+$/.test(r) ? parseInt(r) : defaut
+        return n >= mini && n <= maxi ? n : defaut
+    }
+    readonly property int epaisseur: entier("ILE_CONTOUR_EPAISSEUR", 2, 0, 4)
+    readonly property real verre: entier("ILE_VERRE", 100, 85, 100) / 100
+    readonly property bool majuscules: Reglages.val("ILE_MAJUSCULES", "non") === "oui"
+    readonly property bool lueur: Reglages.val("ILE_LUEUR", "non") === "oui"
+    readonly property string police: Qt.fontFamilies().indexOf(Reglages.val("ILE_POLICE", "")) >= 0
+                                     ? Reglages.val("ILE_POLICE", "") : "Adwaita Sans"
+    // Ressorts de la largeur et de la hauteur de l'île, durée et courbe du rayon, durées du contour et du Spotlight
+    readonly property var animations: ({
+        "ressort": { raideur: 3.4, amortiL: 0.34, amortiH: 0.36, duree: 280, courbe: Easing.OutCubic, contour: 220, spot: 170 },
+        "doux":    { raideur: 2.2, amortiL: 0.7,  amortiH: 0.7,  duree: 400, courbe: Easing.InOutQuad, contour: 320, spot: 240 },
+        "vif":     { raideur: 5.5, amortiL: 0.28, amortiH: 0.3,  duree: 200, courbe: Easing.OutBack,  contour: 150, spot: 120 },
+        "sec":     { raideur: 8,   amortiL: 1,    amortiH: 1,    duree: 120, courbe: Easing.Linear,   contour: 100, spot: 90 }
+    })
+    readonly property string animNom: animations[Reglages.val("ILE_ANIM", "ressort")] !== undefined ? Reglages.val("ILE_ANIM", "ressort") : "ressort"
+    readonly property var anim: animations[animNom]
 
     FileView {
         path: Quickshell.env("HOME") + "/.config/nc/palette-ile.json"

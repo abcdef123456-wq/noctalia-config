@@ -26,7 +26,7 @@ Column {
         visible:r.message!==""; width:parent.width; height:visible?texte.implicitHeight+32:0
         radius:18; color:Couleurs.carte
         TextEdit { id:texte; x:16;y:16;width:parent.width-32;height:contentHeight;text:AssistantEtat.formater(r.message)
-                   color:Couleurs.texte; font.family:"Adwaita Sans";font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText
+                   color:Couleurs.texte; font.family: Couleurs.police;font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText
                    Keys.onPressed: (e) => { if (e.matches(StandardKey.Copy)) { AssistantEtat.copierSansInvisible(selectedText); e.accepted = true } } }
     }
     Repeater {

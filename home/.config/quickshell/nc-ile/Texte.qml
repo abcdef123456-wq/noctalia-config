@@ -4,7 +4,8 @@ import QtQuick
 Text {
     property bool secondaire: false
     color: secondaire ? Couleurs.texteSec : Couleurs.texte
-    font.family: "Adwaita Sans"
+    font.family: Couleurs.police
+    font.capitalization: Couleurs.majuscules ? Font.AllUppercase : Font.MixedCase
     font.pixelSize: 13
     // Texte brut : un titre de fenêtre, un texte copié ou un nom de flux venu de l'extérieur n'est jamais lu comme du HTML
     textFormat: Text.PlainText

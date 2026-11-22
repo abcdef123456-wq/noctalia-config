@@ -29,7 +29,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             y: parent.height * 0.62
             text: Reglages.t("En écoute...", "Listening...")
-            font.family: "Adwaita Sans"; font.pixelSize: 15; font.weight: Font.Bold
+            font.family: Couleurs.police; font.pixelSize: 15; font.weight: Font.Bold
             color: Couleurs.texte
         }
     }

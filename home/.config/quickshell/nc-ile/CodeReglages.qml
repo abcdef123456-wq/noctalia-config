@@ -137,7 +137,7 @@ Item {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                             verticalAlignment: TextInput.AlignVCenter
                             color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
-                            font.family: "Adwaita Sans"; font.pixelSize: 12; clip: true
+                            font.family: Couleurs.police; font.pixelSize: 12; clip: true
                             text: page.dossierVal
                             onActiveFocusChanged: if (activeFocus) page.sel = 1
                             onAccepted: { var t = text.trim(); if (t !== "" && t !== page.dossierVal) page.regler("CODE_DOSSIER", t); page.rendreFocus() }

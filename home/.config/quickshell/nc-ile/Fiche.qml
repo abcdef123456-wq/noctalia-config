@@ -518,7 +518,7 @@ PanelWindow {
                 objectName: "nc-fiche-nom-" + ligne.r.cle
                 anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
                 verticalAlignment: TextInput.AlignVCenter; clip: true
-                color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13
+                color: Couleurs.texte; font.family: Couleurs.police; font.pixelSize: 13
                 text: ligne.r.nom
                 onAccepted: { if (text.trim() && text !== ligne.r.nom) Raccourcis.raccourci(ligne.r, "renommer", "", text.trim()); zoneClavier.forceActiveFocus() }
                 Keys.onEscapePressed: { text = ligne.r.nom; zoneClavier.forceActiveFocus() }
@@ -696,7 +696,7 @@ PanelWindow {
             id: saisie
             anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10
             verticalAlignment: TextInput.AlignVCenter; clip: true
-            color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13
+            color: Couleurs.texte; font.family: Couleurs.police; font.pixelSize: 13
             Keys.onEscapePressed: { fiche.ajout = false; zoneClavier.forceActiveFocus() }
             onAccepted: parent.valide()
             Texte { anchors.fill: parent; visible: !saisie.text && !saisie.activeFocus; text: parent.parent.indice; color: fiche.texteSecondaire; font.pixelSize: 12 }

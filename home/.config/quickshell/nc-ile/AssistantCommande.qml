@@ -30,7 +30,7 @@ Rectangle {
         }
         Text {
             visible: bouton.texte !== ""; text: bouton.texte; textFormat: Text.PlainText
-            font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.DemiBold
+            font.family: Couleurs.police; font.pixelSize: 12; font.weight: Font.DemiBold
             color: bouton.alerte ? Couleurs.surCouleur : (bouton.choisi ? Couleurs.surAccent : Couleurs.texte)
         }
     }
