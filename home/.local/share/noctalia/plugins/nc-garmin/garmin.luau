@@ -60,14 +60,15 @@ end
 function rendre()
   if enPartage or not etat or etat.actif ~= true then montrer(false); return end
   local t = texte(etat)
+  local vertical = barWidget.isVertical and barWidget.isVertical() or false   -- barre de côté : cœur sur le chiffre
   montrer(true)
-  if t == dernierRendu then return end
-  dernierRendu = t
+  if t .. tostring(vertical) == dernierRendu then return end
+  dernierRendu = t .. tostring(vertical)
   local enfants = { ui.image({ key = "coeur", path = coeur(), width = 17, height = 17, fit = "contain" }) }
   if t ~= "" then
     table.insert(enfants, ui.label({ text = t, maxLines = 1, fontWeight = "semibold", color = "on_surface" }))
   end
-  barWidget.render(ui.row({ gap = 6, align = "center" }, enfants))
+  barWidget.render((vertical and ui.column or ui.row)({ gap = vertical and 2 or 6, align = "center" }, enfants))
   barWidget.setTooltip(t ~= "" and ("Body Battery " .. t) or "Garmin")
 end
 

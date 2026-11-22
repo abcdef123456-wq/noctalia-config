@@ -71,15 +71,19 @@ function rendre()
   if not etat then montrer(false); return end
   local connecte = etat.connecte == true
   local t = texte(etat)
-  local sig = (connecte and "1" or "0") .. "|" .. t
+  -- Barre de côté (52 px) : bouclier puis le seul code pays, en colonne ; le nom complet reste dans l'infobulle
+  local vertical = barWidget.isVertical and barWidget.isVertical() or false
+  local court = vertical and (etat.masque_partage ~= true and connecte and type(etat.pays) == "string"
+    and string.match(etat.pays, "^%u%u$") or "") or t
+  local sig = (connecte and "1" or "0") .. "|" .. t .. "|" .. tostring(vertical)
   montrer(true)
   if sig == dernierRendu then return end
   dernierRendu = sig
   local enfants = { ui.image({ key = "bouclier:" .. (connecte and "plein" or "vide"), path = bouclier(connecte), width = 17, height = 17, fit = "contain" }) }
-  if t ~= "" then
-    table.insert(enfants, ui.label({ text = t, maxLines = 1, fontWeight = "semibold", color = "on_surface" }))
+  if court ~= "" then
+    table.insert(enfants, ui.label({ text = court, maxLines = 1, fontWeight = "semibold", color = "on_surface" }))
   end
-  barWidget.render(ui.row({ gap = 6, align = "center" }, enfants))
+  barWidget.render((vertical and ui.column or ui.row)({ gap = vertical and 2 or 6, align = "center" }, enfants))
   barWidget.setTooltip(connecte and (t ~= "" and t or "VPN") or "VPN")
 end
 

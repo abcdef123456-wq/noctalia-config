@@ -3327,6 +3327,20 @@ def appliquer_noctalia(vals):
     # fenêtre ni jauges système, rognés en colonne ; au moins 52 px de large. L'horloge se met d'elle-même sur deux lignes
     # (widget clock : vertical_format vide = format, « : » changés en retours à la ligne). En haut ou en bas : rien
     barre = tables.get("bar.default", {})
+    # Barre sans pastilles (apple) : un groupe garde toujours la sienne (Noctalia 5.3, capsuleSpecFromGroup) ; ses
+    # membres prennent donc sa place, nus, comme le reste de la barre. Un groupe désactivé ne montre rien
+    if barre.get("capsule") is False:
+        try:
+            cfg = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))
+            groupes = {g["id"]: g.get("members", []) if g.get("enabled", True) else []
+                       for g in list(cfg["groupes"]) + barre.get("capsule_group", [])}
+            for cote in _LISTES:
+                liste = barre.get(cote, cfg[cote])
+                plat = [m for w in liste for m in (groupes.get(w[6:], [w]) if w.startswith("group:") else [w])]
+                if plat != liste:
+                    mettre("bar.default", cote, plat)
+        except (OSError, KeyError, ValueError):
+            pass
     if barre.get("position") in ("left", "right"):
         for cote in ("start", "center", "end"):
             try:

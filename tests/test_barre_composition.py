@@ -41,36 +41,12 @@ REFERENCE = {
     "plugin/noctalia/3": "c8dd78a3ffa16f48",
     "plugin/noctalia/4": "0d00747cb0888bac",
     "plugin/noctalia/5": "009cf2e9ff55794d",
-    "plugin/apple/0": "a19b2696ab6c245c",
-    "plugin/apple/1": "c40190e30edf4fee",
-    "plugin/apple/2": "f97578a4bc0a0ff1",
-    "plugin/apple/3": "3d4f1a4887cf906f",
-    "plugin/apple/4": "2244649e63a2e0fa",
-    "plugin/apple/5": "e96153cff71e4c08",
-    "plugin/oled/0": "bceb8855acd469c9",
-    "plugin/oled/1": "489b89132e23f399",
-    "plugin/oled/2": "ef7070f10a8a7b8d",
-    "plugin/oled/3": "948f844791fc95de",
-    "plugin/oled/4": "69c54cce03396bbd",
-    "plugin/oled/5": "9153426509b4487d",
     "quickshell/noctalia/0": "e3b0c44298fc1c14",
     "quickshell/noctalia/1": "d2bb81bad99f06b1",
     "quickshell/noctalia/2": "ed7ae48e9d56a941",
     "quickshell/noctalia/3": "de8c4f8144e2154b",
     "quickshell/noctalia/4": "80c0eb1ba78189d0",
     "quickshell/noctalia/5": "73533f04732264f2",
-    "quickshell/apple/0": "a19b2696ab6c245c",
-    "quickshell/apple/1": "97ea5da1728fb5d0",
-    "quickshell/apple/2": "fe20e2fd272cbf4e",
-    "quickshell/apple/3": "e46aa8b839ed7b9d",
-    "quickshell/apple/4": "ff3924513cb284b5",
-    "quickshell/apple/5": "85936b1a4361984e",
-    "quickshell/oled/0": "bceb8855acd469c9",
-    "quickshell/oled/1": "5648ea6c9ce2512b",
-    "quickshell/oled/2": "fd819341f24da597",
-    "quickshell/oled/3": "1d777479b1171147",
-    "quickshell/oled/4": "adca1ea57d39088a",
-    "quickshell/oled/5": "931971b245b4a4f4",
 }
 
 
@@ -144,7 +120,8 @@ def barre(nc, fichier, vals):
 class SansComposition(unittest.TestCase):
     def test_identique_a_avant(self):
         for install in INSTALLS:
-            for style in ("noctalia", "apple", "oled"):
+            # apple et oled (barre sans pastilles) mettent leurs groupes à plat : test_barre_verticale
+            for style in ("noctalia",):
                 with nc_isole(install=install, style=style) as (nc, f):
                     for i, c in enumerate(COMBOS):
                         with self.subTest(install=install, style=style, interrupteurs=c):

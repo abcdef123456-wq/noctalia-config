@@ -54,6 +54,9 @@ local dernierStatut = nil
 local lectureDepuis = 0     -- lecture en cours (0 : aucune)
 local intervalle = 0
 local signature, bulle, visible = nil, nil, nil
+-- Barre verticale (left, right) : lue dans lire(), jamais dans un rappel de readFileAsync, où Noctalia 5.3 passe un
+-- contexte vide (isVertical() toujours faux : script_runtime.cpp, enqueueAsyncFileResult sans snapshot)
+local vertical = false
 
 local function cadence(ms)
   if ms ~= intervalle then intervalle = ms; noctalia.setUpdateInterval(ms) end
@@ -67,7 +70,6 @@ end
 -- horizontale) ou 18 × 23 (barre verticale, 14 × 22 à 100 %, sans chiffre), coins 4, borne 3 × 7, chiffre de 13 pt
 -- réduit pour tenir dans le corps, 2 pt avant l'icône d'état de 13 pt
 local function dessin(r)
-  local vertical = barWidget.isVertical and barWidget.isVertical() or false
   local pct = math.floor(r.pct + 0.5)
   local alerte = SEUIL > 0 and pct <= SEUIL and not calc.branche(r.statut)
   local fg = alerte and ALERTE or "on_surface"
@@ -146,6 +148,7 @@ end
 
 -- Une lecture : uevent de chaque batterie, sans bloquer (readFileAsync, prévu pour le sysfs)
 local function lire()
+  vertical = barWidget.isVertical and barWidget.isVertical() or false
   local maintenant = noctalia.nowMs()
   if lectureDepuis > 0 and maintenant - lectureDepuis < 5000 then return end
   local noms = {}
