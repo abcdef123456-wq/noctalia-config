@@ -17,8 +17,8 @@
     "bordure": "degrade",
     "ombre": "coloree"
   },
-  "fonds": "",
-  "fond_de_depart": "",
+  "fonds": "catppuccin",
+  "fond_de_depart": "catppuccin-brume.jpg",
   "credits": [],
   "widgets": []
 }

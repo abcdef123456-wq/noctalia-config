@@ -18,7 +18,19 @@ REPO = Path(__file__).resolve().parent.parent
 THEMES = REPO / "home/.local/share/nc/themes"
 BIN = REPO / "home/.local/bin"
 ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa"]
+FONDS = REPO / "home/Pictures/Wallpapers"
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
+
+
+def tous():
+    """Les thèmes du dépôt : les huit d'origine dans leur ordre, puis les nouveaux par nom."""
+    autres = sorted(p.stem for p in THEMES.glob("*.json") if p.stem not in ORDRE)
+    return ORDRE + autres
+
+
+def credits():
+    lignes = (FONDS / "CREDITS.tsv").read_text(encoding="utf-8").splitlines()[1:]
+    return {l.split("\t")[0] for l in lignes if l.strip()}
 
 
 def anciens():
@@ -100,7 +112,7 @@ class Equivalence(Base):
                 pal = palettes.get(nom)
                 self.assertEqual([d["palette"]["source"], d["palette"]["nom"]] if pal else d["palette"]["source"],
                                  pal if pal else "fond")
-        self.assertEqual(sorted(p.stem for p in THEMES.glob("*.json")), sorted(ORDRE))
+        self.assertTrue(set(ORDRE) <= {p.stem for p in THEMES.glob("*.json")})
 
     def test_style_conf_identique_par_style(self):
         styles, _ = anciens()
@@ -112,6 +124,10 @@ class Equivalence(Base):
                 vals = self.lignes_style()
                 self.assertEqual(vals.pop("STYLE"), nom)
                 vals.pop("POLICE", None)              # décidée par police_apple(), pas par le thème
+                d = json.loads((THEMES / (nom + ".json")).read_text(encoding="utf-8"))
+                # Seul ajout voulu depuis les anciens styles : le dossier de fonds du thème, s'il en a un
+                self.assertEqual(vals.pop("FONDS_DOSSIER", ""),
+                                 str(self.home / "Pictures/Wallpapers" / d["fonds"]) if d["fonds"] else "")
                 self.assertEqual(vals, styles.get(nom, {}))
 
     def test_choix_dans_l_ordre(self):
@@ -121,9 +137,9 @@ class Equivalence(Base):
         try:
             m = importlib.util.module_from_spec(importlib.util.spec_from_loader(spec.name, spec))
             spec.exec_module(m)
-            self.assertEqual([c[0] for c in m.choix_styles()], ORDRE)
-            self.ecrire_theme("alpha")
-            self.assertEqual([c[0] for c in m.choix_styles()], ORDRE + ["alpha"])
+            self.assertEqual([c[0] for c in m.choix_styles()], tous())
+            self.ecrire_theme("zzz-essai")
+            self.assertEqual([c[0] for c in m.choix_styles()], tous() + ["zzz-essai"])
         finally:
             os.environ.clear()
             os.environ.update(sauve)
@@ -141,7 +157,15 @@ class Validation(Base):
                 self.assertEqual(d["widgets"], [])
                 self.assertIn(d["theme_sync"]["bordure"], ("degrade", "gris"))
                 self.assertIn(d["theme_sync"]["ombre"], ("coloree", "noire"))
-                self.assertEqual((d["fonds"], d["fond_de_depart"]), ("", ""))
+                if d["fonds"]:
+                    # Le dossier de fonds du thème existe, son fond de départ aussi, et il est crédité
+                    self.assertTrue((FONDS / d["fonds"]).is_dir(), d["fonds"])
+                    self.assertTrue((FONDS / d["fonds"] / d["fond_de_depart"]).is_file(), d["fond_de_depart"])
+                    self.assertIn(d["fonds"] + "/" + d["fond_de_depart"], credits())
+                else:
+                    self.assertEqual(d["fond_de_depart"], "")
+        sans = {f.stem for f in THEMES.glob("*.json") if not json.loads(f.read_text(encoding="utf-8"))["fonds"]}
+        self.assertEqual(sans, {"noctalia", "dracula"})
 
     def refuse(self, nom, attendu):
         self.nc("set", "STYLE", "nord")
@@ -226,7 +250,7 @@ class Fonds(Base):
         self.assertEqual(len(self.wallpaper_set()), 1)
 
     def test_theme_sans_fond_ne_pose_rien(self):
-        self.nc("set", "STYLE", "nord")
+        self.nc("set", "STYLE", "dracula")
         self.assertEqual(self.wallpaper_set(), [])
         self.assertNotIn("FONDS_DOSSIER", self.lignes_style())
 

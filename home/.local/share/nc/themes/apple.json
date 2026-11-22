@@ -36,8 +36,8 @@
     "bordure": "gris",
     "ombre": "noire"
   },
-  "fonds": "",
-  "fond_de_depart": "",
+  "fonds": "apple",
+  "fond_de_depart": "electric-peak.jpg",
   "credits": [],
   "widgets": []
 }

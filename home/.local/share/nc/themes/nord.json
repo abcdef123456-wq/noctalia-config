@@ -17,8 +17,8 @@
     "bordure": "degrade",
     "ombre": "coloree"
   },
-  "fonds": "",
-  "fond_de_depart": "",
+  "fonds": "nord",
+  "fond_de_depart": "nord-fjord.jpg",
   "credits": [],
   "widgets": []
 }

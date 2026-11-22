@@ -22,8 +22,8 @@
     "bordure": "degrade",
     "ombre": "coloree"
   },
-  "fonds": "",
-  "fond_de_depart": "",
+  "fonds": "oled",
+  "fond_de_depart": "lune.jpg",
   "credits": [],
   "widgets": []
 }
