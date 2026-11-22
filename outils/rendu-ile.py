@@ -69,6 +69,8 @@ ACTIONS = {
 # Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; les widgets et le carrousel
 # sont des fenêtres à part
 FENETRES = {"bureau": "vb.instances[0]", "themes": "chargeurThemes.item"}
+# Le carrousel est une fenêtre entière, avec des fonds JPEG opaques : Qt le sort en RGB, sans que ça compte
+SANS_ALPHA = {"themes"}
 PILOTE = """
     Timer {
         interval: 1500; running: true
@@ -171,6 +173,11 @@ def preparer(root, etat, reglages, palette):
         f.write_text(t)
         (root / "home/.local/share/nc").mkdir(parents=True)
         (root / "home/.local/share/nc/themes").symlink_to(DEPOT / "home/.local/share/nc/themes")
+        # palettes et fonds du dépôt (lus seulement) : les cartes montrent leurs vraies couleurs et leur fond de départ
+        (root / "home/.config/noctalia").mkdir(parents=True, exist_ok=True)
+        (root / "home/.config/noctalia/palettes").symlink_to(DEPOT / "home/.config/noctalia/palettes")
+        (root / "home/Pictures").mkdir(parents=True, exist_ok=True)
+        (root / "home/Pictures/Wallpapers").symlink_to(DEPOT / "home/Pictures/Wallpapers")
     if etat == "musique":
         f = ile / "Etat.qml"
         t, n = re.subn(r"readonly property var lecteurs:.*", lambda m: FAUX_LECTEUR, f.read_text(), count=1)
@@ -307,7 +314,7 @@ def rendre(etat, sortie, reglages, palette, polices=None, echelle=1):
     journal = ""
     for _ in range(3):
         png, journal = essai(etat, sortie, reglages, palette, polices, echelle)
-        if png and png_valide(png):
+        if png and (etat in SANS_ALPHA or png_valide(png)):
             return png, journal
     return None, "PNG sans transparence (RGB au lieu de RGBA) après 3 essais\n" + journal
 

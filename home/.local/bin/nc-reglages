@@ -2413,9 +2413,20 @@ COULEURS_NEUTRES = {"primary": "#8ab4f8", "secondary": "#c58af9", "tertiary": "#
                     "onSurface": "#e3e3e8"}
 
 
+def palettes_noctalia(src, pnom):
+    """Fichiers où lire une palette : custom dans ~/.config/noctalia/palettes ; builtin dans les schémas installés avec
+    Noctalia (dossiers XDG, quickshell/noctalia-shell/Assets/ColorScheme/<nom>/<nom>.json), absents sur certaines distributions."""
+    if src == "custom":
+        return [os.path.join(HOME, ".config/noctalia/palettes", pnom + ".json")]
+    dossiers = [os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")]
+    dossiers += (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":")
+    dossiers += (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    return [os.path.join(d, "quickshell/noctalia-shell/Assets/ColorScheme", pnom, pnom + ".json") for d in dossiers if d]
+
+
 def themes_json(vals):
     """Liste des thèmes valides (lecture seule, aucun réseau) pour le carrousel de l'île : palette résolue en couleurs.
-    Palette custom : lue dans le fichier ; builtin ou fond : couleurs neutres, marquées « approximative »."""
+    Palette custom ou builtin : lue dans son fichier ; introuvable, illisible ou fond : couleurs neutres, « approximative »."""
     actif = valeur(vals, "STYLE")
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache")
     ok = charger_themes()[0]
@@ -2424,19 +2435,22 @@ def themes_json(vals):
         t = ok[nom]
         src, pnom = t["palette"]
         couleurs, approx = dict(COULEURS_NEUTRES), True
-        if src == "custom" and re.fullmatch(r"[\w .+-]+", pnom):
+        for fichier in (palettes_noctalia(src, pnom) if src in ("custom", "builtin") and re.fullmatch(r"[\w .+-]+", pnom) else []):
             try:
-                with open(os.path.join(HOME, ".config/noctalia/palettes", pnom + ".json"), encoding="utf-8") as fh:
+                with open(fichier, encoding="utf-8") as fh:
                     m = json.load(fh)["dark"]
                 lues = {c: m["m" + c[0].upper() + c[1:]] for c in couleurs}
                 if all(isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v) for v in lues.values()):
                     couleurs, approx = lues, False
+                    break
             except (OSError, ValueError, KeyError, TypeError):
-                pass                               # palette illisible : couleurs neutres, dites approximatives
+                pass                               # palette absente ou illisible : la suivante, sinon couleurs neutres
+        # Miniature : celle du carrousel des fonds si elle existe, sinon le fond de départ lui-même (l'île le décode en petit)
         miniature = ""
         if t["fond_de_depart"]:
             f = os.path.join(cache, "nc/carousel", os.path.basename(t["fond_de_depart"]) + ".W.webp")
-            miniature = f if os.path.isfile(f) else ""
+            fond = os.path.join(HOME, "Pictures/Wallpapers", t["fonds"] or "", os.path.basename(t["fond_de_depart"]))
+            miniature = f if os.path.isfile(f) else (fond if os.path.isfile(fond) else "")
         sortie_.append({"nom": nom, "libelle": str(t["libelle"]), "actif": nom == actif, "palette": {"source": src, "nom": pnom},
                         "couleurs": couleurs, "palette_approximative": approx, "reglages": t["reglages"],
                         "miniature": miniature})

@@ -127,6 +127,7 @@ FloatingWindow {
                         anchors.fill: parent
                         source: c.t && c.t.miniature ? "file://" + c.t.miniature : ""
                         fillMode: Image.PreserveAspectCrop; asynchronous: true
+                        sourceSize.width: 360                // un fond de 3840 px décodé en petit
                         visible: status === Image.Ready
                     }
                     // La mini-pilule, avec les vraies valeurs du thème

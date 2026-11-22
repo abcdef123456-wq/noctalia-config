@@ -30,6 +30,7 @@ class ThemesJson(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG")}
         env.update(HOME=self.d, XDG_CONFIG_HOME=self.d + "/.config", XDG_DATA_HOME=self.d + "/.local/share",
                    XDG_CACHE_HOME=self.d + "/.cache", XDG_STATE_HOME=self.d + "/.state", XDG_RUNTIME_DIR=self.d,
+                   XDG_CONFIG_DIRS=self.d + "/xdg", XDG_DATA_DIRS=self.d + "/share",   # schémas de Noctalia : ceux du test seulement
                    TMPDIR=self.d, NC_THEMES_DIR=str(self.themes), NC_LANGUE="fr",
                    http_proxy="http://127.0.0.1:9", https_proxy="http://127.0.0.1:9")  # un accès réseau échouerait
         return subprocess.run([sys.executable, str(BIN)] + list(args), env=env, capture_output=True, text=True,
@@ -59,6 +60,28 @@ class ThemesJson(unittest.TestCase):
     def test_palette_custom_mauvaise(self):
         (Path(self.d) / ".config/noctalia/palettes/Retro.json").write_text("pas du json")
         self.assertTrue(self.liste()["retro"]["palette_approximative"])
+
+    def test_palette_builtin_lue_dans_les_schemas_de_noctalia(self):
+        """Builtin : lue dans quickshell/noctalia-shell/Assets/ColorScheme d'un dossier XDG ; absente : neutre."""
+        self.assertTrue(self.liste()["tokyo"]["palette_approximative"])
+        d = Path(self.d) / "share/quickshell/noctalia-shell/Assets/ColorScheme/Tokyo-Night"
+        d.mkdir(parents=True)
+        (d / "Tokyo-Night.json").write_text(json.dumps({"dark": {"mPrimary": "#7aa2f7", "mSecondary": "#bb9af7", "mTertiary": "#9ece6a",
+                                                                 "mSurface": "#1a1b26", "mOnSurface": "#c0caf5"}}))
+        x = self.liste()["tokyo"]
+        self.assertFalse(x["palette_approximative"])
+        self.assertEqual((x["couleurs"]["primary"], x["couleurs"]["surface"]), ("#7aa2f7", "#1a1b26"))
+
+    def test_miniature_cache_sinon_fond_de_depart(self):
+        self.assertEqual(self.liste()["retro"]["miniature"], "")
+        fond = Path(self.d) / "Pictures/Wallpapers/retro/retro-grille.jpg"
+        fond.parent.mkdir(parents=True)
+        fond.write_bytes(b"x")
+        self.assertEqual(self.liste()["retro"]["miniature"], str(fond))
+        cache = Path(self.d) / ".cache/nc/carousel/retro-grille.jpg.W.webp"
+        cache.parent.mkdir(parents=True)
+        cache.write_bytes(b"x")
+        self.assertEqual(self.liste()["retro"]["miniature"], str(cache))
 
     def test_theme_refuse_absent(self):
         p = self.themes / "nord.json"
