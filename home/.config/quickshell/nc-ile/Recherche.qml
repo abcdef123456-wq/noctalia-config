@@ -32,6 +32,7 @@ import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.UPower
 import "AideConfig.js" as Aide
+import "Saisies.js" as Saisies
 
 Item {
     id: r
@@ -637,7 +638,7 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 if (calculer.pour !== r.q) return
-                var t = text.trim().split("\n").pop()
+                var t = text.trim().split("\n").pop().replace(/^"(\d{4}-\d{2}-\d{2})"$/, "$1")      // date de qalc : sans guillemets
                 // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
                 r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
                 r.chercher()
@@ -708,9 +709,10 @@ Item {
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
             }
-            if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q)) {
+            let date = Saisies.dateQalc(q, Date.now())      // « jours jusqu'au 25/12 », « dans 45 jours » : réécrits pour qalc
+            if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && (date !== "" || /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q))) {
                 calculer.pour = q
-                calculer.command = ["qalc", "-t", q.replace(/\s+en\s+/g, " to ")]      // pas d'option « mix » : inconnue de qalc 5.5 à 5.13
+                calculer.command = ["qalc", "-t", date !== "" ? date : q.replace(/\s+en\s+/g, " to ")]      // pas d'option « mix » : inconnue de qalc 5.5 à 5.13
                 calculer.running = true
             }
         }
