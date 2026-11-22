@@ -17,7 +17,7 @@ end
 local maitre_part = (disposition == "master") and borne("FENETRES_MAITRE_PART", 0.3, 0.8) or nil
 local colonne = (disposition == "scrolling") and borne("FENETRES_COLONNE_LARGEUR", 0.3, 1.0) or nil
 local coupe = (disposition == "dwindle") and borne("FENETRES_COUPE", 0.3, 1.7) or nil
-local seule = ({ ["16:10"] = { x = 16, y = 10 }, ["4:3"] = { x = 4, y = 3 }, ["1:1"] = { x = 1, y = 1 } })[nc.reglage("FENETRES_SEULE_CENTREE", "non")]
+local seule = ({ ["16:10"] = { 16, 10 }, ["4:3"] = { 4, 3 }, ["1:1"] = { 1, 1 } })[nc.reglage("FENETRES_SEULE_CENTREE", "non")]
 local fond = ({ auto = "rgb(0b0d12)", noir = "rgb(000000)" })[nc.reglage("FENETRES_FOND", "auto")] or "rgb(0b0d12)"
 local ombre_decalage = ({ auto = { 0, 4 }, aucun = { 0, 0 }, bas = { 0, 8 }, dure = { 8, 8 } })[nc.reglage("FENETRES_OMBRE_DECALAGE", "auto")] or { 0, 4 }
 

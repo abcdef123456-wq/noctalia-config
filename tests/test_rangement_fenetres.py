@@ -69,7 +69,7 @@ class Lua(unittest.TestCase):
     def test_seule_centree(self):
         for v, xy in (("16:10", (16, 10)), ("4:3", (4, 3)), ("1:1", (1, 1))):
             self.assertEqual(cle(lancer({"FENETRES_SEULE_CENTREE": v}), "layout", "single_window_aspect_ratio"),
-                             {"x": xy[0], "y": xy[1]})
+                             {"1": xy[0], "2": xy[1]})   # tableau Lua à 2 éléments : le vec2 de Hyprland (pas de clés x, y)
         for v in ("non", "auto", "3:2", ""):
             self.assertIsNone(cle(lancer({"FENETRES_SEULE_CENTREE": v}), "layout", "single_window_aspect_ratio"), v)
 
