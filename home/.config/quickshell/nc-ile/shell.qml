@@ -130,6 +130,7 @@ ShellRoot {
     Component.onCompleted: {
         Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
         Rappels.demarrer()           // rappels de la recherche (Rappels.qml) : relit la liste, montre les échus de l'arrêt
+        racine.effacerEpingles("")   // aucune capture épinglée n'est ouverte au démarrage : leurs copies restantes sont effacées
         Chaleur.demarrer()           // veille de surchauffe (Chaleur.qml) : un « nc-ile-etat capteurs », puis deux fichiers
                                      // du noyau relus toutes les 20 s écran allumé ; rien sur une machine sans capteur
     }
@@ -192,6 +193,35 @@ ShellRoot {
         ChoixTheme {
             screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
             onFermer: racine.themesOuvert = false
+        }
+    }
+    // Capture épinglée (nc-capture epingler) : une seule à la fois, la nouvelle remplace l'ancienne. Sa copie vit dans
+    // $XDG_RUNTIME_DIR/nc-epingles ; elle est effacée à la fermeture, au remplacement et au démarrage de l'île.
+    property string epingleChemin: ""
+    readonly property string epingleDossier: (Quickshell.env("XDG_RUNTIME_DIR") || "") + "/nc-epingles"
+    function epingler(chemin) {
+        var nom = String(chemin).slice(racine.epingleDossier.length + 1)
+        // seulement un fichier au nom aléatoire de nc-capture, directement dans le bon dossier
+        if (!Quickshell.env("XDG_RUNTIME_DIR") || String(chemin) !== racine.epingleDossier + "/" + nom || !/^[A-Za-z0-9]{10}\.(png|jpg)$/.test(nom)) return
+        racine.epingleChemin = String(chemin)
+        racine.effacerEpingles(nom)
+    }
+    function effacerEpingles(garder) {
+        if (!Quickshell.env("XDG_RUNTIME_DIR") || effaceur.running) return
+        var c = ["find", racine.epingleDossier, "-maxdepth", "1", "-type", "f"]
+        if (garder !== "") c.push("!", "-name", garder)
+        c.push("-delete")
+        effaceur.command = c
+        effaceur.running = true
+    }
+    Process { id: effaceur }
+    LazyLoader {
+        id: chargeurEpingle
+        active: racine.epingleChemin !== ""
+        CaptureEpinglee {
+            chemin: racine.epingleChemin
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: { racine.epingleChemin = ""; racine.effacerEpingles("") }
         }
     }
     // Panneau Cloud JARVIS (IPC cloud, recherche, nc-cloud fenetre) : créé à l'ouverture seulement, si CLOUD_JARVIS=oui
@@ -274,6 +304,8 @@ ShellRoot {
             if (!racine.garminOuvert) Hyprland.refreshMonitors()
             racine.garminOuvert = !racine.garminOuvert
         }
+        // Épingle une capture (nc-capture epingler) : le chemin doit être une copie de nc-epingles
+        function epingler(chemin: string): void { racine.epingler(chemin) }
         // Carrousel des thèmes (Super + Alt + T) : ouvre ; déjà ouvert, le referme
         function themes(): void {
             Etat.fermer()

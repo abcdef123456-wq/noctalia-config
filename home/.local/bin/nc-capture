@@ -12,6 +12,8 @@
 # corbeille. Dans Swappy, l'icône de corbeille efface seulement les annotations ; Échap ferme Swappy.
 #   nc-capture habiller FICHIER   nouvelle image à côté : capture aux coins arrondis, ombre, sur un dégradé du thème
 #                                  (« …-habillee.png », l'original n'est jamais touché) ; bouton « Habiller » de la notification
+#   nc-capture epingler [FICHIER]  garde la capture (ou une zone choisie) dans une petite fenêtre qui reste visible ;
+#                                  Échap ou clic droit la ferme et efface sa copie ; bouton « Épingler » de la notification
 # Avec Cloud JARVIS (CLOUD_JARVIS=oui, PC associé) : bouton « Envoyer au cloud », dans le dossier « Captures » du cloud.
 set -uo pipefail
 # Captures et dossier privés : lisibles par toi seul (0600 / 0700), pas par les autres comptes du PC
@@ -87,8 +89,8 @@ habiller() {
 }
 case "${1:-}" in habiller|dress) shift; habiller "${1:-}"; exit $? ;; esac
 
-mode=""; delai=-
-usage() { t "Usage : nc-capture ecran | zone | retouche | texte [--dans 1..30] | annuler" "Usage: nc-screenshot screen | area | edit | text [--in 1..30] | cancel" >&2; echo >&2; exit 2; }
+mode=""; delai=-; cmd1="${1:-}"; cmd2="${2:-}"   # cmd1 et cmd2 : pour « epingler [FICHIER] », lu plus bas
+usage() { t "Usage : nc-capture ecran | zone | retouche | texte [--dans 1..30] | annuler | epingler [FICHIER] | habiller FICHIER" "Usage: nc-screenshot screen | area | edit | text [--in 1..30] | cancel | pin [FILE] | dress FILE" >&2; echo >&2; exit 2; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --dans|--in) [ $# -ge 2 ] || usage; delai="$2"; shift 2 ;;
@@ -112,6 +114,44 @@ choisir_zone() {
   [ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause false >/dev/null 2>&1
   return $rc
 }
+# « epingler [FICHIER] » : garde une capture à l'écran, dans une petite fenêtre qui reste visible (Échap ou clic droit la
+# ferme et efface sa copie). Sans FICHIER : une zone est choisie. La copie va dans $XDG_RUNTIME_DIR/nc-epingles
+# (dossier 0700, fichier 0600, nom aléatoire), jamais dans « Captures » ; seuls PNG et JPEG (octets de tête).
+epingler() {
+  local f="${1:-}" dir ext copie zone
+  if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    t "Épinglage impossible : pas de dossier d'exécution (XDG_RUNTIME_DIR)." "Cannot pin: no runtime folder (XDG_RUNTIME_DIR)." >&2; echo >&2; return 1
+  fi
+  dir="$XDG_RUNTIME_DIR/nc-epingles"
+  [ -d "$dir" ] || mkdir -m 700 "$dir" 2>/dev/null
+  if [ -L "$dir" ] || [ ! -d "$dir" ] || ! chmod 700 "$dir" 2>/dev/null; then
+    t "Épinglage impossible : dossier illisible." "Cannot pin: unusable folder." >&2; echo >&2; return 1
+  fi
+  if [ -z "$f" ]; then
+    command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1 || { t "Épinglage impossible : grim et slurp sont nécessaires." "Cannot pin: grim and slurp are required." >&2; echo >&2; return 1; }
+    zone="$(choisir_zone)" && [ -n "$zone" ] || return 0
+    copie="$(mktemp "$dir/XXXXXXXXXX.png")" || return 1
+    grim -g "$zone" "$copie" 2>/dev/null && [ -s "$copie" ] || { rm -f "$copie"; return 1; }
+  else
+    case "$f" in -*) f="./$f" ;; esac
+    if [ -L "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      t "Épinglage refusé : « $1 » n'est pas un fichier image ordinaire." "Refused: “$1” is not a regular image file." >&2; echo >&2; return 1
+    fi
+    case "$(head -c 8 < "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in
+      89504e470d0a1a0a) ext=png ;;
+      ffd8ff*) ext=jpg ;;
+      *) t "Épinglage refusé : seules les images PNG et JPEG sont acceptées." "Refused: only PNG and JPEG images are accepted." >&2; echo >&2; return 1 ;;
+    esac
+    copie="$(mktemp "$dir/XXXXXXXXXX.$ext")" || return 1
+    cat < "$f" > "$copie" 2>/dev/null || { rm -f "$copie"; return 1; }
+  fi
+  chmod 600 "$copie"
+  if ! qs -c nc-ile ipc call ile epingler "$copie" >/dev/null 2>&1; then
+    rm -f "$copie"; t "Épinglage impossible : l'île n'est pas lancée." "Cannot pin: the island is not running." >&2; echo >&2; return 1
+  fi
+  printf '%s\n' "$copie"
+}
+case "$cmd1" in epingler|pin) epingler "$cmd2"; exit $? ;; esac
 # Noms anglais des modes (nc-screenshot screen | area | edit | text)
 case "$mode" in
   screen) mode=ecran ;; cancel) mode=annuler ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
@@ -323,12 +363,13 @@ envoyer_cloud() {
 }
 (
   action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" "${annoter[@]}" -A "supprimer=$(t "Supprimer" "Delete")" \
-    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "${cloud[@]}" "${habiller_bouton[@]}" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
+    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "${cloud[@]}" "${habiller_bouton[@]}" -A "epingler=$(t "Épingler" "Pin")" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
     ia) "$HOME/.local/bin/nc-ia" fichier "$fichier" --notifier ;;     # l'IA du bureau l'explique (notification)
     cloud) [ "${#cloud[@]}" -gt 0 ] && envoyer_cloud "$fichier" ;;
     habiller) [ "${#habiller_bouton[@]}" -gt 0 ] && lancer_habiller "$fichier" ;;
+    epingler) "$0" epingler "$fichier" >/dev/null 2>&1 || notify-send -a "$(t "Capture d'écran" "Screenshot")" -i dialog-warning -- "$(t "Capture non épinglée" "Screenshot not pinned")" "$(t "L'île doit être lancée." "The island must be running.")" 2>/dev/null ;;
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)
     dossier) ( umask 022; xdg-open "$dossier" ) ;;
   esac

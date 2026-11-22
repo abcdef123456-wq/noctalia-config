@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes")
+ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes", "epinglee")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -65,12 +65,13 @@ ACTIONS = {
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
     "bureau": "",                                                # widgets du bureau : l'île reste fermée
     "themes": "racine.themesOuvert = true",
+    "epinglee": 'racine.epingler(racine.epingleDossier + "/EssaiEpi10.png")',
 }
 # Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; les widgets et le carrousel
 # sont des fenêtres à part
-FENETRES = {"bureau": "vb.instances[0]", "themes": "chargeurThemes.item"}
+FENETRES = {"bureau": "vb.instances[0]", "themes": "chargeurThemes.item", "epinglee": "chargeurEpingle.item"}
 # Le carrousel est une fenêtre entière, avec des fonds JPEG opaques : Qt le sort en RGB, sans que ça compte
-SANS_ALPHA = {"themes"}
+SANS_ALPHA = {"themes", "epinglee"}
 PILOTE = """
     Timer {
         interval: 1500; running: true
@@ -178,6 +179,18 @@ def preparer(root, etat, reglages, palette):
         (root / "home/.config/noctalia/palettes").symlink_to(DEPOT / "home/.config/noctalia/palettes")
         (root / "home/Pictures").mkdir(parents=True, exist_ok=True)
         (root / "home/Pictures/Wallpapers").symlink_to(DEPOT / "home/Pictures/Wallpapers")
+    if etat == "epinglee":
+        # image d'essai (dégradé 1200 x 700, plus grande que la borne de 40 % de l'écran factice) au nom que l'île accepte ;
+        # le ménage du démarrage est retiré de la copie, sinon il l'effacerait avant l'épinglage
+        w, h = 1200, 700
+        brut = b"".join(b"\0" + b"".join(bytes((x * 255 // w, y * 255 // h, 160)) for x in range(w)) for y in range(h))
+        def morceau(k, d):
+            return struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d) & 0xffffffff)
+        (root / "run/nc-epingles").mkdir(mode=0o700)
+        (root / "run/nc-epingles/EssaiEpi10.png").write_bytes(b"\x89PNG\r\n\x1a\n" + morceau(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                                                               + morceau(b"IDAT", zlib.compress(brut)) + morceau(b"IEND", b""))
+        f = ile / "shell.qml"
+        f.write_text(f.read_text().replace('racine.effacerEpingles("")   //', "//", 1))
     if etat == "musique":
         f = ile / "Etat.qml"
         t, n = re.subn(r"readonly property var lecteurs:.*", lambda m: FAUX_LECTEUR, f.read_text(), count=1)

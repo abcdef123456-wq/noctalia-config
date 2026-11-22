@@ -160,3 +160,6 @@ hl.window_rule({ name = "nc-cloud-fenetre", match = { class = "^(org.quickshell)
 -- Carrousel des thèmes de l'île (Super + Alt + T ; ChoixTheme.qml) : flottant et centré, à la taille qu'il demande ;
 -- limité à la classe de Quickshell (« Themes » seul est un titre courant)
 hl.window_rule({ name = "nc-themes-fenetre", match = { class = "^(org.quickshell)$", title = "^(Thèmes|Themes)$" }, float = true, center = true })
+-- Capture épinglée de l'île (nc-capture epingler ; CaptureEpinglee.qml) : flottante et épinglée sur tous les bureaux ;
+-- limitée à la classe de Quickshell et à son titre exact. Sans « pin », la mémoire des fenêtres flottantes ne la touche pas (exclue : nc/automatismes.lua)
+hl.window_rule({ name = "nc-epingle-fenetre", match = { class = "^(org.quickshell)$", title = "^(Capture épinglée|Pinned screenshot)$" }, float = true, pin = true })
