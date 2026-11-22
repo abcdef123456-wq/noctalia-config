@@ -3420,6 +3420,7 @@ def appliquer_noctalia(vals):
                 plat = [m for w in liste for m in (groupes.get(w[6:], [w]) if w.startswith("group:") else [w])]
                 if plat != liste:
                     mettre("bar.default", cote, plat)
+            barre.pop("capsule_group", None)        # plus aucun groupe n'est posé : ceux du thème ne serviraient à rien
         except (OSError, KeyError, ValueError):
             pass
     if barre.get("position") in ("left", "right"):
