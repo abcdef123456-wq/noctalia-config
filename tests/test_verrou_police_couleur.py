@@ -1,6 +1,7 @@
 """Verrou : choix de la police (VERROU_POLICE) et de la couleur (VERROU_COULEUR) de l'heure (nc-verrou heure.luau).
 Le bloc « DEBUT choix » / « FIN choix » est écrit dans le sous-ensemble commun à Lua et Luau et exécuté avec lua (sauté
 s'il est absent). L'effet réel de fontFamily dans Noctalia n'est pas testable ici : le reste est vérifié sur le texte."""
+import json
 from pathlib import Path
 import re
 import shutil
@@ -69,6 +70,20 @@ class Texte(unittest.TestCase):
         d = HEURE.parent
         self.assertNotIn("fontFamily", (d / "batterie.luau").read_text(encoding="utf-8"))
         self.assertNotIn("fontFamily", (d / "musique.luau").read_text(encoding="utf-8"))
+
+    def test_reponse_de_fc_list_protegee(self):
+        """Rappel de runAsync : r doit être une table et r.stdout une chaîne, sinon polices reste nil, sans redessin."""
+        debut = SRC.index('noctalia.runAsync({ "fc-list"')
+        rappel = SRC[debut:SRC.index("end, 5000)", debut)]
+        garde = rappel.index('if type(r) ~= "table" or type(r.stdout) ~= "string" then return end')
+        self.assertLess(garde, rappel.index("polices = famillesInstallees(r.stdout)"))
+        self.assertLess(garde, rappel.index('derniere = ""'))
+
+    def test_aucun_theme_ne_pose_la_police_du_verrou(self):
+        """fontFamily dans Noctalia n'a jamais été essayé à l'écran : aucun thème ne pose VERROU_POLICE pour l'instant."""
+        for f in sorted((REPO / "home/.local/share/nc/themes").glob("*.json")):
+            with self.subTest(theme=f.stem):
+                self.assertNotIn("VERROU_POLICE", json.loads(f.read_text(encoding="utf-8"))["reglages"])
 
     def test_reglages_declares(self):
         t = REGLAGES.read_text(encoding="utf-8")

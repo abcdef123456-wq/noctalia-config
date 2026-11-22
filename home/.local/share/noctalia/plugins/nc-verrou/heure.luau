@@ -81,7 +81,9 @@ end
 local polices = nil        -- liste fc-list, lue une seule fois au démarrage (nil tant qu'elle n'est pas arrivée)
 if noctalia.runAsync then
   noctalia.runAsync({ "fc-list", ":", "family" }, function(r)
-    polices = famillesInstallees(r and r.stdout)
+    -- réponse inattendue : polices reste nil (police de Noctalia), et rien n'est redessiné
+    if type(r) ~= "table" or type(r.stdout) ~= "string" then return end
+    polices = famillesInstallees(r.stdout)
     derniere = ""                           -- redessin à la prochaine seconde
   end, 5000)
 end

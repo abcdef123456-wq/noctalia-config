@@ -27,8 +27,7 @@
     "TERMINAL_LOGO": "macOS",
     "ILE_POLICE": "Inter",
     "FENETRES_OMBRE": "30",
-    "WIDGETS_PLAQUE": "non",
-    "VERROU_POLICE": "Inter"
+    "WIDGETS_PLAQUE": "non"
   },
   "noctalia": {
     "bar.default": {
