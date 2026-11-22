@@ -101,6 +101,10 @@ class Fonctions(unittest.TestCase):
         self.assertEqual(manquantes, [])
         for v in ["tokyo", "new york", "londres", "paris", "berlin", "montreal"]:
             self.assertNotEqual(js(f"zoneVille({json.dumps(v)}, {json.dumps(zones)})"), "", v)
+        # Saisies qui ressemblent à « heure … » sans être une ville : aucune zone, donc aucune carte
+        for q in ["time machine", "time zone", "heure exacte", "heure d'été"]:
+            v = js(f"villeHeure({json.dumps(q)})")
+            self.assertEqual(js(f"zoneVille({json.dumps(v)}, {json.dumps(zones)})") if v else "", "", q)
 
     def test_ligne_24h(self):
         r = ligne("14:32|1|23|11|+0900")
@@ -143,11 +147,17 @@ class Branchement(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertIn('r.zonesVoulues ? (Quickshell.env("TZDIR") || "/usr/share/zoneinfo") + "/zone1970.tab" : ""', m[0])
         self.assertIn("printErrors: false", m[0])
-        self.assertIn("onLoadFailed: { r.zonesIllisibles = true", m[0])
+        self.assertNotIn("onLoadFailed", m[0])      # fichier absent : rien à montrer
 
-    def test_fichier_absent_donne_ville_inconnue(self):
-        self.assertRegex(RECHERCHE, r'if \(li\) out\.push[\s\S]*?else if \(zonesIllisibles \|\| zonesHeure\.length && zone === ""\)'
-                                    r'\s*out\.push\(\{ titre: Reglages\.t\("Ville inconnue", "Unknown city"\)')
+    def test_ville_inconnue_aucune_carte(self):
+        """« time machine », « heure exacte » : pas de carte en tête, la recherche ordinaire continue."""
+        self.assertNotIn("Ville inconnue", RECHERCHE)
+        self.assertNotIn("Unknown city", RECHERCHE)
+        debut = RECHERCHE.index('if (heureVille !== "") {', RECHERCHE.index("function chercher"))
+        bloc = RECHERCHE[debut:RECHERCHE.index("\n        }\n", debut)]
+        self.assertEqual(bloc.count("out.push("), 1, "une seule carte : celle d'une ville connue")
+        self.assertIn("if (li) out.push(", bloc)
+        self.assertIn('let li = zone !== "" && zone === heureZone', bloc)
 
     def test_pas_de_releve_periodique(self):
         bloc = RECHERCHE[RECHERCHE.index("id: lireHeure"):RECHERCHE.index("id: calculer")]

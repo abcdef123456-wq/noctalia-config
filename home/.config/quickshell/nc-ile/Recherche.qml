@@ -272,7 +272,6 @@ Item {
     // « heure tokyo » : les zones de zone1970.tab (lues au premier « heure … »), puis la réponse de date pour la zone demandée
     property bool zonesVoulues: false
     property var zonesHeure: []
-    property bool zonesIllisibles: false
     property string heureZone: ""
     property string heureSortie: ""
     readonly property string heureVille: Saisies.villeHeure(q)
@@ -644,8 +643,7 @@ Item {
         // lu une seule fois, au premier « heure … » tapé ; TZDIR d'abord (NixOS), comme glibc pour « date » ensuite
         path: r.zonesVoulues ? (Quickshell.env("TZDIR") || "/usr/share/zoneinfo") + "/zone1970.tab" : ""
         printErrors: false
-        onLoaded: { r.zonesHeure = Saisies.listeZones(text()); r.zonesIllisibles = r.zonesHeure.length === 0; attente.restart() }
-        onLoadFailed: { r.zonesIllisibles = true; r.chercher() }
+        onLoaded: { r.zonesHeure = Saisies.listeZones(text()); attente.restart() }
     }
     Process {
         id: lireHeure
@@ -1081,15 +1079,14 @@ Item {
             return
         }
 
-        // « heure tokyo » : l'heure et la date de la ville, l'écart avec ici ; Entrée copie le texte
+        // « heure tokyo » : l'heure et la date de la ville, l'écart avec ici ; Entrée copie le texte. Ville que la liste ne connaît pas, ou
+        // fichier des zones absent : aucune carte (« time machine » reste une recherche ordinaire)
         if (heureVille !== "") {
             let zone = zonesHeure.length ? Saisies.zoneVille(heureVille, zonesHeure) : ""
             let li = zone !== "" && zone === heureZone
                 ? Saisies.ligneHeure(heureSortie, Saisies.nomAffiche(heureVille), Reglages.val("ILE_HEURE", "24") === "12", Reglages.t("fr", "en") === "en", -new Date().getTimezoneOffset()) : null
             if (li) out.push({ titre: li.texte, sous: Reglages.t("Heure · ", "Time · ") + li.ecart + Reglages.t(" par rapport à ici · Entrée pour copier", " from here · Enter to copy"),
                                glyphe: "schedule", s: 1000, f: () => Quickshell.execDetached(["wl-copy", "--", li.texte]) })
-            else if (zonesIllisibles || zonesHeure.length && zone === "")
-                out.push({ titre: Reglages.t("Ville inconnue", "Unknown city"), sous: Saisies.nomAffiche(heureVille), glyphe: "schedule", s: 1000, garder: true, f: () => {} })
         }
         // Calcul en tête
         if (calcul !== "") {

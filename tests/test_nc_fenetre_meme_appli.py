@@ -98,6 +98,21 @@ class MemeAppli(unittest.TestCase):
         self.assertEqual(self.lancer(cs, "0xa"), "0xc")
         self.assertEqual(self.lancer(cs, "0xc"), "0xa", "le tour revient au début sans passer par le bureau spécial")
 
+    def test_fenetre_non_affichee_sautee(self):
+        cs = [cl("0xa"), dict(cl("0xb"), mapped=False), cl("0xc")]
+        self.assertEqual(self.lancer(cs, "0xa"), "0xc")
+
+    def test_classe_vide_ou_absente_rien_et_muet(self):
+        for cs in ([cl("0xa", ""), cl("0xb", "")], [{k: v for k, v in cl("0xa").items() if k != "class"},
+                                                    {k: v for k, v in cl("0xb").items() if k != "class"}]):
+            with self.subTest(cs=cs):
+                self.state.write_text(json.dumps(dict(clients=cs, active="0xa")))
+                self.appels.write_text("")
+                r = subprocess.run(["bash", str(NC_FENETRE), "meme-appli"], env=self.env, timeout=20, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0)
+                self.assertEqual(r.stderr, "")
+                self.assertEqual(self.focus(), [])
+
     def test_une_seule(self):
         self.lancer([cl("0xa"), cl("0xb", "firefox")], "0xa")
         self.assertEqual(self.focus(), [])

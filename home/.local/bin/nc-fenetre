@@ -293,12 +293,13 @@ PY
     # courant avant de passer au suivant, en boucle (un ordre « celui-ci d'abord » recalculé à chaque appel en oublierait).
     # Sautées : les masquées et les bureaux spéciaux (terminal déroulant…). Plein écran : on n'en sort pas
     act="$(hyprctl activewindow -j 2>/dev/null)"
+    # « .mapped != false » et non « .mapped // true » : en jq, false // true vaut true. Classe vide ou absente : rien
     a="$(clients | jq -r --argjson act "${act:-null}" --arg c "$CACHE" '
-      if ($act.address // "") == "" or (($act.fullscreen // 0) != 0) then empty else
-      [.[] | select(.class == $act.class and .workspace.name != $c and (.mapped // true)
+      if ($act.address // "") == "" or (($act.class // "") == "") or (($act.fullscreen // 0) != 0) then empty else
+      [.[] | select(.class == $act.class and .workspace.name != $c and .mapped != false
                     and (.workspace.id == $act.workspace.id or .workspace.id >= 0))]
       | sort_by(.workspace.id, .address) | map(.address) as $l
-      | if ($l | length) < 2 then empty else $l[(($l | index($act.address)) // -1) + 1] // $l[0] end end')"
+      | if ($l | length) < 2 then empty else $l[(($l | index($act.address)) // -1) + 1] // $l[0] end end' 2>/dev/null)"
     [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || exit 0
     # Venu du clavier : le pointeur suit la fenêtre
     NC_FENETRE_POINTEUR=suivre exec "$0" aller "$a" ;;

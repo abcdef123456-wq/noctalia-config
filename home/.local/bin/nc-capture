@@ -24,18 +24,29 @@ IM=""; if command -v magick >/dev/null 2>&1; then IM=magick; elif command -v con
 # « habiller FICHIER » : écrit « …-habillee.png » (puis -2, -3…) à côté ; l'original n'est jamais ouvert en écriture.
 # Le fichier entre par l'entrée standard : ImageMagick n'interprète donc ni son nom ni ses crochets.
 habiller() {
-  local f="$1" h w a b m r s out base n pal
+  local f="$1" h w a b m r s out base n pal k lim pid
   [ -n "$f" ] || { t "Usage : nc-capture habiller FICHIER" "Usage: nc-screenshot dress FILE" >&2; echo >&2; return 2; }
   case "$f" in -*) f="./$f" ;; esac
   if [ -L "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then
     t "Habillage refusé : « $1 » n'est pas un fichier image ordinaire." "Refused: “$1” is not a regular image file." >&2; echo >&2; return 1
   fi
   [ -n "$IM" ] || { t "ImageMagick n'est pas installé (paquet « imagemagick »)." "ImageMagick is not installed (package “imagemagick”)." >&2; echo >&2; return 1; }
-  h="$("$IM" '-[0]' -format '%w %h\n' info: < "$f" 2>/dev/null | head -n 1)"
+  # Seuls PNG et JPEG, reconnus par leurs octets de tête avant tout ImageMagick (SVG, MVG, texte… : refusés)
+  case "$(head -c 8 < "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in
+    89504e470d0a1a0a) k=png ;;
+    ffd8ff*) k=jpeg ;;
+    *) t "Habillage refusé : seules les images PNG et JPEG sont acceptées." "Refused: only PNG and JPEG images are accepted." >&2; echo >&2; return 1 ;;
+  esac
+  # Limites de ressources (IM7 « magick » et IM6 « convert » : « -limit type valeur », avant la lecture de l'entrée)
+  lim=(-limit width 16384 -limit height 16384 -limit area 1GiB -limit memory 1GiB -limit map 2GiB -limit disk 4GiB -limit time 120)
+  h="$(timeout 30 "$IM" "${lim[@]}" "$k:-[0]" -format '%w %h\n' info: < "$f" 2>/dev/null | head -n 1)"
   w="${h% *}"; h="${h#* }"
   case "$w$h" in ''|*[!0-9]*) t "Image illisible." "Unreadable image." >&2; echo >&2; return 1 ;; esac
   if [ "$w" -lt 16 ] || [ "$h" -lt 16 ] || [ "$w" -gt 16384 ] || [ "$h" -gt 16384 ]; then
     t "Image trop petite ou trop grande pour être habillée." "Image too small or too large to dress." >&2; echo >&2; return 1
+  fi
+  if [ $((w * h)) -gt 40000000 ]; then
+    t "Image trop grande (plus de 40 millions de pixels)." "Image too large (over 40 million pixels)." >&2; echo >&2; return 1
   fi
   # Couleurs du thème actif (accent en haut, fond en bas) ; palette absente ou illisible : dégradé neutre
   a=""; b=""
@@ -47,7 +58,12 @@ habiller() {
   [ -n "$a" ] && [ -n "$b" ] || { a="#4a5170"; b="#15171d"; }
   # Marge = 1/10 du petit côté : la sortie reste toujours sous 2 fois la largeur et 2 fois la hauteur
   m=$(( (w < h ? w : h) / 10 )); r=$(( (w < h ? w : h) / 40 + 4 )); s=$(( m / 4 + 1 ))
-  base="${f%.*}"; base="${base%-habillee*}"
+  base="${f%.*}"
+  # ne retire que le suffixe FINAL « -habillee » ou « -habillee-N »
+  case "$base" in
+    *-habillee) base="${base%-habillee}" ;;
+    *-habillee-*) n="${base##*-habillee-}"; case "$n" in ''|*[!0-9]*) ;; *) base="${base%-habillee-$n}" ;; esac ;;
+  esac
   out="$base-habillee.png"; n=2
   # « set -C » : la création échoue si le nom existe déjà (jamais d'écrasement)
   while ! ( set -C; : > "$out" ) 2>/dev/null; do
@@ -55,14 +71,19 @@ habiller() {
     out="$base-habillee-$n.png"; n=$((n + 1))
     [ "$n" -gt 999 ] && return 1
   done
-  if "$IM" '-[0]' -alpha set \
+  # Sortie incomplète retirée si le script est interrompu ou tué, ou si ImageMagick échoue
+  # (en arrière-plan + wait : le signal est traité tout de suite, pas après la fin d'ImageMagick)
+  pid=""; trap '[ -n "$pid" ] && kill "$pid" 2>/dev/null; rm -f "$out"; exit 1' INT TERM HUP
+  timeout 150 "$IM" "${lim[@]}" "$k:-[0]" -alpha set \
       -size "${w}x${h}" xc:none -fill white -draw "roundrectangle 0,0 $((w - 1)),$((h - 1)) $r,$r" -compose DstIn -composite -compose over \
       \( +clone -background black -shadow "55x${s}+0+${s}" \) +swap -background none -layers merge +repage \
       \( -size "$((w + 2 * m))x$((h + 2 * m))" "gradient:$a-$b" \) +swap -gravity center -compose over -composite \
-      -alpha off "png:$out" < "$f" 2>/dev/null && [ -s "$out" ]; then
-    chmod 600 "$out" 2>/dev/null; printf '%s\n' "$out"; return 0
+      -alpha off "png:$out" < "$f" 2>/dev/null &
+  pid=$!
+  if wait "$pid" && [ -s "$out" ]; then
+    trap - INT TERM HUP; chmod 600 "$out" 2>/dev/null; printf '%s\n' "$out"; return 0
   fi
-  rm -f "$out"; t "L'habillage a échoué." "Dressing failed." >&2; echo >&2; return 1
+  trap - INT TERM HUP; rm -f "$out"; t "L'habillage a échoué." "Dressing failed." >&2; echo >&2; return 1
 }
 case "${1:-}" in habiller|dress) shift; habiller "${1:-}"; exit $? ;; esac
 
