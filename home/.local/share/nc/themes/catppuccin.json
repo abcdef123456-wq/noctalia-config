@@ -10,7 +10,17 @@
   },
   "reglages": {
     "FENETRES_ARRONDI": "16",
-    "ANIM_BUREAUX": "slidefade"
+    "ANIM_BUREAUX": "slidefade",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "97",
+    "ILE_ANIM": "doux",
+    "ILE_ACCENTS": "accent",
+    "ILE_CONTOUR_FERMEE": "oui",
+    "WIDGETS_PLAQUE": "oui",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "30"
   },
   "noctalia": {},
   "theme_sync": {

@@ -10,7 +10,16 @@
   },
   "reglages": {
     "ILE_CONTOUR": "discret",
-    "FENETRES_ARRONDI": "12"
+    "FENETRES_ARRONDI": "12",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_RAYON": "doux",
+    "ILE_VERRE": "100",
+    "ILE_LUEUR": "non",
+    "ILE_ACCENTS": "accent",
+    "ILE_CONTOUR_FERMEE": "non",
+    "WIDGETS_PLAQUE": "oui",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_OMBRE": "20"
   },
   "noctalia": {},
   "theme_sync": {

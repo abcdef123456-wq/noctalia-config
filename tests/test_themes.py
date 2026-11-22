@@ -19,9 +19,19 @@ THEMES = REPO / "home/.local/share/nc/themes"
 BIN = REPO / "home/.local/bin"
 ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa"]
 FONDS = REPO / "home/Pictures/Wallpapers"
-ENRICHIS = {"apple"}
+ENRICHIS = {"apple", "catppuccin", "gruvbox", "nord", "kanagawa", "dracula"}
 # Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
-AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
+AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n",
+          "catppuccin": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=rond\nILE_VERRE=97\nILE_ANIM=doux\nILE_ACCENTS=accent\n"
+                        "ILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=oui\nFENETRES_BORDURE=2\nFENETRES_OMBRE=30\n",
+          "gruvbox": "ILE_CONTOUR_EPAISSEUR=3\nILE_RAYON=doux\nILE_VERRE=100\nILE_LUEUR=non\nILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=non\n"
+                     "FENETRES_BORDURE=3\nFENETRES_OMBRE=12\n",
+          "nord": "ILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=auto\nILE_VERRE=94\nILE_LUEUR=non\nILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=non\n"
+                  "FENETRES_BORDURE=1\nFENETRES_OMBRE=16\n",
+          "kanagawa": "ILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=doux\nILE_VERRE=100\nILE_LUEUR=non\nILE_ACCENTS=accent\nILE_CONTOUR_FERMEE=non\n"
+                      "WIDGETS_PLAQUE=oui\nFENETRES_BORDURE=1\nFENETRES_OMBRE=20\n",
+          "dracula": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=2\nILE_RAYON=carre\nILE_VERRE=100\nILE_LUEUR=oui\nILE_ACCENTS=accent\n"
+                     "ILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=oui\nFENETRES_BORDURE=2\nFENETRES_OMBRE=32\n"}          # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
 
 
