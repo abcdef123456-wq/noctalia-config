@@ -2573,10 +2573,18 @@ def _verifier_noctalia(noct, refus):
         b = {k: v for k, v in kv.items() if k not in _LISTES + ("capsule_group",)}
         if "capsule_group" in kv:
             cg = kv["capsule_group"]
-            if not isinstance(cg, list) or not 1 <= len(cg) <= 6:
+            if not isinstance(cg, list) or not 1 <= len(cg) <= 8:
                 non(t, "capsule_group")
             b["capsule_group"] = []
+            surcharges = set()
             for g in cg:
+                # Sans « members » : le style seul d'un groupe de config.toml (sys, status), fusionné sur lui à l'écriture
+                if (isinstance(g, dict) and "members" not in g and t == "bar.default" and g.get("id") in groupes_cfg
+                        and g["id"] not in surcharges and len(g) > 1 and set(g) <= {"id"} | set(_GROUPE)
+                        and all(_GROUPE[k](g[k]) for k in g if k in _GROUPE)):
+                    surcharges.add(g["id"])
+                    b["capsule_group"].append(dict(g))
+                    continue
                 if (not isinstance(g, dict) or not {"id", "members"} <= set(g) <= {"id", "members"} | set(_GROUPE)
                         or not all(_GROUPE[k](g[k]) for k in g if k in _GROUPE) or not isinstance(g["id"], str)
                         or not _RE_ID.fullmatch(g["id"]) or g["id"] in groupes or not isinstance(g["members"], list)
@@ -3406,8 +3414,12 @@ def appliquer_noctalia(vals):
                 if k in compo or listes[k] != cfg[k] or k == "end" and interrupteurs:
                     mettre("bar.default", k, listes[k])
             if "capsule_group" in barre_theme:
-                # Noctalia remplace la liste entière (noctalia config export) : les groupes de config.toml d'abord
-                mettre("bar.default", "capsule_group", list(cfg["groupes"]) + barre_theme["capsule_group"])
+                # Noctalia remplace la liste entière (noctalia config export) : les groupes de config.toml d'abord, avec
+                # le style que le thème leur donne (entrée sans « members »), puis ceux du thème
+                style = {g["id"]: g for g in barre_theme["capsule_group"] if "members" not in g}
+                mettre("bar.default", "capsule_group", [{**g, **{k: v for k, v in style.get(g.get("id"), {}).items() if k != "id"}}
+                                                        for g in cfg["groupes"]]
+                       + [g for g in barre_theme["capsule_group"] if "members" in g])
             premiere = tables.get("bar.default", {}).get("position", cfg["position"])
             for t in [t for t in tables if t.startswith("bar.") and t != "bar.default"]:
                 if tables[t].get("position") == premiere:       # jamais deux barres sur le même bord

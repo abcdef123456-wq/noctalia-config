@@ -5,7 +5,10 @@
 - un thème a au plus une seconde barre, sur un autre bord que la première ;
 - les bureaux posés dans une barre montrent leur chiffre (minimal sans chiffres = pastille vide, vu sur oled et papier ;
   l'utilisateur ne voyait pas les numéros) ; en pilules pleines, jamais focused_color=on_surface (chiffre on_surface sur
-  une pilule on_surface : invisible, vu sur oled). En minimal, focused_color colore le chiffre lui-même : permis.
+  une pilule on_surface : invisible, vu sur oled). En minimal, focused_color colore le chiffre lui-même : permis ;
+- une barre de côté est une pilule flottante centrée sur le bord (vue sur matrice), jamais une barre pleine hauteur
+  collée au bord (ancien nord, que l'utilisateur n'aimait pas) : sans fond, à 6 px du bord au moins, tout dans des
+  groupes posés au centre, start et end vides.
 Règles sur les fichiers des thèmes : pas de session, pas de Noctalia."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
 import contextlib
@@ -82,6 +85,17 @@ class Regles(unittest.TestCase):
                     if w.get("style", "regular") != "minimal":
                         self.assertNotEqual(w.get("focused_color"), "on_surface", "chiffre invisible sur la pilule active")
 
+    def test_barre_de_cote_bien_integree(self):
+        for nom, d in themes().items():
+            for t, b in d.get("noctalia", {}).items():
+                if t.startswith("bar.") and b.get("position") in ("left", "right"):
+                    with self.subTest(theme=nom, barre=t):
+                        self.assertEqual(b.get("background_opacity", 0.0), 0.0, "pas de bande pleine hauteur")
+                        self.assertGreaterEqual(b.get("margin_edge", 6), 6, "flottante, pas collée au bord")
+                        self.assertEqual((b.get("start"), b.get("end")), ([], []), "rien aux extrémités")
+                        self.assertTrue(b.get("center") and all(w.startswith("group:") for w in b["center"]),
+                                        "tout dans des groupes au centre")
+
     def test_controle_du_controle(self):
         """Les règles attrapent bien les défauts vus : bandeau de 36, texte sans fond, heure en double."""
         d = {"reglages": {}, "noctalia": {"bar.default": {"position": "top", "margin_edge": 0, "thickness": 36,
@@ -92,6 +106,13 @@ class Regles(unittest.TestCase):
         self.assertEqual(b["fond"], 0)
         self.assertTrue(montre_l_heure(d, "t-h"))
         self.assertFalse(montre_l_heure({"noctalia": {"widget.t-d": {"type": "clock", "format": "{:%a %d %b}"}}}, "t-d"))
+        # l'ancienne barre de nord (pleine hauteur collée au bord, listes aux extrémités) est attrapée
+        with patch(__name__ + ".themes", lambda: {"nord": {"noctalia": {"bar.default": {
+                "position": "left", "margin_edge": 0, "thickness": 52, "background_opacity": 0.9,
+                "start": ["logo", "workspaces"], "center": [], "end": ["tray", "group:status", "t-heure"]}}}}):
+            with self.assertRaises(AssertionError):
+                with patch.object(self, "subTest", lambda **k: contextlib.nullcontext()):
+                    self.test_barre_de_cote_bien_integree()
         # l'ancienne table de papier (minimal sans chiffres, bureaux dans un groupe) est attrapée
         with patch(__name__ + ".themes", lambda: {"papier": {"noctalia": {
                 "bar.default": {"capsule_group": [{"id": "b", "members": ["workspaces"]}], "start": ["group:b"]},

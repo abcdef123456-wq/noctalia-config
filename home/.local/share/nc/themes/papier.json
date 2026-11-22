@@ -56,25 +56,61 @@
           "id": "bureaux",
           "members": [
             "workspaces"
-          ]
+          ],
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
         },
         {
           "id": "fenetre",
           "members": [
             "nc/fenetres:titre"
-          ]
+          ],
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
         },
         {
           "id": "plateau",
           "members": [
             "tray"
-          ]
+          ],
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
         },
         {
           "id": "jour",
           "members": [
             "t-date"
-          ]
+          ],
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
+        },
+        {
+          "id": "status",
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
+        },
+        {
+          "id": "sys",
+          "fill": "#fffdf7",
+          "foreground": "#111111",
+          "border": "#111111",
+          "border_width": 2,
+          "radius": 0
         }
       ],
       "start": [

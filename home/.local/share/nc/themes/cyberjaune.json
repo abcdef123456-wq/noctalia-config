@@ -66,7 +66,11 @@
       "style": "regular",
       "show_labels": true,
       "label_source": "id",
-      "pill_scale": 1.0
+      "pill_scale": 1.0,
+      "capsule_fill": "#1a1a1a",
+      "capsule_radius": 0,
+      "capsule_border": "#ff2e88",
+      "capsule_border_width": 2
     },
     "widget.t-heure": {
       "type": "clock",

@@ -53,13 +53,30 @@
           "members": [
             "logo",
             "workspaces"
-          ]
+          ],
+          "fill": "#313244",
+          "border": "#cba6f7",
+          "border_width": 2
         },
         {
           "id": "jour",
           "members": [
             "t-date"
-          ]
+          ],
+          "fill": "#f5c2e7",
+          "foreground": "#1e1e2e"
+        },
+        {
+          "id": "status",
+          "fill": "#313244",
+          "border": "#89b4fa",
+          "border_width": 2
+        },
+        {
+          "id": "sys",
+          "fill": "#313244",
+          "border": "#89b4fa",
+          "border_width": 2
         }
       ],
       "start": [

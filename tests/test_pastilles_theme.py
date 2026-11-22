@@ -97,6 +97,28 @@ class Liste(unittest.TestCase):
             with self.subTest(chemin=chemin):
                 self.refuse(n)
 
+    def test_surcharge_d_un_groupe_de_la_config(self):
+        """Entrée sans « members » dont l'id est un groupe de config.toml (sys, status) : son style seul, fusionné."""
+        n = copy.deepcopy(NOCT)
+        st = {"fill": "#1a0933", "foreground": "#f6c1ff", "border": "#00f0ff", "border_width": 2}   # texte clair : celui de la barre est sombre
+        n["bar.default"]["capsule_group"] += [{"id": "status", **st}, {"id": "sys", **st}]
+        g = {x["id"]: x for x in self.sortie(n, {"BARRE_SYSTEME": "oui"})["bar"]["default"]["capsule_group"]}
+        self.assertEqual(g["status"], {"id": "status", "members": ["network", "bluetooth", "volume", "nc/batterie:batterie"], **st})
+        self.assertEqual(g["sys"], {"id": "sys", "members": ["cpu", "temp", "ram"], **st})
+        self.assertEqual(g["bureaux"], NOCT["bar.default"]["capsule_group"][0])          # ceux du thème : inchangés
+        for nom, entree in (("id hors config", {"id": "autre", "fill": "#000000"}),
+                            ("sans style", {"id": "status"}),
+                            ("clé inconnue", {"id": "status", "color": "#000000"}),
+                            ("membres de config redéfinis", {"id": "status", "members": ["tray"]}),
+                            ("texte illisible", {"id": "status", "fill": "#101010", "foreground": "#202020"})):
+            n = copy.deepcopy(NOCT)
+            n["bar.default"]["capsule_group"].append(entree)
+            with self.subTest(nom):
+                self.refuse(n)
+        n = copy.deepcopy(NOCT)
+        n["bar.default"]["capsule_group"] += [{"id": "status", "fill": "#000000"}, {"id": "status", "fill": "#ffffff"}]
+        self.refuse(n)                                                                  # deux fois le même groupe
+
     def test_weather_refuse(self):
         n = copy.deepcopy(NOCT)
         n["widget.t-meteo"] = {"type": "weather"}

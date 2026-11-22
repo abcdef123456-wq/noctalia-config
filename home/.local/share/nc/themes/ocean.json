@@ -57,13 +57,18 @@
             "logo",
             "workspaces",
             "t-applis"
-          ]
+          ],
+          "fill": "#0c2a47",
+          "border": "#4fb3ff",
+          "border_width": 2
         },
         {
           "id": "heure",
           "members": [
             "t-heure"
-          ]
+          ],
+          "fill": "#4fb3ff",
+          "foreground": "#06192e"
         },
         {
           "id": "etat",
@@ -73,7 +78,16 @@
             "bluetooth",
             "volume",
             "nc/batterie:batterie"
-          ]
+          ],
+          "fill": "#0c2a47",
+          "border": "#2ec4b6",
+          "border_width": 2
+        },
+        {
+          "id": "sys",
+          "fill": "#0c2a47",
+          "border": "#2ec4b6",
+          "border_width": 2
         }
       ],
       "start": [

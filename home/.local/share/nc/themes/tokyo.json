@@ -55,13 +55,24 @@
             "t-temp",
             "t-ram",
             "t-disque"
-          ]
+          ],
+          "fill": "#24283b",
+          "border": "#7aa2f7",
+          "border_width": 1
         },
         {
           "id": "jour",
           "members": [
             "t-date"
-          ]
+          ],
+          "fill": "#bb9af7",
+          "foreground": "#1a1b26"
+        },
+        {
+          "id": "status",
+          "fill": "#24283b",
+          "border": "#7dcfff",
+          "border_width": 1
         }
       ],
       "start": [

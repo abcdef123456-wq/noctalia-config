@@ -61,7 +61,11 @@
             "volume",
             "nc/batterie:batterie",
             "t-date"
-          ]
+          ],
+          "fill": "#2b1055",
+          "foreground": "#f6c1ff",
+          "border": "#00e5ff",
+          "border_width": 2
         }
       ],
       "start": [],

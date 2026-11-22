@@ -56,14 +56,32 @@
           "members": [
             "logo",
             "workspaces"
-          ]
+          ],
+          "fill": "#f7b6c8",
+          "foreground": "#4a1f2c"
         },
         {
           "id": "droite",
           "members": [
             "tray",
             "t-date"
-          ]
+          ],
+          "fill": "#c2255c",
+          "foreground": "#ffffff"
+        },
+        {
+          "id": "status",
+          "fill": "#fde4ec",
+          "foreground": "#4a1f2c",
+          "border": "#e8799a",
+          "border_width": 1
+        },
+        {
+          "id": "sys",
+          "fill": "#fde4ec",
+          "foreground": "#4a1f2c",
+          "border": "#e8799a",
+          "border_width": 1
         }
       ],
       "start": [

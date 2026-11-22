@@ -57,25 +57,44 @@
           "members": [
             "logo",
             "workspaces"
-          ]
+          ],
+          "fill": "#eee8d5",
+          "border": "#268bd2",
+          "border_width": 2
         },
         {
           "id": "fenetre",
           "members": [
             "nc/fenetres:titre"
-          ]
+          ],
+          "fill": "#eee8d5"
         },
         {
           "id": "plateau",
           "members": [
             "tray"
-          ]
+          ],
+          "fill": "#eee8d5"
         },
         {
           "id": "jour",
           "members": [
             "t-date"
-          ]
+          ],
+          "fill": "#2076b2",
+          "foreground": "#ffffff"
+        },
+        {
+          "id": "status",
+          "fill": "#eee8d5",
+          "border": "#2aa198",
+          "border_width": 2
+        },
+        {
+          "id": "sys",
+          "fill": "#eee8d5",
+          "border": "#2aa198",
+          "border_width": 2
         }
       ],
       "start": [

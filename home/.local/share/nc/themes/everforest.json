@@ -41,38 +41,57 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
-      "margin_ends": 12,
+      "margin_ends": 16,
       "thickness": 40,
       "capsule": true,
       "background_opacity": 0.0,
-      "capsule_thickness": 0.8,
+      "capsule_thickness": 0.72,
       "capsule_padding": 12,
-      "widget_spacing": 8,
+      "widget_spacing": 12,
       "capsule_group": [
         {
           "id": "gauche",
           "members": [
             "logo",
             "workspaces"
-          ]
+          ],
+          "fill": "#343F44",
+          "border": "#A7C080",
+          "border_width": 2
         },
         {
           "id": "fenetre",
           "members": [
             "nc/fenetres:titre"
-          ]
+          ],
+          "fill": "#343F44"
         },
         {
           "id": "plateau",
           "members": [
             "tray"
-          ]
+          ],
+          "fill": "#343F44"
         },
         {
           "id": "jour",
           "members": [
             "t-date"
-          ]
+          ],
+          "fill": "#A7C080",
+          "foreground": "#2D353B"
+        },
+        {
+          "id": "status",
+          "fill": "#343F44",
+          "border": "#7FBBB3",
+          "border_width": 2
+        },
+        {
+          "id": "sys",
+          "fill": "#343F44",
+          "border": "#7FBBB3",
+          "border_width": 2
         }
       ],
       "start": [

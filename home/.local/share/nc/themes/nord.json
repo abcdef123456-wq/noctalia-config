@@ -59,7 +59,14 @@
             "volume",
             "nc/batterie:batterie",
             "t-heure"
-          ]
+          ],
+          "border": "#88c0d0",
+          "border_width": 1
+        },
+        {
+          "id": "sys",
+          "border": "#88c0d0",
+          "border_width": 1
         }
       ],
       "start": [],
