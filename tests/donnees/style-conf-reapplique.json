@@ -128,10 +128,14 @@
   "TERMINAL_CURSEUR=block",
   "FENETRES_CARACTERE=vif",
   "FENETRES_OMBRE_DECALAGE=bas",
-  "FENETRES_DISPOSITION=scrolling",
+  "FENETRES_DISPOSITION=dwindle",
   "FENETRES_COINS_FORME=rond",
   "DOCK=non",
-  "ILE_BANDE=oui"
+  "ILE_BANDE=oui",
+  "FENETRES_ESPACE=0",
+  "FENETRES_MARGE=0",
+  "WIDGETS_BUREAU=oui",
+  "WIDGETS_THEME=horloge-geante:haut-droite:moyen:::empilee,jauges:haut-droite:grand,musique:bas-gauche:moyen:carte"
  ],
  "gruvbox": [
   "ILE_CONTOUR_EPAISSEUR=3",

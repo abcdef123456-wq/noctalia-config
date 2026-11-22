@@ -30,10 +30,13 @@
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "vif",
     "FENETRES_OMBRE_DECALAGE": "bas",
-    "FENETRES_DISPOSITION": "scrolling",
+    "FENETRES_DISPOSITION": "dwindle",
     "FENETRES_COINS_FORME": "rond",
     "DOCK": "non",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "oui",
+    "FENETRES_ESPACE": "0",
+    "FENETRES_MARGE": "0",
+    "WIDGETS_BUREAU": "oui"
   },
   "noctalia": {
     "bar.default": {
@@ -86,7 +89,25 @@
     "ombre": "coloree"
   },
   "fonds": "dracula",
-  "fond_de_depart": "dracula-nuit.jpg",
+  "fond_de_depart": "dracula-chateau.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-geante",
+      "coin": "haut-droite",
+      "taille": "moyen",
+      "variante": "empilee"
+    },
+    {
+      "type": "jauges",
+      "coin": "haut-droite",
+      "taille": "grand"
+    },
+    {
+      "type": "musique",
+      "coin": "bas-gauche",
+      "taille": "moyen",
+      "style": "carte"
+    }
+  ]
 }

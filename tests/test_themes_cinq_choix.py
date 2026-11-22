@@ -20,7 +20,8 @@ def cinq_choix(t):
     # labels_only_when_occupied : tous les numéros, ou seulement ceux des bureaux occupés (config.toml : occupés seulement)
     bureaux = (ws.get("style", "regular"), ws.get("show_labels", True), ws.get("label_source", "id"),
                ws.get("labels_only_when_occupied", True))
-    dispo = (r.get("FENETRES_DISPOSITION", "dwindle"), r.get("FENETRES_MAITRE_ORIENTATION", "auto"))
+    # l'espace entre les fenêtres en fait partie : une spirale sans espaces (dracula) ne ressemble pas à celle de base
+    dispo = (r.get("FENETRES_DISPOSITION", "dwindle"), r.get("FENETRES_MAITRE_ORIENTATION", "auto"), r.get("FENETRES_ESPACE", "4"))
     dock = (r.get("DOCK", "oui") == "oui", r.get("DOCK_POSITION", "bottom"),
             r.get("DOCK_AUTO", "oui") == "oui")
     coins = (r.get("FENETRES_ARRONDI", "14"), r.get("FENETRES_BORDURE", "2"))
