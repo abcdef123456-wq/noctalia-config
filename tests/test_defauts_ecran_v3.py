@@ -245,3 +245,26 @@ class EcritPourNoctalia(tt.Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NODE = shutil.which("node")
+
+
+@unittest.skipUnless(NODE, "node absent")
+class EchellePilule(unittest.TestCase):
+    """L'échelle de la pilule fermée (Ile.qml) : jamais NaN, jamais 0 au repos ; contenu de 32 px ou moins = 1."""
+    def test_valeurs_limites(self):
+        import subprocess
+        src = (Path(__file__).resolve().parents[1] / "home/.config/quickshell/nc-ile/Ile.qml").read_text(encoding="utf-8")
+        expr = re.search(r"^\s*scale: (!\(compact\.largeur > 32\).*)$", src, re.M).group(1)
+        cas = [(0, 0), (0, 31), (31, 31), (32, 32), (33, 33), (40, 200), (200, 200), (10, None), (10, 200), (300, 200)]
+        js = ("const r = [];\n" + "".join(
+            f"{{ const ile = {{ width: {w} }}, compact = {{ largeur: {'undefined' if l is None else l} }}; r.push({expr}); }}\n"
+            for w, l in cas) + "console.log(JSON.stringify(r));")
+        sortie = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(sortie.returncode, 0, sortie.stderr)
+        r = json.loads(sortie.stdout)          # NaN et Infinity deviennent null en JSON : refusés par l'égalité
+        self.assertEqual(r[:5], [1, 1, 1, 1, 1], "0, 31, 32 et 33 au repos (et largeur 0) : échelle 1")
+        self.assertAlmostEqual(r[5], 8 / 168)  # en pleine croissance : réduit, jamais négatif
+        self.assertEqual(r[6:8], [1, 1], "au repos et largeur pas encore connue : 1")
+        self.assertEqual(r[8:], [0, 1], "bornée : jamais négative (île plus étroite que 32), jamais au-dessus de 1")
