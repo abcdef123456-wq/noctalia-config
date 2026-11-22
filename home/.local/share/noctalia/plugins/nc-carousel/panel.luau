@@ -8,6 +8,8 @@
 -- fond calé sur le cadre du panneau.
 -- Défilement animé : la position suit la cible avec un amorti exponentiel (onFrameTick).
 -- Ouverture : noctalia msg panel-toggle nc/carousel:main
+-- Dans un thème : les fonds du thème, puis ceux de l'utilisateur (voir plus bas). La rotation ne change pas : dans un thème,
+-- elle ne tourne que dans les fonds du thème ; un fond à toi choisi dans le carrousel peut être remplacé à la rotation suivante.
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
 local function env(nom)
@@ -50,8 +52,63 @@ local function fenetre(n, c, fl, reach)
   local lo = c - math.floor((n - 1) / 2)
   return lo, lo + n - 1
 end
+
+-- Dans un thème (style.conf pose FONDS_DOSSIER et Noctalia lit un autre dossier que celui de l'utilisateur), le carrousel
+-- montre les fonds du thème, PUIS ceux de l'utilisateur. Dossier de l'utilisateur (règle écrite ici une fois, même
+-- règle dans nc-carousel-thumbs, dossier_utilisateur, testée des deux côtés) : son FONDS_DOSSIER de reglages.conf
+-- (~ développé, sans « / » final), sinon ~/Pictures/Wallpapers.
+local function sansFinal(d)
+  while #d > 1 and d:sub(-1) == "/" do d = d:sub(1, -2) end
+  return d
+end
+local function valeurConf(conf, cle)
+  local v
+  for l in string.gmatch(conf or "", "[^\n]+") do
+    local x = l:match("^%s*" .. cle .. "%s*=%s*(.-)%s*$")
+    if x then v = x:gsub('^"(.*)"$', "%1") end
+  end
+  return v
+end
+local function dossiersDuCarrousel(dir, reglages, style, home)
+  dir = sansFinal(dir)
+  local liste = { dir }
+  local theme = valeurConf(style, "FONDS_DOSSIER")
+  if theme and theme ~= "" then
+    local u = valeurConf(reglages, "FONDS_DOSSIER")
+    if not u or u == "" then u = "~/Pictures/Wallpapers" end
+    u = sansFinal((u:gsub("^~", function() return sansFinal(home) end)))
+    if u ~= dir then table.insert(liste, u) end
+  end
+  return liste
+end
+-- Images de chaque dossier à la suite ; chacune garde son dossier (chemin complet) et ses vignettes (clé de SON dossier).
+-- api : listDir, fileInfo, fileExists ; exts : extensions d'images
+local function listerFonds(dossiers, racine, api, exts)
+  local out = {}
+  for _, d in ipairs(dossiers) do
+    local thumbs = racine .. cleDossier(d) .. "/"
+    local files = api.listDir(d .. "/") or {}
+    table.sort(files, function(a, b) return a:lower() < b:lower() end)
+    for _, f in ipairs(files) do
+      local ext = (f:match("%.([%w]+)$") or ""):lower()
+      if exts[ext] then
+        local path = d .. "/" .. f
+        local info = api.fileInfo(path)
+        if info and not info.isDir then
+          -- Vignette absente (pas encore découpée) : rien n'est affiché, jamais l'image d'origine (jusqu'à 8K)
+          local tw, tn = thumbs .. f .. ".W.webp", thumbs .. f .. ".N.webp"
+          table.insert(out, {
+            path = path, file = f,
+            thumbW = api.fileExists(tw) and tw or nil,
+            thumbN = api.fileExists(tn) and tn or nil,
+          })
+        end
+      end
+    end
+  end
+  return out
+end
 -- FIN cle
-local thumbs = THUMBS
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
 local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940 }
 local CW, CH = BASE.CW, BASE.CH   -- tranche du milieu
@@ -100,26 +157,10 @@ local function loadList()
   all = {}
   local dir = noctalia.wallpaperDirectory()
   if not dir then return end
-  thumbs = THUMBS .. cleDossier(dir) .. "/"
-  if dir:sub(-1) ~= "/" then dir = dir .. "/" end
-  local files = noctalia.listDir(dir) or {}
-  table.sort(files, function(a, b) return a:lower() < b:lower() end)
-  for _, f in ipairs(files) do
-    local ext = (f:match("%.([%w]+)$") or ""):lower()
-    if EXTS[ext] then
-      local path = dir .. f
-      local info = noctalia.fileInfo(path)
-      if info and not info.isDir then
-        -- Vignette absente (pas encore découpée) : rien n'est affiché, jamais l'image d'origine (jusqu'à 8K)
-        local tw, tn = thumbs .. f .. ".W.webp", thumbs .. f .. ".N.webp"
-        table.insert(all, {
-          path = path, file = f, title = prettify(f),
-          thumbW = noctalia.fileExists(tw) and tw or nil,
-          thumbN = noctalia.fileExists(tn) and tn or nil,
-        })
-      end
-    end
-  end
+  local dossiers = dossiersDuCarrousel(dir, noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or "",
+    noctalia.readFile(noctalia.expandPath("~/.config/nc/style.conf")) or "", noctalia.expandPath("~/"))
+  all = listerFonds(dossiers, THUMBS, noctalia, EXTS)
+  for _, w in ipairs(all) do w.title = prettify(w.file) end
 end
 
 -- Écran de référence : celui qui a le focus, sinon le premier (focusedOutputName() peut être nil)

@@ -19,7 +19,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
   fenêtres, la molette passe de l'une à l'autre ; trois doigts vers le haut : la vue de toutes les fenêtres ;
 - batterie de la barre : au survol, la consommation réelle (relue chaque seconde) et le temps restant ;
 - **Super + R** : recherche compacte au centre de l'écran (applis, fichiers, calculs) ;
-- **Super + W** : carrousel de fonds d'écran ; **Super + /** : fiche de tes raccourcis ;
+- **Super + W** : carrousel de fonds d'écran (dans un thème : les fonds du thème, puis ceux de ton dossier ; la rotation ne tourne que dans les fonds du thème, et un fond à toi choisi dans le carrousel peut être remplacé à la rotation suivante) ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
   - l'heure et la date peuvent prendre une police (`VERROU_POLICE`, une liste « A, B » : la première installée est prise, sinon

@@ -54,21 +54,45 @@ cle_dossier() {
 }
 # -- FIN cle
 
+# Dans un thème, le carrousel montre les fonds du thème PUIS ceux de l'utilisateur : les deux dossiers sont surveillés et
+# ont leurs miniatures. « Dans un thème » : style.conf pose FONDS_DOSSIER et le dossier de Noctalia (src) n'est pas celui
+# de l'utilisateur. Dossier de l'utilisateur (même règle dans panel.luau, dossiersDuCarrousel, testée des deux côtés) :
+# son FONDS_DOSSIER de reglages.conf (~ développé, sans « / » final), sinon ~/Pictures/Wallpapers.
+valeur_conf() {
+  sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | tail -n 1 | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/'
+}
+sans_final() {
+  local d="$1"
+  while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d="${d%/}"; done
+  printf '%s' "$d"
+}
+dossiers=("$src")
+if [ -n "$(valeur_conf "$HOME/.config/nc/style.conf" FONDS_DOSSIER)" ]; then
+  u=$(valeur_conf "$HOME/.config/nc/reglages.conf" FONDS_DOSSIER)
+  [ -n "$u" ] || u="$FONDS_DEFAUT"
+  u=$(sans_final "${u/#\~/$HOME}")
+  [ "$u" != "$src" ] && dossiers+=("$u")
+fi
+
 # --surveillance : fait surveiller par nc-carousel-thumbs.path le vrai dossier (drop-in dossier.conf ; aucun pour le
 # dossier par défaut, déjà dans l'unité : le drop-in disparaît au retour au défaut). Appelé par nc-reglages (à chaque
 # application), install.sh, nc-maj et l'ouverture de session ; idempotent et rapide. Silencieux sans systemd.
 if [ "${1:-}" = "--surveillance" ]; then
   dropin="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/nc-carousel-thumbs.path.d/dossier.conf"
   want=""
-  if [ "$src" != "$FONDS_DEFAUT" ]; then
-    real=$(realpath -m -- "$src" 2>/dev/null) || real="$src"
+  # Dans un thème (deux dossiers) : une ligne par dossier qui existe ; seul : le dossier de Noctalia s'il n'est pas le défaut
+  lignes=""
+  for d in "${dossiers[@]}"; do
+    if [ ${#dossiers[@]} -gt 1 ]; then [ -d "$d" ] || continue; elif [ "$d" = "$FONDS_DEFAUT" ]; then continue; fi
+    real=$(realpath -m -- "$d" 2>/dev/null) || real="$d"
     case "$real" in /*) ;; *) real="" ;; esac
     case "$real" in *$'\n'*|*'\') real="" ;; esac     # saut de ligne ou \ final : illisible pour systemd, on laisse le défaut
     # % est le début d'un spécificateur pour systemd : %%
-    [ -n "$real" ] && want="[Path]
-PathChanged=
+    [ -n "$real" ] && lignes+="
 PathChanged=${real//%/%%}"
-  fi
+  done
+  [ -n "$lignes" ] && want="[Path]
+PathChanged=$lignes"
   changed=0
   if [ -n "$want" ]; then
     if [ "$(cat "$dropin" 2>/dev/null)" != "$want" ]; then
@@ -96,7 +120,6 @@ SK=0.30
 # (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6) ; écran plus grand que 1600 x 1000 : agrandi jusqu'à x2.
 # Le plus grand de tous les écrans branchés.
 ROOT="$HOME/.cache/nc/carousel"
-OUT="$ROOT/$(cle_dossier "$src")"
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
    (if $w > 1600 or $h > 1000 then ([2, $w / 1600, $h / 1000] | min | if . < 1 then 1 else . end)
@@ -130,29 +153,32 @@ bake() {
     "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.${out##*.}" && mv "$out.tmp.${out##*.}" "$out"
 }
 
-# Le dossier de Noctalia, comme lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
-
-[ -d "$src" ] || exit 0
-
-mkdir -p "$OUT"
-touch "$OUT"
 # Ancien cache à plat (avant le cache par dossier) : effacé, il ne sert plus
 rm -f "$ROOT"/*.webp "$ROOT"/*.jpg "$ROOT"/*.echec "$ROOT/.size"
-# Plus de 32 dossiers : les plus anciens partent (dates comparées entre elles, jamais à l'horloge)
-ls -1dt -- "$ROOT"/*/ 2>/dev/null | tail -n +33 | while IFS= read -r d; do
-  [ "${d%/}" = "$OUT" ] || rm -rf -- "$d"
+# Dossiers absents : rien à faire pour eux, sans erreur
+actifs=()
+for d in "${dossiers[@]}"; do [ -d "$d" ] && actifs+=("$d"); done
+[ ${#actifs[@]} -gt 0 ] || exit 0
+for d in "${actifs[@]}"; do mkdir -p "$ROOT/$(cle_dossier "$d")" && touch "$ROOT/$(cle_dossier "$d")"; done
+# Plus de 32 dossiers : les plus anciens partent (dates comparées entre elles, jamais à l'horloge), sauf ceux en cours
+ls -1dt -- "$ROOT"/*/ 2>/dev/null | tail -n +33 | while IFS= read -r x; do
+  garde=0
+  for d in "${actifs[@]}"; do [ "${x%/}" = "$ROOT/$(cle_dossier "$d")" ] && garde=1; done
+  [ "$garde" = 1 ] || rm -rf -- "$x"
 done
+
+shopt -s nullglob nocaseglob
+made=0
+for src in "${actifs[@]}"; do
+OUT="$ROOT/$(cle_dossier "$src")"
 # Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
 sig="v5-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
 if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
   rm -f "$OUT"/*.jpg "$OUT"/*.webp
   echo "$sig" > "$OUT/.size"
 fi
-
-shopt -s nullglob nocaseglob
 # Restes d'une découpe interrompue ou en échec
 rm -f "$OUT"/*.tmp.webp
-made=0
 for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
   n="$(basename "$f")"
   tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"; tb="$OUT/$n.B.webp"
@@ -177,6 +203,7 @@ done
 for t in "$OUT"/*.echec; do
   base="$(basename "$t" .echec)"
   [ -e "$src/$base" ] || rm -f "$t"
+done
 done
 [ "$made" -gt 0 ] && t "nc-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)" \
   "nc-carousel-thumbs: $made wallpaper(s) cut into slices (${CW}x${CH} and ${NW}x${NH}, scale $dpr)" && echo
