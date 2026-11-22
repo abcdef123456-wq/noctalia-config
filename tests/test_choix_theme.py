@@ -140,6 +140,42 @@ class HorsEcran(unittest.TestCase):
         ''')
         self.assertEqual(j, [])
 
+    def test_boucle_actif_en_tete_et_fleche_gauche_vers_le_dernier(self):
+        """Thème actif en tête de liste : toujours deux voisines de chaque côté ; ← passe au dernier."""
+        themes = [dict(t, actif=t["nom"] == "alpha") for t in THEMES]
+        j = self.lancer(self.ATTENDRE + '''
+                if (etape === 2) { verifier(fen.centre === 0 && cartes().length === 5, "5 cartes autour du premier, trouvé " + cartes().length)
+                    touches.keyClick(Qt.Key_Left); etape++; ticks = 0; return }
+                if (ticks < 4) return
+                verifier(fen.centre === 4, "← depuis le premier : le dernier, centre=" + fen.centre)
+                touches.keyClick(Qt.Key_Right); touches.keyClick(Qt.Key_Right)
+                verifier(fen.centre === 1, "→ depuis le dernier : le premier puis le deuxième, centre=" + fen.centre)
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', themes=themes)
+        self.assertEqual(j, [])
+
+    def test_trois_themes_pas_de_doublon(self):
+        j = self.lancer(self.ATTENDRE + '''
+                verifier(cartes().length === 3, "3 thèmes : 3 cartes, trouvé " + cartes().length)
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', themes=THEMES[:3])
+        self.assertEqual(j, [])
+
+    def test_nom_court_et_parenthese_dessous(self):
+        themes = [dict(t, libelle="Gamma très long (néons de nuit)") if t["nom"] == "gamma" else t for t in THEMES]
+        j = self.lancer(self.ATTENDRE + '''
+                var mid = trouver(fen.contentItem, "nc-themes-centre-2")
+                var nom = trouver(mid, "nc-themes-nom"), pr = trouver(mid, "nc-themes-precision")
+                verifier(nom.text === "Gamma très long" && nom.elide === Text.ElideNone, "nom court sans points : " + nom.text)
+                verifier(pr.text === "néons de nuit" && pr.y > nom.y, "parenthèse dessous : " + pr.text)
+                verifier(trouver(trouver(fen.contentItem, "nc-themes-autre-1"), "nc-themes-precision").text === "", "sans parenthèse : rien dessous")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', themes=themes)
+        self.assertEqual(j, [])
+
     def test_liste_vide_aucune_carte_aucune_commande(self):
         j = self.lancer(self.ATTENDRE + '''
                 if (etape === 2) { verifier(cartes().length === 0, "aucune carte"); touches.keyClick(Qt.Key_Return); etape++; ticks = 0; return }

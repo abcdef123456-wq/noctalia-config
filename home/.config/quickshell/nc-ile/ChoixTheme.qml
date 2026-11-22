@@ -29,7 +29,12 @@ FloatingWindow {
     property int centre: 0
     property alias cible: carte         // pour le rendu hors écran
 
-    function aller(delta) { ct.centre = Math.max(0, Math.min(ct.themes.length - 1, ct.centre + delta)) }
+    // La liste tourne en boucle : du dernier au premier, et autant de voisines des deux côtés de la carte du milieu
+    function aller(delta) { var n = ct.themes.length; if (n > 0) ct.centre = ((ct.centre + delta) % n + n) % n }
+    function boucle(i) { var n = ct.themes.length; return n > 0 ? (i % n + n) % n : -1 }
+    // « Rétro terminal (phosphore vert) » : le nom court, puis la parenthèse à part
+    function nomCourt(l) { var i = String(l).indexOf(" ("); return i > 0 ? String(l).slice(0, i) : String(l) }
+    function precision(l) { var s = String(l), i = s.indexOf(" ("); return i > 0 ? s.slice(i + 2).replace(/\)\s*$/, "") : "" }
     function valider() {
         if (ct.themes.length === 0 || appliquer.running) return
         appliquer.command = [ct.bin, "set", "STYLE", ct.themes[ct.centre].nom]
@@ -97,8 +102,9 @@ FloatingWindow {
             delegate: Item {
                 id: c
                 readonly property int d: index - (ct.visibles - 1) / 2         // -2..2 : 0 est la carte du milieu
-                readonly property int pos: ct.centre + d
-                readonly property var t: pos >= 0 && pos < ct.themes.length ? ct.themes[pos] : null
+                readonly property int pos: ct.boucle(ct.centre + d)
+                // Moins de thèmes que de cartes : pas deux fois le même thème à l'écran
+                readonly property var t: pos >= 0 && 2 * Math.abs(d) < ct.themes.length ? ct.themes[pos] : null
                 readonly property var col: t ? t.couleurs : ({})
                 readonly property color surface: col.surface || "#1e1f24"
                 readonly property color primaire: col.primary || "#8ab4f8"
@@ -173,15 +179,26 @@ FloatingWindow {
                     }
                 }
                 Text {
+                    objectName: "nc-themes-nom"
                     textFormat: Text.PlainText
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 194; width: parent.width - 16
-                    horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    text: c.t ? c.t.libelle : ""
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 186; width: parent.width - 16
+                    // jamais de points de suspension sur le nom : il rapetisse plutôt pour tenir
+                    horizontalAlignment: Text.AlignHCenter; elide: Text.ElideNone
+                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 9
+                    text: c.t ? ct.nomCourt(c.t.libelle) : ""
                     color: Couleurs.texte; font.pixelSize: 13; font.bold: c.d === 0; font.family: Couleurs.police
                 }
                 Text {
+                    objectName: "nc-themes-precision"
                     textFormat: Text.PlainText
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 214
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 204; width: parent.width - 16
+                    horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                    text: c.t ? ct.precision(c.t.libelle) : ""
+                    color: Couleurs.texteSec; font.pixelSize: 10; font.family: Couleurs.police
+                }
+                Text {
+                    textFormat: Text.PlainText
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 220
                     visible: c.t !== null && c.t.actif === true
                     text: Reglages.t("Actif", "Active")
                     color: c.primaire; font.pixelSize: 11; font.family: Couleurs.police
