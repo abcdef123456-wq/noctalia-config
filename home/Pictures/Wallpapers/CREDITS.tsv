@@ -61,3 +61,19 @@ rose-aube/charing.jpg	https://www.artic.edu/artworks/16544	Claude Monet	Domaine 
 rose-aube/meules.jpg	https://www.artic.edu/artworks/81545	Claude Monet	Domaine public
 rose-aube/turner.jpg	https://www.artic.edu/artworks/29385	Joseph Mallord William Turner	Domaine public
 oled/airglow.jpg	https://images.nasa.gov/details/iss073e0982679	NASA (Station spatiale internationale, JSC)	Domaine public
+apple/apple-liquide.jpg	outils/generer_fonds_2.py (apple-liquide)	noctalia-config	généré par noctalia-config
+apple/apple-collines.jpg	outils/generer_fonds_2.py (apple-collines)	noctalia-config	généré par noctalia-config
+oled/oled-arc.jpg	outils/generer_fonds_2.py (oled-arc)	noctalia-config	généré par noctalia-config
+oled/oled-relief.jpg	outils/generer_fonds_2.py (oled-relief)	noctalia-config	généré par noctalia-config
+tokyo/tokyo-tours.jpg	outils/generer_fonds_2.py (tokyo-tours)	noctalia-config	généré par noctalia-config
+tokyo/tokyo-ruelle.jpg	outils/generer_fonds_2.py (tokyo-ruelle)	noctalia-config	généré par noctalia-config
+synthwave/synthwave-route.jpg	outils/generer_fonds_2.py (synthwave-route)	noctalia-config	généré par noctalia-config
+synthwave/synthwave-ville.jpg	outils/generer_fonds_2.py (synthwave-ville)	noctalia-config	généré par noctalia-config
+retro/retro-oscillo.jpg	outils/generer_fonds_2.py (retro-oscillo)	noctalia-config	généré par noctalia-config
+retro/retro-phosphore.jpg	outils/generer_fonds_2.py (retro-phosphore)	noctalia-config	généré par noctalia-config
+catppuccin/catppuccin-nuages.jpg	outils/generer_fonds_2.py (catppuccin-nuages)	noctalia-config	généré par noctalia-config
+catppuccin/catppuccin-lune.jpg	outils/generer_fonds_2.py (catppuccin-lune)	noctalia-config	généré par noctalia-config
+dracula/dracula-chateau.jpg	outils/generer_fonds_2.py (dracula-chateau)	noctalia-config	généré par noctalia-config
+dracula/dracula-chauves.jpg	outils/generer_fonds_2.py (dracula-chauves)	noctalia-config	généré par noctalia-config
+nord/nord-aurore.jpg	outils/generer_fonds_2.py (nord-aurore)	noctalia-config	généré par noctalia-config
+nord/nord-banquise.jpg	outils/generer_fonds_2.py (nord-banquise)	noctalia-config	généré par noctalia-config
