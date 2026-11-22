@@ -4,7 +4,7 @@
   outils/rendu-ile.py --sortie DOSSIER [--reglages FICHIER.conf] [--palette palette-ile.json] ETAT...
 
 ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), page (la page Système ouverte),
-recherche (Spotlight avec un texte tapé). Un PNG par état : DOSSIER/ETAT.png.
+recherche (Spotlight avec un texte tapé), agent (pilule d'un agent factice au travail). Un PNG par état : DOSSIER/ETAT.png.
 --polices : dossier de polices lu en plus, en lecture seule (défaut : $XDG_DATA_HOME/fonts ou ~/.local/share/fonts).
 --echelle N : 1 (défaut), 2 ou 3 ; l'image est N fois plus grande, dessinée à cette taille (pas agrandie après coup).
 Le système est factice (Processeur, 8 cœurs, 16 Go, 45 °C, disque 40 %, batterie 80 %, ni Wi-Fi ni météo ni musique réels) :
@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes", "epinglee")
+ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes", "epinglee", "agent")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -66,6 +66,9 @@ ACTIONS = {
     "bureau": "",                                                # widgets du bureau : l'île reste fermée
     "themes": "racine.themesOuvert = true",
     "epinglee": 'racine.epingler(racine.epingleDossier + "/EssaiEpi10.png")',
+    # un agent factice qui travaille : l'heure, l'étincelle et une étape longue (coupée à 200 px) dans la pilule
+    "agent": 'Agents.donnees = { sessions: { a: { id: "a", agent: "claude", etat: "travail", maj: Date.now() / 1000,'
+             ' etape: "Lance : Vérifier fiche + aperçu du rendu" } }, demandes: {} }',
 }
 # Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; les widgets et le carrousel
 # sont des fenêtres à part

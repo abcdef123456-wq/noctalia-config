@@ -28,6 +28,16 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
+    // Bande réservée pour l'île sur chaque écran (ILE_BANDE=oui, thèmes à barre en bas ou sur un côté) : à « non »,
+    // aucune fenêtre n'est créée
+    LazyLoader {
+        id: chargeurBande
+        active: Reglages.val("ILE_BANDE", "non") === "oui"
+        Variants {
+            model: Quickshell.screens
+            ReserveIle {}
+        }
+    }
     // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : chargée seulement à l'ouverture.
     // Elle utilise la capture d'écran de Quickshell, absente de certains paquets : sans elle, seule la vue manque
     // (un message le dit) ; déclarée ici directement, c'est toute l'île qui ne se chargeait plus.

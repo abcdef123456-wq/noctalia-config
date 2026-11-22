@@ -297,6 +297,9 @@ PanelWindow {
             id: compact
             anchors.centerIn: parent
             width: parent.width
+            // Un texte qui s'allonge (étape d'un agent) est là tout de suite, l'île le rejoint avec son ressort : le contenu
+            // se réduit le temps qu'elle grandisse, au lieu d'être rogné des deux côtés (« 6:50 » ; long avec ILE_ANIM=doux)
+            scale: Math.max(0, Math.min(1, (ile.width - 32) / (compact.largeur - 32)))
             opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)
                      : (ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))
             Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }

@@ -35,7 +35,8 @@
     "FENETRES_COINS_FORME": "carres",
     "FENETRES_MAITRE_ORIENTATION": "bas",
     "FENETRES_ESPACE": "0",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {

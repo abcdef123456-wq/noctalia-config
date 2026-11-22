@@ -1,19 +1,21 @@
 """Table « noctalia » d'un thème : un réglage de la personne gagne sur le thème, et seules les clés de la liste blanche
-passent (jamais compositor_blur, ni flou, ni verrou, ni fond). apple et oled sont figés à l'octet (contenu de A7 : barre, bureaux, dock). Faux HOME, faux noctalia ; jamais le vrai HOME."""
+passent (jamais compositor_blur, ni flou, ni verrou, ni fond). apple et oled sont figés à l'octet (contenu de A7 : barre, bureaux, dock ;
+barres épaissies pour que l'île fermée y tienne, dock visible d'apple qui réserve sa place : test_defauts_ecran_v3). Faux HOME, faux noctalia ; jamais le vrai HOME."""
 import re
 import unittest
 
 from tests import test_themes as tt
 
-# zy-reglages.toml d'apple et d'oled tels qu'ils sortaient de 6c144c5 (sans police : fc-list est un faux vide)
+# zy-reglages.toml d'apple et d'oled tels qu'ils sortaient de 6c144c5 (sans police : fc-list est un faux vide), barres
+# épaissies et reserve_space d'apple en plus (défauts vus à l'écran, test_defauts_ecran_v3)
 ENTETE = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n\n"
 APPLE = ENTETE + ('[lockscreen]\nblur_intensity = 0.35\ntransition = ["fade"]\n\n'
-                  '[dock]\nposition = "bottom"\nenabled = true\nauto_hide = false\nmagnification = true\nicon_size = 56\n\n'
-                  '[bar.default]\ncapsule = false\nbackground_opacity = 0.55\nposition = "top"\nmargin_edge = 0\nthickness = 30\n\n'
+                  '[dock]\nposition = "bottom"\nenabled = true\nauto_hide = false\nmagnification = true\nicon_size = 56\nreserve_space = true\n\n'
+                  '[bar.default]\ncapsule = false\nbackground_opacity = 0.55\nposition = "top"\nmargin_edge = 0\nthickness = 40\n\n'
                   '[widget.workspaces]\nstyle = "minimal"\nshow_labels = false\n\n'
                   '[wallpaper]\ntransition = ["fade"]\ndirectory = "@FONDS@"\n')
 OLED = ENTETE + ('[theme]\npure_black_dark = true\n\n'
-                 '[bar.default]\nposition = "top"\nmargin_edge = 6\nthickness = 26\ncapsule = false\nbackground_opacity = 0.0\n\n'
+                 '[bar.default]\nposition = "top"\nmargin_edge = 6\nthickness = 34\ncapsule = false\nbackground_opacity = 0.0\n\n'
                  '[widget.workspaces]\nstyle = "focus_hint"\nshow_labels = true\n\n'
                  '[dock]\nenabled = false\n\n[wallpaper]\ndirectory = "@FONDS@"\n')
 

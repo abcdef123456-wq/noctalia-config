@@ -54,7 +54,7 @@
       "background_opacity": 0.55,
       "position": "top",
       "margin_edge": 0,
-      "thickness": 30
+      "thickness": 40
     },
     "widget.workspaces": {
       "style": "minimal",

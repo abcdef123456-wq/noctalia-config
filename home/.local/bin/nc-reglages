@@ -523,6 +523,11 @@ REGLAGES = [
     R("ILE_CONTOUR_FERMEE", "Île", L("Contour et lueur aussi sur l'île fermée", "Outline and glow on the closed island too"), "ouinon", "non",
       L("Le contour (et la lueur si elle est allumée) entoure aussi la pilule fermée. Rien ne bouge au repos.",
         "The outline (and the glow if on) also surrounds the closed pill. Nothing moves at rest.")),
+    R("ILE_BANDE", "Île", L("Bande réservée pour l'île", "Reserved strip for the island"), "ouinon", "non",
+      L("Une bande vide en haut de l'écran garde la place de l'île : les fenêtres ne passent plus dessous. Pour une barre "
+        "en bas ou sur un côté (les thèmes qui en ont une la mettent d'eux-mêmes).",
+        "An empty strip at the top of the screen keeps the island's room: windows no longer go under it. For a bar at the "
+        "bottom or on a side (themes with one turn it on themselves).")),
     R("ILE_MAJUSCULES", "Île", L("Textes en majuscules", "Uppercase texts"), "ouinon", "non",
       L("Les textes de l'île s'écrivent en majuscules.", "The island's texts are written in capitals.")),
     R("ILE_ACCENTS", "Île", L("Jauges et barres", "Gauges and bars"), "choix", "texte",
@@ -1898,7 +1903,7 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
-    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
+    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
@@ -2893,18 +2898,19 @@ def appliquer_terminal(vals):
     subprocess.run(["pkill", "-USR1", "-x", "kitty"], capture_output=True)      # kitty relit sa config
 
 
-def fin_barre(chemin):
-    """La liste « end » de [bar.default] dans config.toml. Avec tomllib (Python 3.11+) ou tomli : lecture complète ;
-    sans (Python < 3.11 sans tomli) : repli qui lit seulement cette liste de textes entre guillemets (KeyError si absente)."""
+def fin_barre(chemin, cle="end"):
+    """La liste « end » (ou « start », « center » : cle) de [bar.default] dans config.toml. Avec tomllib (Python 3.11+)
+    ou tomli : lecture complète ; sans (Python < 3.11 sans tomli) : repli qui lit seulement cette liste de textes entre
+    guillemets (KeyError si absente)."""
     if tomllib:
         with open(chemin, "rb") as f:
-            return tomllib.load(f)["bar"]["default"]["end"]
+            return tomllib.load(f)["bar"]["default"][cle]
     with open(chemin, encoding="utf-8") as f:
         texte = f.read()
     sec = re.search(r'^\[bar\.default\][ \t]*\n(.*?)(?=^\[|\Z)', texte, re.M | re.S)
-    m = sec and re.search(r'^end\s*=\s*\[(.*?)\]\s*(?:#.*)?$', sec.group(1), re.M | re.S)
+    m = sec and re.search(r'^' + cle + r'\s*=\s*\[(.*?)\]\s*(?:#.*)?$', sec.group(1), re.M | re.S)
     if not m:
-        raise KeyError("end")
+        raise KeyError(cle)
     return re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
 
 
@@ -3064,6 +3070,27 @@ def appliquer_noctalia(vals):
         mettre("wallpaper", "transition", [])
         mettre("lockscreen", "transition", [])
         mettre("dock", "magnification", False)
+
+    # Dock toujours visible (DOCK_AUTO=non ou auto_hide du thème) : il réserve sa place, les fenêtres ne passent plus
+    # dessous (reserve_space, docs.noctalia.dev/noctalia/dock/). Dock caché : rien ne change
+    dock = tables.get("dock", {})
+    if dock.get("enabled", True) and not dock.get("auto_hide", True):
+        mettre("dock", "reserve_space", True)
+    # Barre sur un côté : sa composition en colonne, après les listes de la personne (rien ne la défait). Ni titre de
+    # fenêtre ni jauges système, rognés en colonne ; au moins 52 px de large. L'horloge se met d'elle-même sur deux lignes
+    # (widget clock : vertical_format vide = format, « : » changés en retours à la ligne). En haut ou en bas : rien
+    barre = tables.get("bar.default", {})
+    if barre.get("position") in ("left", "right"):
+        for cote in ("start", "center", "end"):
+            try:
+                liste = barre[cote] if cote in barre else fin_barre(os.path.join(NOCTALIA_DIR, "config.toml"), cote)
+            except (OSError, KeyError, ValueError):
+                continue
+            garde = [w for w in liste if w not in ("nc/fenetres:titre", "active_window", "group:sys", "cpu", "temp", "ram")]
+            if garde != liste:
+                mettre("bar.default", cote, garde)
+        if barre.get("thickness", 0) < 52:
+            mettre("bar.default", "thickness", 52)
 
     texte = ""
     if tables:

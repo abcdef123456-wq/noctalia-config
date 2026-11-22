@@ -32,7 +32,8 @@
     "FENETRES_OMBRE_DECALAGE": "bas",
     "FENETRES_DISPOSITION": "scrolling",
     "FENETRES_COINS_FORME": "rond",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {

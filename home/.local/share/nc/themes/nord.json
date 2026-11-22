@@ -33,7 +33,8 @@
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",
     "FENETRES_MAITRE_ORIENTATION": "gauche",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {
