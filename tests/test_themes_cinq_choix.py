@@ -47,8 +47,8 @@ class CinqChoix(unittest.TestCase):
     def test_barres_en_bas_et_sur_un_cote(self):
         pos = [c[0][0] for c in self.t.values()]
         self.assertGreaterEqual(pos.count("bottom"), 2)
-        # Recettes : kanagawa est passé en bandeau du haut ; nord reste sur le côté (ocean et matrice suivront)
-        self.assertGreaterEqual(sum(p in ("left", "right") for p in pos), 1)
+        # Recettes : nord et matrice sur le côté (barres verticales) ; kanagawa en bandeau du haut, ocean en bas
+        self.assertGreaterEqual(sum(p in ("left", "right") for p in pos), 2)
 
 
 if __name__ == "__main__":

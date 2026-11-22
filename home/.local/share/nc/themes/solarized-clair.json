@@ -43,10 +43,51 @@
   "noctalia": {
     "bar.default": {
       "position": "top",
-      "margin_edge": 0,
-      "thickness": 40,
-      "capsule": false,
-      "background_opacity": 1.0
+      "margin_edge": 6,
+      "margin_ends": 14,
+      "thickness": 44,
+      "capsule": true,
+      "background_opacity": 0.0,
+      "capsule_thickness": 0.92,
+      "capsule_padding": 16,
+      "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ]
+        },
+        {
+          "id": "fenetre",
+          "members": [
+            "nc/fenetres:titre"
+          ]
+        },
+        {
+          "id": "plateau",
+          "members": [
+            "tray"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "group:gauche",
+        "group:fenetre"
+      ],
+      "center": [],
+      "end": [
+        "group:plateau",
+        "group:status",
+        "group:jour"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
@@ -56,6 +97,10 @@
     "dock": {
       "margin_edge": 0,
       "radius": 0
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%A %d %B}"
     }
   },
   "theme_sync": {

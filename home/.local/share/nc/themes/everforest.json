@@ -35,21 +35,65 @@
     "ANIM_BUREAUX": "slidefade",
     "VERROU_COULEUR": "accent",
     "DOCK": "non",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "non"
   },
   "noctalia": {
     "bar.default": {
-      "position": "bottom",
-      "margin_edge": 10,
-      "thickness": 32,
+      "position": "top",
+      "margin_edge": 0,
+      "margin_ends": 12,
+      "thickness": 40,
       "capsule": true,
-      "background_opacity": 1.0,
-      "margin_ends": 40
+      "background_opacity": 0.0,
+      "capsule_thickness": 0.8,
+      "capsule_padding": 12,
+      "widget_spacing": 8,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ]
+        },
+        {
+          "id": "fenetre",
+          "members": [
+            "nc/fenetres:titre"
+          ]
+        },
+        {
+          "id": "plateau",
+          "members": [
+            "tray"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "group:gauche",
+        "group:fenetre"
+      ],
+      "center": [],
+      "end": [
+        "group:plateau",
+        "group:status",
+        "group:jour"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": true,
       "label_source": "name"
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%a %d %b}"
     }
   },
   "theme_sync": {

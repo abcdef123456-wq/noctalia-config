@@ -42,13 +42,59 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
+      "margin_ends": 8,
       "thickness": 40,
-      "capsule": false,
-      "background_opacity": 1.0
+      "capsule": true,
+      "background_opacity": 1.0,
+      "capsule_fill": "surface_variant",
+      "capsule_opacity": 1.0,
+      "capsule_thickness": 0.78,
+      "capsule_padding": 12,
+      "widget_spacing": 8,
+      "capsule_group": [
+        {
+          "id": "bureaux",
+          "members": [
+            "workspaces"
+          ]
+        },
+        {
+          "id": "fenetre",
+          "members": [
+            "nc/fenetres:titre"
+          ]
+        },
+        {
+          "id": "plateau",
+          "members": [
+            "tray"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "group:bureaux",
+        "group:fenetre"
+      ],
+      "center": [],
+      "end": [
+        "group:plateau",
+        "group:status",
+        "group:jour"
+      ]
     },
     "widget.workspaces": {
       "style": "minimal",
       "show_labels": false
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%A %d %B}"
     }
   },
   "theme_sync": {

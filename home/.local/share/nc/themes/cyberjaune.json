@@ -44,15 +44,33 @@
     "bar.default": {
       "position": "bottom",
       "margin_edge": 6,
-      "thickness": 30,
-      "capsule": true,
-      "background_opacity": 1.0
+      "margin_ends": 6,
+      "thickness": 34,
+      "capsule": false,
+      "background_opacity": 1.0,
+      "widget_spacing": 12,
+      "font_weight": 700,
+      "start": [
+        "logo",
+        "workspaces",
+        "nc/fenetres:titre"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:status",
+        "t-heure"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": true,
       "label_source": "id",
       "pill_scale": 1.2
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M  %d.%m}"
     }
   },
   "theme_sync": {

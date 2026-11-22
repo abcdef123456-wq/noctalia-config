@@ -41,14 +41,31 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
+      "margin_ends": 6,
       "thickness": 40,
       "capsule": false,
-      "background_opacity": 1.0
+      "background_opacity": 1.0,
+      "widget_spacing": 8,
+      "font_weight": 400,
+      "start": [
+        "workspaces",
+        "nc/fenetres:titre"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:status",
+        "t-date"
+      ]
     },
     "widget.workspaces": {
       "style": "minimal",
       "show_labels": true,
       "label_source": "id"
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%Y-%m-%d}"
     }
   },
   "theme_sync": {

@@ -34,19 +34,37 @@
     "FENETRES_OMBRE": "14",
     "ANIM_BUREAUX": "slidevert",
     "VERROU_COULEUR": "accent",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {
-      "position": "top",
-      "margin_edge": 0,
-      "thickness": 40,
-      "capsule": false,
-      "background_opacity": 1.0
+      "position": "left",
+      "margin_edge": 8,
+      "margin_ends": 24,
+      "thickness": 52,
+      "capsule": true,
+      "background_opacity": 0.92,
+      "capsule_fill": "surface_variant",
+      "widget_spacing": 8,
+      "start": [
+        "logo",
+        "workspaces"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:status",
+        "t-heure"
+      ]
     },
     "widget.workspaces": {
       "style": "focus_hint",
       "show_labels": false
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M}"
     }
   },
   "theme_sync": {

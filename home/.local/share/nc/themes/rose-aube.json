@@ -34,19 +34,34 @@
     "FENETRES_OMBRE": "18",
     "ANIM_BUREAUX": "fade",
     "VERROU_COULEUR": "blanc",
-    "DOCK": "oui",
+    "DOCK": "non",
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "non",
     "DOCK_TAILLE": "48",
-    "THEME_MODE": "light"
+    "THEME_MODE": "light",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {
-      "position": "top",
+      "position": "bottom",
       "margin_edge": 0,
-      "thickness": 40,
+      "margin_ends": 0,
+      "thickness": 32,
       "capsule": false,
-      "background_opacity": 1.0
+      "background_opacity": 0.94,
+      "widget_spacing": 10,
+      "start": [
+        "logo",
+        "workspaces"
+      ],
+      "center": [
+        "t-dock"
+      ],
+      "end": [
+        "tray",
+        "group:status",
+        "t-heure"
+      ]
     },
     "widget.workspaces": {
       "style": "focus_hint",
@@ -55,6 +70,19 @@
     },
     "dock": {
       "radius": 30
+    },
+    "widget.t-dock": {
+      "type": "taskbar",
+      "show_running": true,
+      "show_window_title": false,
+      "show_active_indicator": true,
+      "active_indicator_color": "primary",
+      "item_spacing": 10,
+      "icon_scale": 1.1
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M}"
     }
   },
   "theme_sync": {

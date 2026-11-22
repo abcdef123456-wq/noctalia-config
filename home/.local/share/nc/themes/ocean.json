@@ -42,16 +42,67 @@
   },
   "noctalia": {
     "bar.default": {
-      "position": "right",
-      "margin_edge": 10,
-      "thickness": 36,
+      "position": "bottom",
+      "margin_edge": 8,
+      "margin_ends": 16,
+      "thickness": 40,
       "capsule": true,
-      "background_opacity": 1.0
+      "background_opacity": 0.0,
+      "capsule_padding": 12,
+      "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "applis",
+          "members": [
+            "logo",
+            "workspaces",
+            "t-applis"
+          ]
+        },
+        {
+          "id": "heure",
+          "members": [
+            "t-heure"
+          ]
+        },
+        {
+          "id": "etat",
+          "members": [
+            "tray",
+            "network",
+            "bluetooth",
+            "volume",
+            "nc/batterie:batterie"
+          ]
+        }
+      ],
+      "start": [
+        "group:applis"
+      ],
+      "center": [
+        "group:heure"
+      ],
+      "end": [
+        "group:etat"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": false,
       "pill_scale": 1.2
+    },
+    "widget.t-applis": {
+      "type": "taskbar",
+      "show_running": true,
+      "only_active_workspace": true,
+      "show_window_title": false,
+      "show_active_indicator": true,
+      "active_indicator_color": "primary",
+      "item_spacing": 8
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M · %a %d}"
     }
   },
   "theme_sync": {

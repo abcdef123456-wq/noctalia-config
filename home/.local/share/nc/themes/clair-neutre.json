@@ -41,15 +41,30 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
+      "margin_ends": 10,
       "thickness": 40,
       "capsule": false,
-      "background_opacity": 1.0
+      "background_opacity": 0.97,
+      "widget_spacing": 12,
+      "start": [
+        "workspaces"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:status",
+        "t-date"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": false,
       "pill_scale": 1.0,
       "active_pill_size": 2.2
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%a %d %b}"
     }
   },
   "theme_sync": {

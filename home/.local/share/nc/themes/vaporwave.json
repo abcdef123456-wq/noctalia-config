@@ -37,16 +37,38 @@
     "DOCK": "oui",
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "non",
-    "DOCK_TAILLE": "44"
+    "DOCK_TAILLE": "44",
+    "BARRE_SYSTEME": "non"
   },
   "noctalia": {
     "bar.default": {
       "position": "top",
       "margin_edge": 8,
+      "margin_ends": 24,
       "thickness": 38,
       "capsule": true,
-      "background_opacity": 1.0,
-      "margin_ends": 24
+      "background_opacity": 0.0,
+      "capsule_padding": 14,
+      "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "un",
+          "members": [
+            "workspaces",
+            "tray",
+            "network",
+            "bluetooth",
+            "volume",
+            "nc/batterie:batterie",
+            "t-date"
+          ]
+        }
+      ],
+      "start": [],
+      "center": [],
+      "end": [
+        "group:un"
+      ]
     },
     "widget.workspaces": {
       "style": "minimal",
@@ -56,6 +78,10 @@
     "dock": {
       "margin_edge": 14,
       "radius": 24
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%d/%m}"
     }
   },
   "theme_sync": {
