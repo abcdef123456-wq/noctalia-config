@@ -269,6 +269,13 @@ Item {
     property var usage: ({})
     property var fichiers: []
     property string calcul: ""
+    // « heure tokyo » : les zones de zone1970.tab (lues au premier « heure … »), puis la réponse de date pour la zone demandée
+    property bool zonesVoulues: false
+    property var zonesHeure: []
+    property bool zonesIllisibles: false
+    property string heureZone: ""
+    property string heureSortie: ""
+    readonly property string heureVille: Saisies.villeHeure(q)
     property var resultats: []
     // Aide sur la config : l'index (nc-aide-config index, refait seulement si une source a changé), et la réponse affichée
     readonly property bool aideActive: Reglages.val("SPOTLIGHT_AIDE", "oui") !== "non"
@@ -632,6 +639,24 @@ Item {
             }
         }
     }
+    FileView {
+        id: fichierZones
+        path: r.zonesVoulues ? "/usr/share/zoneinfo/zone1970.tab" : ""      // lu une seule fois, au premier « heure … » tapé
+        printErrors: false
+        onLoaded: { r.zonesHeure = Saisies.listeZones(text()); r.zonesIllisibles = r.zonesHeure.length === 0; attente.restart() }
+        onLoadFailed: { r.zonesIllisibles = true; r.chercher() }
+    }
+    Process {
+        id: lireHeure
+        property string zone: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (lireHeure.zone !== r.heureZone) return
+                r.heureSortie = text.trim()
+                r.chercher()
+            }
+        }
+    }
     Process {
         id: calculer
         property string pour: ""
@@ -708,6 +733,17 @@ Item {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
+            }
+            if (r.heureVille !== "") {
+                r.zonesVoulues = true
+                // La zone vient toujours de la liste lue ; la commande est une liste (jamais de shell), TZ n'est qu'un argument de env
+                let zone = Saisies.zoneVille(r.heureVille, r.zonesHeure)
+                if (zone !== "") {
+                    r.heureZone = zone; r.heureSortie = ""
+                    lireHeure.zone = zone
+                    lireHeure.command = ["env", "TZ=" + zone, "date", "+%H:%M|%u|%d|%m|%z"]
+                    lireHeure.running = true
+                }
             }
             let date = Saisies.dateQalc(q, Date.now())      // « jours jusqu'au 25/12 », « dans 45 jours » : réécrits pour qalc
             if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && (date !== "" || /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q))) {
@@ -1044,6 +1080,16 @@ Item {
             return
         }
 
+        // « heure tokyo » : l'heure et la date de la ville, l'écart avec ici ; Entrée copie le texte
+        if (heureVille !== "") {
+            let zone = zonesHeure.length ? Saisies.zoneVille(heureVille, zonesHeure) : ""
+            let li = zone !== "" && zone === heureZone
+                ? Saisies.ligneHeure(heureSortie, Saisies.nomAffiche(heureVille), Reglages.val("ILE_HEURE", "24") === "12", Reglages.t("fr", "en") === "en", -new Date().getTimezoneOffset()) : null
+            if (li) out.push({ titre: li.texte, sous: Reglages.t("Heure · ", "Time · ") + li.ecart + Reglages.t(" par rapport à ici · Entrée pour copier", " from here · Enter to copy"),
+                               glyphe: "schedule", s: 1000, f: () => Quickshell.execDetached(["wl-copy", "--", li.texte]) })
+            else if (zonesIllisibles || zonesHeure.length && zone === "")
+                out.push({ titre: Reglages.t("Ville inconnue", "Unknown city"), sous: Saisies.nomAffiche(heureVille), glyphe: "schedule", s: 1000, garder: true, f: () => {} })
+        }
         // Calcul en tête
         if (calcul !== "") {
             let res = calcul
