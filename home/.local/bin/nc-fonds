@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# nc-fonds : tes fonds d'écran à toi, rangés à part dans « Mes fonds » : le sous-dossier mes-fonds du dossier des fonds
+# en cours (~/Pictures/Wallpapers/<thème>/mes-fonds dans un thème, ~/Pictures/Wallpapers/mes-fonds dans la base).
+# Rien ne le livre, install.sh et nc-maj n'y touchent jamais. Boutons du carrousel (Super + W) et de nc-reglages → Fonds d'écran.
+#   nc-fonds dossier                 le chemin de « Mes fonds » (rien n'est créé)
+#   nc-fonds ouvrir                  le crée s'il manque, puis l'ouvre dans le gestionnaire de fichiers
+#   nc-fonds ajouter [IMAGE…]        COPIE les images dans « Mes fonds » (sans image : le sélecteur de fichiers) ; refus
+#                                    clair si ce n'est pas une image, avertissement (pas de refus) sous 2560 x 1600
+#   nc-fonds retirer IMAGE           met à la corbeille un fond de « Mes fonds » (jamais un fond livré)
+# --notifier (avec ajouter) : le message part aussi en notification (le carrousel s'est fermé pour le sélecteur).
+# Code 0 si c'est fait (ou annulé), 1 si refusé (message sur la sortie d'erreur), 2 pour un usage inconnu.
+set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+IM=$(command -v magick >/dev/null && echo magick || echo convert)
+EXTS="jpg jpeg png webp bmp avif jxl"          # celles que nc-carousel-thumbs découpe
+usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE"; }
+refus() { echo "$1" >&2; exit 1; }
+
+# Le dossier des fonds lu comme Noctalia : une seule règle, celle de nc-carousel-thumbs
+src=$("${0%/*}/nc-carousel-thumbs" --dossier 2>/dev/null) || src=""
+[ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
+mes="$src/mes-fonds"
+
+notifier=0
+ajouter() {
+  local f n e base ext dest i w h copies=0 refuses=0 msg="" avert=""
+  if [ $# -eq 0 ]; then
+    local titre sep=$'\x1f' sortie
+    titre="$(t "Ajouter un fond d'écran" "Add a wallpaper")"
+    if command -v zenity >/dev/null; then
+      sortie=$(zenity --file-selection --multiple "--separator=$sep" "--title=$titre" \
+        "--file-filter=$(t "Images" "Images") | *.jpg *.jpeg *.png *.webp *.bmp *.avif *.jxl *.JPG *.JPEG *.PNG *.WEBP" 2>/dev/null) || return 0
+      IFS="$sep" read -r -a choisis <<<"$sortie"
+    elif command -v kdialog >/dev/null; then
+      sortie=$(kdialog --getopenfilename --multiple --separate-output "$HOME" "image/jpeg image/png image/webp image/bmp image/avif image/jxl" --title "$titre" 2>/dev/null) || return 0
+      mapfile -t choisis <<<"$sortie"
+    else
+      refus "$(t "Aucun sélecteur de fichiers : installe zenity, ou mets tes images dans $mes." "No file picker: install zenity, or put your pictures in $mes.")"
+    fi
+    set -- "${choisis[@]}"
+    [ $# -gt 0 ] && [ -n "$1" ] || return 0
+  fi
+  mkdir -p -- "$mes" || refus "$(t "Impossible de créer $mes." "Cannot create $mes.")"
+  for f in "$@"; do
+    n="${f##*/}"
+    e="${n##*.}"; e="${e,,}"
+    if [ ! -f "$f" ] || [ "$e" = "$n" ] || [[ " $EXTS " != *" $e "* ]] || ! read -r w h < <("$IM" identify -format '%w %h\n' -- "${f}[0]" 2>/dev/null); then
+      echo "$(t "« $n » n'est pas une image (jpg, png, webp, bmp, avif, jxl) : rien n'est copié." "\"$n\" is not a picture (jpg, png, webp, bmp, avif, jxl): nothing copied.")" >&2
+      refuses=$((refuses + 1)); continue
+    fi
+    if [ "$w" -lt 2560 ] || [ "$h" -lt 1600 ]; then
+      avert="$(t "Attention : « $n » fait ${w} x ${h}, moins que 2560 x 1600 : il peut paraître flou." "Note: \"$n\" is ${w} x ${h}, less than 2560 x 1600: it may look blurry.")"
+      echo "$avert"
+    fi
+    # Même nom, autre image : un numéro ; même image : rien à faire
+    base="${n%.*}"; ext="${n##*.}"; dest="$mes/$n"; i=2
+    while [ -e "$dest" ] && ! cmp -s -- "$f" "$dest"; do dest="$mes/$base-$i.$ext"; i=$((i + 1)); done
+    if [ ! -e "$dest" ]; then
+      # Copie sous un nom que personne ne lit (.part), puis renommage : jamais d'image à moitié écrite dans le carrousel
+      cp -- "$f" "$mes/.${dest##*/}.part" && mv -f -- "$mes/.${dest##*/}.part" "$dest" ||
+        { rm -f -- "$mes/.${dest##*/}.part"; refus "$(t "Copie impossible de « $n »." "Cannot copy \"$n\".")"; }
+    fi
+    copies=$((copies + 1))
+  done
+  if [ "$copies" -gt 0 ]; then
+    # restart, pas start : un passage en cours (réveillé par le début de la copie) pourrait ne pas voir l'image finie
+    systemctl --user restart --no-block nc-carousel-thumbs.service >/dev/null 2>&1 || true
+    msg="$(t "$copies fond(s) ajouté(s) dans Mes fonds." "$copies wallpaper(s) added to My wallpapers.")"
+    [ "$notifier" = 1 ] && notify-send -a "$(t "Fonds d'écran" "Wallpapers")" -i preferences-desktop-wallpaper "$msg" "$avert" 2>/dev/null
+    echo "$msg"
+  fi
+  if [ "$refuses" -gt 0 ]; then
+    [ "$notifier" = 1 ] && notify-send -a "$(t "Fonds d'écran" "Wallpapers")" -i dialog-warning \
+      "$(t "$refuses fichier(s) refusé(s) : ce ne sont pas des images." "$refuses file(s) refused: not pictures.")" 2>/dev/null
+    [ "$copies" -gt 0 ] || exit 1
+  fi
+  return 0
+}
+
+case "${1:-}" in
+  dossier) printf '%s\n' "$mes" ;;
+  ouvrir)
+    mkdir -p -- "$mes" || refus "$(t "Impossible de créer $mes." "Cannot create $mes.")"
+    setsid xdg-open "$mes" >/dev/null 2>&1 < /dev/null &
+    echo "$(t "Mes fonds : $mes" "My wallpapers: $mes")" ;;
+  ajouter)
+    shift
+    [ "${1:-}" = --notifier ] && { notifier=1; shift; }
+    ajouter "$@" ;;
+  retirer)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    # Seulement un fichier rangé directement dans un mes-fonds : un fond livré ne part jamais ainsi (il reviendrait)
+    p=$(realpath -e -- "$2" 2>/dev/null) || refus "$(t "Fichier introuvable." "File not found.")"
+    [ -f "$p" ] && [ "$(basename -- "$(dirname -- "$p")")" = mes-fonds ] ||
+      refus "$(t "Seuls tes fonds (Mes fonds) vont à la corbeille ; un fond livré se masque." "Only your wallpapers (My wallpapers) go to the trash; a bundled one is hidden instead.")"
+    gio trash -- "$p" 2>/dev/null || refus "$(t "Corbeille impossible (gio absent ?) : rien n'est supprimé." "Cannot move to the trash (gio missing?): nothing deleted.")"
+    echo "$(t "« ${p##*/} » est à la corbeille." "\"${p##*/}\" moved to the trash.")" ;;
+  -h|--help|aide) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
+exit 0

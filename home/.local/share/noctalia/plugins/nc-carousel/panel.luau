@@ -10,6 +10,8 @@
 -- Ouverture : noctalia msg panel-toggle nc/carousel:main
 -- Deux groupes, jamais d'autres fonds : ceux du dossier de Noctalia (le thème, ou la racine dans la base), puis « Mes fonds »
 -- (son sous-dossier mes-fonds, à toi, qu'aucune mise à jour ne touche). Un titre au-dessus de la bande dit le groupe.
+-- Sous la bande : « Ajouter un fond… » (copie dans Mes fonds), « Ouvrir le dossier », et pour un de TES fonds au centre,
+-- « Mettre à la corbeille ». Tout passe par ~/.local/bin/nc-fonds (les mêmes boutons sont dans nc-reglages → Fonds d'écran).
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
 local function env(nom)
@@ -35,6 +37,7 @@ local EN = langue() == "en"
 local function tr(fr, en) return EN and en or fr end
 
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")
+local NC_FONDS = noctalia.expandPath("~/.local/bin/nc-fonds")
 
 -- DEBUT cle
 -- Cache PAR DOSSIER : THUMBS/<clé>/. Clé : chemin du dossier sans « / » final, chaque octet hors [A-Za-z0-9._-] écrit %XX.
@@ -120,6 +123,7 @@ local eco = false
 
 local all = {}        -- { path, file, title, thumbW, thumbN, g, perso, rang, total }
 local dansTheme = false
+local message = nil   -- dernière réponse de nc-fonds, sous la bande
 local shown = {}      -- liste filtrée par la recherche
 local target = 1      -- index cible, non replié (peut dépasser n : carrousel infini)
 local pos = 1         -- position affichée (réelle), tend vers target
@@ -315,11 +319,49 @@ local function titreGroupe()
   return nom .. "  ·  " .. w.rang .. " / " .. w.total
 end
 
+-- Réponse de nc-fonds (dernière ligne : le message, celui d'erreur s'il a échoué), puis liste relue
+local function relire(r)
+  local t = r and ((r.exitCode == 0 and r.stdout) or r.stderr or r.stdout) or ""
+  message = noctalia.string.trim(t):match("([^\n]*)$")
+  if message == "" then message = nil end
+  loadList()
+  filter()
+  render()
+end
+
+local function bouton(cle, texte, glyphe, action)
+  return ui.button({ key = cle, text = texte, glyph = glyphe, variant = "ghost", controlSize = "sm", onClick = action })
+end
+
+-- Sous la bande : ajouter (le panneau se ferme : le sélecteur de fichiers passerait dessous), ouvrir le dossier, et la
+-- corbeille pour un fond à toi (jamais pour un fond livré)
+local function boutons()
+  local kids = {
+    bouton("ajouter", tr("Ajouter un fond…", "Add a wallpaper…"), "photo-plus", function()
+      panel.close()
+      noctalia.runAsync({ NC_FONDS, "ajouter", "--notifier" }, function() end, 900000)
+    end),
+    bouton("ouvrir", tr("Ouvrir le dossier", "Open the folder"), "folder-open", function()
+      panel.close()
+      noctalia.runAsync({ NC_FONDS, "ouvrir" }, function() end, 15000)
+    end),
+  }
+  local w = #shown > 0 and shown[wrap(target)]
+  if w and w.perso then
+    table.insert(kids, bouton("corbeille", tr("Mettre à la corbeille", "Move to trash"), "trash", function()
+      noctalia.runAsync({ NC_FONDS, "retirer", w.path }, relire, 15000)
+    end))
+  end
+  if message then table.insert(kids, ui.label({ text = message, fontSize = TEXTE, color = "on_surface", maxLines = 1 })) end
+  return kids
+end
+
 function render()
   local middle
   if #shown == 0 then
     middle = ui.column({ height = ROW_H, align = "center", justify = "center", gap = 10 }, {
-      ui.label({ text = #all == 0 and tr("Aucune image dans le dossier des fonds d'écran", "No images in the wallpaper folder")
+      ui.label({ text = #all == 0 and tr("Aucun fond ici : ajoute les tiens avec « Ajouter un fond… »",
+          "No wallpapers here: add yours with “Add a wallpaper…”")
         or tr("Aucun fond d'écran trouvé", "No wallpaper found"), fontSize = 22, fontWeight = "bold", color = "on_surface" }),
     })
   else
@@ -337,7 +379,7 @@ function render()
           ui.label({ text = titreGroupe(), fontSize = TEXTE, fontWeight = "bold", color = "on_surface" }),
         }),
         middle,
-        ui.row({ height = BANDE, align = "center", justify = "center", gap = 10 }, {}),
+        ui.row({ height = BANDE, align = "center", justify = "center", gap = 10 }, boutons()),
       }),
     }),
   }))
@@ -391,6 +433,7 @@ function onOpen(context)
   holdDir = 0
   inputKey = inputKey + 1
   current = noctalia.wallpaperPath(outputName())
+  message = nil
   bg = nil
   if current then
     local b = THUMBS .. cleDossier(current:match("^(.*)/[^/]*$") or "") .. "/" .. (current:match("([^/]+)$") or "") .. ".B.webp"

@@ -5043,6 +5043,23 @@ def catalogue(vals):
                                       "it: put your pictures there for “One wallpaper for day, one for night”."),
                                choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="", affiche=T("Créer…", "Create…"),
                                modifie=False, groupe="", commande=["nc-fond-jour-nuit", "creer-dossiers"], relire=True))
+        # « Mes fonds » (nc-fonds), juste après « Créer les dossiers jour et nuit » : les mêmes boutons que sous le
+        # carrousel (Super + W)
+        for cle_f, nom_f, aide_f, cmd_f, aff_f in reversed((
+                ("action:fonds-ajouter", T("Ajouter un fond…", "Add a wallpaper…"),
+                 T("Copie une image (choisie dans le sélecteur de fichiers) dans « Mes fonds » du thème en cours : le "
+                   "dossier mes-fonds, à part des fonds livrés, qu'aucune mise à jour ne touche. Sous 2560 x 1600, elle est "
+                   "ajoutée avec un avertissement.",
+                   "Copies a picture (chosen in the file picker) into the current theme's “My wallpapers”: the "
+                   "mes-fonds folder, apart from the bundled wallpapers, never touched by an update. Below 2560 x 1600, it "
+                   "is added with a warning."), ["nc-fonds", "ajouter"], T("Ajouter…", "Add…")),
+                ("action:fonds-ouvrir", T("Ouvrir « Mes fonds »", "Open “My wallpapers”"),
+                 T("Ouvre le dossier mes-fonds du thème en cours (créé s'il manque) : tes images y sont à l'abri des mises à jour.",
+                   "Opens the current theme's mes-fonds folder (created if missing): your pictures there are safe from updates."),
+                 ["nc-fonds", "ouvrir"], T("Ouvrir", "Open")))):
+            res.insert(k + 2, dict(cle=cle_f, section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"), nom=nom_f,
+                                   genre="action", defaut="", aide=aide_f, choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
+                                   valeur="", affiche=aff_f, modifie=False, groupe="", commande=cmd_f, relire=True))
     # Sessions enregistrées : à la fin de Fenêtres. Le bouton demande confirmation sur sa ligne (« confirmer » : la
     # question, « bouton » : le mot du bouton qui confirme), puis la fenêtre relit le catalogue (« relire »)
     fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Fenêtres"), default=len(res))

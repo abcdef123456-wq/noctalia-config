@@ -83,6 +83,7 @@ HOME_FILES=(
   .local/bin/nc-boot-wallpaper
   .local/bin/nc-brightness
   .local/bin/nc-carousel-thumbs
+  .local/bin/nc-fonds
   .local/bin/nc-finger
   .local/bin/nc-anim
   .local/bin/nc-aide

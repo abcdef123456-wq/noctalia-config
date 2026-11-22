@@ -12,11 +12,12 @@
 # [A-Za-z0-9._-] écrit %XX (majuscules). Même règle dans panel.luau (cleDossier, testée des deux côtés).
 # Garde les 32 dossiers les plus récents.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
+# --dossier : écrit seulement le dossier des fonds lu comme Noctalia (nc-fonds s'en sert pour trouver « Mes fonds »).
 # Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
 case "${1:-}" in
-  ""|--surveillance) ;;
-  -h|--help|aide) echo "usage : nc-carousel-thumbs [--surveillance]"; exit 0 ;;
-  *) echo "usage : nc-carousel-thumbs [--surveillance]" >&2; exit 2 ;;
+  ""|--surveillance|--dossier) ;;
+  -h|--help|aide) echo "usage : nc-carousel-thumbs [--surveillance | --dossier]"; exit 0 ;;
+  *) echo "usage : nc-carousel-thumbs [--surveillance | --dossier]" >&2; exit 2 ;;
 esac
 set -uo pipefail
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
@@ -39,6 +40,7 @@ src=""
 [ -n "$src" ] || src="$FONDS_DEFAUT"
 src="${src/#\~/$HOME}"
 while [ ${#src} -gt 1 ] && [ "${src%/}" != "$src" ]; do src="${src%/}"; done
+[ "${1:-}" = --dossier ] && { printf '%s\n' "$src"; exit 0; }
 
 # -- DEBUT cle
 cle_dossier() {
