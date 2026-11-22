@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tests import _isolation
 
 REPO = Path(__file__).resolve().parents[1]
 INSTALL = REPO / "install.sh"
@@ -28,8 +29,7 @@ def faux(dossier, nom, corps):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        parent = "/tmp/claude-1000"
-        os.makedirs(parent, exist_ok=True)
+        parent = _isolation.dossier_court()
         self._tmp = tempfile.TemporaryDirectory(prefix="nc-as-", dir=parent)
         self.addCleanup(self._tmp.cleanup)
         self.r = Path(self._tmp.name)

@@ -8,14 +8,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tests import _isolation
 
 NC_CLAUDE = Path(__file__).resolve().parents[1] / "home/.local/bin/nc-claude"
 
 
 class OpencodeTiret(unittest.TestCase):
     def setUp(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        d = tempfile.TemporaryDirectory(prefix="nc-oc-", dir="/tmp/claude-1000")
+        d = tempfile.TemporaryDirectory(prefix="nc-oc-", dir=_isolation.dossier_court())
         self.addCleanup(d.cleanup)
         r = Path(d.name)
         for s in ("home", "run", "bin"):

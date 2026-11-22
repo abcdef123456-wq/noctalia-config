@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from tests import _isolation
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = (REPO / "install.sh").read_text()
@@ -30,8 +31,7 @@ ask() { echo "QUESTION"; return 1; }
 
 class PoseRegle(unittest.TestCase):
     def setUp(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        tmp = tempfile.TemporaryDirectory(prefix="nc-pr-", dir="/tmp/claude-1000")
+        tmp = tempfile.TemporaryDirectory(prefix="nc-pr-", dir=_isolation.dossier_court())
         self.addCleanup(tmp.cleanup)
         self.r = Path(tmp.name)
         self.journal = self.r / "journal.txt"

@@ -627,8 +627,7 @@ ShellRoot {
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class RechercheHorsEcran(unittest.TestCase):
     def test_de_la_frappe_au_lancement(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="ncm-", dir="/tmp/claude-1000") as d:
+        with tempfile.TemporaryDirectory(prefix="ncm-", dir=_isolation.dossier_court()) as d:
             root = Path(d)
             q = root / "qml"
             shutil.copytree(QML, q)

@@ -16,6 +16,7 @@ import tempfile
 import unittest
 
 from tests import _ile_hors_ecran as H
+from tests import _isolation
 
 PARTAGE = "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false; property bool indicateur: false; property int sessions: 0 }\n"
 ETAT = """
@@ -64,8 +65,7 @@ def etape(c, m, f="null"):
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class LanceurFondu(unittest.TestCase):
     def lancer(self, etapes, valeurs=None, sobre=False, ecran="DP-1", partage=""):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="nq-", dir="/tmp/claude-1000") as d:
+        with tempfile.TemporaryDirectory(prefix="nq-", dir=_isolation.dossier_court()) as d:
             root = H.preparer(d, ["LanceurFondu"], etat=ETAT + """
   function enregistrerPilule(nom, pilule) { pilules[nom] = pilule }
   function oublierPilule(nom, pilule) { if (pilules[nom] === pilule) delete pilules[nom] }

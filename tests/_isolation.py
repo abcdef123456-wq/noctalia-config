@@ -70,6 +70,27 @@ esac
 """
 
 
+def dossier_court():
+    """Dossier temporaire court et neutre pour les tests dont les chemins doivent rester courts (sockets de Quickshell :
+    108 octets au plus) : /tmp/nct-<uid>, en 0700, à nous et pas un lien. Sinon (pris par un autre, droits trop larges,
+    /tmp absent) : le dossier temporaire du système. Chaque test y crée son propre TemporaryDirectory."""
+    import stat
+    d = "/tmp/nct-%d" % os.getuid()
+    try:
+        os.mkdir(d, 0o700)
+    except FileExistsError:
+        pass
+    except OSError:
+        return tempfile.gettempdir()
+    try:
+        st = os.lstat(d)
+    except OSError:
+        return tempfile.gettempdir()
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        return tempfile.gettempdir()
+    return d
+
+
 def vrai(nom):
     """Le vrai programme, cherché dans le PATH d'avant le garde-fou (None s'il manque) : pour un test qui en a besoin
     dans un cadre sûr, comme test_notifs avec notify-send sur un bus de session privé."""

@@ -17,6 +17,7 @@ import unittest
 
 from tests import _ile_hors_ecran as H
 from tests.test_modes import FAUX_ENERGIE, FAUX_FOND, FAUX_REGLAGES
+from tests import _isolation
 
 NOTIFS = "pragma Singleton\nimport QtQuick\nQtObject { property bool concentration: false }\n"
 PARTAGE = "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }\n"
@@ -54,8 +55,7 @@ def etape(c, m, f="null"):
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
     def lancer(self, etapes, valeurs=None, avant=None, page=False, delai=90):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="nq-", dir="/tmp/claude-1000") as d:
+        with tempfile.TemporaryDirectory(prefix="nq-", dir=_isolation.dossier_court()) as d:
             noms = ["Modes", "Couleurs"] + (["PageConcentration", "EditeurMode", "ChoixMode", "BoutonEnergie", "Texte", "Ico"] if page else [])
             root = H.preparer(d, noms, etat=ETAT, extra={"Notifs.qml": NOTIFS, "Partage.qml": PARTAGE},
                               singletons=("Modes", "Notifs", "Partage"))

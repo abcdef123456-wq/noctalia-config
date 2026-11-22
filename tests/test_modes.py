@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tests import _isolation
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
@@ -72,8 +73,7 @@ os.makedirs(os.path.dirname(f), exist_ok=True); open(f, "w").write("\\n".join(l)
 
 class Base(unittest.TestCase):
     def setUp(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(prefix="nm-", dir="/tmp/claude-1000")
+        self.tmp = tempfile.TemporaryDirectory(prefix="nm-", dir=_isolation.dossier_court())
         self.addCleanup(self.tmp.cleanup)
         r = Path(self.tmp.name)
         self.r = r
@@ -414,8 +414,7 @@ class FondImpose(unittest.TestCase):
     """nc-fond-jour-nuit imposer : le vrai script, écran « éteint » pour qu'aucun fond ni minuteur ne soit touché."""
 
     def setUp(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(prefix="nf-", dir="/tmp/claude-1000")
+        self.tmp = tempfile.TemporaryDirectory(prefix="nf-", dir=_isolation.dossier_court())
         self.addCleanup(self.tmp.cleanup)
         r = Path(self.tmp.name)
         for s in ("home", "config/nc", "state", "run", "tmp"):

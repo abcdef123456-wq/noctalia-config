@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tests import _isolation
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
@@ -172,8 +173,7 @@ ShellRoot {
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class SpotlightEmoji(unittest.TestCase):
     def test_de_la_frappe_a_la_copie(self):
-        os.makedirs("/tmp/claude-1000", exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="nce-", dir="/tmp/claude-1000") as d:
+        with tempfile.TemporaryDirectory(prefix="nce-", dir=_isolation.dossier_court()) as d:
             root = Path(d); q = root / "qml"
             shutil.copytree(QML, q)
             for sous in ("run", "cache", "state", "data", "config", "tmp"):

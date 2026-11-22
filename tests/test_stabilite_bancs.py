@@ -53,5 +53,37 @@ class Bancs(unittest.TestCase):
         self.assertEqual(_isolation.avis_limite_de_processus(limite=_isolation.resource.RLIM_INFINITY, fils=10 ** 6), "")
 
 
+class DossierCourt(unittest.TestCase):
+    """dossier_court() : un dossier court, à nous, en 0700 ; jamais un dossier d'un autre ou trop ouvert."""
+
+    def test_dossier_court_a_nous(self):
+        d = _isolation.dossier_court()
+        st = os.lstat(d)
+        self.assertLessEqual(len(d), 24)
+        self.assertEqual(st.st_uid, os.getuid())
+        self.assertFalse(os.path.islink(d))
+        if d.startswith("/tmp/nct-"):
+            self.assertEqual(st.st_mode & 0o777, 0o700)
+        self.assertNotIn("claude", d)
+
+    def test_trop_ouvert_ou_lien_refuse(self):
+        from unittest import mock
+        vrai_lstat = os.lstat
+        with tempfile.TemporaryDirectory() as t:
+            ouvert = Path(t) / "ouvert"
+            ouvert.mkdir()
+            ouvert.chmod(0o777)
+            lien = Path(t) / "lien"
+            lien.symlink_to(ouvert)
+            fichier = Path(t) / "fichier"
+            fichier.write_text("")
+            fichier.chmod(0o600)
+            for cible in (ouvert, lien, fichier):
+                with self.subTest(cible=cible.name), \
+                        mock.patch.object(_isolation.os, "mkdir", side_effect=FileExistsError), \
+                        mock.patch.object(_isolation.os, "lstat", side_effect=lambda _d, c=cible: vrai_lstat(c)):
+                    self.assertEqual(_isolation.dossier_court(), tempfile.gettempdir())
+
+
 if __name__ == "__main__":
     unittest.main()
