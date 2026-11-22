@@ -22,6 +22,9 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - **Super + W** : carrousel de fonds d'écran ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
+  - l'heure et la date peuvent prendre une police (`VERROU_POLICE`, une liste « A, B » : la première installée est prise, sinon
+    celle de Noctalia) et la couleur d'accent du bureau (`VERROU_COULEUR=accent`) ; les thèmes Apple, Rétro et Synthwave s'en servent ;
+  - limite : la batterie et la musique du verrouillage restent en blanc, quel que soit ce réglage ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
 - look façon Apple : île dynamique noir pur qui se déploie depuis la pilule et s'y rétracte (ressort physique),
   symboles dessinés dans l'esprit des SF Symbols dans l'île ; ailleurs, thème d'icônes maison « NC » (dossiers,

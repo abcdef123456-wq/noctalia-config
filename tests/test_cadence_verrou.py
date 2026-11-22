@@ -122,6 +122,10 @@ class CadenceVerrou(unittest.TestCase):
             self.assertTrue(corps, nom)
             garde, rendu = corps.group(1).find("if noctalia.fileExists(ETEINT) then return end"), corps.group(1).find("rendre()")
             self.assertTrue(0 <= garde < rendu, nom)        # la garde passe avant tout rendu
+            if nom == "heure.luau":        # un seul fc-list au démarrage (liste des polices), jamais dans update ni rendre
+                self.assertEqual(src.count("noctalia.runAsync({"), 1, nom)
+                self.assertLess(src.index("noctalia.runAsync({"), src.index("function rendre()"), nom)
+                src = src.replace("noctalia.runAsync", "")  # ni dans le test "if" du démarrage
             self.assertNotRegex(src, r"runAsync|os\.execute|io\.popen", nom)
 
     def test_musique_vie_privee(self):

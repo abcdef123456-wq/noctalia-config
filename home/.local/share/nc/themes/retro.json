@@ -22,7 +22,9 @@
     "FENETRES_OMBRE": "0",
     "ANIM_BUREAUX": "slide",
     "ILE_ACCENTS": "accent",
-    "ILE_CONTOUR_FERMEE": "oui"
+    "ILE_CONTOUR_FERMEE": "oui",
+    "VERROU_POLICE": "JetBrains Mono, DejaVu Sans Mono",
+    "VERROU_COULEUR": "accent"
   },
   "noctalia": {},
   "theme_sync": {

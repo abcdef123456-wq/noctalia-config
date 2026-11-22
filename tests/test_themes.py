@@ -21,7 +21,7 @@ ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox"
 FONDS = REPO / "home/Pictures/Wallpapers"
 ENRICHIS = {"apple", "catppuccin", "gruvbox", "nord", "kanagawa", "dracula"}
 # Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
-AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n",
+AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\nVERROU_POLICE=Inter\n",
           "catppuccin": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=rond\nILE_VERRE=97\nILE_ANIM=doux\nILE_ACCENTS=accent\n"
                         "ILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=oui\nFENETRES_BORDURE=2\nFENETRES_OMBRE=30\n",
           "gruvbox": "ILE_CONTOUR_EPAISSEUR=3\nILE_RAYON=doux\nILE_VERRE=100\nILE_LUEUR=non\nILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=non\n"

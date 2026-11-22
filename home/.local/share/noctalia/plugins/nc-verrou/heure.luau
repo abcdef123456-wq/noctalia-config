@@ -2,7 +2,8 @@
 -- nc/verrou : heure de l'écran de verrouillage, comme sur iPhone : petit cadenas (ou ta photo), date au-dessus, très
 -- grande heure, et un message à toi en dessous si tu en as mis un.
 -- Réglages (nc-reglages → Verrouillage) : VERROU_HORLOGE (grande, fine, petite), VERROU_PHOTO (oui/non),
--- VERROU_MESSAGE (texte ; « aucun » : rien). Relus chaque minute.
+-- VERROU_MESSAGE (texte ; « aucun » : rien), VERROU_POLICE (familles installées séparées par des virgules ; vide : police de
+-- Noctalia), VERROU_COULEUR (blanc, accent). Relus chaque minute. Batterie et musique restent blanches.
 -- Taille : box_width / box_height du widget dans config.toml (640 × 280).
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
@@ -50,6 +51,41 @@ local function reglages()
   return r
 end
 
+-- DEBUT choix : fonctions pures (sous-ensemble commun à Lua et Luau), testées avec lua dans tests/test_verrou_police_couleur.py
+-- Première famille de la liste « A, B » présente dans installees (table nom -> true) ; nil : pas de fontFamily
+local function choisirPolice(valeur, installees)
+  if type(valeur) ~= "string" or type(installees) ~= "table" then return nil end
+  for brut in string.gmatch(valeur .. ",", "([^,]*),") do
+    local nom = string.gsub(string.gsub(brut, "^%s+", ""), "%s+$", "")
+    if nom ~= "" and installees[nom] then return nom end
+  end
+  return nil
+end
+-- Familles de la sortie de « fc-list : family » (une ligne par police, alias séparés par des virgules)
+local function famillesInstallees(sortie)
+  local t = {}
+  for ligne in string.gmatch(tostring(sortie or ""), "[^\n]+") do
+    for nom in string.gmatch(ligne .. ",", "([^,]*),") do t[nom] = true end
+  end
+  return t
+end
+-- Blanc, ou mPrimary de colors.json si VERROU_COULEUR=accent ; fichier absent, de plus de 64 Ko ou mal formé : blanc
+local BLANC = "#ffffff"
+local function choisirCouleur(reglage, json)
+  if reglage ~= "accent" or type(json) ~= "string" or #json > 65536 then return BLANC end
+  local c = string.match(json, '"mPrimary"%s*:%s*"(#%x%x%x%x%x%x)"')
+  return c or BLANC
+end
+-- FIN choix
+
+local polices = nil        -- liste fc-list, lue une seule fois au démarrage (nil tant qu'elle n'est pas arrivée)
+if noctalia.runAsync then
+  noctalia.runAsync({ "fc-list", ":", "family" }, function(r)
+    polices = famillesInstallees(r and r.stdout)
+    derniere = ""                           -- redessin à la prochaine seconde
+  end, 5000)
+end
+
 function rendre()
   EN = langue() == "en"                     -- relue chaque minute, comme les réglages
   local t = os.date("*t")
@@ -63,13 +99,18 @@ function rendre()
   local taille, graisse = 150, "bold"
   if horloge == "fine" then graisse = "regular" elseif horloge == "petite" then taille, graisse = 96, "semibold" end
   if message ~= "" and taille > 130 then taille = 130 end        -- place pour le message
+  local couleur = BLANC
+  if r.VERROU_COULEUR == "accent" then
+    couleur = choisirCouleur("accent", noctalia.readFile(noctalia.expandPath("~/.config/noctalia/colors.json")))
+  end
+  local police = polices and choisirPolice(r.VERROU_POLICE, polices)
   local haut = photo and ui.image({ path = PHOTO, width = 56, height = 56, fit = "cover", radius = 28 })
     or ui.glyph({ name = "lock", size = 22, color = "#ffffff", opacity = 0.85 })
   local enfants = {
     haut,
     ui.label({ text = tr(JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], DAYS[t.wday] .. ", " .. MONTHS[t.month] .. " " .. t.day), fontSize = 24, fontWeight = "semibold",
-      color = "#ffffff", opacity = 0.9 }),
-    ui.label({ text = heure, fontSize = taille, fontWeight = graisse, color = "#ffffff" }),
+      color = couleur, opacity = 0.9, fontFamily = police }),
+    ui.label({ text = heure, fontSize = taille, fontWeight = graisse, color = couleur, fontFamily = police }),
   }
   if message ~= "" then
     table.insert(enfants, ui.label({ text = message, fontSize = 17, fontWeight = "semibold", color = "#ffffff", opacity = 0.8 }))
