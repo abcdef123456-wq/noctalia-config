@@ -27,17 +27,29 @@ jobs:
         include:
           - image: archlinux:latest
             install: pacman -Syu --noconfirm --needed python git bash jq lua procps-ng diffutils findutils gzip tar
+            node: pacman -S --noconfirm --needed nodejs
           - image: debian:trixie
             install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-venv git bash lua5.4 jq procps diffutils findutils
             jq17: "1"
+            node: DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
           - image: fedora:44
             install: dnf install -y -q python3 git bash lua jq procps-ng findutils diffutils gzip tar
+            # nodejs22 seul ne donne que node-22 : on demande le paquet qui fournit /usr/bin/node (nodejs22-bin sur 44)
+            node: dnf install -y -q /usr/bin/node
           - image: opensuse/tumbleweed
             install: zypper -q --non-interactive install python3 python3-curses git bash lua54 jq procps findutils diffutils gzip tar
+            node: zypper -q --non-interactive install nodejs-default || zypper -q --non-interactive install nodejs
     steps:
       # git doit exister avant le checkout (conteneurs minimaux)
       - name: Installer les paquets
         run: ${{ matrix.install }}
+
+      # Node.js : les tests des fonctions pures de l'île (.js) s'exécutent enfin ; facultatif, sans lui ils sautent
+      - name: Installer Node.js (facultatif)
+        continue-on-error: true
+        run: |
+          ${{ matrix.node }}
+          command -v node && node --version
 
       - name: Récupérer le dépôt
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
