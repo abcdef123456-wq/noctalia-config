@@ -40,7 +40,7 @@ Column {
             objectName: "nc-vpn-recherche"
             anchors.left: loupe.right; anchors.leftMargin: 8; anchors.right: parent.right; anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
-            color: Couleurs.texte; font.pixelSize: 13; font.family: "Adwaita Sans"
+            color: Couleurs.texte; font.pixelSize: 13; font.family: Couleurs.police
             selectionColor: Qt.alpha(Couleurs.accent, 0.5); clip: true
             maximumLength: 60
             inputMethodHints: Qt.ImhNoPredictiveText

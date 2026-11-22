@@ -62,7 +62,7 @@ Item {
             }
         }
     }
-    FontMetrics { id: metriques; font.family: "Adwaita Sans"; font.pixelSize: 12 }
+    FontMetrics { id: metriques; font.family: Couleurs.police; font.pixelSize: 12 }
     // Le début du README, en texte brut, dans un voile du fond (autant de lignes que la place le permet)
     Rectangle {
         objectName: "nc-code-readme"

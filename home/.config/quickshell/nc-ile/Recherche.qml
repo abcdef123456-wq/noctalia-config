@@ -1255,7 +1255,7 @@ Item {
             anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
             anchors.verticalCenter: parent.verticalCenter
             color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
-            font.family: "Adwaita Sans"; font.pixelSize: 19
+            font.family: Couleurs.police; font.pixelSize: 19
             clip: true
             cursorVisible: activeFocus
             Keys.onPressed: e => r.toucheDock(e)       // Alt + P : épingler au dock (ou retirer)
@@ -1315,7 +1315,7 @@ Item {
             // Filtré quel que soit le format : text et textFormat sont deux liaisons, Qt peut lire l'un avec l'ancien état de l'autre
             text: AssistantEtat.sansReseau(r.reponseAide !== "" ? r.reponseAide : zoneReponse.enDiag ? diag.resume : AssistantEtat.formater(r.reponse))
             visible: !zoneReponse.attend || r.reponseAide !== ""
-            color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
+            color: Couleurs.texte; font.family: Couleurs.police; font.pixelSize: 14; wrapMode: Text.Wrap
             textFormat: r.reponseAide !== "" || zoneReponse.enDiag ? Text.PlainText : Text.MarkdownText
         }
         // Mini-carte : l'écran aux proportions 16:10, chaque zone en carte arrondie avec le nom de son appli

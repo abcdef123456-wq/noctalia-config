@@ -432,7 +432,7 @@ FloatingWindow {
                             color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold; wrapMode: Text.Wrap; elide: Text.ElideNone }
                     // Rapport de mise à jour : le résumé de l'IA (Markdown), puis le détail à la demande
                     Text { visible: ligne.r.genre === "rapport"; width: parent.width; text: ligne.r.genre === "rapport" ? AssistantEtat.sansReseau(ligne.r.aide || "") : ""; textFormat: Text.MarkdownText
-                           wrapMode: Text.Wrap; color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13 }
+                           wrapMode: Text.Wrap; color: Couleurs.texte; font.family: Couleurs.police; font.pixelSize: 13 }
                     Texte { visible: ligne.r.genre === "rapport" && !!ligne.r.ia; text: Reglages.t("Résumé par ", "Summary by ") + (ligne.r.ia || ""); secondaire: true; font.pixelSize: 11 }
                     Column {
                         objectName: "nc-rapport-details-" + ligne.r.cle

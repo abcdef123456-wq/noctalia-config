@@ -4,7 +4,7 @@ ILE_POLICE, ILE_ANIM, ILE_LUEUR, ILE_MAJUSCULES.
 - Hors écran, avec le vrai qs (« qs -p ») : le vrai Couleurs.qml, un Reglages de remplacement changé pendant l'essai.
   Défauts = allure d'avant (rayons 15/42/28/32, contour 2, opacité 1, Adwaita Sans, ressort 3.4/0.34/0.36, 280 ms OutCubic,
   220 ms, 170 ms) ; extrêmes acceptés ; valeur invalide ou hors bornes = défaut ; police absente = Adwaita Sans ; rayon 0 :
-  un rectangle sans coin, jamais de rayon négatif ni plus grand que la demi-taille.
+  un rectangle sans coin, 200 % : doublé mais jamais plus grand que la demi-taille.
 - Source : pas de composant neuf dans un .qml existant (comparé à origin/main), pas de flou, réglages déclarés dans « Île ».
 HOME, XDG_* et TMPDIR sont ceux du dossier temporaire."""
 import json
@@ -28,7 +28,7 @@ SHELL = """
     Rectangle { id: carre; objectName: "carre"; width: 100; height: 30; radius: Couleurs.rayon(15, 100, 30) }
     function sortie(v) {
         Reglages.valeurs = v
-        console.log("R:" + JSON.stringify({ rayon: [Couleurs.rayon(15, 100, 30), Couleurs.rayon(42, 600, 400), Couleurs.rayon(28, 300, 50), Couleurs.rayon(32, 320, 90), Couleurs.rayon(15, 20, 8)],
+        console.log("R:" + JSON.stringify({ rayon: [Couleurs.rayon(15, 100, 30), Couleurs.rayon(42, 800, 700), Couleurs.rayon(28, 500, 60), Couleurs.rayon(32, 320, 90), Couleurs.rayon(15, 20, 8)],
             epaisseur: Couleurs.epaisseur, verre: Couleurs.verre, police: Couleurs.police, anim: Couleurs.animNom,
             ressort: [Couleurs.anim.raideur, Couleurs.anim.amortiL, Couleurs.anim.amortiH, Couleurs.anim.duree, Couleurs.anim.courbe === Easing.OutCubic, Couleurs.anim.contour, Couleurs.anim.spot],
             lueur: Couleurs.lueur, maj: Couleurs.majuscules, carre: carre.radius }))
@@ -63,9 +63,9 @@ class HorsEcran(unittest.TestCase):
         _, cls.installee = lancer_cas([])
         cls.cas = [
             {},                                                                                 # 0 défauts
-            {"ILE_RAYON": "carre"}, {"ILE_RAYON": "doux"}, {"ILE_RAYON": "pilule"},            # 1 2 3
-            {"ILE_RAYON": "0"}, {"ILE_RAYON": "100"}, {"ILE_RAYON": "50"},                     # 4 5 6
-            {"ILE_RAYON": "101"}, {"ILE_RAYON": "-3"}, {"ILE_RAYON": "abc"}, {"ILE_RAYON": ""},  # 7 8 9 10
+            {"ILE_RAYON": "carre"}, {"ILE_RAYON": "doux"}, {"ILE_RAYON": "rond"},              # 1 2 3
+            {"ILE_RAYON": "0"}, {"ILE_RAYON": "200"}, {"ILE_RAYON": "50"},                     # 4 5 6
+            {"ILE_RAYON": "201"}, {"ILE_RAYON": "-3"}, {"ILE_RAYON": "abc"}, {"ILE_RAYON": ""},  # 7 8 9 10
             {"ILE_CONTOUR_EPAISSEUR": "0"}, {"ILE_CONTOUR_EPAISSEUR": "4"}, {"ILE_CONTOUR_EPAISSEUR": "5"},  # 11 12 13
             {"ILE_CONTOUR_EPAISSEUR": "-1"}, {"ILE_CONTOUR_EPAISSEUR": "x"},                   # 14 15
             {"ILE_VERRE": "85"}, {"ILE_VERRE": "100"}, {"ILE_VERRE": "84"}, {"ILE_VERRE": "101"},  # 16-19
@@ -75,6 +75,7 @@ class HorsEcran(unittest.TestCase):
             {"ILE_ANIM": "bizarre"}, {"ILE_ANIM": "constructor"}, {"ILE_ANIM": ""},            # 29 30 31
             {"ILE_LUEUR": "oui"}, {"ILE_LUEUR": "non"}, {"ILE_LUEUR": "peut-etre"},            # 32 33 34
             {"ILE_MAJUSCULES": "oui"}, {"ILE_MAJUSCULES": "non"}, {"ILE_MAJUSCULES": "1"},     # 35 36 37
+            {"ILE_RAYON": "normal"}, {"ILE_RAYON": "pilule"},                                   # 38 39 (ancien nom : invalide)
         ]
         cls.r, _ = lancer_cas(cls.cas)
 
@@ -83,25 +84,26 @@ class HorsEcran(unittest.TestCase):
 
     def test_defauts_egaux_a_avant(self):
         d = self.r[0]
-        self.assertEqual(d["rayon"][:4], [15, 42, 28, 32])
+        self.assertEqual(d["rayon"], [15, 42, 28, 32, 4])      # rayons d'origine ; le dernier : plafond de la demi-taille
         self.assertEqual((d["epaisseur"], d["verre"], d["police"], d["anim"]), (2, 1, "Adwaita Sans", "ressort"))
         self.assertEqual(d["ressort"], [3.4, 0.34, 0.36, 280, True, 220, 170])
         self.assertEqual((d["lueur"], d["maj"]), (False, False))
 
     def test_valeurs_invalides_donnent_le_defaut(self):
-        for i in (7, 8, 9, 10, 13, 14, 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 34, 37):
+        for i in (7, 8, 9, 10, 38, 39, 13, 14, 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 34, 37):
             with self.subTest(cas=self.cas[i]):
                 self.assertEqual(self.r[i], self.r[0])
 
-    def test_rayon_carre_et_pilule(self):
+    def test_rayon_carre_et_rond(self):
         for i in (1, 4):
             with self.subTest(cas=self.cas[i]):
                 self.assertEqual(self.r[i]["rayon"], [0, 0, 0, 0, 0])
                 self.assertEqual(self.r[i]["carre"], 0)           # un vrai Rectangle : aucun coin
-        self.assertEqual(self.r[3]["rayon"], [15, 200, 25, 45, 4])
+        # 200 % : doublé, mais jamais au-delà de la demi-taille (100x30 : 15 ; 500x60 : 30 ; 320x90 : 45 ; 20x8 : 4)
+        self.assertEqual(self.r[3]["rayon"], [15, 84, 30, 45, 4])
         self.assertEqual(self.r[5]["rayon"], self.r[3]["rayon"])
-        self.assertEqual(self.r[3]["carre"], 15)
-        self.assertEqual(self.r[2]["rayon"], [7.5, 100, 12.5, 22.5, 2])
+        self.assertEqual(self.r[3]["carre"], 15)                  # la pilule fermée reste une pilule
+        self.assertEqual(self.r[2]["rayon"], [7.5, 21, 14, 16, 4])
         self.assertEqual(self.r[6]["rayon"], self.r[2]["rayon"])
 
     def test_epaisseur(self):
@@ -152,6 +154,13 @@ class Source(unittest.TestCase):
         texte = (QML / "Texte.qml").read_text()
         self.assertIn("Couleurs.majuscules", texte)
         self.assertIn("font.family: Couleurs.police", texte)
+
+    def test_aucune_police_en_dur(self):
+        # Toute l'île suit ILE_POLICE : « Adwaita Sans » n'est écrit que dans Couleurs.qml (le repli)
+        for f in sorted(QML.glob("*.qml")):
+            if f.name != "Couleurs.qml":
+                with self.subTest(fichier=f.name):
+                    self.assertNotIn("Adwaita Sans", re.sub(r"//.*", "", f.read_text()))
 
     def test_reglages_declares(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, HOME=d), warnings.catch_warnings():

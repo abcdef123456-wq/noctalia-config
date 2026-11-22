@@ -165,7 +165,7 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: page.dansDashboard ? "JARVIS" : "J.A.R.V.I.S."
-                    font.family: "Adwaita Sans"; font.pixelSize: page.dansDashboard ? 20 : 19; font.weight: Font.Bold
+                    font.family: Couleurs.police; font.pixelSize: page.dansDashboard ? 20 : 19; font.weight: Font.Bold
                     color: Couleurs.texte
                 }
                 Rectangle {
@@ -180,7 +180,7 @@ Item {
                         text: AssistantEtat.enCours ? Reglages.t("Traitement", "Thinking")
                             : (page.ecouteVocale ? Reglages.t("Écoute vocale", "Listening")
                             : (AssistantEtat.erreur ? Reglages.t("Erreur, réessaie", "Error, try again") : Reglages.t("Prêt", "Ready")))
-                        font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.DemiBold; color: page.teinteEtat
+                        font.family: Couleurs.police; font.pixelSize: 12; font.weight: Font.DemiBold; color: page.teinteEtat
                     }
                 }
             }
@@ -309,7 +309,7 @@ Item {
                                     readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
                                     color: Couleurs.texte
                                     selectionColor: Couleurs.accent
-                                    font.family: "Adwaita Sans"; font.pixelSize: 13
+                                    font.family: Couleurs.police; font.pixelSize: 13
                                     onLinkActivated: lien => page.ouvrirLien(AssistantEtat.sansInvisible(lien))
                                     Keys.onPressed: (e) => { if (e.matches(StandardKey.Copy)) { AssistantEtat.copierSansInvisible(selectedText); e.accepted = true } }
                                     HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
@@ -383,7 +383,7 @@ Item {
                         text: AssistantEtat.erreur; textFormat: TextEdit.PlainText
                         readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
                         color: page.teinteEtat; selectionColor: Couleurs.accent
-                        font.family: "Adwaita Sans"; font.pixelSize: 13
+                        font.family: Couleurs.police; font.pixelSize: 13
                     }
                 }
             }
@@ -423,7 +423,7 @@ Item {
                     width: Math.min(implicitWidth, resume.width - 32)
                     text: resume.libelleStatut
                     color: (AssistantEtat.erreur || page.ecouteVocale) ? page.corail : Couleurs.texte
-                    font.family: "Adwaita Sans"; font.pixelSize: 14; font.weight: Font.DemiBold
+                    font.family: Couleurs.police; font.pixelSize: 14; font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                     textFormat: Text.PlainText; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                 }
@@ -466,7 +466,7 @@ Item {
             // catalogue. Quand tout ne tient pas : le modèle courant, puis les derniers choisis, puis l'ordre du catalogue,
             // et « Autres… » ouvre la liste complète des réglages ; l'ordre affiché reste celui du catalogue, il ne saute
             // donc pas à chaque choix. Catalogue vide : le modèle courant seul et « Autres… ».
-            FontMetrics { id: mesure; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.DemiBold }
+            FontMetrics { id: mesure; font.family: Couleurs.police; font.pixelSize: 11; font.weight: Font.DemiBold }
             readonly property var famillesVisibles: {
                 var fam = AssistantEtat.famillesModeles, place = choix.width, ecart = choix.spacing
                 var large = t => Math.ceil(mesure.advanceWidth(t)) + 12      // le texte et 6 px de chaque côté au moins
@@ -597,7 +597,7 @@ Item {
                     maximumLength: 8000; clip: true; selectByMouse: true
                     color: Couleurs.texte
                     selectionColor: Couleurs.accent
-                    font.family: "Adwaita Sans"; font.pixelSize: 13
+                    font.family: Couleurs.police; font.pixelSize: 13
                     onAccepted: page.validerSaisie()
                     Keys.onPressed: event => {
                         event.accepted = false

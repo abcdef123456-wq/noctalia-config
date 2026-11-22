@@ -419,7 +419,7 @@ PanelWindow {
                 anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: compteur.left; anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
                 color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
-                font.family: "Adwaita Sans"; font.pixelSize: 18
+                font.family: Couleurs.police; font.pixelSize: 18
                 clip: true
                 focus: true
                 cursorVisible: activeFocus

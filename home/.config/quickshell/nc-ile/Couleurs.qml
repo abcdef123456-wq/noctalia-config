@@ -8,7 +8,7 @@ pragma Singleton
 //   ILE_STYLE=terminal (par défaut) | noir (île noire d'iPhone, couleurs d'Apple)
 //   ILE_CONTOUR=degrade (par défaut, l'accent fondu au milieu) | discret (filet de l'accent) | aucun
 //   Allure (par défaut : celle d'avant, rien ne change) :
-//   ILE_RAYON=auto (rayons d'origine) | carre | doux | pilule (ou 0 à 100 : part du demi-côté le plus court)
+//   ILE_RAYON=auto ou normal (rayons d'origine, 100) | carre (0) | doux (50) | rond (200) ; ou 0 à 200 : % des rayons d'origine, plafonné à la demi-taille
 //   ILE_CONTOUR_EPAISSEUR=2 (0 à 4 px) ; ILE_VERRE=100 (85 à 100 % d'opacité du fond, sans flou)
 //   ILE_POLICE=Adwaita Sans (une police absente : retour à celle-ci) ; ILE_MAJUSCULES=non | oui
 //   ILE_ANIM=ressort (allure d'origine) | doux | vif | sec ; ILE_LUEUR=non | oui (halo autour de l'île ouverte)
@@ -27,13 +27,13 @@ Singleton {
     // Allure : chaque valeur invalide retombe sur celle d'origine
     readonly property real rayonPct: {
         const r = Reglages.val("ILE_RAYON", "auto")
-        const noms = { "carre": 0, "doux": 50, "pilule": 100 }
-        if (noms[r] !== undefined) return noms[r]
-        const n = /^[0-9]+$/.test(r) ? parseInt(r) : -1
-        return n >= 0 && n <= 100 ? n : -1          // -1 : rayons d'origine
+        const noms = { "auto": 100, "normal": 100, "carre": 0, "doux": 50, "rond": 200 }
+        if (Object.keys(noms).indexOf(r) >= 0) return noms[r]
+        const n = /^[0-9]+$/.test(r) ? parseInt(r) : 100
+        return n <= 200 ? n : 100                   // 100 : rayons d'origine
     }
-    // Rayon d'un élément de taille w x h : « base » est le rayon d'origine ; un rayon ne dépasse jamais la demi-taille
-    function rayon(base, w, h) { return rayonPct < 0 ? base : Math.min(w, h) / 2 * rayonPct / 100 }
+    // Rayon d'un élément de taille w x h : « base » est son rayon d'origine, multiplié par le réglage, jamais au-delà de la demi-taille
+    function rayon(base, w, h) { return Math.min(base * rayonPct / 100, Math.min(w, h) / 2) }
     function entier(cle, defaut, mini, maxi) {
         const r = Reglages.val(cle, "")
         const n = /^[0-9]+$/.test(r) ? parseInt(r) : defaut
