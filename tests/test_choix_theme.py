@@ -150,5 +150,15 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(j, [])
 
 
+
+class RegleDeFenetre(unittest.TestCase):
+    def test_flottante_centree_limitee_a_quickshell(self):
+        """Sans règle, la fenêtre « Thèmes » serait rangée en tuile ; le titre seul viserait d'autres applis."""
+        regles = (Path(__file__).resolve().parents[1] / "home/.config/hypr/nc/regles.lua").read_text(encoding="utf-8")
+        self.assertRegex(regles, r'hl\.window_rule\(\{ name = "nc-themes-fenetre", match = \{ class = "\^\(org\.quickshell\)\$", '
+                                 r'title = "\^\(Thèmes\|Themes\)\$" \}, float = true, center = true \}\)')
+        qml = (Path(__file__).resolve().parents[1] / "home/.config/quickshell/nc-ile/ChoixTheme.qml").read_text(encoding="utf-8")
+        self.assertIn('title: Reglages.t("Thèmes", "Themes")', qml)
+
 if __name__ == "__main__":
     unittest.main()

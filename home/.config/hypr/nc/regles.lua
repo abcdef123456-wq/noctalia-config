@@ -157,3 +157,6 @@ hl.window_rule({ name = "nc-vpn-fenetre", match = { class = "^(org.quickshell)$"
 hl.window_rule({ name = "nc-garmin-fenetre", match = { class = "^(org.quickshell)$", title = "^(Garmin)$" }, float = true })
 -- Fenêtre Cloud JARVIS de l'île (CloudPanneau.qml) : titre exact « Cloud JARVIS », flottante ; placée comme le VPN par nc/automatismes.lua
 hl.window_rule({ name = "nc-cloud-fenetre", match = { class = "^(org.quickshell)$", title = "^(Cloud JARVIS)$" }, float = true })
+-- Carrousel des thèmes de l'île (Super + Alt + T ; ChoixTheme.qml) : flottant et centré, à la taille qu'il demande ;
+-- limité à la classe de Quickshell (« Themes » seul est un titre courant)
+hl.window_rule({ name = "nc-themes-fenetre", match = { class = "^(org.quickshell)$", title = "^(Thèmes|Themes)$" }, float = true, center = true })
