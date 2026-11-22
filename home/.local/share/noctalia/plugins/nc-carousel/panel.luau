@@ -33,6 +33,25 @@ local EN = langue() == "en"
 local function tr(fr, en) return EN and en or fr end
 
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")
+
+-- DEBUT cle
+-- Cache PAR DOSSIER : THUMBS/<clé>/. Clé : chemin du dossier sans « / » final, chaque octet hors [A-Za-z0-9._-] écrit %XX.
+-- Même règle que cle_dossier dans nc-carousel-thumbs (testée des deux côtés).
+local function cleDossier(d)
+  while #d > 1 and d:sub(-1) == "/" do d = d:sub(1, -2) end
+  return (d:gsub("[^A-Za-z0-9._%-]", function(c) return string.format("%%%02X", c:byte()) end))
+end
+
+-- Tranches à dessiner autour de la tranche centrale c (fl = floor(pos)) : de chaque côté « reach » tranches, plus une pour
+-- l'interpolation ; jamais plus de n tranches (sinon la même image apparaît deux fois aux deux bouts de la bande).
+local function fenetre(n, c, fl, reach)
+  if n >= 2 * reach + 2 then return c - reach, c + reach + 1 end
+  if n == 2 then return fl, fl + 1 end
+  local lo = c - math.floor((n - 1) / 2)
+  return lo, lo + n - 1
+end
+-- FIN cle
+local thumbs = THUMBS
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
 local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940 }
 local CW, CH = BASE.CW, BASE.CH   -- tranche du milieu
@@ -81,6 +100,7 @@ local function loadList()
   all = {}
   local dir = noctalia.wallpaperDirectory()
   if not dir then return end
+  thumbs = THUMBS .. cleDossier(dir) .. "/"
   if dir:sub(-1) ~= "/" then dir = dir .. "/" end
   local files = noctalia.listDir(dir) or {}
   table.sort(files, function(a, b) return a:lower() < b:lower() end)
@@ -90,11 +110,12 @@ local function loadList()
       local path = dir .. f
       local info = noctalia.fileInfo(path)
       if info and not info.isDir then
-        local tw, tn = THUMBS .. f .. ".W.webp", THUMBS .. f .. ".N.webp"
+        -- Vignette absente (pas encore découpée) : rien n'est affiché, jamais l'image d'origine (jusqu'à 8K)
+        local tw, tn = thumbs .. f .. ".W.webp", thumbs .. f .. ".N.webp"
         table.insert(all, {
           path = path, file = f, title = prettify(f),
-          thumbW = noctalia.fileExists(tw) and tw or path,
-          thumbN = noctalia.fileExists(tn) and tn or path,
+          thumbW = noctalia.fileExists(tw) and tw or nil,
+          thumbN = noctalia.fileExists(tn) and tn or nil,
         })
       end
     end
@@ -207,7 +228,8 @@ local function strip()
   local c = math.floor(pos + 0.5)
   local fl = math.floor(pos)
   local cards, centers, x = {}, {}, 0
-  for idx = c - reach, c + reach + 1 do
+  local lo, hi = fenetre(n, c, fl, reach)
+  for idx = lo, hi do
     local delta = math.abs(idx - pos)
     local d = math.abs(idx - c)
     local w, h = dims(d)
@@ -218,7 +240,7 @@ local function strip()
     local kindW = d == 0
     centers[idx] = x + w / 2
     table.insert(cards, ui.row({ key = "c" .. idx, width = w, height = ROW_H, align = "center", justify = "center" }, {
-      ui.image({
+      (kindW and wp.thumbW or wp.thumbN) and ui.image({
         key = "i" .. idx,
         path = kindW and wp.thumbW or wp.thumbN,
         width = bw,
@@ -228,7 +250,7 @@ local function strip()
         onClick = function()
           if idx == target then apply(wp) else target = idx; setTicking(true) end
         end,
-      }),
+      }) or ui.box({ key = "i" .. idx, width = bw, height = h, opacity = 0 }),
     }))
     x = x + w + SPACE
   end
@@ -317,7 +339,7 @@ function onOpen(context)
   current = noctalia.wallpaperPath(outputName())
   bg = nil
   if current then
-    local b = THUMBS .. (current:match("([^/]+)$") or "") .. ".B.webp"
+    local b = THUMBS .. cleDossier(current:match("^(.*)/[^/]*$") or "") .. "/" .. (current:match("([^/]+)$") or "") .. ".B.webp"
     if noctalia.fileExists(b) then bg = b end
   end
   loadList()

@@ -7,6 +7,10 @@
 # x échelle de l'écran, filtre Lanczos) :
 # le carrousel l'affiche pixel pour pixel, l'image d'origine reste celle appliquée comme fond.
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
+# Cache PAR DOSSIER : ~/.cache/nc/carousel/<clé du dossier>/ (changer de thème ou de dossier n'efface rien : revenir sur un
+# dossier déjà vu ne régénère rien). La clé : chemin du dossier (~ développé, sans « / » final), chaque octet hors
+# [A-Za-z0-9._-] écrit %XX (majuscules). Même règle dans panel.luau (cleDossier, testée des deux côtés).
+# Garde les 32 dossiers les plus récents.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
 # Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
 case "${1:-}" in
@@ -34,9 +38,25 @@ src=""
   "${fichiers[@]}" 2>/dev/null)
 [ -n "$src" ] || src="$FONDS_DEFAUT"
 src="${src/#\~/$HOME}"
+while [ ${#src} -gt 1 ] && [ "${src%/}" != "$src" ]; do src="${src%/}"; done
+
+# -- DEBUT cle
+cle_dossier() {
+  local LC_ALL=C s="$1" out="" c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [A-Za-z0-9._-]) out+="$c" ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+# -- FIN cle
 
 # --surveillance : fait surveiller par nc-carousel-thumbs.path le vrai dossier (drop-in dossier.conf ; aucun pour le
-# dossier par défaut, déjà dans l'unité). Appelé par nc-reglages (FONDS_DOSSIER) et install.sh. Silencieux sans systemd.
+# dossier par défaut, déjà dans l'unité : le drop-in disparaît au retour au défaut). Appelé par nc-reglages (à chaque
+# application), install.sh, nc-maj et l'ouverture de session ; idempotent et rapide. Silencieux sans systemd.
 if [ "${1:-}" = "--surveillance" ]; then
   dropin="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/nc-carousel-thumbs.path.d/dossier.conf"
   want=""
@@ -49,17 +69,21 @@ if [ "${1:-}" = "--surveillance" ]; then
 PathChanged=
 PathChanged=${real//%/%%}"
   fi
+  changed=0
   if [ -n "$want" ]; then
-    [ "$(cat "$dropin" 2>/dev/null)" = "$want" ] && exit 0
-    mkdir -p "$(dirname "$dropin")" && printf '%s\n' "$want" > "$dropin.tmp.$$" && mv "$dropin.tmp.$$" "$dropin" || exit 0
-  else
-    [ -e "$dropin" ] || exit 0
+    if [ "$(cat "$dropin" 2>/dev/null)" != "$want" ]; then
+      mkdir -p "$(dirname "$dropin")" && printf '%s\n' "$want" > "$dropin.tmp.$$" && mv "$dropin.tmp.$$" "$dropin" || exit 0
+      changed=1
+    fi
+  elif [ -e "$dropin" ]; then
     rm -f "$dropin" && rmdir "$(dirname "$dropin")" 2>/dev/null
+    changed=1
   fi
-  systemctl --user daemon-reload >/dev/null 2>&1 || exit 0
+  [ "$changed" = 1 ] && { systemctl --user daemon-reload >/dev/null 2>&1 || exit 0; }
   if systemctl --user is-active --quiet nc-carousel-thumbs.path 2>/dev/null; then
-    systemctl --user restart nc-carousel-thumbs.path >/dev/null 2>&1
-    systemctl --user start --no-block nc-carousel-thumbs.service >/dev/null 2>&1    # miniatures du nouveau dossier
+    [ "$changed" = 1 ] && systemctl --user restart nc-carousel-thumbs.path >/dev/null 2>&1
+    # Toujours : les miniatures du dossier réel (le service ne refait que ce qui manque)
+    systemctl --user start --no-block nc-carousel-thumbs.service >/dev/null 2>&1
   fi
   exit 0
 fi
@@ -71,7 +95,8 @@ SK=0.30
 # Facteur de pixels : échelle de l'écran x réduction du plugin sur les écrans de moins de 1600 x 1000 points
 # (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6) ; écran plus grand que 1600 x 1000 : agrandi jusqu'à x2.
 # Le plus grand de tous les écrans branchés.
-OUT="$HOME/.cache/nc/carousel"
+ROOT="$HOME/.cache/nc/carousel"
+OUT="$ROOT/$(cle_dossier "$src")"
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
    (if $w > 1600 or $h > 1000 then ([2, $w / 1600, $h / 1000] | min | if . < 1 then 1 else . end)
@@ -81,11 +106,11 @@ dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
 # Hyprland enregistre le vrai facteur.
 if [ -n "$dpr" ]; then
   dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
-  if [ "$(cat "$OUT/.dpr" 2>/dev/null)" != "$dpr" ] && mkdir -p "$OUT"; then
-    echo "$dpr" > "$OUT/.dpr.tmp" && mv "$OUT/.dpr.tmp" "$OUT/.dpr"
+  if [ "$(cat "$ROOT/.dpr" 2>/dev/null)" != "$dpr" ] && mkdir -p "$ROOT"; then
+    echo "$dpr" > "$ROOT/.dpr.tmp" && mv "$ROOT/.dpr.tmp" "$ROOT/.dpr"
   fi
 else
-  dpr=$(cat "$OUT/.dpr" 2>/dev/null)
+  dpr=$(cat "$ROOT/.dpr" 2>/dev/null)
   case "$dpr" in ''|*[!0-9.]*) dpr=1.000 ;; esac
 fi
 
@@ -110,6 +135,13 @@ bake() {
 [ -d "$src" ] || exit 0
 
 mkdir -p "$OUT"
+touch "$OUT"
+# Ancien cache à plat (avant le cache par dossier) : effacé, il ne sert plus
+rm -f "$ROOT"/*.webp "$ROOT"/*.jpg "$ROOT"/*.echec "$ROOT/.size"
+# Plus de 32 dossiers : les plus anciens partent (dates comparées entre elles, jamais à l'horloge)
+ls -1dt -- "$ROOT"/*/ 2>/dev/null | tail -n +33 | while IFS= read -r d; do
+  [ "${d%/}" = "$OUT" ] || rm -rf -- "$d"
+done
 # Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
 sig="v5-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
 if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then

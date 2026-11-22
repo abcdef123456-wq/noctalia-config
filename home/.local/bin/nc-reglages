@@ -2974,13 +2974,13 @@ def appliquer_noctalia(vals):
         elif os.path.exists(NOCTALIA_OUT):
             os.remove(NOCTALIA_OUT)
         subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
-    if "FONDS_DOSSIER" in vals:
-        # Le carrousel refait ses miniatures quand ce dossier change : nc-carousel-thumbs (qui lit le même dossier
-        # que Noctalia) met à jour la surveillance de son .path ; sans systemd ou sans le script, rien
-        try:
-            subprocess.run([os.path.join(HOME, ".local/bin/nc-carousel-thumbs"), "--surveillance"], capture_output=True)
-        except OSError:
-            pass
+    # À chaque application (un thème change aussi le dossier des fonds, et le retour au dossier par défaut doit retirer
+    # le drop-in) : nc-carousel-thumbs, qui lit le même dossier que Noctalia, met à jour la surveillance de son .path et
+    # lance les miniatures du dossier réel ; sans systemd ou sans le script, rien
+    try:
+        subprocess.run([os.path.join(HOME, ".local/bin/nc-carousel-thumbs"), "--surveillance"], capture_output=True)
+    except OSError:
+        pass
 
 
 def appliquer_curseur(vals):

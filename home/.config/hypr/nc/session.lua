@@ -24,6 +24,8 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("~/.local/bin/nc-session-propre")
     -- Disposition de fenêtres à rouvrir à l'ouverture de session (nc-reglages → Fenêtres → Session à l'ouverture)
     if nc.reglage("SESSION_DEMARRAGE", "aucune") ~= "aucune" then hl.exec_cmd("~/.local/bin/nc-session demarrage") end
+    -- Carrousel des fonds : surveillance et miniatures du dossier réel, après le démarrage, à basse priorité
+    hl.exec_cmd("sh -c 'sleep 30; if command -v ionice >/dev/null 2>&1; then exec nice -n 19 ionice -c3 \"$HOME/.local/bin/nc-carousel-thumbs\" --surveillance; else exec nice -n 19 \"$HOME/.local/bin/nc-carousel-thumbs\" --surveillance; fi'")
     -- Pastille Garmin de la barre : nc-garmin écrit son fichier d'état une fois (lecture locale, sans réseau), sinon
     -- elle reste cachée jusqu'à la première ouverture du panneau (#43)
     if nc.reglage("GARMIN_ACTIF", "non") == "oui" then hl.exec_cmd("~/.local/bin/nc-garmin etat-json >/dev/null 2>&1") end

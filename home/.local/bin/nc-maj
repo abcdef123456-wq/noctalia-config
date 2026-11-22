@@ -325,6 +325,15 @@ fi
 if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ -x "$HOME/.local/bin/nc-navigateurs" ]; then
   "$HOME/.local/bin/nc-navigateurs" appliquer >/dev/null 2>&1 || true
 fi
+# Carrousel des fonds : surveillance et miniatures du dossier réel, une fois, en arrière-plan et à basse priorité
+# (répare le cache des versions où changer de thème le vidait)
+if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ -x "$HOME/.local/bin/nc-carousel-thumbs" ]; then
+  if command -v ionice >/dev/null 2>&1; then
+    setsid nice -n 19 ionice -c3 "$HOME/.local/bin/nc-carousel-thumbs" --surveillance >/dev/null 2>&1 < /dev/null &
+  else
+    setsid nice -n 19 "$HOME/.local/bin/nc-carousel-thumbs" --surveillance >/dev/null 2>&1 < /dev/null &
+  fi
+fi
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
 if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
   setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$base" "$apres" >/dev/null 2>&1 < /dev/null &
