@@ -9,20 +9,50 @@
     "nom": "Catppuccin"
   },
   "reglages": {
-    "FENETRES_ARRONDI": "16",
+    "FENETRES_ARRONDI": "18",
     "ANIM_BUREAUX": "slidefade",
     "ILE_CONTOUR": "degrade",
     "ILE_CONTOUR_EPAISSEUR": "1",
     "ILE_RAYON": "rond",
     "ILE_VERRE": "97",
-    "ILE_ANIM": "doux",
+    "ILE_ANIM": "ressort",
     "ILE_ACCENTS": "accent",
     "ILE_CONTOUR_FERMEE": "oui",
     "WIDGETS_PLAQUE": "oui",
     "FENETRES_BORDURE": "2",
-    "FENETRES_OMBRE": "30"
+    "FENETRES_OMBRE": "30",
+    "ILE_STYLE": "terminal",
+    "ILE_POLICE": "Nunito, Quicksand, Inter",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "non",
+    "TERMINAL_POLICE": "FiraCode Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "88",
+    "TERMINAL_MARGE": "14",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "vif",
+    "FENETRES_OMBRE_DECALAGE": "auto",
+    "FENETRES_DISPOSITION": "dwindle",
+    "FENETRES_COINS_FORME": "doux",
+    "DOCK": "oui",
+    "DOCK_POSITION": "left",
+    "DOCK_AUTO": "non"
   },
-  "noctalia": {},
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 6,
+      "thickness": 40,
+      "capsule": true,
+      "capsule_thickness": 0.92,
+      "capsule_padding": 12
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": false,
+      "pill_scale": 1.4,
+      "active_pill_size": 3.0
+    }
+  },
   "theme_sync": {
     "bordure": "degrade",
     "ombre": "coloree"

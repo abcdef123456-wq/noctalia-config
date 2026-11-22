@@ -19,7 +19,11 @@ THEMES = REPO / "home/.local/share/nc/themes"
 BIN = REPO / "home/.local/bin"
 ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa"]
 FONDS = REPO / "home/Pictures/Wallpapers"
-ENRICHIS = {"apple", "catppuccin", "gruvbox", "nord", "kanagawa", "dracula"}
+ENRICHIS = {"apple", "oled", "catppuccin", "gruvbox", "nord", "kanagawa", "dracula"}
+# A7 : valeurs d'origine volontairement changées pour que chaque thème se reconnaisse (coins, bordure, dock d'Apple)
+A7 = {"apple": {"FENETRES_ARRONDI": "20", "FENETRES_BORDURE": "0", "DOCK_TAILLE": "56"}, "nord": {"FENETRES_ARRONDI": "6"},
+      "catppuccin": {"FENETRES_ARRONDI": "18"}, "dracula": {"FENETRES_ARRONDI": "10"},
+      "gruvbox": {"FENETRES_ARRONDI": "0"}, "kanagawa": {"FENETRES_ARRONDI": "8"}}
 # Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
 AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n",
           "catppuccin": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=rond\nILE_VERRE=97\nILE_ANIM=doux\nILE_ACCENTS=accent\n"
@@ -52,7 +56,8 @@ REFERENCE = json.loads((REPO / "tests/donnees/styles-avant-themes.json").read_te
 def anciens():
     """(STYLES, PALETTES) de nc-reglages d'avant les thèmes en fichiers, figés dans tests/donnees (commit 40eb708) :
     la comparaison ne dépend ni de l'historique git (CI sans historique) ni de ce que devient main."""
-    return REFERENCE["STYLES"], {k: list(v) for k, v in REFERENCE["PALETTES"].items()}
+    styles = {k: dict(v, **A7.get(k, {})) for k, v in REFERENCE["STYLES"].items()}
+    return styles, {k: list(v) for k, v in REFERENCE["PALETTES"].items()}
 
 
 class Base(unittest.TestCase):
@@ -164,8 +169,23 @@ class Reapplication(Base):
                 (self.home / ".config/nc/reglages.conf").write_text(f"STYLE={nom}\n", encoding="utf-8")
                 r = self.nc("appliquer")
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-                self.assertEqual(self.style_conf(), avant + AJOUTS.get(nom, ""))
+                # l'ancien contenu (valeurs A7 au besoin) en tête, dans l'ordre ; les ajouts voulus ensuite
+                attendu = [l.split("=")[0] + "=" + A7.get(nom, {}).get(l.split("=")[0], l.split("=", 1)[1])
+                           if "=" in l and not l.startswith("#") else l for l in avant.splitlines()]
+                lignes = self.style_conf().splitlines()
+                self.assertEqual(lignes[:len(attendu)], attendu)
+                cles = {l.split("=")[0] for l in lignes[len(attendu):]}
+                self.assertTrue({l.split("=")[0] for l in AJOUTS.get(nom, "").splitlines()} <= cles)
                 self.assertNotIn("FONDS_DOSSIER", self.style_conf())
+
+    def test_noctalia_identique_a_main_a_l_octet(self):
+        """STYLE=noctalia : style.conf strictement identique à l'ancien (aucune ligne ajoutée ni changée)."""
+        avant = REFERENCE["style_conf"]["noctalia"]
+        (self.home / ".config/nc/style.conf").write_text(avant, encoding="utf-8")
+        (self.home / ".config/nc/reglages.conf").write_text("STYLE=noctalia\n", encoding="utf-8")
+        r = self.nc("appliquer")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.style_conf(), avant)
 
     def test_dossier_de_fonds_au_choix_puis_garde(self):
         """Choisir le thème pose son dossier de fonds ; une réapplication ensuite le garde."""
@@ -276,12 +296,12 @@ class Priorite(Base):
     def test_reglage_utilisateur_avant_le_theme(self):
         r = self.nc("set", "STYLE", "nord")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "10")
+        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "6")
         r = self.nc("set", "FENETRES_ARRONDI", "20")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("FENETRES_ARRONDI", (self.home / ".config/nc/reglages.conf").read_text())
-        self.nc("set", "STYLE", "nord")               # réapplication : le thème écrit toujours 10 dans style.conf
-        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "10")
+        self.nc("set", "STYLE", "nord")               # réapplication : le thème écrit toujours 6 dans style.conf
+        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "6")
         self.assertIn("FENETRES_ARRONDI=20", (self.home / ".config/nc/reglages.conf").read_text())
         g = self.nc("get", "FENETRES_ARRONDI")
         self.assertEqual(g.stdout.strip().split()[-1], "20", g.stdout)

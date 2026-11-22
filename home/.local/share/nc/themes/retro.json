@@ -19,13 +19,38 @@
     "ILE_MAJUSCULES": "oui",
     "FENETRES_ARRONDI": "0",
     "FENETRES_BORDURE": "1",
-    "FENETRES_OMBRE": "0",
+    "FENETRES_OMBRE": "10",
     "ANIM_BUREAUX": "slide",
     "ILE_ACCENTS": "accent",
     "ILE_CONTOUR_FERMEE": "oui",
-    "VERROU_COULEUR": "accent"
+    "VERROU_COULEUR": "accent",
+    "ILE_LUEUR": "non",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "100",
+    "TERMINAL_MARGE": "6",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "aucun",
+    "FENETRES_OMBRE_DECALAGE": "dure",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "carres",
+    "FENETRES_MAITRE_ORIENTATION": "bas",
+    "FENETRES_ESPACE": "0",
+    "DOCK": "non"
   },
-  "noctalia": {},
+  "noctalia": {
+    "bar.default": {
+      "position": "bottom",
+      "margin_edge": 0,
+      "thickness": 24,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "focus_hint",
+      "show_labels": true,
+      "label_source": "id"
+    }
+  },
   "theme_sync": {
     "bordure": "degrade",
     "ombre": "coloree"

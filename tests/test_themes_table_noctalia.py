@@ -1,6 +1,5 @@
 """Table « noctalia » d'un thème : un réglage de la personne gagne sur le thème, et seules les clés de la liste blanche
-passent (jamais compositor_blur, ni flou, ni verrou, ni fond). apple et oled restent identiques à l'octet à leur sortie
-d'avant (6c144c5). Faux HOME, faux noctalia ; jamais le vrai HOME."""
+passent (jamais compositor_blur, ni flou, ni verrou, ni fond). apple et oled sont figés à l'octet (contenu de A7 : barre, bureaux, dock). Faux HOME, faux noctalia ; jamais le vrai HOME."""
 import re
 import unittest
 
@@ -9,10 +8,14 @@ from tests import test_themes as tt
 # zy-reglages.toml d'apple et d'oled tels qu'ils sortaient de 6c144c5 (sans police : fc-list est un faux vide)
 ENTETE = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n\n"
 APPLE = ENTETE + ('[lockscreen]\nblur_intensity = 0.35\ntransition = ["fade"]\n\n'
-                  "[bar.default]\ncapsule = false\nbackground_opacity = 0.55\n\n"
-                  '[wallpaper]\ntransition = ["fade"]\ndirectory = "@FONDS@"\n\n'
-                  "[dock]\nmagnification = true\nicon_size = 52\n")
-OLED = ENTETE + '[theme]\npure_black_dark = true\n\n[wallpaper]\ndirectory = "@FONDS@"\n'
+                  '[dock]\nposition = "bottom"\nenabled = true\nauto_hide = false\nmagnification = true\nicon_size = 56\n\n'
+                  '[bar.default]\ncapsule = false\nbackground_opacity = 0.55\nposition = "top"\nmargin_edge = 0\nthickness = 30\n\n'
+                  '[widget.workspaces]\nstyle = "minimal"\nshow_labels = false\n\n'
+                  '[wallpaper]\ntransition = ["fade"]\ndirectory = "@FONDS@"\n')
+OLED = ENTETE + ('[theme]\npure_black_dark = true\n\n'
+                 '[bar.default]\nposition = "top"\nmargin_edge = 6\nthickness = 26\ncapsule = false\nbackground_opacity = 0.0\n\n'
+                 '[widget.workspaces]\nstyle = "focus_hint"\nshow_labels = true\n\n'
+                 '[dock]\nenabled = false\n\n[wallpaper]\ndirectory = "@FONDS@"\n')
 
 
 class TableNoctalia(tt.Base):

@@ -10,7 +10,7 @@
   },
   "reglages": {
     "ILE_CONTOUR": "discret",
-    "FENETRES_ARRONDI": "12",
+    "FENETRES_ARRONDI": "8",
     "ILE_CONTOUR_EPAISSEUR": "1",
     "ILE_RAYON": "doux",
     "ILE_VERRE": "100",
@@ -19,9 +19,34 @@
     "ILE_CONTOUR_FERMEE": "non",
     "WIDGETS_PLAQUE": "oui",
     "FENETRES_BORDURE": "1",
-    "FENETRES_OMBRE": "20"
+    "FENETRES_OMBRE": "20",
+    "ILE_STYLE": "terminal",
+    "ILE_POLICE": "Noto Serif JP, Noto Serif, Inter",
+    "ILE_ANIM": "doux",
+    "ILE_MAJUSCULES": "non",
+    "TERMINAL_POLICE": "CaskaydiaCove Nerd Font Mono, JetBrainsMono Nerd Font Mono",
+    "TERMINAL_OPACITE": "90",
+    "TERMINAL_MARGE": "12",
+    "TERMINAL_CURSEUR": "underline",
+    "FENETRES_CARACTERE": "doux",
+    "FENETRES_OMBRE_DECALAGE": "auto",
+    "FENETRES_DISPOSITION": "scrolling",
+    "FENETRES_COINS_FORME": "doux",
+    "DOCK": "oui",
+    "DOCK_POSITION": "bottom",
+    "DOCK_AUTO": "oui"
   },
-  "noctalia": {},
+  "noctalia": {
+    "bar.default": {
+      "position": "right",
+      "margin_edge": 8,
+      "thickness": 40
+    },
+    "widget.workspaces": {
+      "style": "minimal",
+      "show_labels": true
+    }
+  },
   "theme_sync": {
     "bordure": "degrade",
     "ombre": "coloree"

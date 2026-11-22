@@ -11,11 +11,45 @@
   "reglages": {
     "ILE_STYLE": "noir",
     "ILE_CONTOUR": "aucun",
-    "FENETRES_ASSOMBRIR": "non"
+    "FENETRES_ASSOMBRIR": "non",
+    "ILE_CONTOUR_EPAISSEUR": "0",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "auto",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Inter, Adwaita Sans",
+    "ILE_ANIM": "sec",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "texte",
+    "TERMINAL_POLICE": "CaskaydiaCove Nerd Font Mono, JetBrainsMono Nerd Font Mono",
+    "TERMINAL_OPACITE": "100",
+    "TERMINAL_MARGE": "8",
+    "TERMINAL_CURSEUR": "underline",
+    "FENETRES_ARRONDI": "14",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_CARACTERE": "sec",
+    "FENETRES_OMBRE_DECALAGE": "aucun",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_OMBRE": "0",
+    "FENETRES_COINS_FORME": "rond",
+    "FENETRES_MAITRE_ORIENTATION": "centre",
+    "FENETRES_FOND": "noir",
+    "DOCK": "non"
   },
   "noctalia": {
     "theme": {
       "pure_black_dark": true
+    },
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 6,
+      "thickness": 26,
+      "capsule": false,
+      "background_opacity": 0.0
+    },
+    "widget.workspaces": {
+      "style": "focus_hint",
+      "show_labels": true
     }
   },
   "theme_sync": {

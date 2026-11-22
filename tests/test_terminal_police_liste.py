@@ -97,7 +97,6 @@ class PoliceListe(unittest.TestCase):
             with self.subTest(cle=cle):
                 self.m._verifier_theme("apple", self.theme(**{cle: v}))
 
-    @unittest.skip("activé en A7")
     def test_familles_completes(self):
         for f in sorted(THEMES.glob("*.json")):
             if f.stem == "noctalia":
