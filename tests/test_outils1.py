@@ -377,6 +377,19 @@ class VerrouPlace(Base):
         self.assertEqual(sorted(p.name for p in self.conf.iterdir()), ["config.toml", "zx-verrou.toml"])
         self.assertEqual(sorted(p.name for p in self.etat.iterdir()), ["settings.toml"])
 
+    def test_widget_order_sur_plusieurs_lignes(self):
+        """Noctalia peut écrire widget_order sur plusieurs lignes : tout le tableau est remplacé, rien ne reste après."""
+        if sys.version_info < (3, 11):
+            self.skipTest("tomllib absent")
+        import tomllib
+        (self.etat / "settings.toml").write_text(self.CONFIG.replace('widget_order = ["nc-heure"]',
+                                                                     'widget_order = [\n  "nc-heure",\n  "autre",\n]'))
+        r = self.lancer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        etat = (self.etat / "settings.toml").read_text()
+        self.assertEqual(tomllib.loads(etat)["lockscreen_widgets"]["widget_order"], ["nc-heure"])
+        self.assertNotIn('"autre"', etat)
+
     def _ecrans(self, noms):
         ecrans = json.dumps([{"name": n, "width": 2000 if n == "DP-1" else 800, "height": 1000, "scale": 1.0,
                               "transform": 0} for n in noms])
