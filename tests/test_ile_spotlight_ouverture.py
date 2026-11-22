@@ -80,7 +80,8 @@ class Spotlight(unittest.TestCase):
     def test_entree_depuis_une_page_le_contenu_part_de_zero(self):
         """D-A : page -> Spotlight. La page sort en 80 ms, le contenu monte en 170 ms depuis 0 ; calcul image par image."""
         sortie_page = self.lire_duree(r"duration: fen\.ouverte && !fen\.recherche \? 200 : (\d+);")
-        entree = self.lire_duree(r"id: entreeSpot;[^\n]*duration: (\d+);")
+        self.assertRegex(self.src, r"id: entreeSpot;[^\n]*duration: Couleurs\.anim\.spot;")   # 170 ms par défaut (test_ile_allure)
+        entree = 170
         self.assertIn("if (!spotDepuisPilule && !Notifs.enPause) { fonduSpot = 0; entreeSpot.start() }", self.src)
         self.assertIn("entreeSpot.stop(); fonduSpot = 1", self.src)   # Échap, Super + R deux fois, pilule : retour à 1
         self.assertIn('id: entreeSpot;', self.src)
@@ -116,10 +117,10 @@ class Spotlight(unittest.TestCase):
         cadre = m.group(1)
         self.assertNotIn("visible: e > 0", cadre)
         # Sans contour : rien de dessiné, sinon le dégradé reste sous l'île, de sa taille exacte
-        self.assertIn("opacity: Couleurs.aContour && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0", cadre)
+        self.assertIn("opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0", cadre)
         self.assertIn("visible: opacity > 0.01", cadre)
-        self.assertIn("readonly property real e: Couleurs.aContour ? 2 : 0", cadre)
-        self.assertIn("Behavior on opacity { NumberAnimation { duration: 220 } }", cadre)
+        self.assertIn("readonly property real e: Couleurs.aContour ? Couleurs.epaisseur : 0", cadre)
+        self.assertIn("Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }", cadre)
 
     def test_point_et_bulle_attendent_la_fin_du_retour(self):
         for nom in ("pointPrive", "bulle"):
