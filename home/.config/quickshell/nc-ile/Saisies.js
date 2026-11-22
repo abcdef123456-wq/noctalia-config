@@ -123,3 +123,37 @@ function demandeProcessus(q) {
     m = /^processus\s+([A-Za-z0-9._-]{1,32})$/i.exec(s)
     return m ? { nom: m[1] } : null
 }
+
+// Raccourcis web de l'utilisateur (liens-web.conf : « préfixe<TAB>nom<TAB>URL », « %s » = la saisie). Mêmes règles que
+// nc-reglages (liens_web_valide) : préfixe [a-z0-9]{1,12} hors mots réservés, URL http(s) avec un seul « %s », nom de
+// 40 caractères au plus sans contrôle. Fichier borné à 16 Kio et 50 lignes ; une ligne fausse est ignorée sans bruit.
+var RESERVES = ["g", "yt", "w", "heure", "time", "mdp", "password", "port", "processus", "session", "sessions",
+                "note", "notes", "rappel", "rappels", "reminder", "reminders"]
+function analyseLiens(texte) {
+    var t = String(texte || ""), vus = {}, liens = []
+    if (t.length > 16384) return []
+    var lignes = t.split("\n")
+    if (lignes[lignes.length - 1] === "") lignes.pop()      // le retour à la ligne final n'est pas une ligne
+    if (lignes.length > 50) return []
+    for (var i = 0; i < lignes.length; i++) {
+        var l = lignes[i].replace(/\r$/, "")
+        if (l === "" || l.charAt(0) === "#") continue
+        var c = l.split("\t")
+        if (c.length !== 3) continue
+        var p = c[0], nom = c[1], url = c[2]
+        if (!/^[a-z0-9]{1,12}$/.test(p) || RESERVES.indexOf(p) >= 0 || vus[p]) continue
+        if (nom.length < 1 || nom.length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(nom)) continue
+        if (!/^https?:\/\/[^\s\u0000-\u001f\u007f-\u009f]+$/.test(url) || url.split("%s").length !== 2) continue
+        vus[p] = true
+        liens.push({ p: p, nom: nom, url: url })
+    }
+    return liens
+}
+// « amz chaussettes » → { nom, terme, url } avec la saisie encodée ; null si le préfixe n'est pas dans la liste
+function lienWeb(q, liens) {
+    var m = /^([a-z0-9]{1,12}) +(\S.*)$/.exec(String(q || ""))
+    if (!m) return null
+    for (var i = 0; i < liens.length; i++)
+        if (liens[i].p === m[1]) return { nom: liens[i].nom, terme: m[2], url: liens[i].url.replace("%s", encodeURIComponent(m[2])) }
+    return null
+}

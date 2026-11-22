@@ -273,6 +273,9 @@ Item {
     property string calcul: ""
     // « heure tokyo » : les zones de zone1970.tab (lues au premier « heure … »), puis la réponse de date pour la zone demandée
     property bool zonesVoulues: false
+    // Raccourcis web de l'utilisateur (liens-web.conf) : lus une seule fois, à la première ouverture
+    property bool liensVoulus: false
+    property var liensWeb: []
     property var zonesHeure: []
     property string heureZone: ""
     property string heureSortie: ""
@@ -374,6 +377,7 @@ Item {
         lireFenetres.running = true
         lireSessions.running = true
         notesLues = false; noteErreur = ""
+        liensVoulus = true
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
@@ -700,6 +704,12 @@ Item {
         printErrors: false
         onLoaded: { r.zonesHeure = Saisies.listeZones(text()); attente.restart() }
     }
+    FileView {
+        id: fichierLiens
+        path: r.liensVoulus ? (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/nc/liens-web.conf" : ""
+        printErrors: false
+        onLoaded: { r.liensWeb = Saisies.analyseLiens(text()); if (r.q !== "") r.chercher() }
+    }
     Process {
         id: lireHeure
         property string zone: ""
@@ -942,6 +952,11 @@ Item {
                 resultats = [{ titre: terme, sous: Reglages.t("Rechercher sur ", "Search ") + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
                 return
             }
+        }
+        let lienUtil = Saisies.lienWeb(q, liensWeb)
+        if (lienUtil) {
+            resultats = [{ titre: lienUtil.terme, sous: Reglages.t("Rechercher sur ", "Search ") + lienUtil.nom, glyphe: "travel_explore", f: () => Qt.openUrlExternally(lienUtil.url) }]
+            return
         }
         if (q.startsWith("?")) {
             let question = q.slice(1).trim()

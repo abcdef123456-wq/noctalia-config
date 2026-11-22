@@ -4489,6 +4489,20 @@ def catalogue(vals):
                                 "nc-dock up|down ID."))
         lignes.append(ligne)
     res[fin:fin] = lignes
+    # Raccourcis web du Spotlight : à la fin de Barre et dock, « Retirer » par lien ; l'ajout se fait au terminal
+    fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Barre et dock"), default=len(res))
+    lignes = []
+    for s in lignes_liens_web():
+        ligne = dict(cle=s["cle"], section="Barre et dock", sectionNom=nom_section("Barre et dock"), nom=s["nom"],
+                     genre="info", defaut="", aide=s["aide"], choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
+                     valeur="", affiche="", modifie=False, groupe="")
+        if "retirer" in s:
+            ligne.update(genre="action", commande=["nc-reglages", "liens-web", "retirer", s["retirer"]], relire=True,
+                         affiche=T("Retirer", "Remove"))
+        else:
+            ligne.update(genre="texte")                  # Entrée : « nc-reglages set LIEN_AJOUTER <saisie> »
+        lignes.append(ligne)
+    res[fin:fin] = lignes
     # Santé Garmin : quatre actions à la fin de la section (argv fixes) ; « Installer » dans un terminal s'il y en a un
     fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Santé Garmin"), default=len(res))
     lignes = []
@@ -4794,8 +4808,138 @@ def distant_refuse(cle):
     return cle not in DISTANT_PERMIS or r is None or r.genre in ("texte", "dossier")
 
 
+# ── Raccourcis web du Spotlight (~/.config/nc/liens-web.conf) ──────────────────────────────────────────────────
+# Une ligne par lien : préfixe<TAB>nom<TAB>URL (« %s » = la saisie). Mêmes règles que Saisies.js (analyseLiens) : les
+# deux côtés refusent ce que l'autre refuse. Aucun lien symbolique suivi ; écriture d'un seul coup, en 0600.
+LIENS_RESERVES = ("g", "yt", "w", "heure", "time", "mdp", "password", "port", "processus", "session", "sessions",
+                  "note", "notes", "rappel", "rappels", "reminder", "reminders")
+LIENS_MAX_OCTETS, LIENS_MAX_LIGNES = 16384, 50
+
+
+def liens_web_fichier():
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "nc", "liens-web.conf")
+
+
+def liens_web_valide(prefixe, nom, url):
+    """Vrai si les trois champs suivent les règles (préfixe [a-z0-9]{1,12} hors mots réservés, nom de 40 caractères au
+    plus sans contrôle, URL http(s) avec un seul « %s »)."""
+    return bool(re.fullmatch(r"[a-z0-9]{1,12}", prefixe) and prefixe not in LIENS_RESERVES
+                and 1 <= len(nom) <= 40 and not re.search(r"[\x00-\x1f\x7f-\x9f]", nom)
+                and re.fullmatch(r"https?://[^\s\x00-\x1f\x7f-\x9f]+", url) and url.count("%s") == 1)
+
+
+def liens_web_lire():
+    """[(préfixe, nom, URL)] ; [] si le fichier manque, est trop gros, trop long ou n'est pas un fichier ordinaire."""
+    try:
+        fd = os.open(liens_web_fichier(), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return []
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return []
+        brut = os.read(fd, LIENS_MAX_OCTETS + 1)
+    finally:
+        os.close(fd)
+    if len(brut) > LIENS_MAX_OCTETS:
+        return []
+    lignes = brut.decode("utf-8", "replace").split("\n")
+    if lignes[-1] == "":
+        lignes.pop()
+    if len(lignes) > LIENS_MAX_LIGNES:
+        return []
+    res = []
+    for l in lignes:
+        c = l.rstrip("\r").split("\t")
+        if len(c) == 3 and not l.startswith("#") and liens_web_valide(*c) and all(c[0] != x[0] for x in res):
+            res.append(tuple(c))
+    return res
+
+
+def liens_web_ecrire(liens):
+    """Fichier temporaire (0600) dans le même dossier, puis renommage : jamais à moitié écrit ; un lien symbolique à la
+    place du fichier est remplacé, pas suivi."""
+    texte = "".join("\t".join(x) + "\n" for x in liens)
+    if len(liens) > LIENS_MAX_LIGNES or len(texte.encode("utf-8")) > LIENS_MAX_OCTETS:
+        raise ValueError(T("trop de liens", "too many links"))
+    chemin = liens_web_fichier()
+    dossier = os.path.dirname(chemin)
+    if os.path.islink(dossier):
+        raise OSError(T("le dossier nc est un lien symbolique", "the nc folder is a symbolic link"))
+    os.makedirs(dossier, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".nc-", suffix=".tmp", dir=dossier)       # mkstemp crée en 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+        os.replace(tmp, chemin)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
+def liens_web_ajouter(prefixe, nom, url):
+    """Ajoute un lien (CLI et fenêtre) : ValueError avec un message clair si refusé, rien n'est écrit alors."""
+    if prefixe in LIENS_RESERVES:
+        raise ValueError(T(f"« {prefixe} » est un mot de la recherche, choisis un autre préfixe",
+                           f"\"{prefixe}\" is a search keyword, pick another prefix"))
+    if not liens_web_valide(prefixe, nom, url):
+        raise ValueError(T("lien refusé (préfixe a-z 0-9 de 1 à 12 signes, nom de 40 signes au plus, URL http(s) "
+                           "avec un seul %s)",
+                           "link refused (prefix a-z 0-9, 1 to 12 characters, name up to 40 characters, http(s) URL "
+                           "with a single %s)"))
+    liens = liens_web_lire()
+    if any(x[0] == prefixe for x in liens):
+        raise ValueError(T(f"le préfixe {prefixe} existe déjà", f"prefix {prefixe} already exists"))
+    liens_web_ecrire(liens + [(prefixe, nom, url)])
+
+
+def liens_web_saisie(texte):
+    """Champ unique de la fenêtre « préfixe nom URL » (le nom peut avoir des espaces) : ajoute ; ValueError si refusé."""
+    m = texte.split()
+    if len(m) < 3:
+        raise ValueError(T("écris : préfixe, nom, puis l'URL (ex. amz Amazon https://www.amazon.fr/s?k=%s)",
+                           "type: prefix, name, then the URL (e.g. amz Amazon https://www.amazon.com/s?k=%s)"))
+    liens_web_ajouter(m[0], " ".join(m[1:-1]), m[-1])
+
+
+def liens_web_cli(a):
+    """nc-reglages liens-web liste | ajouter PRÉFIXE NOM URL | retirer PRÉFIXE"""
+    liens = liens_web_lire()
+    if a[:1] == ["liste"] and len(a) == 1:
+        for p, nom, url in liens:
+            print(f"{p}\t{nom}\t{url}")
+    elif a[:1] == ["ajouter"] and len(a) == 4:
+        try:
+            liens_web_ajouter(*a[1:])
+        except (OSError, ValueError) as e:
+            sys.exit(f"nc-reglages : {e}")
+    elif a[:1] == ["retirer"] and len(a) == 2:
+        if all(x[0] != a[1] for x in liens):
+            sys.exit(T(f"nc-reglages : pas de lien {a[1]}", f"nc-settings: no link {a[1]}"))
+        try:
+            liens_web_ecrire([x for x in liens if x[0] != a[1]])
+        except (OSError, ValueError) as e:
+            sys.exit(f"nc-reglages : {e}")
+    else:
+        sys.exit("nc-reglages liens-web liste | ajouter PREFIXE NOM URL | retirer PREFIXE")
+
+
+def lignes_liens_web():
+    """Lignes de la fenêtre graphique : un « Retirer » par lien, puis comment en ajouter."""
+    res = [{"cle": "LIEN_" + p, "nom": f"{p} → {nom}", "aide": url, "retirer": p} for p, nom, url in liens_web_lire()]
+    res.append({"cle": "LIEN_AJOUTER", "nom": T("Ajouter un lien web", "Add a web link"),
+                "aide": T("Écris : préfixe, nom, URL (le %s de l'URL prend la saisie), puis Entrée. Ex. amz Amazon "
+                          "https://www.amazon.fr/s?k=%s. Ensuite dans le Spotlight : « amz chaussettes ».",
+                          "Type: prefix, name, URL (the %s in the URL takes the typed text), then Enter. E.g. amz Amazon "
+                          "https://www.amazon.com/s?k=%s. Then in Spotlight: \"amz socks\".")})
+    return res
+
+
 def cli(a):
     vals = lire()
+    if a[0] == "liens-web":
+        liens_web_cli(a[1:])
+        return
     if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
         code, message = verifier_assistant()
         print(message, file=sys.stdout if code == 0 else sys.stderr)
@@ -4872,6 +5016,11 @@ def cli(a):
             sys.exit(T(f"nc-reglages : {a[2][:60]} ne se change pas à distance (depuis ce PC seulement)",
                        f"nc-settings: {a[2][:60]} cannot be changed remotely (from this PC only)"))
         cli(["set", a[2], a[3]])
+    elif a[0] == "set" and len(a) == 3 and a[1] == "LIEN_AJOUTER":
+        try:
+            liens_web_saisie(a[2])
+        except (OSError, ValueError) as e:
+            sys.exit(f"nc-reglages : {e}")
     elif a[0] == "set" and len(a) == 3 and a[1] in PAR_CLE:
         try:
             g = regler(vals, a[1], a[2])

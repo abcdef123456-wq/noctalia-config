@@ -319,7 +319,7 @@ class Reglages(unittest.TestCase):
         self.m.lignes_sessions = lambda: []
 
     def dock_du_catalogue(self):
-        return [x for x in self.m.catalogue({}) if x["section"] == "Barre et dock"]
+        return [x for x in self.m.catalogue({}) if x["section"] == "Barre et dock" and x["cle"] != "LIEN_AJOUTER"]   # sans les liens web
 
     def test_catalogue(self):
         # Une ligne par appli épinglée (« Retirer », sans confirmation : ça se remet d'un geste), puis l'ajout (une info :

@@ -172,6 +172,7 @@ fichier. Rien n'est envoyé.
 qu'à la validation, jamais affiché, et l'historique de l'île ne le garde pas (ni une copie faite dans les 5 s
 qui suivent). Il reste dans le presse-papiers jusqu'à la copie suivante ; les autres lecteurs du presse-papiers le
 voient, sauf ceux qui respectent l'indice `--sensitive` (absent sur Debian 13) (détails : `docs/pages-ile.md`).
+**Raccourcis web à toi** : `~/.config/nc/liens-web.conf`, une ligne `préfixe<TAB>nom<TAB>URL` (`%s` = ta saisie, encodée ; http ou https ; préfixe de 1 à 12 lettres minuscules ou chiffres ; 50 lignes et 16 Kio au plus ; `#` ignore la ligne). Exemple : `amz` puis `Amazon` puis `https://www.amazon.fr/s?k=%s` ; `amz chaussettes` ouvre la recherche. `g`, `yt`, `w` et les mots de l'île restent à eux. Gestion : `nc-reglages liens-web liste|ajouter|retirer` ou la section « Barre et dock » (liste, ajout par le champ « Ajouter un lien web » : `préfixe nom URL`, et retrait). Une ligne fausse est ignorée.
 **`port 8080`** dit quel programme écoute sur ce port (TCP et UDP, par `ss`, du paquet iproute2) et **`processus firefox`**
 liste tes processus de ce nom, en lecture seule ; ces lignes s'ajoutent aux résultats ordinaires.
 
@@ -626,6 +627,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 | Fichier | Pour |
 |---|---|
 | `~/.config/nc/reglages.conf`, `~/.config/nc/raccourcis.conf` | tes réglages (`nc-reglages`, ou la fenêtre avec recherche : **Super + Alt + ,**, `nc-reglages fenetre`, appli « Réglages du bureau ») et tes raccourcis (`nc-raccourci`, ou la section Raccourcis de cette fenêtre : Entrée puis la nouvelle combinaison) |
+| `~/.config/nc/liens-web.conf` | tes raccourcis web de la recherche de l'île (`nc-reglages liens-web`) |
 | `~/.config/hypr/perso.lua` | règles de fenêtres, écrans, tout réglage Hyprland en plus (format Lua de Hyprland) |
 | `~/.zshrc.perso` | tes alias et variables du terminal |
 | `~/.config/kitty/perso.conf` | tes réglages de kitty |
