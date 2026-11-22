@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "bureau")
+ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -64,7 +64,11 @@ ACTIONS = {
     "page": 'Etat.basculer(nom, true); Etat.aller("systeme")',
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
     "bureau": "",                                                # widgets du bureau : l'île reste fermée
+    "themes": "racine.themesOuvert = true",
 }
+# Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; les widgets et le carrousel
+# sont des fenêtres à part
+FENETRES = {"bureau": "vb.instances[0]", "themes": "chargeurThemes.item"}
 PILOTE = """
     Timer {
         interval: 1500; running: true
@@ -76,8 +80,8 @@ PILOTE = """
     }
     Timer {
         id: grab; interval: %(attente)d
-        onTriggered: %(cible)s.instances[0].cible.grabToImage(function(r) {
-            var i = %(cible)s.instances[0].ilot || %(cible)s.instances[0].cible      // bureau : pas d'île, la plaque
+        onTriggered: %(fenetre)s.cible.grabToImage(function(r) {
+            var i = %(fenetre)s.ilot || %(fenetre)s.cible      // bureau, thèmes : pas d'île, le contenu entier
             console.log("CADRE " + JSON.stringify([i.x, i.y, i.width, i.height, i.parent.width, i.parent.height]))
             console.log("RENDU " + (r.saveToFile(Quickshell.env("NCR_PNG")) ? "ok" : "echec"))
             Qt.quit()
@@ -160,6 +164,13 @@ def preparer(root, etat, reglages, palette):
             if f.name == "Ile.qml":    # hors écran l'écran n'a pas de nom : « "" === "" » ouvrirait l'île
                 t = re.sub(r"\b((?:fen\.)?modelData\.name)\b", r'(\1 || "ecran-rendu")', t)
         f.write_text(t)
+    if etat == "themes":
+        # la fenêtre hors écran garde la taille de l'écran factice : la carte prend la taille voulue, et les thèmes du dépôt (lus seulement)
+        f = ile / "ChoixTheme.qml"
+        t = f.read_text().replace("ct.screen ? ct.screen.width : 1600", "1600").replace("anchors.fill: parent\n        focus: true", "width: ct.largeurFenetre; height: 360\n        focus: true")
+        f.write_text(t)
+        (root / "home/.local/share/nc").mkdir(parents=True)
+        (root / "home/.local/share/nc/themes").symlink_to(DEPOT / "home/.local/share/nc/themes")
     if etat == "musique":
         f = ile / "Etat.qml"
         t, n = re.subn(r"readonly property var lecteurs:.*", lambda m: FAUX_LECTEUR, f.read_text(), count=1)
@@ -173,7 +184,7 @@ def preparer(root, etat, reglages, palette):
         if n != 1:
             raise SystemExit("rendu-ile : le Variants de Bureau a changé dans shell.qml")
     i = t.rindex("}")                                            # fin du ShellRoot
-    f.write_text(t[:i] + PILOTE % {"action": ACTIONS[etat], "attente": ATTENTE, "cible": "vb" if etat == "bureau" else "vs"} + t[i:])
+    f.write_text(t[:i] + PILOTE % {"action": ACTIONS[etat], "attente": ATTENTE, "fenetre": FENETRES.get(etat, "vs.instances[0]")} + t[i:])
     if reglages:
         shutil.copy2(reglages, str(root / "home/.config/nc/reglages.conf"))
     if etat == "bureau":                                         # l'état n'a de sens qu'avec le réglage allumé
