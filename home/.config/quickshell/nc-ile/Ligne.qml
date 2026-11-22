@@ -16,7 +16,7 @@ Rectangle {
     signal clicDroit()
     width: parent ? parent.width : 300
     height: sous !== "" ? 50 : 42
-    radius: 12
+    radius: Couleurs.rayon(12, width, height)
     color: zone.containsMouse ? Couleurs.gris2 : "transparent"
     Behavior on color { ColorAnimation { duration: 120 } }
     scale: zone.pressed ? 0.98 : 1
@@ -25,7 +25,7 @@ Rectangle {
     Row {
         anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 8; spacing: 11
         Rectangle {
-            width: 28; height: 28; radius: 14
+            width: 28; height: 28; radius: width / 2
             color: l.actif ? Couleurs.accent : Couleurs.gris3
             Behavior on color { ColorAnimation { duration: 160 } }
             Ico { anchors.centerIn: parent; nom: l.icone; taille: 16; color: l.actif ? Couleurs.surAccent : Couleurs.texte }

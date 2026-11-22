@@ -14,7 +14,7 @@ Column {
     height: implicitHeight
     Texte { width: parent.width; text: champ.titre; textFormat: Text.PlainText; secondaire: true; font.pixelSize: 12; leftPadding: 4 }
     Rectangle {
-        width: parent.width; height: 38; radius: 19; color: Couleurs.gris2
+        width: parent.width; height: 38; radius: Couleurs.rayon(19, width, height); color: Couleurs.gris2
         border.width: 1; border.color: input.activeFocus ? Couleurs.accent : "transparent"
         TextInput {
             id: input

@@ -10,7 +10,7 @@ Rectangle {
     property bool actif: true
     signal clic()
     implicitWidth: ligne.implicitWidth + 28
-    height: 32; radius: 16
+    height: 32; radius: Couleurs.rayon(16, width, height)
     opacity: actif ? 1 : 0.4
     color: zone.containsMouse && actif ? Qt.lighter(teinte, 1.12) : teinte
     scale: zone.pressed && actif ? 0.95 : 1

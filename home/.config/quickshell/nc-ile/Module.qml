@@ -7,7 +7,7 @@ Rectangle {
     signal clic()
     signal appuiLong()
     color: Couleurs.carte
-    radius: 24
+    radius: Couleurs.rayon(24, width, height)
     scale: zone.pressed && cliquable ? 0.97 : 1
     Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }
     MouseArea {

@@ -8,7 +8,7 @@ Rectangle {
     property bool choisi: false
     property color point: "transparent"           // transparent : pas de point
     signal clic()
-    height: 32; radius: 16
+    height: 32; radius: Couleurs.rayon(16, width, height)
     width: rangee.implicitWidth + 28
     color: choisi ? Qt.alpha(Couleurs.accent, 0.32) : (zone.containsMouse ? Qt.alpha(Couleurs.accent, 0.16) : Qt.alpha(Couleurs.carte, 0.6))
     border.width: 1; border.color: choisi ? Qt.alpha(Couleurs.accent, 0.7) : Qt.alpha(Couleurs.texte, 0.1)

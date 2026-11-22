@@ -7,7 +7,7 @@ Rectangle {
     property string texte: ""
     property bool actif: false
     signal clic()
-    height: 28; width: etiquette.implicitWidth + 24; radius: 14
+    height: 28; width: etiquette.implicitWidth + 24; radius: Couleurs.rayon(14, width, height)
     color: actif ? Qt.alpha(Couleurs.accent, 0.30) : zone.containsMouse ? Qt.alpha(Couleurs.accent, 0.14) : Qt.alpha(Couleurs.carte, 0.6)
     border.width: 1; border.color: actif ? Qt.alpha(Couleurs.accent, 0.7) : Qt.alpha(Couleurs.texte, 0.1)
     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }

@@ -15,7 +15,7 @@ Rectangle {
     signal clic()
     implicitWidth: rond ? 36 : libelle.implicitWidth + 24
     implicitHeight: rond ? 36 : 30
-    radius: rond ? width / 2 : 10
+    radius: rond ? width / 2 : Couleurs.rayon(10, width, height)
     color: alerte ? Couleurs.rouge : (choisi ? accent : (contour ? Qt.alpha(accent, zone.containsMouse ? 0.28 : 0.18) : (zone.containsMouse ? Couleurs.gris3 : Couleurs.gris2)))
     border.width: activeFocus || choisi || contour || alerte ? (contour ? 1.5 : 1) : 1
     border.color: alerte ? Qt.lighter(Couleurs.rouge, 1.15) : (activeFocus || choisi || contour ? accent : Couleurs.gris3)

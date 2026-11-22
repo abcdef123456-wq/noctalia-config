@@ -7,7 +7,7 @@ Rectangle {
     property int taille: 13
     signal clic()
     implicitWidth: label.implicitWidth + 26; implicitHeight: 32
-    radius: 16
+    radius: Couleurs.rayon(16, width, height)
     color: primaire ? (zoneClic.containsMouse ? Couleurs.accentClair : Couleurs.accent) : (zoneClic.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
     Behavior on color { ColorAnimation { duration: 120 } }
     opacity: enabled ? 1 : 0.4
