@@ -57,7 +57,7 @@ def sans_couche(texte):
         if bloc > 0:                                             # « anchors { … } » sur plusieurs lignes
             bloc += l.count("{") - l.count("}")
             continue
-        if re.match(r"^\s*anchors \{", l):
+        if re.match(r"^\s*(anchors|margins) \{", l):
             bloc = l.count("{") - l.count("}")
             continue
         if ANCRE_BOOLEEN.match(l):

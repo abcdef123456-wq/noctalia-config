@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche")
+ETATS = ("fermee", "musique", "page", "recherche", "bureau")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -63,6 +63,7 @@ ACTIONS = {
     "musique": "",
     "page": 'Etat.basculer(nom, true); Etat.aller("systeme")',
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
+    "bureau": "",                                                # widgets du bureau : l'île reste fermée
 }
 PILOTE = """
     Timer {
@@ -75,8 +76,8 @@ PILOTE = """
     }
     Timer {
         id: grab; interval: %(attente)d
-        onTriggered: vs.instances[0].cible.grabToImage(function(r) {
-            var i = vs.instances[0].ilot
+        onTriggered: %(cible)s.instances[0].cible.grabToImage(function(r) {
+            var i = %(cible)s.instances[0].ilot || %(cible)s.instances[0].cible      // bureau : pas d'île, la plaque
             console.log("CADRE " + JSON.stringify([i.x, i.y, i.width, i.height, i.parent.width, i.parent.height]))
             console.log("RENDU " + (r.saveToFile(Quickshell.env("NCR_PNG")) ? "ok" : "echec"))
             Qt.quit()
@@ -113,7 +114,7 @@ def sans_couche(texte):
         if bloc > 0:                                             # « anchors { … } » sur plusieurs lignes
             bloc += l.count("{") - l.count("}")
             continue
-        if re.match(r"^\s*anchors \{", l):
+        if re.match(r"^\s*(anchors|margins) \{", l):
             bloc = l.count("{") - l.count("}")
             continue
         if ANCRE_BOOLEEN.match(l):
@@ -166,10 +167,17 @@ def preparer(root, etat, reglages, palette):
         f.write_text(t)
     f = ile / "shell.qml"
     t = f.read_text().replace("Variants {", "Variants {\n        id: vs", 1)
+    if etat == "bureau":                                         # on capture la plaque des widgets, dans le Variants de Bureau
+        t, n = re.subn(r"Variants \{((?:(?!Variants \{).)*?Bureau \{\})", lambda m: "Variants {\n        id: vb" + m.group(1), t, count=1, flags=re.S)
+        if n != 1:
+            raise SystemExit("rendu-ile : le Variants de Bureau a changé dans shell.qml")
     i = t.rindex("}")                                            # fin du ShellRoot
-    f.write_text(t[:i] + PILOTE % {"action": ACTIONS[etat], "attente": ATTENTE} + t[i:])
+    f.write_text(t[:i] + PILOTE % {"action": ACTIONS[etat], "attente": ATTENTE, "cible": "vb" if etat == "bureau" else "vs"} + t[i:])
     if reglages:
         shutil.copy2(reglages, str(root / "home/.config/nc/reglages.conf"))
+    if etat == "bureau":                                         # l'état n'a de sens qu'avec le réglage allumé
+        with open(str(root / "home/.config/nc/reglages.conf"), "a") as c:
+            c.write("\nWIDGETS_BUREAU=oui\n")
     if palette:
         shutil.copy2(palette, str(root / "home/.config/nc/palette-ile.json"))
     return ile
