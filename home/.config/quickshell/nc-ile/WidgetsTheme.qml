@@ -7,8 +7,9 @@
 // coin s'empilent (disposer), jamais l'un sur l'autre ni hors de l'écran.
 // Énergie : aucune pendule à soi. Horloges, date, accueil, calendrier et citation suivent Etat.minute ; météo et musique,
 // les signaux d'Etat (nc-meteo et MPRIS déjà lus par l'île) ; la citation relit son fichier une fois par jour. Jauges,
-// anneau et jauge à aiguille partagent le seul minuteur (2 s), allumé seulement quand l'un d'eux est vu (écran allumé, non
-// verrouillé, widgets non cachés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
+// anneau et jauge à aiguille : un relevé à chaque minute (Etat.minute, en même temps que l'heure : rien ne bouge entre
+// deux), plus un seul minuteur de 2 s, une fois, quand l'un d'eux devient visible (le processeur se mesure entre deux
+// relevés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -59,7 +60,7 @@ Scope {
         onLoadFailed: w.citations = []
     }
 
-    // ── Jauges : CPU (/proc/stat), RAM (/proc/meminfo), disque (df, toutes les 30 s) ──
+    // ── Jauges : CPU (/proc/stat), RAM (/proc/meminfo), disque (df, un relevé sur quinze) ──
     property real cpu: 0
     property real ram: 0
     property real disque: 0
@@ -70,8 +71,10 @@ Scope {
         if (tic++ % 15 === 0 && !dfProc.running) dfProc.running = true
     }
     onVuChanged: if (vu && aJauges) echantillon()
+    readonly property var minute: Etat.minute
+    onMinuteChanged: if (vu && aJauges) echantillon()
     readonly property var minuteur: echantillonneur
-    Timer { id: echantillonneur; interval: 2000; repeat: true; running: w.vu && w.aJauges; onTriggered: w.echantillon() }
+    Timer { id: echantillonneur; interval: 2000; running: w.vu && w.aJauges; onTriggered: w.echantillon() }
     FileView {
         id: procStat
         path: w.aJauges ? "/proc/stat" : ""

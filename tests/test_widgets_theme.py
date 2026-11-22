@@ -4,7 +4,7 @@
   français et en anglais.
 - style.conf : sans « widgets » rien de nouveau ; avec, une ligne WIDGETS_THEME=type:coin:taille[:style],…
 - Hors écran (qs -p, offscreen) : un contenu par type, coupé à WIDGETS_BUREAU=non, caché par « Tout masquer », rien écran
-  éteint ; citation du jour (4 Kio, 200 caractères, une par jour) ; un seul minuteur (2 s, jauges ou anneau vus seulement)
+  éteint ; citation du jour (4 Kio, 200 caractères, une par jour) ; jauges relevées à la minute (un seul minuteur de 2 s, une fois, jauges vues seulement)
   dans tous les fichiers du widget ; cartes (brutal : contour et ombre dure ; ronde : coins transparents), horloge géante,
   météo absente = rien, widgets d'un même coin empilés sans se toucher ni sortir de l'écran.
 - Chiffres d'une horloge : un fichier Chiffres<Nom>.qml par valeur de WIDGETS_CHIFFRES, ni plus ni moins ; séparateur de
@@ -79,7 +79,8 @@ class Source(unittest.TestCase):
     def test_un_seul_minuteur_de_2_s_seulement_pour_les_jauges_vues(self):
         w = lire("WidgetsTheme.qml")
         tous = [m for nom in FICHIERS for m in re.findall(r"\bTimer\s*\{[^}]*\}", lire(nom))]
-        self.assertEqual(tous, ["Timer { id: echantillonneur; interval: 2000; repeat: true; running: w.vu && w.aJauges; onTriggered: w.echantillon() }"])
+        self.assertEqual(tous, ["Timer { id: echantillonneur; interval: 2000; running: w.vu && w.aJauges; onTriggered: w.echantillon() }"])
+        self.assertIn("onMinuteChanged: if (vu && aJauges) echantillon()", w)
         self.assertIn('["jauges", "anneau", "jauge-aiguille"].indexOf(liste[i].type) >= 0', w)
         self.assertIn("readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches", w)
         self.assertIn('Reglages.val("WIDGETS_BUREAU", "non") === "oui"', w)
@@ -87,7 +88,7 @@ class Source(unittest.TestCase):
         self.assertIn("slice(0, 200)", w)
         for nom in FICHIERS:
             for interdit in ("MouseArea", "Behavior", "Animation", "layer.effect", "MultiEffect", "Blur", "Canvas", "Shape", "Process {"):
-                if not (nom == "WidgetsTheme.qml" and interdit == "Process {"):      # df, toutes les 30 s, jauges vues seulement
+                if not (nom == "WidgetsTheme.qml" and interdit == "Process {"):      # df, un relevé sur quinze, jauges vues seulement
                     self.assertNotIn(interdit, lire(nom), nom)
         # Météo et musique : ce qu'Etat lit déjà (nc-meteo, MPRIS), aucun processus de plus
         self.assertNotIn('"nc-meteo"', lire("CarteWidget.qml"))
@@ -204,7 +205,7 @@ class HorsEcran(unittest.TestCase):
             if citations is not None:
                 (root / "config/nc").mkdir(parents=True)
                 (root / "config/nc/citations.txt").write_text(citations, encoding="utf-8")
-            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n id: racine\n property int etape: 0\n property var w: null\n" + H.OUTILS + """
+            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n id: racine\n property int etape: 0\n property var w: null\n property var tic0: null\n" + H.OUTILS + """
  function minuteurs() { return [w.minuteur] }
  Timer { interval: 150; running: true; repeat: true; onTriggered: {
   if (etape === 0) { Reglages.valeurs = %s; var c = Qt.createComponent("WidgetsTheme.qml"); verifier(c.status === Component.Ready, c.errorString())
@@ -255,7 +256,7 @@ class HorsEcran(unittest.TestCase):
         self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "jauges:centre:petit"}, """
   var m = minuteurs()
   if (etape === 1) {
-    verifier(m.length === 1 && m[0].interval === 2000 && m[0].repeat, "un seul minuteur de 2 s : " + m.length)
+    verifier(m.length === 1 && m[0].interval === 2000 && !m[0].repeat, "un seul minuteur de 2 s, une fois : " + m.length)
     verifier(m[0].running && w.fenetres[0].visible, "actif quand vu")
     Etat.widgetsCaches = true; etape++; return }
   if (etape === 2) { verifier(!m[0].running && !w.fenetres[0].visible, "arrêté et caché par Tout masquer")
@@ -263,6 +264,16 @@ class HorsEcran(unittest.TestCase):
   if (etape === 3) { verifier(!m[0].running && !w.fenetres[0].visible, "rien écran éteint")
     Etat.ecranVu = true; etape++; return }
   if (etape === 4) { verifier(m[0].running && w.fenetres[0].visible, "reprise"); Qt.quit() }
+""")
+
+    def test_jauges_immobiles_entre_deux_minutes(self):
+        # Rien ne bouge au repos : après le relevé de départ, plus rien jusqu'à la minute suivante, comme l'heure
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "jauges:centre:petit:carte"}, """
+  if (etape === 1) { racine.tic0 = w.tic; etape++; return }
+  if (etape < 20) { etape++; return }
+  if (etape === 20) { verifier(!w.minuteur.running && w.tic === racine.tic0 + 1, "un seul relevé de plus, puis rien : " + (w.tic - racine.tic0))
+    racine.tic0 = w.tic; Etat.minute = new Date(2026, 10, 22, 9, 6); etape++; return }
+  if (etape === 21) { verifier(w.tic === racine.tic0 + 1, "un relevé à la minute"); Qt.quit() }
 """)
 
     def test_sans_jauges_le_minuteur_dort(self):
@@ -440,8 +451,9 @@ class HorsEcran(unittest.TestCase):
     w.cpu = 0.5; etape++; return }
   if (etape === 4) { var a = trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille")
     verifier(Math.abs(a.rotation) < 0.01, "jauge à 50 % : aiguille droite : " + a.rotation)
-    w.cpu = 0; Etat.minute = new Date(2026, 10, 22, 18, 0); etape++; return }
-  if (etape === 5) { var h2 = pointe("nc-aiguille-heures")
+    Etat.minute = new Date(2026, 10, 22, 18, 0); etape++; return }
+  if (etape === 5) { w.cpu = 0; etape++; return }          // après le relevé de la minute
+  if (etape === 6) { var h2 = pointe("nc-aiguille-heures")
     verifier(Math.abs(h2[0]) < 1.5 && Math.abs(h2[1] - h2[2]) < 1.5, "6 h : heures vers le bas : " + h2)
     verifier(Math.abs(trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille").rotation + 90) < 0.01, "jauge à 0 : à gauche")
     Qt.quit() }
