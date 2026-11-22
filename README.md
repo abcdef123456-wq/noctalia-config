@@ -167,6 +167,10 @@ installer dans le Spotlight »).
 locale, qui survit aux redémarrages ; `rappels` les liste et Entrée en supprime un (détails : `docs/pages-ile.md`).
 **`note acheter du pain`** ajoute une ligne à ton fichier de notes local ; `notes` montre les dernières et ouvre le
 fichier. Rien n'est envoyé.
+**`mdp 20`** (ou `mdp`, `password 20` ; 8 à 64) propose de copier un mot de passe aléatoire ; il n'est généré et copié
+qu'à la validation, jamais affiché, et l'historique de l'île ne le garde pas (ni une copie faite dans les 5 s
+qui suivent). Il reste dans le presse-papiers jusqu'à la copie suivante ; les autres lecteurs du presse-papiers le
+voient, sauf ceux qui respectent l'indice `--sensitive` (absent sur Debian 13) (détails : `docs/pages-ile.md`).
 
 **Emoji dans le Spotlight** : `:` puis un mot (`:coeur`, `:rire`, `:heart`) propose des emoji, en français comme en
 anglais, sans accents ni casse ; Entrée copie l'emoji (`wl-copy`) et referme. Les 24 derniers choisis passent en

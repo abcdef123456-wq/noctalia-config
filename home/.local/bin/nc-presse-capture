@@ -4,7 +4,7 @@
 #   I:<octets>:<identifiant>:<chemin>                                   image PNG, gardée en fichier privé (0600) par
 #                                                                       nc-ile-memo dans ~/.local/state/nc/ile/images
 #                                                                       (l'identifiant vient de l'empreinte du contenu)
-# Rien pour une copie de la dictée (marque nc-dictee-copie de moins de 5 s) ni pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret).
+# Rien pour une copie de la dictée ou un mot de passe de nc-mdp (marques nc-dictee-copie, nc-secret-copie de moins de 5 s) ni pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret), ni pour la sélection déjà là quand la veille démarre.
 # Le contenu n'est jamais journalisé.
 # Une copie de nc-dictee (texte dicté, marque datée de moins de 5 s) : jamais gardée dans l'historique
 # Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
@@ -12,9 +12,44 @@ if [ $# -gt 0 ]; then
   case "$1" in -h|--help|aide) echo "usage : nc-presse-capture (sans argument)"; exit 0 ;; esac
   echo "usage : nc-presse-capture (sans argument)" >&2; exit 2
 fi
-m="${XDG_RUNTIME_DIR:-}/nc-dictee-copie"
-if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$m" ]; then
-  d=$(stat -c %Y "$m" 2>/dev/null) && [ $(( $(date +%s) - d )) -lt 5 ] && exit 0
+# La sélection déjà là quand la veille de l'île (re)démarre n'est jamais gardée : wl-paste --watch lance sa commande
+# aussi pour elle (protocole data-control : « The first selection event is sent upon binding »). Elle est déjà dans
+# l'historique, ou en a été exclue (mot de passe, dictée). L'île pose NC_PRESSE_VEILLE=1 ; le premier appel venu d'un
+# nouveau wl-paste est celui-là : un fichier par veille, nc-presse-veille.<pid du wl-paste>, qui contient l'heure de
+# départ de ce wl-paste (champ 22 de /proc/<pid>/stat) ; absent ou autre heure (pid réutilisé) : premier appel.
+# Sans XDG_RUNTIME_DIR, ou /proc illisible : rien n'est gardé.
+if [ "${NC_PRESSE_VEILLE:-}" = 1 ]; then
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || exit 0
+  st=$(cat "/proc/$PPID/stat" 2>/dev/null) || exit 0
+  # Compté après la dernière « ) » : le nom du processus peut contenir espaces et parenthèses
+  h=$(printf '%s\n' "${st##*) }" | cut -d' ' -f20)
+  case "$h" in ''|*[!0-9]*) exit 0 ;; esac
+  v="$XDG_RUNTIME_DIR/nc-presse-veille.$PPID"
+  p=""
+  [ -f "$v" ] && [ ! -L "$v" ] && p=$(head -c 32 "$v" 2>/dev/null)
+  if [ "$p" != "$h" ]; then
+    # Ménage : les fichiers des veilles dont le wl-paste n'existe plus (pid tout en chiffres seulement)
+    for f in "$XDG_RUNTIME_DIR"/nc-presse-veille.*; do
+      q=${f##*/nc-presse-veille.}
+      case "$q" in ''|*[!0-9]*) continue ;; esac
+      [ -d "/proc/$q" ] || rm -f "$f" 2>/dev/null
+    done
+    # Écrit à côté (mktemp : 0600, création exclusive, préfixe hors du motif du ménage) puis renommé (mv -T : atomique ;
+    # un lien posé à la place de « v » est remplacé, jamais suivi ; un dossier n'est jamais rempli)
+    n=$(mktemp "$XDG_RUNTIME_DIR/nc-presse-veille-tmp.XXXXXX" 2>/dev/null) || exit 0
+    { printf '%s\n' "$h" > "$n" && mv -fT "$n" "$v"; } 2>/dev/null || rm -f "$n"
+    exit 0
+  fi
+fi
+# Marques de moins de 5 s : copie de la dictée, ou mot de passe de nc-mdp (utile quand wl-copy n'a pas --sensitive).
+# Âge de 0 à 4 s seulement : une marque datée dans le futur (horloge reculée) ne coupe pas l'historique.
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  for m in "$XDG_RUNTIME_DIR/nc-dictee-copie" "$XDG_RUNTIME_DIR/nc-secret-copie"; do
+    [ -e "$m" ] || continue
+    d=$(stat -c %Y "$m" 2>/dev/null) || continue
+    a=$(( $(date +%s) - d ))
+    [ "$a" -ge 0 ] && [ "$a" -lt 5 ] && exit 0
+  done
 fi
 t=$(wl-paste --list-types 2>/dev/null) || exit 0
 case "$t" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0 ;; esac

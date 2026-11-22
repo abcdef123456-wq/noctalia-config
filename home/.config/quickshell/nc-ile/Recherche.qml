@@ -498,6 +498,25 @@ Item {
         return { titre: x.titre, sous: x.sous || "Sessions", glyphe: x.ok === undefined ? "hourglass_top" : (x.ok ? "check_circle" : "error"),
                  garder: true, f: () => { r.retourSession = null; r.chercher() } }
     }
+    // « mdp 20 » : rien n'est généré en tapant ; à la validation nc-mdp copie le mot de passe (seul N passe en argument,
+    // jamais affiché ni journalisé ici) et le retour dit seulement copié ou non
+    property var retourMdp: null
+    function copierMdp(n) {
+        if (copieurMdp.running) return
+        copieurMdp.n = n
+        copieurMdp.command = [Etat.bin + "nc-mdp", String(n)]
+        copieurMdp.running = true
+    }
+    Process {
+        id: copieurMdp
+        property int n: 0
+        onExited: code => {
+            r.retourMdp = code === 0
+                ? { ok: true, titre: Reglages.t("Mot de passe de ", "Password of ") + n + Reglages.t(" caractères copié", " characters copied") }
+                : { ok: false, titre: Reglages.t("Copie impossible", "Copy failed") }
+            r.chercher()
+        }
+    }
     function nomGuillemets(nom) { return Reglages.t("« ", "“") + nom + Reglages.t(" »", "”") }
     // Enregistrer la disposition actuelle : le Spotlight reste ouvert, la ligne de la nouvelle session y apparaît
     // (running ne passe à vrai qu'un instant après le lancement : « en cours » se lit aussi dans le retour)
@@ -673,7 +692,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?|notes?)(\s|$))/i.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -728,7 +747,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?|notes?)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -856,7 +875,7 @@ Item {
     }
 
     onQChanged: { if (modeDiag && q !== diagPour) { modeDiag = false; diag.annuler() }
-                  sel = 0; annulerSuppr(); retourSession = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+                  sel = 0; annulerSuppr(); retourSession = null; retourMdp = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -1039,6 +1058,21 @@ Item {
             }
             resultats = lignesR
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+            return
+        }
+        // « mdp 20 » / « mdp » (20) / « password 20 » : une seule ligne, la copie se fait à la validation
+        let mm = /^\s*(mdp|password)(?:\s+(\d+))?\s*$/i.exec(champ.text)
+        if (mm) {
+            let nm = mm[2] === undefined ? 20 : parseInt(mm[2])
+            resultats = [retourMdp ? { titre: retourMdp.titre, sous: Reglages.t("Mot de passe", "Password"), glyphe: retourMdp.ok ? "check_circle" : "error",
+                                       garder: true, f: () => { r.retourMdp = null; r.chercher() } }
+                         : nm >= 8 && nm <= 64
+                         ? { titre: Reglages.t("Copier un mot de passe de ", "Copy a password of ") + nm + Reglages.t(" caractères", " characters"),
+                             sous: Reglages.t("Généré à la validation, jamais affiché", "Generated on Enter, never shown"), glyphe: "key",
+                             garder: true, f: () => r.copierMdp(nm) }
+                         : { titre: Reglages.t("Longueur : 8 à 64 caractères", "Length: 8 to 64 characters"), sous: Reglages.t("Mot de passe", "Password"),
+                             glyphe: "error", garder: true, f: () => {} }]
+            sel = 0
             return
         }
         // « session NOM » : ouvrir une disposition enregistrée, ou enregistrer celle d'aujourd'hui sous ce nom
@@ -1270,7 +1304,7 @@ Item {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if (!applisLues && !/^([?>+!@:]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+        if (!applisLues && !/^([?>+!@:]|sessions? |(mdp|password)(\s|$))/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
             && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return

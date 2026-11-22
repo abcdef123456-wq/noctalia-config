@@ -149,6 +149,7 @@ HOME_FILES=(
   .local/bin/nc-ile-etat
   .local/bin/nc-ile-memo
   .local/bin/nc-presse-capture
+  .local/bin/nc-mdp
   .local/bin/nc-qr
   .local/bin/nc-note
   .local/bin/nc-xwayland-primaire

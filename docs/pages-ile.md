@@ -66,7 +66,9 @@ L’historique est gardé d’une session à l’autre (`~/.local/state/nc/ile/p
 0600 dans `~/.local/state/nc/ile/images`, écrits d’un bloc par `nc-ile-memo`) : 50 textes et 12 images au plus, 64 Mio
 d’images en tout ; les plus anciens non épinglés partent, leurs fichiers aussi. La capture (`nc-presse-capture`, lancé
 par `wl-paste --watch`) ignore toujours ce qu’un gestionnaire de mots de passe marque comme secret
-(`x-kde-passwordManagerHint`, `x-nc-secret`) et ne journalise jamais le contenu. Dans la page : recherche, filtre
+(`x-kde-passwordManagerHint`, `x-nc-secret`) et ne journalise jamais le contenu. Ce qui est déjà dans le
+presse-papiers quand la veille démarre (île relancée) n'entre pas : c'est déjà dans l'historique, ou exclu exprès ;
+seule une copie faite pendant que l'île était arrêtée manque. Dans la page : recherche, filtre
 Tout / Textes / Images, épinglés en tête (épingle sur la carte), suppression d’une carte (croix ou Suppr), aperçu
 complet d’un texte long (flèche), « Coller en texte brut » (recopie en `text/plain`, ferme l’île et envoie Ctrl + V
 à la fenêtre active par le dispatcher `send_shortcut` de Hyprland), « Effacer » (les épinglés restent). Clavier : ↑ ↓ choisir,
@@ -111,3 +113,17 @@ récente en haut ; Entrée ouvre le fichier avec l'application par défaut. Une 
 ligne et les caractères invisibles deviennent des espaces. 1000 caractères au plus. Le fichier est privé (0600) et
 n'est jamais suivi s'il est remplacé par un lien. Rien n'est envoyé nulle part. Le fichier est un simple texte : tu peux
 le modifier à la main. En ligne de commande : `nc-note ajouter < texte`, `nc-note liste`, `nc-note ouvrir`.
+
+**Mot de passe dans le Spotlight** : `mdp 20` (`mdp` seul = 20, `password 20` en anglais ; 8 à 64 caractères) montre une
+ligne « Copier un mot de passe de 20 caractères ». Rien n'est généré en tapant : à Entrée, `nc-mdp 20` tire le mot de
+passe (module `secrets`, lettres, chiffres et symboles, au moins un de chaque), le copie par l'entrée standard de
+`wl-copy` et l'île dit « copié », sans jamais l'afficher ; « Copie impossible » si `wl-copy` échoue ou dépasse 10 s.
+Pendant toute la copie, une marque vide et datée (`$XDG_RUNTIME_DIR/nc-secret-copie`) dit à l'historique de l'île de ne
+pas la garder ; une copie que tu fais toi-même dans les 5 secondes qui suivent n'y entre pas non plus. `--sensitive` est
+ajouté si ton `wl-copy` (wl-clipboard 2.3 ou plus) le connaît : les lecteurs qui respectent cet indice l'ignorent aussi,
+pas les autres. Sans lui (Debian 13 : 2.2.1), seul l'historique de l'île l'ignore. Un lecteur qui ne regarde pas
+l'indice voit le mot de passe (cliphist de Noctalia s'il est activé, `nc-cloud presse` si tu l'envoies). Le mot de passe reste dans le presse-papiers jusqu'à ta
+copie suivante. `wl-copy` le recopie dans un fichier effacé aussitôt : `nc-mdp` lui donne un dossier privé en mémoire
+(sous `$XDG_RUNTIME_DIR`, rien n'est copié sans lui) ; wl-clipboard avant 2.3 (Debian 13) ignore ce dossier : son
+fichier, déjà effacé mais encore ouvert, est sous `/tmp`, donc sur le disque si `/tmp` n'est pas un tmpfs, tant que le mot
+de passe reste dans le presse-papiers.

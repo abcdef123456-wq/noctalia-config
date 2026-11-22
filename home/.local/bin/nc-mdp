@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""nc-mdp N : génère un mot de passe de N caractères (8 à 64) et le COPIE ; il n'est jamais affiché.
+
+Lettres, chiffres et quelques symboles faciles à taper, au moins un de chaque. Tirage par le module `secrets`.
+Le mot de passe va au presse-papiers par l'entrée standard de wl-copy (jamais par argv, jamais par un shell) ;
+`--sensitive` est ajouté si l'installation de wl-copy le connaît (wl-clipboard 2.3 ou plus) : il pose l'indice que
+les historiques du presse-papiers ignorent. Une marque datée vide ($XDG_RUNTIME_DIR/nc-secret-copie), posée avant la
+copie puis rafraîchie toutes les demi-secondes tant que wl-copy tourne et une dernière fois après, dit à l'historique
+de l'île (nc-presse-capture) de ne pas la garder, même sans --sensitive (Debian 13 : 2.2.1).
+wl-copy recopie son entrée dans un fichier de $TMPDIR (effacé aussitôt, gardé ouvert) : il reçoit un TMPDIR privé
+(0700) sous $XDG_RUNTIME_DIR, en mémoire. Sans XDG_RUNTIME_DIR, ou si la marque ne peut pas être posée : rien n'est
+copié. wl-clipboard plus ancien que 2.3 ignore TMPDIR et passe par /tmp.
+Rien n'est journalisé, rien ne sort sur stdout/stderr hors les messages d'erreur (jamais le mot de passe).
+Codes : 0 copié, 1 copie impossible, 2 usage (N absent, non entier ou hors 8..64)."""
+import os
+import secrets
+import shutil
+import signal
+import stat
+import string
+import subprocess
+import sys
+import tempfile
+import time
+
+MIN, MAX = 8, 64
+CLASSES = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "-_.,:;+=@#%!?")
+DELAI = 10          # secondes au plus pour wl-copy ; au-delà : tué, « copie impossible »
+RAFRAICHIR = 0.5    # la marque reste fraîche pendant tout ce temps (la capture la croit moins de 5 s)
+
+
+def generer(n):
+    """Un caractère de chaque classe, le reste de l'alphabet entier, puis un mélange par secrets."""
+    c = [secrets.choice(k) for k in CLASSES]
+    tout = "".join(CLASSES)
+    c += [secrets.choice(tout) for _ in range(n - len(c))]
+    secrets.SystemRandom().shuffle(c)
+    return "".join(c)
+
+
+def marquer(chemin):
+    """Marque vide et datée, lue par nc-presse-capture ; jamais le mot de passe. Ne suit pas un lien, ne bloque
+    jamais (O_NONBLOCK : une FIFO sans lecteur échoue aussitôt) et refuse ce qui n'est pas un fichier ordinaire."""
+    try:
+        fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+    except OSError:
+        return False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return False
+        os.utime(fd)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def copier(cmd, mot, marque, prive):
+    """wl-copy avec le mot de passe sur son entrée ; la marque est rafraîchie tant qu'il tourne, et après."""
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
+                             env=dict(os.environ, TMPDIR=prive))
+    except OSError:
+        return False
+    fin, entree, ok = time.monotonic() + DELAI, mot, False
+    try:
+        while True:
+            try:
+                p.communicate(entree, timeout=RAFRAICHIR)
+                ok = p.returncode == 0
+                break
+            except subprocess.TimeoutExpired:
+                entree = None                          # déjà donnée : communicate la finit sans la redemander
+                marquer(marque)
+                if time.monotonic() >= fin:
+                    break
+    finally:
+        if p.poll() is None:                           # délai dépassé, ou signal reçu : wl-copy arrêté
+            p.kill()
+            p.wait()
+        ok = marquer(marque) and ok
+    return ok
+
+
+def arreter(signum, _cadre):
+    """SIGTERM, SIGINT, SIGHUP : sortie par les finally (wl-copy arrêté, marque rafraîchie, TMPDIR privé retiré)."""
+    raise SystemExit(128 + signum)
+
+
+def main(argv):
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, arreter)
+    if len(argv) != 2 or not 1 <= len(argv[1]) <= 2 or not argv[1].isascii() or not argv[1].isdigit() \
+            or not MIN <= int(argv[1]) <= MAX:
+        print("nc-mdp : usage : nc-mdp N, avec N entre %d et %d" % (MIN, MAX), file=sys.stderr)
+        return 2
+    wl = shutil.which("wl-copy")
+    if not wl:
+        print("nc-mdp : wl-copy est absent (paquet wl-clipboard) : rien n'a été copié", file=sys.stderr)
+        return 1
+    run = os.environ.get("XDG_RUNTIME_DIR")
+    if not run:
+        print("nc-mdp : XDG_RUNTIME_DIR est absent (pas de session) : rien n'a été copié", file=sys.stderr)
+        return 1
+    marque = os.path.join(run, "nc-secret-copie")
+    # Type donné : wl-copy ne devine pas le type en lisant le fichier qui contient le mot de passe
+    cmd = [wl, "--type", "text/plain;charset=utf-8"]
+    try:
+        aide = subprocess.run([wl, "--help"], capture_output=True, text=True, timeout=5)
+        if "--sensitive" in aide.stdout + aide.stderr:
+            cmd.append("--sensitive")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    prive = None
+    try:
+        try:
+            prive = tempfile.mkdtemp(prefix="nc-mdp-", dir=run)     # 0700, en mémoire (XDG_RUNTIME_DIR est un tmpfs)
+        except OSError:
+            pass
+        if not prive or not marquer(marque):
+            print("nc-mdp : impossible de préparer la copie dans XDG_RUNTIME_DIR : rien n'a été copié", file=sys.stderr)
+            return 1
+        ok = copier(cmd, generer(int(argv[1])), marque, prive)
+    finally:
+        if prive:
+            try:
+                os.rmdir(prive)
+            except OSError:
+                pass
+    if not ok:
+        print("nc-mdp : la copie a échoué (ou a dépassé %d s)" % DELAI, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

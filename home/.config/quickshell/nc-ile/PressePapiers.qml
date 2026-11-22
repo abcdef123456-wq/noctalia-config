@@ -133,6 +133,8 @@ Singleton {
         id: veilleur
         running: pp.prete && pp.active
         command: ["wl-paste", "--watch", pp.bin + "nc-presse-capture"]
+        // La capture ignore la sélection déjà là quand wl-paste démarre (voir nc-presse-capture)
+        environment: ({ "NC_PRESSE_VEILLE": "1" })
         onExited: if (pp.prete && pp.active && pp.essais < 5) relance.restart()
         stdout: SplitParser {
             onRead: ligne => {
