@@ -1,8 +1,9 @@
 // Transformations d'un texte copié, au clic seulement (page Presse-papiers) : minuscules, MAJUSCULES, JSON mis en forme.
-// Fonctions pures : rien n'est lancé ici. Texte de plus de 100 000 caractères : aucune transformation.
+// Fonctions pures : rien n'est lancé ici. L'historique garde 4 000 caractères, puis « … » (nc-presse-capture) : un texte
+// plus long est donc coupé, et rien n'est proposé (on ne recopie jamais un texte tronqué).
 .pragma library
 
-var MAX = 100000
+var MAX = 4000
 
 // JSON valide ET objet ou tableau (« 42 » ou « "x" » ne sont pas proposés) ; sinon undefined
 function json(t) {

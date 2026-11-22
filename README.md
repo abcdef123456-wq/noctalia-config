@@ -261,7 +261,7 @@ l'île Quickshell.
   commandes sont lancées en argv, et seulement sur ton clic. Le calcul d'aperçu n'accepte que des chiffres et des opérateurs
   (aucun taux de change n'est cherché en ligne), est borné à 2 s et ne se lance qu'à l'affichage de la carte. Tout est caché
   pendant un partage d'écran.
-- **Coller transformé** (page Presse-papiers) : sur un texte de l'historique, trois boutons au survol, au clic seulement : « minuscules », « MAJUSCULES » et « JSON mis en forme » (seulement pour un objet ou un tableau JSON valide). Le résultat est recopié comme la remise en texte brut ; rien au-delà de 100 000 caractères, rien pour un secret (jamais gardé dans l'historique).
+- **Coller transformé** (page Presse-papiers) : sur un texte de l'historique, trois boutons au survol, au clic seulement : « minuscules », « MAJUSCULES » et « JSON mis en forme » (seulement pour un objet ou un tableau JSON valide). Le résultat est recopié comme la remise en texte brut ; rien pour un texte que l'historique a coupé (plus de 4 000 caractères), rien pour un secret (jamais gardé dans l'historique).
 - **QR code d'un texte copié** (page Presse-papiers, bouton « QR » sur un texte) : affiche le QR code du texte dans la page,
   avec son début en dessous et « Retour » (ou Échap) ; `nc-qr` lit le texte sur l'entrée standard (jamais en argument), 2000
   caractères au plus, PNG privé dans `$XDG_RUNTIME_DIR/nc-qr/`, retiré en quittant la vue. Demande le paquet **`qrencode`**

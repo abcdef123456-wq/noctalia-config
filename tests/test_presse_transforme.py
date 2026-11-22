@@ -58,12 +58,20 @@ class Fonctions(unittest.TestCase):
 
     def test_texte_vide_ou_trop_long(self):
         self.assertEqual(js('[appliquer("min", ""), appliquer("maj", null), appliquer("zzz", "a")]'), [None, None, None])
-        self.assertEqual(js('appliquer("maj", "a".repeat(100000)).length'), 100000)
-        self.assertIsNone(js('appliquer("maj", "a".repeat(100001))'))
-        self.assertEqual(js('proposees("{\\"a\\":\\"" + "x".repeat(100000) + "\\"}")'), [])
+        self.assertEqual(js('appliquer("maj", "a".repeat(4000)).length'), 4000)
+        self.assertIsNone(js('appliquer("maj", "a".repeat(4000) + "…")'), "texte coupé par l'historique")
+        self.assertEqual(js('proposees("{\\"a\\":\\"" + "x".repeat(4000) + "\\"}")'), [])
 
 
 class Branchement(unittest.TestCase):
+    def test_borne_egale_a_la_coupure_de_l_historique(self):
+        """Sans node aussi (CI) : la borne vaut la longueur gardée par nc-presse-capture, pour ne jamais recopier un texte coupé."""
+        js = (QML / "PresseTransforme.js").read_text()
+        capture = (REPO / "home/.local/bin/nc-presse-capture").read_text()
+        self.assertIn("var MAX = 4000", js)
+        self.assertIn("t.length > MAX) return undefined", js)
+        self.assertIn('d[:4000] + ("…" if coupe else "")', capture)
+
     def test_copie_par_recopier(self):
         corps = PAPIERS.split("function transformer(e, mode)")[1].split("\n    }")[0]
         self.assertIn("recopier({ genre: \"texte\", texte: r })", corps)
