@@ -4,6 +4,7 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -29,6 +30,27 @@ class NomsDePaquets(unittest.TestCase):
         # Sans paquet Debian, c'est l'extra LazyVim qui fournit gitui (Mason) : il doit rester activé
         extras = json.loads((RACINE / "home/.config/nvim/lazyvim.json").read_text(encoding="utf-8"))["extras"]
         self.assertIn("lazyvim.plugins.extras.util.gitui", extras)
+
+
+class PolicesDesThemes(unittest.TestCase):
+    """Inter (Apple) et JetBrains Mono (Rétro) : noms vérifiés dans le dépôt par défaut de chaque distribution
+    (sources dans install.sh) ; autre famille : rien (l'île prend sa police de repli) ; facultatives sur Arch."""
+    def test_paquet_par_famille(self):
+        debut = INSTALL.index("pname() {")
+        fonction = INSTALL[debut:INSTALL.index("\n}\n", debut) + 3]
+        attendu = {"inter": {"arch": "inter-font", "debian": "fonts-inter", "fedora": "rsms-inter-fonts", "suse": "inter-fonts",
+                             "other": "", "nixos": ""},
+                   "jetbrains-mono": {"arch": "ttf-jetbrains-mono", "debian": "fonts-jetbrains-mono", "fedora": "jetbrains-mono-fonts",
+                                      "suse": "jetbrains-mono-fonts", "other": "", "nixos": ""}}
+        for nom, familles in attendu.items():
+            for famille, paquet in familles.items():
+                r = subprocess.run(["bash", "-c", fonction + f"FAMILY={famille}; pname {nom}"], capture_output=True, text=True)
+                self.assertEqual(r.stdout.strip(), paquet, (nom, famille))
+
+    def test_dans_les_listes_et_facultatives_sur_arch(self):
+        for liste in ("GENERIC=(", "FACULTATIFS=("):
+            debut = INSTALL.index(liste)
+            self.assertIn("noto-fonts inter jetbrains-mono", INSTALL[debut:INSTALL.index(")", debut)], liste)
 
 
 if __name__ == "__main__":
