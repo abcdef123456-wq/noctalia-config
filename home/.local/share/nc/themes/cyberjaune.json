@@ -9,7 +9,7 @@
     "nom": "Cyberjaune"
   },
   "reglages": {
-    "ILE_STYLE": "noir",
+    "ILE_STYLE": "terminal",
     "ILE_CONTOUR": "degrade",
     "ILE_CONTOUR_EPAISSEUR": "2",
     "ILE_CONTOUR_FERMEE": "oui",
@@ -38,7 +38,9 @@
     "DOCK_POSITION": "right",
     "DOCK_AUTO": "non",
     "DOCK_TAILLE": "40",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "oui",
+    "ILE_FORME": "rectangle",
+    "WIDGETS_BUREAU": "oui"
   },
   "noctalia": {
     "bar.default": {
@@ -82,7 +84,20 @@
     "ombre": "coloree"
   },
   "fonds": "cyberjaune",
-  "fond_de_depart": "cyberjaune-ville.jpg",
+  "fond_de_depart": "cyberjaune-puces.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-segments",
+      "coin": "haut-gauche",
+      "taille": "grand",
+      "style": "brutal"
+    },
+    {
+      "type": "jauges",
+      "coin": "haut-gauche",
+      "taille": "grand",
+      "style": "brutal"
+    }
+  ]
 }
