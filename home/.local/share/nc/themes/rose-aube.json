@@ -44,26 +44,61 @@
   "noctalia": {
     "bar.default": {
       "position": "bottom",
-      "margin_edge": 0,
-      "margin_ends": 0,
-      "thickness": 32,
-      "capsule": false,
-      "background_opacity": 0.94,
+      "margin_edge": 8,
+      "margin_ends": 16,
+      "thickness": 44,
+      "capsule": true,
+      "background_opacity": 0.0,
+      "capsule_padding": 14,
       "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ],
+          "fill": "#fbe9ec",
+          "foreground": "#3d2a32"
+        },
+        {
+          "id": "dock",
+          "members": [
+            "t-dock"
+          ],
+          "fill": "#fbe9ec",
+          "foreground": "#3d2a32",
+          "border": "#d9778f",
+          "border_width": 2
+        },
+        {
+          "id": "droite",
+          "members": [
+            "network",
+            "bluetooth",
+            "volume",
+            "nc/batterie:batterie",
+            "t-heure"
+          ],
+          "fill": "#fbe9ec",
+          "foreground": "#3d2a32"
+        },
+        {
+          "id": "sys",
+          "fill": "#fbe9ec",
+          "foreground": "#3d2a32"
+        }
+      ],
       "start": [
-        "logo",
-        "workspaces"
+        "group:gauche"
       ],
       "center": [
-        "t-dock"
+        "group:dock"
       ],
       "end": [
         "tray",
-        "group:status",
-        "t-heure"
-      ],
-      "radius": 0,
-      "padding": 12
+        "group:droite"
+      ]
     },
     "widget.workspaces": {
       "style": "focus_hint",

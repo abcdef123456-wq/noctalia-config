@@ -98,6 +98,12 @@ class Regles(unittest.TestCase):
                         self.assertTrue(b.get("center") and all(w.startswith("group:") for w in b["center"]),
                                         "tout dans des groupes au centre")
 
+    def test_pilule_de_cote_exclusive(self):
+        """La pilule de côté est la signature de matrice (« laisse-la exclusive à ce modèle ») : un seul thème au plus."""
+        cote = [n for n, d in themes().items()
+                if any(t.startswith("bar.") and b.get("position") in ("left", "right") for t, b in d.get("noctalia", {}).items())]
+        self.assertLessEqual(len(cote), 1, cote)
+
     def test_barre_collee_remplit_les_coins(self):
         for nom, d in themes().items():
             for t, b in d.get("noctalia", {}).items():

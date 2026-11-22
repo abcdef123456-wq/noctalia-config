@@ -43,19 +43,71 @@
       "margin_edge": 0,
       "margin_ends": 0,
       "thickness": 40,
-      "capsule": false,
+      "capsule": true,
       "background_opacity": 1.0,
-      "widget_spacing": 8,
+      "widget_spacing": 6,
       "font_weight": 400,
       "start": [
-        "workspaces",
-        "nc/fenetres:titre"
+        "group:bureaux",
+        "group:fenetre"
       ],
       "center": [],
       "end": [
         "tray",
         "group:status",
-        "t-date"
+        "group:jour"
+      ],
+      "capsule_thickness": 0.72,
+      "capsule_group": [
+        {
+          "id": "bureaux",
+          "members": [
+            "workspaces"
+          ],
+          "fill": "#00140a",
+          "foreground": "#5dff8a",
+          "border": "#00d94a",
+          "border_width": 1,
+          "radius": 0
+        },
+        {
+          "id": "fenetre",
+          "members": [
+            "nc/fenetres:titre"
+          ],
+          "fill": "#00140a",
+          "foreground": "#5dff8a",
+          "border": "#00d94a",
+          "border_width": 1,
+          "radius": 0
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ],
+          "fill": "#00140a",
+          "foreground": "#5dff8a",
+          "border": "#00d94a",
+          "border_width": 1,
+          "radius": 0
+        },
+        {
+          "id": "status",
+          "fill": "#00140a",
+          "foreground": "#5dff8a",
+          "border": "#00d94a",
+          "border_width": 1,
+          "radius": 0
+        },
+        {
+          "id": "sys",
+          "fill": "#00140a",
+          "foreground": "#5dff8a",
+          "border": "#00d94a",
+          "border_width": 1,
+          "radius": 0
+        }
       ],
       "radius": 0,
       "padding": 12

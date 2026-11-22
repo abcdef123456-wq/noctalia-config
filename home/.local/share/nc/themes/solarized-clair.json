@@ -50,7 +50,7 @@
       "background_opacity": 0.0,
       "capsule_thickness": 0.92,
       "capsule_padding": 16,
-      "widget_spacing": 10,
+      "widget_spacing": 8,
       "capsule_group": [
         {
           "id": "gauche",
@@ -59,52 +59,33 @@
             "workspaces"
           ],
           "fill": "#eee8d5",
+          "foreground": "#073642",
           "border": "#268bd2",
           "border_width": 2
-        },
-        {
-          "id": "fenetre",
-          "members": [
-            "nc/fenetres:titre"
-          ],
-          "fill": "#eee8d5"
-        },
-        {
-          "id": "plateau",
-          "members": [
-            "tray"
-          ],
-          "fill": "#eee8d5"
         },
         {
           "id": "jour",
           "members": [
             "t-date"
           ],
-          "fill": "#2076b2",
-          "foreground": "#ffffff"
-        },
-        {
-          "id": "status",
-          "fill": "#eee8d5",
-          "border": "#2aa198",
-          "border_width": 2
+          "fill": "#073642",
+          "foreground": "#fdf6e3"
         },
         {
           "id": "sys",
           "fill": "#eee8d5",
-          "border": "#2aa198",
-          "border_width": 2
+          "foreground": "#073642"
         }
       ],
       "start": [
-        "group:gauche",
-        "group:fenetre"
+        "group:gauche"
       ],
       "center": [],
       "end": [
-        "group:plateau",
-        "group:status",
+        "t-reseau",
+        "t-bt",
+        "t-son",
+        "t-pile",
         "group:jour"
       ]
     },
@@ -120,6 +101,26 @@
     "widget.t-date": {
       "type": "clock",
       "format": "{:%A %d %B}"
+    },
+    "widget.t-reseau": {
+      "type": "network",
+      "capsule_fill": "#1a6fb0",
+      "capsule_foreground": "#fdf6e3"
+    },
+    "widget.t-bt": {
+      "type": "bluetooth",
+      "capsule_fill": "#17706a",
+      "capsule_foreground": "#fdf6e3"
+    },
+    "widget.t-son": {
+      "type": "volume",
+      "capsule_fill": "#566400",
+      "capsule_foreground": "#fdf6e3"
+    },
+    "widget.t-pile": {
+      "type": "battery",
+      "capsule_fill": "#7d5e00",
+      "capsule_foreground": "#fdf6e3"
     }
   },
   "theme_sync": {
