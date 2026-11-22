@@ -156,6 +156,8 @@ class EnvFonds(Base):
         self.env.update(PATH=f"{self.bin}:{os.environ['PATH']}", J=str(self.journal))
         (self.fonds / "nord").mkdir(parents=True)
         (self.fonds / "nord/n.png").write_text("3840 2160\n")
+        # les fonds livrés des thèmes : ceux de CREDITS.tsv (copie de ~, faute de dépôt installé)
+        (self.fonds / "CREDITS.tsv").write_text("fichier\tsource\nnord/n.png\tx\nnord/o.png\tx\n")
         self.image = self.r / "mon fond.png"
         self.image.write_text("3840 2160\n")
 
@@ -353,6 +355,71 @@ io.write(n(suivantDuGroupe(l, a)), n(suivantDuGroupe(l, c)), n(suivantDuGroupe(l
         r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
         self.assertEqual(r.stdout, "banilnil", r.stderr)
 
+    def test_une_image_non_livree_ne_se_masque_pas(self):
+        """Une image à toi à la racine, dans un dossier de thème, ou dans un dossier hors de ~/Pictures/Wallpapers :
+        refus, fichier intact, liste inchangée. Contrôle : l'ancien nc-fonds (e4d2efd) la mettait à la corbeille."""
+        ailleurs = self.home / "Images/perso.jpg"
+        ailleurs.parent.mkdir(parents=True)
+        for f in (self.fonds / "moi.jpg", self.fonds / "nord/perso.png", ailleurs):
+            f.write_text("3840 2160\n")
+            r = self.lance("masquer", str(f))
+            self.assertEqual(r.returncode, 1, (f, r.stdout))
+            self.assertIn("n'est pas un fond livré", r.stderr)
+            self.assertIn("Ranger dans Mes fonds", r.stderr)
+            self.assertTrue(f.exists())
+            self.assertIsNone(self.masques())
+        self.assertEqual(self.journal_de("gio"), [])
+        r = subprocess.run(["git", "-C", str(REPO), "show", "e4d2efd:home/.local/bin/nc-fonds"], capture_output=True, text=True)
+        if r.returncode != 0:
+            self.skipTest("e4d2efd absent (clone partiel)")
+        vieux = self.r / "vieux-nc-fonds"
+        vieux.write_text(r.stdout)
+        vieux.chmod(0o755)
+        subprocess.run([str(vieux), "masquer", str(self.fonds / "moi.jpg")], env=self.env, capture_output=True, timeout=60)
+        self.assertFalse((self.fonds / "moi.jpg").exists(), "contrôle : l'ancien nc-fonds jetait une image à toi")
+
+    def test_retirer_hors_des_fonds_refuse(self):
+        dehors = self.home / "ailleurs/mes-fonds/x.png"                     # un « mes-fonds » hors de ~/Pictures/Wallpapers
+        dehors.parent.mkdir(parents=True)
+        dehors.write_text("3840 2160\n")
+        lien = self.fonds / "nord/mes-fonds/lien.png"                       # un lien qui sort des fonds
+        lien.parent.mkdir(parents=True)
+        cible = self.home / "Documents/precieux.png"
+        cible.parent.mkdir(parents=True)
+        cible.write_text("3840 2160\n")
+        lien.symlink_to(cible)
+        for f in (dehors, lien):
+            r = self.lance("retirer", str(f))
+            self.assertEqual(r.returncode, 1, (f, r.stdout))
+        self.assertTrue(dehors.exists() and cible.exists())
+        self.assertEqual(self.journal_de("gio"), [])
+        mes = self.fonds / "nord/mes-fonds/vrai.png"                        # contrôle : un vrai fond à toi part bien
+        mes.write_text("3840 2160\n")
+        self.assertEqual(self.lance("retirer", str(mes)).returncode, 0)
+
+    def test_livres_base_et_themes(self):
+        l = self.lance("livres").stdout.splitlines()
+        self.assertIn("nord/n.png", l)
+        self.assertIn("astronaut-dark-5120x2880-22768.jpg", l)
+        self.assertNotIn("fichier", l)
+
+    @unittest.skipUnless(LUA, "lua absent")
+    def test_remplacant_jamais_l_ecran_vide(self):
+        bloc = PANEL.read_text(encoding="utf-8").split("-- DEBUT cle", 1)[1].split("-- FIN cle", 1)[0].split("\n", 1)[1]
+        prog = bloc + r"""
+local a, b, m = { g = 1, n = "a" }, { g = 1, n = "b" }, { g = 2, n = "m" }
+local function n(x) return x and x.n or "nil" end
+io.write(n(remplacant({ a, b, m }, a)), n(remplacant({ a, m }, a)), n(remplacant({ m, a }, a)), n(remplacant({ a }, a)))
+"""
+        f = self.r / "remplacant.lua"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
+        self.assertEqual(r.stdout, "bmmnil", r.stderr)
+
+    def test_home_et_fin_gardes_sur_liste_vide(self):
+        self.assertIn('if (chord == "Home" or chord == "End") and #shown == 0 then return end',
+                      PANEL.read_text(encoding="utf-8"))
+
     def test_un_fond_a_toi_ne_se_masque_pas(self):
         mes = self.theme()
         self.lance("ajouter", str(self.image))
@@ -400,9 +467,12 @@ io.write(table.concat(out, "\n"))
 
     def test_boutons_masquer_et_reafficher(self):
         panneau = PANEL.read_text(encoding="utf-8")
-        i = panneau.index("elseif w then")
-        self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 900])     # seulement pour un fond livré
-        self.assertIn('"--poser", x.path', panneau[i:i + 900])               # le fond affiché : le suivant du groupe
+        i = panneau.index("elseif w and livres[cheminMasque(w.path, baseFonds)] then")   # seulement pour un fond livré
+        self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 1100])
+        self.assertIn('"--poser", x.path', panneau[i:i + 1100])              # le fond affiché : un remplaçant
+        self.assertIn("if not x then", panneau[i:i + 1100])                  # aucun remplaçant : refus
+        j = panneau.index('elseif w and w.path:match("^(.*)/[^/]*$") == baseFonds then')
+        self.assertIn('bouton("ranger-un"', panneau[j:j + 300])              # une image à toi de la racine : la ranger
         self.assertIn('["nc-fonds", "reafficher"]', REGLAGES.read_text(encoding="utf-8"))
 
 
@@ -450,6 +520,17 @@ class F5Ranger(EnvFonds):
         self.lance("ranger", "--affiche", str(self.fonds / self.LIVRE))
         self.assertEqual(self.journal_de("noctalia"), [])
 
+    def test_ranger_une_seule_image(self):
+        (self.fonds / "autre.jpg").write_text("3840 2160\n")
+        r = self.lance("ranger", str(self.fonds / "moi.jpg"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.fonds / "mes-fonds/moi.jpg").exists())
+        self.assertTrue((self.fonds / "autre.jpg").exists())                 # les autres restent
+        self.assertFalse((self.home / ".config/nc/fonds-rangement").exists())   # la question reste posée
+        r = self.lance("ranger", str(self.fonds / self.LIVRE))                # un fond livré : refus
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue((self.fonds / self.LIVRE).exists())
+
     def test_non_ne_deplace_rien_et_ne_redemande_plus(self):
         r = self.lance("garder")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -461,9 +542,54 @@ class F5Ranger(EnvFonds):
         i = panneau.index("if not noctalia.fileExists(RANGEMENT) then")
         self.assertIn('NC_FONDS, "a-ranger"', panneau[i:i + 200])
         # « ranger » ne part que du bouton « Oui »
-        self.assertEqual(panneau.count('NC_FONDS, "ranger"'), 2)
         j = panneau.index('bouton("ranger-oui"')
         self.assertEqual(panneau[j:j + 500].count('NC_FONDS, "ranger"'), 2)
+
+
+class Identify(EnvFonds):
+    """La taille d'une image : magick identify, sinon identify (ImageMagick 6), sinon rien (accepté sur l'extension)."""
+    OUTILS = ("bash", "cat", "cp", "mv", "mkdir", "rm", "realpath", "dirname", "basename", "grep", "cmp", "awk", "sort",
+              "sed", "tail", "head", "setsid", "tr")
+
+    def setUp(self):
+        super().setUp()
+        outils = self.r / "outils"                 # PATH sans le vrai ImageMagick du PC
+        outils.mkdir()
+        for nom in self.OUTILS:
+            if shutil.which(nom):
+                (outils / nom).symlink_to(shutil.which(nom))
+        self.env["PATH"] = f"{self.bin}:{outils}"
+        self.mes = self.fonds / "mes-fonds"
+        self.petit = self.r / "petit.png"
+        self.petit.write_text("1920 1080\n")
+
+    def test_magick_seul(self):
+        r = self.lance("ajouter", str(self.petit))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("moins que 2560 x 1600", r.stdout)
+        self.assertIn("magick identify", self.journal.read_text())
+
+    def test_identify_seul_imagemagick_6(self):
+        (self.bin / "magick").unlink()
+        self.faux("identify", 'for a; do last="$a"; done\nf="${last%\\[0\\]}"\n'
+                  'grep -qx "[0-9]* [0-9]*" "$f" && cat "$f"\n')
+        r = self.lance("ajouter", str(self.petit))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("moins que 2560 x 1600", r.stdout)
+        self.assertTrue(self.journal_de("identify"))
+        faux_png = self.r / "faux.png"
+        faux_png.write_text("du texte")
+        self.assertEqual(self.lance("ajouter", str(faux_png)).returncode, 1)   # identify voit bien que ce n'en est pas une
+
+    def test_aucun_outil_accepte_sur_l_extension(self):
+        (self.bin / "magick").unlink()
+        r = self.lance("ajouter", str(self.petit))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.mes / "petit.png").exists())
+        self.assertIn("ImageMagick absent", r.stdout)
+        texte = self.r / "notes.txt"
+        texte.write_text("1920 1080\n")
+        self.assertEqual(self.lance("ajouter", str(texte)).returncode, 1)      # l'extension reste vérifiée
 
 
 if __name__ == "__main__":

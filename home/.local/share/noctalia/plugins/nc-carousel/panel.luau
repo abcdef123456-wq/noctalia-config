@@ -125,6 +125,14 @@ local function suivantDuGroupe(liste, w)
   end
   return nil
 end
+-- Le fond qui remplace w affiché qu'on masque : le suivant de son groupe, sinon le premier d'un autre groupe ; nil s'il
+-- n'y en a aucun (l'écran ne reste jamais sans fond : on refuse)
+local function remplacant(liste, w)
+  local x = suivantDuGroupe(liste, w)
+  if x then return x end
+  for _, y in ipairs(liste) do if y ~= w then return y end end
+  return nil
+end
 -- FIN cle
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
 local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940 }
@@ -148,6 +156,7 @@ local eco = false
 
 local all = {}        -- { path, file, title, thumbW, thumbN, g, perso, rang, total }
 local dansTheme = false
+local livres = {}     -- fonds livrés (chemin relatif, nc-fonds livres) : eux seuls se masquent
 local baseFonds = ""  -- ~/Pictures/Wallpapers sans « / » final
 local message = nil   -- dernière réponse de nc-fonds, sous la bande
 local ouvert = false  -- un rappel de nc-fonds peut arriver panneau fermé : rien n'est alors dessiné
@@ -408,16 +417,29 @@ local function boutons()
     table.insert(kids, bouton("corbeille", tr("Mettre à la corbeille", "Move to trash"), "trash", function()
       noctalia.runAsync({ NC_FONDS, "retirer", w.path }, relire, 15000)
     end))
-  elseif w then
+  elseif w and livres[cheminMasque(w.path, baseFonds)] then
     -- Un fond livré ne se supprime pas (la mise à jour le remettrait) : il se masque
     table.insert(kids, bouton("masquer", tr("Masquer ce fond", "Hide this wallpaper"), "eye-off", function()
       if w.path == current then
-        -- le fond affiché : le suivant du groupe le remplace
-        local x = suivantDuGroupe(all, w)
-        apresFermeture(x and { NC_FONDS, "masquer", "--notifier", w.path, "--poser", x.path }
-          or { NC_FONDS, "masquer", "--notifier", w.path })
+        -- le fond affiché : le suivant du groupe (sinon d'un autre groupe) le remplace ; aucun : refus
+        local x = remplacant(all, w)
+        if not x then
+          message = tr("C'est ton seul fond : il ne peut pas être masqué.", "It is your only wallpaper: it cannot be hidden.")
+          render()
+          return
+        end
+        apresFermeture({ NC_FONDS, "masquer", "--notifier", w.path, "--poser", x.path })
       else
         noctalia.runAsync({ NC_FONDS, "masquer", w.path }, relire, 15000)
+      end
+    end))
+  elseif w and w.path:match("^(.*)/[^/]*$") == baseFonds then
+    -- Une image à toi posée à la racine des fonds : elle se range dans Mes fonds (jamais masquée ni jetée d'ici)
+    table.insert(kids, bouton("ranger-un", tr("Ranger dans Mes fonds", "Move to My wallpapers"), "folder-open", function()
+      if w.path == current then
+        apresFermeture({ NC_FONDS, "ranger", "--notifier", "--affiche", current, w.path })   -- le fond affiché suit
+      else
+        noctalia.runAsync({ NC_FONDS, "ranger", w.path }, relire, 15000)
       end
     end))
   end
@@ -486,6 +508,7 @@ function onKey(chord, pressed)
     return
   end
   if not pressed then return end
+  if (chord == "Home" or chord == "End") and #shown == 0 then return end   -- liste vide (recherche sans résultat)
   if chord == "Home" then target = target - (wrap(target) - 1); setTicking(true)
   elseif chord == "End" then target = target + (#shown - wrap(target)); setTicking(true)
   elseif chord == "Escape" then
@@ -505,6 +528,11 @@ function onOpen(context)
   message = nil
   aRanger = 0
   ouvert = true
+  noctalia.runAsync({ NC_FONDS, "livres" }, function(r)
+    livres = {}
+    for l in string.gmatch(r and r.exitCode == 0 and r.stdout or "", "[^\n]+") do livres[l] = true end
+    if ouvert then render() end
+  end, 15000)
   if not noctalia.fileExists(RANGEMENT) then
     noctalia.runAsync({ NC_FONDS, "a-ranger" }, function(r)
       aRanger = tonumber(noctalia.string.trim(r and r.stdout or "")) or 0

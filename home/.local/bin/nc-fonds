@@ -6,9 +6,13 @@
 #   nc-fonds ouvrir                  le crée s'il manque, puis l'ouvre dans le gestionnaire de fichiers
 #   nc-fonds ajouter [IMAGE…]        COPIE les images dans « Mes fonds » (sans image : le sélecteur de fichiers) ; refus
 #                                    clair si ce n'est pas une image, avertissement (pas de refus) sous 2560 x 1600
-#   nc-fonds retirer IMAGE           met à la corbeille un fond de « Mes fonds » (jamais un fond livré)
+#   nc-fonds retirer IMAGE           met à la corbeille un fond de « Mes fonds » (jamais un fond livré) : un fichier dont le
+#                                    vrai chemin (liens résolus) est dans un mes-fonds sous ~/Pictures/Wallpapers, ou dans
+#                                    le mes-fonds du dossier en cours
+#   nc-fonds livres                  les fonds livrés, un chemin relatif à ~/Pictures/Wallpapers par ligne (le carrousel
+#                                    ne propose « Masquer » que pour eux)
 #   nc-fonds masquer IMAGE [--poser SUIVANT]
-#                                    un fond livré que tu ne veux plus : inscrit dans ~/.config/nc/fonds-masques.conf (un
+#                                    un fond LIVRÉ (seulement : jamais une image à toi) que tu ne veux plus : inscrit dans ~/.config/nc/fonds-masques.conf (un
 #                                    chemin relatif à ~/Pictures/Wallpapers par ligne), puis mis à la corbeille ; install.sh
 #                                    ne recopie jamais un fond de cette liste (ni rotation, ni mise à jour ne le ramènent).
 #                                    --poser : c'était le fond affiché, SUIVANT le remplace (noctalia msg wallpaper-set)
@@ -16,16 +20,23 @@
 #                                    sans dépôt, dit de lancer la mise à jour (nc-maj), qui les remettra
 #   nc-fonds a-ranger                combien de fonds TU as posés à la racine de ~/Pictures/Wallpapers (images qui ne sont
 #                                    pas des fonds livrés) ; 0 si la question « ranger » a déjà eu sa réponse
-#   nc-fonds ranger [--affiche FOND] (réponse « oui ») les déplace dans ~/Pictures/Wallpapers/mes-fonds ; si FOND (le fond
+#   nc-fonds ranger [--affiche FOND] [IMAGE]
+#                                    (réponse « oui ») les déplace dans ~/Pictures/Wallpapers/mes-fonds (avec IMAGE : celle-là
+#                                    seulement, et la question reste) ; si FOND (le fond
 #                                    affiché) en fait partie, il est reposé sur son nouveau chemin
 #   nc-fonds garder                  (réponse « non ») rien n'est déplacé, la question ne revient plus
 # --notifier (ajouter, masquer, ranger) : le message part aussi en notification (le carrousel s'est fermé avant).
 # Code 0 si c'est fait (ou annulé), 1 si refusé (message sur la sortie d'erreur), 2 pour un usage inconnu.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
-IM=$(command -v magick >/dev/null && echo magick || echo convert)
+# Taille d'une image : magick identify (ImageMagick 7), sinon identify (livré avec ImageMagick 6, à côté de convert) ;
+# sans l'un ni l'autre, l'image est acceptée sur son extension, avec un avertissement
+if command -v magick >/dev/null; then IDENT=(magick identify)
+elif command -v identify >/dev/null; then IDENT=(identify)
+else IDENT=()
+fi
 EXTS="jpg jpeg png webp bmp avif jxl"          # celles que nc-carousel-thumbs découpe
-usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE | masquer [--notifier] IMAGE [--poser SUIVANT] | reafficher | a-ranger | ranger [--notifier] [--affiche FOND] | garder"; }
+usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE | livres | masquer [--notifier] IMAGE [--poser SUIVANT] | reafficher | a-ranger | ranger [--notifier] [--affiche FOND] [IMAGE] | garder"; }
 refus() { echo "$1" >&2; exit 1; }
 
 # Le dossier des fonds lu comme Noctalia : une seule règle, celle de nc-carousel-thumbs
@@ -63,6 +74,18 @@ a_ranger() {
   shopt -u nullglob nocaseglob
 }
 
+# Fonds livrés (chemins relatifs à ~/Pictures/Wallpapers) : ceux de la base (LIVRES_BASE) et ceux des thèmes, listés dans
+# CREDITS.tsv, celui du dépôt installé s'il est là (la copie de ~ n'est jamais remplacée : elle peut dater)
+livres() {
+  local depot c
+  printf '%s\n' "$LIVRES_BASE"
+  depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
+  c="$depot/home/Pictures/Wallpapers/CREDITS.tsv"
+  { [ -n "$depot" ] && [ -f "$c" ]; } || c="$FONDS/CREDITS.tsv"
+  awk -F '\t' 'NR > 1 && index($1, "/") && $1 !~ /(^|\/)\.\.(\/|$)/ && $1 !~ /(^|\/)mes-fonds\// { print $1 }' "$c" 2>/dev/null
+  return 0
+}
+
 notifier=0
 # Le message de fin : sur la sortie, et en notification avec --notifier
 dire() {
@@ -94,11 +117,16 @@ ajouter() {
   for f in "$@"; do
     n="${f##*/}"
     e="${n##*.}"; e="${e,,}"
-    if [ ! -f "$f" ] || [ "$e" = "$n" ] || [[ " $EXTS " != *" $e "* ]] || ! read -r w h < <("$IM" identify -format '%w %h\n' -- "${f}[0]" 2>/dev/null); then
+    w=""; h=""
+    if [ ! -f "$f" ] || [ "$e" = "$n" ] || [[ " $EXTS " != *" $e "* ]] ||
+       { [ ${#IDENT[@]} -gt 0 ] && ! read -r w h < <("${IDENT[@]}" -format '%w %h\n' -- "${f}[0]" 2>/dev/null); }; then
       echo "$(t "« $n » n'est pas une image (jpg, png, webp, bmp, avif, jxl) : rien n'est copié." "\"$n\" is not a picture (jpg, png, webp, bmp, avif, jxl): nothing copied.")" >&2
       refuses=$((refuses + 1)); continue
     fi
-    if [ "$w" -lt 2560 ] || [ "$h" -lt 1600 ]; then
+    if [ -z "$w" ]; then
+      avert="$(t "Attention : ImageMagick absent, « $n » est pris sur son extension (ni sa taille ni son contenu ne sont vérifiés)." "Note: ImageMagick missing, \"$n\" is taken on its extension (neither its size nor its content is checked).")"
+      echo "$avert"
+    elif [ "$w" -lt 2560 ] || [ "$h" -lt 1600 ]; then
       avert="$(t "Attention : « $n » fait ${w} x ${h}, moins que 2560 x 1600 : il peut paraître flou." "Note: \"$n\" is ${w} x ${h}, less than 2560 x 1600: it may look blurry.")"
       echo "$avert"
     fi
@@ -140,8 +168,10 @@ case "${1:-}" in
   retirer)
     [ $# -eq 2 ] || { usage >&2; exit 2; }
     # Seulement un fichier rangé directement dans un mes-fonds : un fond livré ne part jamais ainsi (il reviendrait)
+    # Vrai chemin (liens résolus) : dans un mes-fonds sous ~/Pictures/Wallpapers, ou dans celui du dossier en cours
     p=$(realpath -e -- "$2" 2>/dev/null) || refus "$(t "Fichier introuvable." "File not found.")"
-    [ -f "$p" ] && [ "$(basename -- "$(dirname -- "$p")")" = mes-fonds ] ||
+    fr=$(realpath -m -- "$FONDS"); mr=$(realpath -m -- "$mes"); d="${p%/*}"
+    { [ -f "$p" ] && [ "${d##*/}" = mes-fonds ] && { [ "$d" = "$mr" ] || [[ "$p" == "$fr"/* ]]; }; } ||
       refus "$(t "Seuls tes fonds (Mes fonds) vont à la corbeille ; un fond livré se masque." "Only your wallpapers (My wallpapers) go to the trash; a bundled one is hidden instead.")"
     gio trash -- "$p" 2>/dev/null || refus "$(t "Corbeille impossible (gio absent ?) : rien n'est supprimé." "Cannot move to the trash (gio missing?): nothing deleted.")"
     echo "$(t "« ${p##*/} » est à la corbeille." "\"${p##*/}\" moved to the trash.")" ;;
@@ -156,7 +186,9 @@ case "${1:-}" in
     [ "$(basename -- "$(dirname -- "$p")")" != mes-fonds ] ||
       refus "$(t "Un fond à toi ne se masque pas : mets-le à la corbeille." "Your own wallpaper is not hidden: move it to the trash.")"
     rel="${p#"$FONDS"/}"
-    case "$rel" in *$'\n'*) refus "$(t "Nom de fichier illisible pour la liste." "File name unreadable for the list.")" ;; esac
+    # Seulement un fond LIVRÉ, sous ~/Pictures/Wallpapers : une image à toi n'est jamais mise à la corbeille par ici
+    { [ "$rel" != "$p" ] && livres | grep -qxF -- "$rel"; } ||
+      refus "$(t "« ${p##*/} » n'est pas un fond livré : rien n'est masqué. Une image à toi se range avec « Ranger dans Mes fonds », puis se met à la corbeille depuis Mes fonds." "\"${p##*/}\" is not a bundled wallpaper: nothing hidden. Your own picture goes with \"Move to My wallpapers\", then to the trash from My wallpapers.")"
     # D'abord la liste (install.sh ne le recopiera plus), puis le fond suivant, puis la corbeille
     mkdir -p -- "${MASQUES%/*}" || refus "$(t "Impossible d'écrire $MASQUES." "Cannot write $MASQUES.")"
     grep -qxF -- "$rel" "$MASQUES" 2>/dev/null || printf '%s\n' "$rel" >> "$MASQUES" ||
@@ -186,15 +218,24 @@ case "${1:-}" in
     else
       echo "$(t "$n fond(s) réaffiché(s)." "$n wallpaper(s) shown again.")"
     fi ;;
+  livres) livres ;;
   a-ranger)
     if [ -e "$RANGEMENT" ]; then echo 0; else a_ranger; echo "${#A_RANGER[@]}"; fi ;;
   ranger)
     shift
     [ "${1:-}" = --notifier ] && { notifier=1; shift; }
     affiche=""
-    [ "${1:-}" = --affiche ] && [ $# -eq 2 ] && { affiche=$(realpath -ms -- "$2"); set --; }
-    [ $# -eq 0 ] || { usage >&2; exit 2; }
+    [ "${1:-}" = --affiche ] && [ $# -ge 2 ] && { affiche=$(realpath -ms -- "$2"); shift 2; }
+    [ $# -le 1 ] || { usage >&2; exit 2; }
+    seul=""
+    [ $# -eq 1 ] && seul=$(realpath -ms -- "$1")
     a_ranger
+    if [ -n "$seul" ]; then                     # une seule image : elle doit être une des tiennes à la racine
+      pris=()
+      for f in "${A_RANGER[@]}"; do [ "$(realpath -ms -- "$f")" = "$seul" ] && pris+=("$f"); done
+      [ ${#pris[@]} -eq 1 ] || refus "$(t "Seule une image à toi, posée à la racine des fonds, se range ainsi." "Only a picture of yours, at the top of the wallpaper folder, can be moved this way.")"
+      A_RANGER=("${pris[@]}")
+    fi
     n=0
     if [ ${#A_RANGER[@]} -gt 0 ]; then
       mkdir -p -- "$FONDS/mes-fonds" || refus "$(t "Impossible de créer $FONDS/mes-fonds." "Cannot create $FONDS/mes-fonds.")"
@@ -205,7 +246,7 @@ case "${1:-}" in
       done
       systemctl --user restart --no-block nc-carousel-thumbs.service >/dev/null 2>&1 || true
     fi
-    mkdir -p -- "${RANGEMENT%/*}" && echo oui > "$RANGEMENT"
+    [ -n "$seul" ] || { mkdir -p -- "${RANGEMENT%/*}" && echo oui > "$RANGEMENT"; }
     dire "$(t "$n fond(s) rangé(s) dans Mes fonds." "$n wallpaper(s) moved to My wallpapers.")" ;;
   garder)
     mkdir -p -- "${RANGEMENT%/*}" && echo non > "$RANGEMENT"
