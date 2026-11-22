@@ -95,7 +95,7 @@
   "widgets": [
     {
       "type": "horloge-geante",
-      "coin": "haut-gauche",
+      "coin": "centre",
       "taille": "grand",
       "chiffres": "points"
     },
