@@ -178,7 +178,7 @@ Item {
                                 anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
                                 width: 28; height: 28; radius: 14
                                 color: msg.text !== "" ? Agents.couleurDe(carte.s) : Couleurs.gris4
-                                Ico { anchors.centerIn: parent; nom: "arrow_upward"; taille: 16; color: "#ffffff" }
+                                Ico { anchors.centerIn: parent; nom: "arrow_upward"; taille: 16; color: msg.text !== "" || Couleurs.sombre ? "#ffffff" : Couleurs.texteSec }
                                 MouseArea { anchors.fill: parent; onClicked: { Agents.ecrire(carte.s.id, msg.text); msg.text = "" } }
                             }
                         }

@@ -50,7 +50,7 @@ PanelWindow {
         radius: Couleurs.rayon(36, width, height)
         color: b.avecPlaque ? Qt.rgba(Couleurs.carte.r, Couleurs.carte.g, Couleurs.carte.b, 0.85 * Couleurs.verre) : "transparent"
         border.width: b.avecPlaque && Couleurs.epaisseur > 0 ? 1 : 0
-        border.color: Couleurs.aContour ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.14)
+        border.color: Couleurs.aContour ? Couleurs.accent : Qt.alpha(Couleurs.voile, 0.14)
         Column {
             id: col
             anchors.centerIn: parent; spacing: 2

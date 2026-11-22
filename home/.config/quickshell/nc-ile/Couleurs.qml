@@ -76,6 +76,11 @@ Singleton {
     readonly property bool terminal: style === "terminal" && p.fond !== undefined
     function v(cle, apple) { return terminal && p[cle] ? p[cle] : apple }
 
+    // Palette sombre (par défaut, y compris sans palette ni style noir) ou claire (fond clair, texte sombre) : « sombre » de palette-ile.json
+    readonly property bool sombre: !(terminal && p.sombre === false)
+    // Filet ou reflet posé sur un fond de carte : blanc en sombre, la couleur du texte en clair (le blanc y serait invisible)
+    readonly property color voile: sombre ? "#ffffff" : texte
+
     readonly property color fond: v("fond", "#000000")
     readonly property color texte: v("texte", "#ffffff")
     readonly property color texteSec: v("texteSec", "#98989d")

@@ -249,9 +249,9 @@ PanelWindow {
                 x: 28; width: parent.width - 56; height: 1; y: 1
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
-                    GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0) }
-                    GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.16) }
-                    GradientStop { position: 1; color: Qt.rgba(1, 1, 1, 0) }
+                    GradientStop { position: 0; color: Qt.alpha(Couleurs.voile, 0) }
+                    GradientStop { position: 0.5; color: Qt.alpha(Couleurs.voile, 0.16) }
+                    GradientStop { position: 1; color: Qt.alpha(Couleurs.voile, 0) }
                 }
             }
         }
