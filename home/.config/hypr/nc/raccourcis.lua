@@ -123,6 +123,9 @@ touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), tra
 -- Panneau VPN de l'île (tunnels VPN et WireGuard de NetworkManager, nc-vpn) ; sans l'île, la liste en notification
 touche(SUPER .. " + ALT + code:55", cmd([[sh -c 'qs -c nc-ile ipc call ile vpn >/dev/null 2>&1 || exec notify-send -a VPN VPN "$(~/.local/bin/nc-vpn liste)"']]),
     trad("Applis et barre|VPN : connecter ou déconnecter un tunnel (île)", "VPN: connect or disconnect a tunnel (island)"))
+-- Carrousel des thèmes de l'île (nc-reglages themes --json) ; Entrée applique, Échap ferme
+touche(SUPER .. " + ALT + code:28", cmd("qs -c nc-ile ipc call ile themes"),
+    trad("Applis et barre|Thèmes : choisir l'allure du bureau (île)", "Themes: choose the desktop look (island)"))
 -- Panneau Santé Garmin de l'île, seulement si la fonction est activée (nc-garmin)
 if nc.reglage("GARMIN_ACTIF", "non") == "oui" then
     touche(SUPER .. " + ALT + code:39", cmd("qs -c nc-ile ipc call ile garmin"),

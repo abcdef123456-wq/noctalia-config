@@ -26,6 +26,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `,` | Réglages de la barre |
 | `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) ; déjà ouverte : la ramène, la met devant, ou la masque |
 | `Super` + `Alt` + `V` | VPN : le panneau de l'île avec les tunnels VPN et WireGuard de NetworkManager (tous les tunnels montés, un bouton « Déconnecter » par tunnel, « Tout déconnecter », un clic sur une autre connexion la connecte, « Importer… » prend un `.ovpn` ou un `.conf`) ; `Échap` ferme. Sans l'île : la liste en notification (`nc-vpn liste`) |
+| `Super` + `Alt` + `T` | Thèmes : le carrousel de l'île, un mini bureau par thème (`←` `→` ou molette pour changer de carte, `Entrée` applique, `Échap` ferme sans rien changer) |
 | `Super` + `Alt` + `S` | Santé Garmin : le panneau de l'île (si Santé Garmin est activé dans les réglages ; sinon le raccourci n'existe pas) ; `Échap` ferme |
 | `Super` + `Alt` + `C` | Cloud JARVIS : le panneau de l'île, tes fichiers sur ton serveur (si le Cloud JARVIS est activé dans les réglages ; sinon le raccourci n'existe pas) |
 | `Super` + `/` | Afficher cette fiche |
