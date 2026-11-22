@@ -79,6 +79,8 @@ class HorsEcran(unittest.TestCase):
             {"ILE_MAJUSCULES": "oui"}, {"ILE_MAJUSCULES": "non"}, {"ILE_MAJUSCULES": "1"},     # 35 36 37
             {"ILE_RAYON": "normal"}, {"ILE_RAYON": "pilule"},                                   # 38 39 (ancien nom : invalide)
             {"ILE_ACCENTS": "accent"}, {"ILE_ACCENTS": "texte"}, {"ILE_ACCENTS": "rose"},      # 40 41 42
+            {"ILE_POLICE": "Police Absente, " + cls.installee}, {"ILE_POLICE": " %s ,Autre" % cls.installee},  # 43 44
+            {"ILE_POLICE": "Absente Une, Absente Deux"}, {"ILE_POLICE": ","},                   # 45 46
         ]
         cls.r, _ = lancer_cas(cls.cas)
 
@@ -122,6 +124,9 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(self.r[22]["police"], self.installee)
         self.assertEqual(self.r[23]["police"], "Adwaita Sans")
         self.assertEqual(self.r[24]["police"], "Adwaita Sans")
+        # Liste : la première installée, espaces ignorés ; aucune : Adwaita Sans
+        self.assertEqual([self.r[i]["police"] for i in (43, 44, 45, 46)],
+                         [self.installee, self.installee, "Adwaita Sans", "Adwaita Sans"])
 
     def test_animations(self):
         self.assertEqual(self.r[27], self.r[0])

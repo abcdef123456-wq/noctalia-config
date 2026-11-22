@@ -213,6 +213,14 @@ class HorsEcran(unittest.TestCase):
 
 
 
+class PoliceEnListe(unittest.TestCase):
+    def test_mini_pilule_prend_la_premiere_police_installee(self):
+        """ILE_POLICE d'un thème peut être une liste « A, B » (Rétro) : même lecture que Couleurs.police."""
+        qml = lire("ChoixTheme.qml")
+        self.assertIn("font.family: ct.police(c.t)", qml)
+        self.assertIn('var liste = ct.rv(t, "ILE_POLICE", "").split(","), installees = Qt.fontFamilies()', qml)
+        self.assertIn('if (n !== "" && installees.indexOf(n) >= 0) return n', qml)
+
 class RegleDeFenetre(unittest.TestCase):
     def test_flottante_centree_limitee_a_quickshell(self):
         """Sans règle, la fenêtre « Thèmes » serait rangée en tuile ; le titre seul viserait d'autres applis."""

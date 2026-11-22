@@ -490,8 +490,10 @@ REGLAGES = [
       L("100 : fond plein. Plus bas, le fond laisse voir un peu derrière (sans flou).",
         "100: solid background. Lower lets a little show through (no blur)."), mini=85, maxi=100, unite="%"),
     R("ILE_POLICE", "Île", L("Police", "Font"), "texte", "Adwaita Sans",
-      L("Nom d'une police installée ; si elle est absente, l'île garde Adwaita Sans.",
-        "Name of an installed font; if it is missing, the island keeps Adwaita Sans.")),
+      L("Nom d'une police installée, ou plusieurs séparés par des virgules : la première installée est prise ; "
+        "aucune n'est là : l'île garde Adwaita Sans.",
+        "Name of an installed font, or several separated by commas: the first installed one is used; "
+        "none is there: the island keeps Adwaita Sans.")),
     R("ILE_ANIM", "Île", L("Animations", "Animations"), "choix", "ressort",
       L("Allure des ouvertures et fermetures.", "Feel of the opening and closing."),
       [("ressort", L("Ressort (d'origine)", "Spring (original)")), ("doux", L("Doux", "Smooth")),

@@ -52,6 +52,12 @@ FloatingWindow {
         var n = /^[0-9]+$/.test(r) ? parseInt(r) : 100
         return n <= 200 ? n : 100
     }
+    // ILE_POLICE du thème (une liste « A, B ») : la première installée, sinon la police de l'île
+    function police(t) {
+        var liste = ct.rv(t, "ILE_POLICE", "").split(","), installees = Qt.fontFamilies()
+        for (var i = 0; i < liste.length; i++) { var n = liste[i].trim(); if (n !== "" && installees.indexOf(n) >= 0) return n }
+        return Couleurs.police
+    }
     function nombre(t, cle, defaut, maxi) { var n = Number(rv(t, cle, defaut)); return isNaN(n) ? defaut : Math.max(0, Math.min(maxi, n)) }
 
     Process {
@@ -162,7 +168,7 @@ FloatingWindow {
                             text: { var s = Reglages.t("Île 12:30", "Island 12:30"); return ct.rv(c.t, "ILE_MAJUSCULES", "non") === "oui" ? s.toUpperCase() : s }
                             color: c.col.onSurface || "#e3e3e8"
                             font.pixelSize: 9
-                            font.family: Qt.fontFamilies().indexOf(ct.rv(c.t, "ILE_POLICE", "")) >= 0 ? ct.rv(c.t, "ILE_POLICE", "") : Couleurs.police
+                            font.family: ct.police(c.t)
                         }
                     }
                     // Deux petites fenêtres : arrondi et bordure du thème

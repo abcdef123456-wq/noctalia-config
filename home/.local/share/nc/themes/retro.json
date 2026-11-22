@@ -15,7 +15,7 @@
     "ILE_RAYON": "carre",
     "ILE_VERRE": "100",
     "ILE_ANIM": "sec",
-    "ILE_POLICE": "DejaVu Sans Mono",
+    "ILE_POLICE": "JetBrains Mono, DejaVu Sans Mono",
     "ILE_MAJUSCULES": "oui",
     "FENETRES_ARRONDI": "0",
     "FENETRES_BORDURE": "1",

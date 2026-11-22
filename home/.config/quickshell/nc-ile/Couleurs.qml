@@ -10,7 +10,7 @@ pragma Singleton
 //   Allure (par défaut : celle d'avant, rien ne change) :
 //   ILE_RAYON=auto ou normal (rayons d'origine, 100) | carre (0) | doux (50) | rond (200) ; ou 0 à 200 : % des rayons d'origine, plafonné à la demi-taille
 //   ILE_CONTOUR_EPAISSEUR=2 (0 à 4 px) ; ILE_VERRE=100 (85 à 100 % d'opacité du fond, sans flou)
-//   ILE_POLICE=Adwaita Sans (une police absente : retour à celle-ci) ; ILE_MAJUSCULES=non | oui
+//   ILE_POLICE=Adwaita Sans, ou une liste « A, B » : la première installée (aucune : Adwaita Sans) ; ILE_MAJUSCULES=non | oui
 //   ILE_ANIM=ressort (allure d'origine) | doux | vif | sec ; ILE_LUEUR=non | oui (halo autour de l'île ouverte)
 import QtQuick
 import Quickshell
@@ -47,8 +47,14 @@ Singleton {
     readonly property bool lueur: Reglages.val("ILE_LUEUR", "non") === "oui"
     // ILE_CONTOUR_FERMEE=oui : contour et lueur aussi autour de la pilule fermée (sinon : île ouverte seulement)
     readonly property bool contourFermee: Reglages.val("ILE_CONTOUR_FERMEE", "non") === "oui"
-    readonly property string police: Qt.fontFamilies().indexOf(Reglages.val("ILE_POLICE", "")) >= 0
-                                     ? Reglages.val("ILE_POLICE", "") : "Adwaita Sans"
+    readonly property string police: {
+        var installees = Qt.fontFamilies(), liste = String(Reglages.val("ILE_POLICE", "")).split(",")
+        for (var i = 0; i < liste.length; i++) {
+            var nom = liste[i].trim()
+            if (nom !== "" && installees.indexOf(nom) >= 0) return nom
+        }
+        return "Adwaita Sans"
+    }
     // Ressorts de la largeur et de la hauteur de l'île, durée et courbe du rayon, durées du contour et du Spotlight
     readonly property var animations: ({
         "ressort": { raideur: 3.4, amortiL: 0.34, amortiH: 0.36, duree: 280, courbe: Easing.OutCubic, contour: 220, spot: 170 },
