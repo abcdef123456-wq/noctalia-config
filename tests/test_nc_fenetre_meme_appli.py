@@ -79,9 +79,24 @@ class MemeAppli(unittest.TestCase):
         cs = [cl("0xa"), cl("0xb", ws=(1, "special:reduites")), cl("0xc")]
         self.assertEqual(self.lancer(cs, "0xa"), "0xc")
 
-    def test_autre_bureau_saute(self):
-        cs = [cl("0xa"), cl("0xb", ws=(2, "2")), cl("0xc")]
+    def test_tous_les_bureaux_celui_ci_d_abord(self):
+        # 0xa et 0xd sur le bureau 1, 0xb sur le 3, 0xc sur le 2 : 1 d'abord, puis 2, puis 3, en boucle (toutes atteintes)
+        cs = [cl("0xa"), cl("0xb", ws=(3, "3")), cl("0xc", ws=(2, "2")), cl("0xd"), cl("0xe", "firefox", ws=(2, "2"))]
+        a, suite = "0xa", []
+        for _ in range(5):
+            a = self.lancer(cs, a)
+            suite.append(a)
+        self.assertEqual(suite, ["0xd", "0xc", "0xb", "0xa", "0xd"])
+
+    def test_depuis_un_autre_bureau_ses_voisines_d_abord(self):
+        cs = [cl("0xa"), cl("0xb", ws=(2, "2")), cl("0xc", ws=(2, "2"))]
+        self.assertEqual(self.lancer(cs, "0xb"), "0xc")
+
+    def test_bureau_special_saute(self):
+        # le terminal déroulant (special:term) ne surgit pas
+        cs = [cl("0xa"), cl("0xb", ws=(-98, "special:term")), cl("0xc", ws=(2, "2"))]
         self.assertEqual(self.lancer(cs, "0xa"), "0xc")
+        self.assertEqual(self.lancer(cs, "0xc"), "0xa", "le tour revient au début sans passer par le bureau spécial")
 
     def test_une_seule(self):
         self.lancer([cl("0xa"), cl("0xb", "firefox")], "0xa")

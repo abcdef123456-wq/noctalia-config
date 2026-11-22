@@ -9,8 +9,8 @@
 #   nc-fenetre outil TITRE           fenêtre-outil de l'île (réglages, cockpit, chat JARVIS) : sur un autre bureau ou
 #                                    masquée, ramenée sur le bureau affiché ; ici sans le focus, le prend ; ici et
 #                                    active, masquée (forme gardée : rangée ou libre) ; absente, code 3
-#   nc-fenetre meme-appli            passe à la fenêtre suivante de la même appli (même classe, même bureau ; comme
-#                                    Cmd + ` sur un Mac), en boucle ; rien en plein écran ni s'il n'y en a qu'une    Super + Ctrl + Z
+#   nc-fenetre meme-appli            passe à la fenêtre suivante de la même appli (même classe, celles de ce bureau
+#                                    puis les autres bureaux ; comme Cmd + ` sur un Mac), en boucle ; rien en plein écran ni s'il n'y en a qu'une    Super + Ctrl + Z
 #   nc-fenetre fermer ADRESSE        la ferme
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
 #   nc-fenetre reduire-lot JSON      masque un lot avec ses géométries prises avant tout déplacement (vue)
@@ -289,12 +289,15 @@ PY
     prop "$a" no_anim 0; prop "$a" opacity 1
     exec "$0" aller "$a" ;;
   meme-appli)
-    # Ordre par adresse (stable, indépendant de l'ordre de focus) ; les masquées sont sautées ; plein écran : on n'en sort pas
+    # Un seul ordre, stable et indépendant du focus : par bureau puis par adresse. On finit donc les fenêtres du bureau
+    # courant avant de passer au suivant, en boucle (un ordre « celui-ci d'abord » recalculé à chaque appel en oublierait).
+    # Sautées : les masquées et les bureaux spéciaux (terminal déroulant…). Plein écran : on n'en sort pas
     act="$(hyprctl activewindow -j 2>/dev/null)"
     a="$(clients | jq -r --argjson act "${act:-null}" --arg c "$CACHE" '
       if ($act.address // "") == "" or (($act.fullscreen // 0) != 0) then empty else
-      [.[] | select(.class == $act.class and .workspace.id == $act.workspace.id and .workspace.name != $c and (.mapped // true))]
-      | sort_by(.address) | map(.address) as $l
+      [.[] | select(.class == $act.class and .workspace.name != $c and (.mapped // true)
+                    and (.workspace.id == $act.workspace.id or .workspace.id >= 0))]
+      | sort_by(.workspace.id, .address) | map(.address) as $l
       | if ($l | length) < 2 then empty else $l[(($l | index($act.address)) // -1) + 1] // $l[0] end end')"
     [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || exit 0
     # Venu du clavier : le pointeur suit la fenêtre
@@ -343,7 +346,7 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
   nc-window tool TITLE           island tool window (settings, JARVIS dashboard or chat): on another workspace or
                                  hidden, brought to the visible workspace; here but unfocused, focused; here and
                                  active, hidden (its shape is kept: tiled or floating); absent, exit code 3
-  nc-window same-app             next window of the same app (same class, same workspace), looping; nothing in
+  nc-window same-app             next window of the same app (same class, this workspace's first, then the others), looping; nothing in
                                  fullscreen or with a single window                              Super + Ctrl + Z
   nc-window close ADDRESS        closes it
   nc-window hide-all             hides every window of the visible workspace
