@@ -111,6 +111,10 @@ nc_ui_n_etape() { [ "${NC_UI:-0}" = 1 ] || return 0; NC_UI_N=$((NC_UI_N + 1)); n
 sans_tty() { [ "${NC_UI:-0}" = 1 ] || ! { true </dev/tty; } 2>/dev/null; }
 # sudo peut-il demander le mot de passe ? Par un terminal, ou par la fenêtre du mode graphique (SUDO_ASKPASS, posé plus haut)
 sudo_peut_demander() { [ -n "${SUDO_ASKPASS:-}" ] || { true </dev/tty; } 2>/dev/null; }
+# Ni terminal ni fenêtre pour demander le mot de passe : un sudo qui « demande » échoue ET compte comme un mot de passe
+# faux (pam_faillock : au 3e, le compte est verrouillé 10 minutes, même avec le bon mot de passe ; vu après un nc-maj lancé
+# sans terminal). On force alors -n pour TOUS les appels de ce script et de ses sous-scripts bash : échec net, rien de compté
+if ! sudo_peut_demander; then sudo() { command sudo -n "$@"; }; export -f sudo; fi
 ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
   # « sensible » : démarrage, connexion, pilotes. Sans terminal, la réponse par défaut y est NON, sauf avec --oui.
   local d="${2:-n}" r hint sens=false

@@ -2,6 +2,7 @@
 est sautée sans terminal ni sudo autorisé. Faux sudo seulement : rien de réel n'est lancé ni copié."""
 import os
 import pty
+import re
 import stat
 import subprocess
 import tempfile
@@ -13,11 +14,13 @@ SOURCE = (REPO / "install.sh").read_text()
 DEBUT = SOURCE[SOURCE.index("sans_tty() {"):SOURCE.index("ask() {")]
 POSE = SOURCE[SOURCE.index("pose_regle() {"):SOURCE.index("# Code de sortie d'un")]
 BATTERIE = SOURCE[SOURCE.index('  if [ "$LAPTOP" = 1 ] && [ "$("$REPO/system/nc-limite-charge" etat'):SOURCE.index("  # Assistants root facultatifs")]
-# Faux sudo : note l'appel ; FAUX_ECHEC=auth fait échouer « -n » et « -v », copie « install », visudo « visudo »
+# Faux sudo : note l'appel ; FAUX_ECHEC=auth fait échouer « -n » et « -v », copie « install », visudo « visudo ».
+# « -n » (demandé par le script, ou forcé sans terminal ni fenêtre) ne passe que si sudo est déjà autorisé (FAUX_N=1)
 SUDO = '''echo "sudo $*" >> "$FAUX_JOURNAL"
-case "$FAUX_ECHEC:$1" in auth:-n|auth:-v|copie:install|visudo:visudo) exit 1 ;; esac
+n=0; [ "$1" = -n ] && { n=1; shift; }
+[ "$n" = 1 ] && { [ "$FAUX_ECHEC" = auth ] || [ "${FAUX_N:-0}" = 0 ]; } && exit 1
+case "$FAUX_ECHEC:$1" in auth:-v|copie:install|visudo:visudo) exit 1 ;; esac
 [ "$1" = grep ] && exit 1
-[ "$1" = -n ] && [ "${FAUX_N:-0}" = 0 ] && exit 1
 exit 0'''
 PRE = '''t() { [ "${NC_LANGUE:-}" = fr ] && printf '%s' "$1" || printf '%s' "$2"; }
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; ok() { echo "OK $*"; }
@@ -69,8 +72,13 @@ class PoseRegle(unittest.TestCase):
 
     APPEL = 'pose_regle /home/user/r /home/user/sudoers.d/x /home/user/src /home/user/bin/x || echo "CAUSE $NC_CAUSE"\n'
 
-    def log(self):
+    def log_brut(self):
         return self.journal.read_text() if self.journal.exists() else ""
+
+    def log(self):
+        """Le journal sans le « -n » forcé hors terminal, et sans les sondes « sudo -n true »."""
+        lignes = [re.sub(r"^sudo (-n )+", "sudo ", l) for l in self.log_brut().splitlines()]
+        return "\n".join(l for l in lignes if l != "sudo true")
 
     def test_authentification_impossible_sans_terminal(self):
         sortie = self.lancer(self.APPEL, FAUX_ECHEC="auth")
@@ -91,6 +99,21 @@ class PoseRegle(unittest.TestCase):
         self.assertIn("sudo -v", self.log())
         self.assertIn("sudo mv", self.log())
 
+    def test_sans_terminal_ni_fenetre_tout_sudo_porte_n(self):
+        """nc-maj lancé sans terminal : un sudo qui « demande » échoue ET compte comme un mot de passe faux (pam_faillock,
+        compte verrouillé au 3e). Tous les appels du script et de ses sous-scripts bash portent donc -n."""
+        self.lancer("sudo grep -q x /home/user/y; sudo install a b; bash -c 'sudo cmp a b'; true\n")
+        lignes = self.log_brut().splitlines()
+        self.assertEqual(len(lignes), 3, lignes)
+        self.assertTrue(all(l.startswith("sudo -n ") for l in lignes), lignes)
+
+    def test_avec_un_moyen_de_demander_sudo_inchange(self):
+        for plus in ({"SUDO_ASKPASS": "/home/user/nc-askpass"}, {"tty": True}):
+            with self.subTest(plus):
+                self.journal.unlink(missing_ok=True)
+                self.lancer("sudo grep -q x /home/user/y; true\n", **plus)
+                self.assertEqual(self.log_brut().splitlines(), ["sudo grep -q x /home/user/y"])
+
     def test_copie_echoue(self):
         sortie = self.lancer(self.APPEL, FAUX_ECHEC="copie", FAUX_N="1")
         self.assertIn("la copie d'un fichier a échoué", sortie)
@@ -106,7 +129,7 @@ class PoseRegle(unittest.TestCase):
     def test_succes_ordre_des_controles(self):
         sortie = self.lancer(self.APPEL, FAUX_N="1")
         self.assertNotIn("CAUSE", sortie)
-        j = [l for l in self.log().splitlines() if "-n true" not in l]
+        j = self.log().splitlines()
         self.assertEqual([l.split()[1] for l in j], ["install", "install", "visudo", "mv"], j)
 
     def test_anglais(self):

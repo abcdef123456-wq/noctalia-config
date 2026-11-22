@@ -105,7 +105,7 @@ class PacmanZypper(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         d = self.tmp.name
         self.journal = Path(d) / "appels"
-        outil(d, "sudo", 'exec "$@"')
+        outil(d, "sudo", '[ "$1" = -n ] && shift   # posé par install.sh sans terminal\nexec "$@"')
         outil(d, "pacman", 'echo "pacman $*" >> "$NC_APPELS"')
 
     def appel(self, runner):

@@ -116,7 +116,7 @@ class Seulement(Base):
     def setUp(self):
         super().setUp()
         # sudo : note ses arguments, ne lance rien ; « grep » (règle déjà posée ?) répond non
-        faux(self.bin, "sudo", 'echo "sudo $*" >> "$FAUX_JOURNAL"\n[ "$1" = grep ] && exit 1\nexit 0')
+        faux(self.bin, "sudo", '[ "$1" = -n ] && shift   # posé par install.sh sans terminal\necho "sudo $*" >> "$FAUX_JOURNAL"\n[ "$1" = grep ] && exit 1\nexit 0')
         # stat : note l'appel, dit que le dossier est à root (uid 0, droits 755) sauf FAUX_UID
         # (le clone de l'essai, lui, est regardé pour de vrai : /usr/bin/stat)
         faux(self.bin, "stat", 'echo "stat $*" >> "$FAUX_JOURNAL"\ncase "${@: -1}" in "$CLONE_ESSAI"*) exec /usr/bin/stat "$@" ;; esac\ncase "$*" in *%u*) echo "${FAUX_UID:-0}" ;; *) echo 755 ;; esac')
