@@ -127,6 +127,9 @@ class Equivalence(Base):
                 # Seul ajout voulu depuis les anciens styles : le dossier de fonds du thème, s'il en a un
                 self.assertEqual(vals.pop("FONDS_DOSSIER", ""),
                                  str(self.home / "Pictures/Wallpapers" / d["fonds"]) if d["fonds"] else "")
+                # et ses widgets (champ « widgets ») en une ligne WIDGETS_THEME, s'il en a (contenu : Reapplication)
+                self.assertEqual("WIDGETS_THEME" in vals, bool(d["widgets"]))
+                vals.pop("WIDGETS_THEME", None)
                 attendu = dict(styles.get(nom, {}), **d["reglages"]) if nom in ENRICHIS else styles.get(nom, {})
                 self.assertEqual(vals, attendu)
 

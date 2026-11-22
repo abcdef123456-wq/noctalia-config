@@ -16,7 +16,7 @@
     "ILE_VERRE": "100",
     "ILE_LUEUR": "non",
     "ILE_ACCENTS": "accent",
-    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_CONTOUR_FERMEE": "oui",
     "WIDGETS_PLAQUE": "oui",
     "FENETRES_BORDURE": "1",
     "FENETRES_OMBRE": "20",
@@ -35,7 +35,10 @@
     "DOCK": "oui",
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "oui",
-    "ILE_BANDE": "non"
+    "ILE_BANDE": "non",
+    "WIDGETS_BUREAU": "oui",
+    "FENETRES_COLONNE_LARGEUR": "0.80",
+    "FENETRES_SEULE_CENTREE": "16:10"
   },
   "noctalia": {
     "bar.default": {
@@ -73,7 +76,32 @@
     "ombre": "coloree"
   },
   "fonds": "kanagawa",
-  "fond_de_depart": "grande-vague.jpg",
+  "fond_de_depart": "kanagawa-ressac.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-geante",
+      "coin": "haut-gauche",
+      "taille": "petit",
+      "style": "carte"
+    },
+    {
+      "type": "calendrier",
+      "coin": "haut-gauche",
+      "taille": "moyen",
+      "style": "carte"
+    },
+    {
+      "type": "meteo",
+      "coin": "haut-gauche",
+      "taille": "moyen",
+      "style": "carte"
+    },
+    {
+      "type": "musique",
+      "coin": "haut-droite",
+      "taille": "grand",
+      "style": "carte"
+    }
+  ]
 }
