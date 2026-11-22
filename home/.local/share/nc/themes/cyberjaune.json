@@ -1,0 +1,65 @@
+{
+  "nom": "cyberjaune",
+  "libelle": {
+    "fr": "Cyber jaune (néon noir)",
+    "en": "Cyber yellow (black neon)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Cyberjaune"
+  },
+  "reglages": {
+    "ILE_STYLE": "noir",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "2",
+    "ILE_CONTOUR_FERMEE": "oui",
+    "ILE_RAYON": "carre",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Rajdhani, Share Tech Mono, Inter",
+    "ILE_ANIM": "vif",
+    "ILE_LUEUR": "oui",
+    "ILE_MAJUSCULES": "oui",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "ShareTechMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "94",
+    "TERMINAL_MARGE": "8",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "vif",
+    "FENETRES_OMBRE_DECALAGE": "aucun",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "carres",
+    "FENETRES_MAITRE_ORIENTATION": "haut",
+    "FENETRES_ARRONDI": "0",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "20",
+    "ANIM_BUREAUX": "slide",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "oui",
+    "DOCK_POSITION": "right",
+    "DOCK_AUTO": "non",
+    "DOCK_TAILLE": "40"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "bottom",
+      "margin_edge": 6,
+      "thickness": 30,
+      "capsule": true,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": true,
+      "label_source": "id",
+      "pill_scale": 1.2
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "cyberjaune",
+  "fond_de_depart": "cyberjaune-ville.jpg",
+  "credits": [],
+  "widgets": []
+}

@@ -105,7 +105,7 @@ def palette_du_theme(mod, theme, dossier_palettes):
             cand += mod.palettes_noctalia("builtin", nom)
         for f in cand:
             try:
-                d = mod.lire_palette(f)
+                d = mod.lire_palette(f, (theme.get("reglages") or {}).get("THEME_MODE", "dark"))
             except (OSError, ValueError, KeyError):
                 continue
             c = {k: d.get("m" + k[0].upper() + k[1:], neutre[k]) for k in neutre}

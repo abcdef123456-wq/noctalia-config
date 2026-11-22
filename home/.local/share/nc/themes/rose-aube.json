@@ -1,0 +1,74 @@
+{
+  "nom": "rose-aube",
+  "libelle": {
+    "fr": "Rose aube (clair, serif doux)",
+    "en": "Dawn rose (light, soft serif)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "RoseAube"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "discret",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Source Serif 4, Noto Serif, Inter",
+    "ILE_ANIM": "doux",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "96",
+    "TERMINAL_MARGE": "12",
+    "TERMINAL_CURSEUR": "beam",
+    "FENETRES_CARACTERE": "doux",
+    "FENETRES_OMBRE_DECALAGE": "bas",
+    "FENETRES_DISPOSITION": "dwindle",
+    "FENETRES_COINS_FORME": "doux",
+    "FENETRES_MAITRE_ORIENTATION": "auto",
+    "FENETRES_ARRONDI": "14",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_OMBRE": "18",
+    "ANIM_BUREAUX": "fade",
+    "VERROU_COULEUR": "blanc",
+    "DOCK": "oui",
+    "DOCK_POSITION": "bottom",
+    "DOCK_AUTO": "non",
+    "DOCK_TAILLE": "48",
+    "THEME_MODE": "light"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 0,
+      "thickness": 36,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "focus_hint",
+      "show_labels": true,
+      "label_source": "name"
+    },
+    "dock": {
+      "radius": 30
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "noire"
+  },
+  "fonds": "rose-aube",
+  "fond_de_depart": "rose-aube-collines.jpg",
+  "credits": [
+    {
+      "nom": "Rosé Pine Dawn (palette d'origine, primaire assombri pour le contraste)",
+      "lien": "https://rosepinetheme.com/palette/",
+      "licence": "MIT"
+    }
+  ],
+  "widgets": []
+}

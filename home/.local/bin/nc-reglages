@@ -2721,8 +2721,8 @@ def palettes_noctalia(src, pnom):
     return [os.path.join(d, "quickshell/noctalia-shell/Assets/ColorScheme", pnom, pnom + ".json") for d in dossiers if d]
 
 
-def lire_palette(fichier):
-    """« dark » d'une palette de Noctalia : fichier ordinaire seulement (pas de lien symbolique, de tube ni de
+def lire_palette(fichier, mode="dark"):
+    """« dark » (ou « light » si le thème est clair et que la palette l'a) d'une palette de Noctalia : fichier ordinaire seulement (pas de lien symbolique, de tube ni de
     périphérique), 1 Mo au plus. Toute erreur lève une exception (l'appelant retombe sur les couleurs neutres)."""
     fd = os.open(fichier, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
     try:
@@ -2735,7 +2735,8 @@ def lire_palette(fichier):
         os.close(fd)
     if len(brut) > 1024 ** 2:
         raise ValueError(fichier)
-    return json.loads(brut.decode("utf-8"))["dark"]
+    pal = json.loads(brut.decode("utf-8"))
+    return pal["light"] if mode == "light" and isinstance(pal.get("light"), dict) else pal["dark"]
 
 
 # Disposition effective d'un thème (vignette du carrousel ET schéma de outils/schema-theme.py : une seule règle ici).
@@ -2827,7 +2828,7 @@ def themes_json(vals):
         couleurs, approx = dict(COULEURS_NEUTRES), True
         for fichier in (palettes_noctalia(src, pnom) if src in ("custom", "builtin") and re.fullmatch(r"[\w .+-]+", pnom) else []):
             try:
-                m = lire_palette(fichier)
+                m = lire_palette(fichier, t["reglages"].get("THEME_MODE", "dark"))
                 lues = {c: m["m" + c[0].upper() + c[1:]] for c in couleurs}
                 if all(isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v) for v in lues.values()):
                     couleurs, approx = lues, False

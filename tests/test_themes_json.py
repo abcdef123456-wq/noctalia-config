@@ -57,6 +57,17 @@ class ThemesJson(unittest.TestCase):
         self.assertEqual(x["couleurs"]["primary"], "#33ff66")
         self.assertEqual(x["couleurs"]["surface"], "#0a0f0a")
 
+    def test_mode_clair(self):
+        pal = Path(self.d) / ".config/noctalia/palettes/Retro.json"
+        pal.write_text(json.dumps({"dark": PALETTE["dark"], "light": dict(PALETTE["dark"], mSurface="#fafafa")}))
+        t = self.themes / "retro.json"
+        d = json.loads(t.read_text())
+        d["reglages"]["THEME_MODE"] = "light"
+        t.write_text(json.dumps(d))
+        self.assertEqual(self.liste()["retro"]["couleurs"]["surface"], "#fafafa")
+        pal.write_text(json.dumps(PALETTE))  # pas de côté light : retombe sur dark
+        self.assertEqual(self.liste()["retro"]["couleurs"]["surface"], "#0a0f0a")
+
     def test_palette_custom_mauvaise(self):
         (Path(self.d) / ".config/noctalia/palettes/Retro.json").write_text("pas du json")
         self.assertTrue(self.liste()["retro"]["palette_approximative"])

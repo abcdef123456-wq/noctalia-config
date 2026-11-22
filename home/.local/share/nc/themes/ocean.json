@@ -1,0 +1,64 @@
+{
+  "nom": "ocean",
+  "libelle": {
+    "fr": "Océan (bleu profond)",
+    "en": "Ocean (deep blue)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Ocean"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "94",
+    "ILE_POLICE": "Inter",
+    "ILE_ANIM": "doux",
+    "ILE_LUEUR": "oui",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "92",
+    "TERMINAL_MARGE": "12",
+    "TERMINAL_CURSEUR": "beam",
+    "FENETRES_CARACTERE": "doux",
+    "FENETRES_OMBRE_DECALAGE": "bas",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "rond",
+    "FENETRES_MAITRE_ORIENTATION": "bas",
+    "FENETRES_ARRONDI": "16",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "24",
+    "ANIM_BUREAUX": "slidefadevert",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "oui",
+    "DOCK_POSITION": "left",
+    "DOCK_AUTO": "oui",
+    "DOCK_TAILLE": "44"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "right",
+      "margin_edge": 10,
+      "thickness": 36,
+      "capsule": true,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": false,
+      "pill_scale": 1.2
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "ocean",
+  "fond_de_depart": "ocean-rayons.jpg",
+  "credits": [],
+  "widgets": []
+}

@@ -1,0 +1,60 @@
+{
+  "nom": "matrice",
+  "libelle": {
+    "fr": "Matrice (pluie de points)",
+    "en": "Matrix (dot rain)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Matrice"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "doux",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Doto, JetBrains Mono, Inter",
+    "ILE_ANIM": "vif",
+    "ILE_LUEUR": "oui",
+    "ILE_MAJUSCULES": "oui",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "92",
+    "TERMINAL_MARGE": "10",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "vif",
+    "FENETRES_OMBRE_DECALAGE": "aucun",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "doux",
+    "FENETRES_MAITRE_ORIENTATION": "centre",
+    "FENETRES_ARRONDI": "20",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_OMBRE": "14",
+    "ANIM_BUREAUX": "slidevert",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "non"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 0,
+      "thickness": 24,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "focus_hint",
+      "show_labels": false
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "matrice",
+  "fond_de_depart": "matrice-relief.jpg",
+  "credits": [],
+  "widgets": []
+}

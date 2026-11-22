@@ -1,0 +1,63 @@
+{
+  "nom": "brutaliste",
+  "libelle": {
+    "fr": "Brut (béton et jaune)",
+    "en": "Raw (concrete and yellow)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Brutaliste"
+  },
+  "reglages": {
+    "ILE_STYLE": "noir",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "3",
+    "ILE_CONTOUR_FERMEE": "oui",
+    "ILE_RAYON": "carre",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Space Mono, JetBrains Mono, Inter",
+    "ILE_ANIM": "sec",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "oui",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "SpaceMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "100",
+    "TERMINAL_MARGE": "8",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "sec",
+    "FENETRES_OMBRE_DECALAGE": "dure",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "carres",
+    "FENETRES_MAITRE_ORIENTATION": "gauche",
+    "FENETRES_ARRONDI": "0",
+    "FENETRES_BORDURE": "4",
+    "FENETRES_OMBRE": "0",
+    "ANIM_BUREAUX": "slide",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "non"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 0,
+      "thickness": 40,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": true,
+      "label_source": "id",
+      "pill_scale": 1.3,
+      "active_pill_size": 2.4
+    }
+  },
+  "theme_sync": {
+    "bordure": "gris",
+    "ombre": "noire"
+  },
+  "fonds": "brutaliste",
+  "fond_de_depart": "brutaliste-blocs.jpg",
+  "credits": [],
+  "widgets": []
+}

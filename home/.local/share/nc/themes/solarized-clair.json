@@ -1,0 +1,75 @@
+{
+  "nom": "solarized-clair",
+  "libelle": {
+    "fr": "Soleil (clair, trait fin)",
+    "en": "Sunlit (light, thin line)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "SolarizedClair"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "discret",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_CONTOUR_FERMEE": "oui",
+    "ILE_RAYON": "doux",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Source Code Pro, JetBrains Mono, Inter",
+    "ILE_ANIM": "sec",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "SauceCodePro Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "98",
+    "TERMINAL_MARGE": "8",
+    "TERMINAL_CURSEUR": "block",
+    "FENETRES_CARACTERE": "sec",
+    "FENETRES_OMBRE_DECALAGE": "aucun",
+    "FENETRES_DISPOSITION": "master",
+    "FENETRES_COINS_FORME": "doux",
+    "FENETRES_MAITRE_ORIENTATION": "gauche",
+    "FENETRES_ARRONDI": "4",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_OMBRE": "12",
+    "ANIM_BUREAUX": "slide",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "oui",
+    "DOCK_POSITION": "right",
+    "DOCK_AUTO": "non",
+    "DOCK_TAILLE": "32",
+    "THEME_MODE": "light"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 0,
+      "thickness": 28,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": true,
+      "label_source": "id"
+    },
+    "dock": {
+      "margin_edge": 0,
+      "radius": 0
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "noire"
+  },
+  "fonds": "solarized-clair",
+  "fond_de_depart": "solarized-clair-dunes.jpg",
+  "credits": [
+    {
+      "nom": "Solarized (palette d'origine)",
+      "lien": "https://ethanschoonover.com/solarized/",
+      "licence": "MIT"
+    }
+  ],
+  "widgets": []
+}

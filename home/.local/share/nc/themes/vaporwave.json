@@ -1,0 +1,69 @@
+{
+  "nom": "vaporwave",
+  "libelle": {
+    "fr": "Vapeur (rose et cyan)",
+    "en": "Vapor (pink and cyan)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Vaporwave"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "2",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "92",
+    "ILE_POLICE": "Inter",
+    "ILE_ANIM": "ressort",
+    "ILE_LUEUR": "oui",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "90",
+    "TERMINAL_MARGE": "14",
+    "TERMINAL_CURSEUR": "beam",
+    "FENETRES_CARACTERE": "rebond",
+    "FENETRES_OMBRE_DECALAGE": "bas",
+    "FENETRES_DISPOSITION": "dwindle",
+    "FENETRES_COINS_FORME": "rond",
+    "FENETRES_MAITRE_ORIENTATION": "auto",
+    "FENETRES_ARRONDI": "20",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "26",
+    "ANIM_BUREAUX": "slidefadevert",
+    "VERROU_COULEUR": "accent",
+    "DOCK": "oui",
+    "DOCK_POSITION": "bottom",
+    "DOCK_AUTO": "non",
+    "DOCK_TAILLE": "44"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 8,
+      "thickness": 38,
+      "capsule": true,
+      "background_opacity": 1.0,
+      "margin_ends": 24
+    },
+    "widget.workspaces": {
+      "style": "minimal",
+      "show_labels": true,
+      "label_source": "name"
+    },
+    "dock": {
+      "margin_edge": 14,
+      "radius": 24
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "vaporwave",
+  "fond_de_depart": "vaporwave-mer.jpg",
+  "credits": [],
+  "widgets": []
+}

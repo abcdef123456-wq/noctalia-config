@@ -1,0 +1,63 @@
+{
+  "nom": "clair-neutre",
+  "libelle": {
+    "fr": "Neutre (clair, sobre)",
+    "en": "Neutral (light, plain)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "ClairNeutre"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "aucun",
+    "ILE_CONTOUR_EPAISSEUR": "0",
+    "ILE_CONTOUR_FERMEE": "non",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "100",
+    "ILE_POLICE": "Cantarell, Inter",
+    "ILE_ANIM": "doux",
+    "ILE_LUEUR": "non",
+    "ILE_MAJUSCULES": "non",
+    "ILE_ACCENTS": "accent",
+    "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
+    "TERMINAL_OPACITE": "96",
+    "TERMINAL_MARGE": "12",
+    "TERMINAL_CURSEUR": "beam",
+    "FENETRES_CARACTERE": "doux",
+    "FENETRES_OMBRE_DECALAGE": "bas",
+    "FENETRES_DISPOSITION": "dwindle",
+    "FENETRES_COINS_FORME": "rond",
+    "FENETRES_MAITRE_ORIENTATION": "auto",
+    "FENETRES_ARRONDI": "12",
+    "FENETRES_BORDURE": "0",
+    "FENETRES_OMBRE": "20",
+    "ANIM_BUREAUX": "slidefade",
+    "VERROU_COULEUR": "blanc",
+    "DOCK": "non",
+    "THEME_MODE": "light"
+  },
+  "noctalia": {
+    "bar.default": {
+      "position": "top",
+      "margin_edge": 0,
+      "thickness": 32,
+      "capsule": false,
+      "background_opacity": 1.0
+    },
+    "widget.workspaces": {
+      "style": "regular",
+      "show_labels": false,
+      "pill_scale": 1.0,
+      "active_pill_size": 2.2
+    }
+  },
+  "theme_sync": {
+    "bordure": "gris",
+    "ombre": "noire"
+  },
+  "fonds": "clair-neutre",
+  "fond_de_depart": "clair-neutre-formes.jpg",
+  "credits": [],
+  "widgets": []
+}
