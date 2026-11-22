@@ -117,7 +117,9 @@ class Spotlight(unittest.TestCase):
         cadre = m.group(1)
         self.assertNotIn("visible: e > 0", cadre)
         # Sans contour : rien de dessiné, sinon le dégradé reste sous l'île, de sa taille exacte
-        self.assertIn("opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0", cadre)
+        # (pilule fermée : seulement avec ILE_CONTOUR_FERMEE=oui, et pas quand le lanceur part d'elle)
+        self.assertIn("opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte"
+                      " || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0", cadre)
         self.assertIn("visible: opacity > 0.01", cadre)
         self.assertIn("readonly property real e: Couleurs.aContour ? Couleurs.epaisseur : 0", cadre)
         self.assertIn("Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }", cadre)
