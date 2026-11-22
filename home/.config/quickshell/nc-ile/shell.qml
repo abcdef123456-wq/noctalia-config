@@ -12,7 +12,8 @@
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
 //   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile vpn          panneau VPN : tunnels VPN et WireGuard de NetworkManager (Super + Alt + V, nc-vpn)
-//   qs -c nc-ile ipc call ile garmin       panneau Santé Garmin : batterie, sommeil, stress, pas (Super + Alt + S, nc-garmin)
+//   qs -c nc-ile ipc call ile themes       carrousel des thèmes : choisir l'allure du bureau (Super + Alt + T)
+//   qs -c nc-ile ipc call ile garmin      panneau Santé Garmin : batterie, sommeil, stress, pas (Super + Alt + S, nc-garmin)
 //   qs -c nc-ile ipc call ile cloud        panneau Cloud JARVIS : parcourir, télécharger (Super + Alt + C, nc-cloud fenetre, CLOUD_JARVIS=oui)
 //   qs -c nc-ile ipc call ile aimant ZONE X Y W H   aperçu d'aimantation pendant un glisser (nc/raccourcis.lua) ; ZONE "" l'efface
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
@@ -183,6 +184,16 @@ ShellRoot {
         target: GarminEtat
         function onOuvrirPanneau() { if (!racine.garminOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.garminOuvert = true } }
     }
+    // Carrousel des thèmes (Super + Alt + T, recherche « Thèmes ») : créé à l'ouverture seulement
+    property bool themesOuvert: false
+    LazyLoader {
+        id: chargeurThemes
+        active: racine.themesOuvert
+        ChoixTheme {
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: racine.themesOuvert = false
+        }
+    }
     // Panneau Cloud JARVIS (IPC cloud, recherche, nc-cloud fenetre) : créé à l'ouverture seulement, si CLOUD_JARVIS=oui
     property bool cloudOuvert: false
     onCloudOuvertChanged: if (cloudOuvert && !CloudEtat.actif) cloudOuvert = false
@@ -259,6 +270,12 @@ ShellRoot {
             Etat.fermer()
             if (!racine.garminOuvert) Hyprland.refreshMonitors()
             racine.garminOuvert = !racine.garminOuvert
+        }
+        // Carrousel des thèmes (Super + Alt + T) : ouvre ; déjà ouvert, le referme
+        function themes(): void {
+            Etat.fermer()
+            if (!racine.themesOuvert) Hyprland.refreshMonitors()
+            racine.themesOuvert = !racine.themesOuvert
         }
         // Panneau Cloud JARVIS (nc-cloud fenetre, recherche) : sans argument, ouvre (déjà ouvert : rien ; il ne se ferme que
         // par l'utilisateur) ; rien si CLOUD_JARVIS n'est pas à oui
