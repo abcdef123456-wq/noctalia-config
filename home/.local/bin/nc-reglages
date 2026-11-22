@@ -243,12 +243,17 @@ def applis_installees(liste):
     return res or liste[:1]
 
 
-def polices(motif, preferees):
-    """Polices installées : d'abord celles de la liste (si présentes), puis les autres qui suivent le motif."""
+def familles_installees():
     familles = set()
     for l in sortie_memo(["fc-list", ":", "family"]).splitlines():
         for f in l.split(","):
             familles.add(f.strip())
+    return familles
+
+
+def polices(motif, preferees):
+    """Polices installées : d'abord celles de la liste (si présentes), puis les autres qui suivent le motif."""
+    familles = familles_installees()
     res = [p for p in preferees if p in familles]
     res += sorted(f for f in familles if re.search(motif, f) and f not in res)
     return res[:14]
@@ -329,6 +334,12 @@ class R:
             vals = [c for c, _ in self.choix()]
             if v in vals:
                 return v
+            if self.cle == "TERMINAL_POLICE" and "," in v:       # liste « A, B » : la première installée sera prise
+                noms = [n.strip() for n in v.split(",")]
+                if 1 <= len(noms) <= 4 and all(re.fullmatch(r"[\w -]+", n) and n.strip(" -") for n in noms):
+                    return ", ".join(noms)
+                raise ValueError(T("1 à 4 noms de police séparés par des virgules (lettres, chiffres, espaces, tirets)",
+                                   "1 to 4 font names separated by commas (letters, digits, spaces, hyphens)"))
             raise ValueError(T("valeurs possibles : ", "possible values: ") + ", ".join(vals))
         if self.genre == "entier":
             if not re.fullmatch(r"-?\d{1,5}", v) or not self.mini <= int(v) <= self.maxi:
@@ -1342,7 +1353,8 @@ REGLAGES = [
       mini=50, maxi=100, pas=2, unite="%", groupe="terminal"),
     R("TERMINAL_TAILLE", "Terminal", L("Taille du texte", "Text size"), "entier", "11", mini=8, maxi=24, unite="pt", groupe="terminal"),
     R("TERMINAL_POLICE", "Terminal", L("Police", "Font"), "choix", "CaskaydiaCove Nerd Font Mono",
-      L("Polices « Nerd Font Mono » installées.", "Installed “Nerd Font Mono” fonts."),
+      L("Polices « Nerd Font Mono » installées. Un thème peut donner une liste « A, B » : la première installée est prise.",
+        "Installed “Nerd Font Mono” fonts. A theme can give a list “A, B”: the first installed one is used."),
       lambda: polices(r"Nerd Font Mono$", ["CaskaydiaCove Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "FiraCode Nerd Font Mono"]),
       groupe="terminal"),
     R("TERMINAL_CURSEUR", "Terminal", L("Forme du curseur", "Cursor shape"), "choix", "beam", "",
@@ -2789,7 +2801,11 @@ def appliquer_terminal(vals):
     if "TERMINAL_TAILLE" in vals:
         c.append(f"font_size {vals['TERMINAL_TAILLE']}")
     if "TERMINAL_POLICE" in vals:
-        c.append(f"font_family {vals['TERMINAL_POLICE']}")
+        noms = [n.strip() for n in vals["TERMINAL_POLICE"].split(",")]
+        if len(noms) > 1:       # liste avec repli : la première installée ; aucune : kitty garde sa police
+            noms = [n for n in noms if n in familles_installees()][:1]
+        if noms:
+            c.append(f"font_family {noms[0]}")
     if "TERMINAL_CURSEUR" in vals:
         c.append(f"cursor_shape {vals['TERMINAL_CURSEUR']}")
     if vals.get("TERMINAL_TRAINEE") == "non":
