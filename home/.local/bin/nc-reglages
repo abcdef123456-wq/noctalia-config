@@ -2751,7 +2751,7 @@ NOCT_DEFAUT = {"bar": {"default": {"position": "top", "thickness": 36, "margin_e
 
 
 def noctalia_defaut(chemin=None):
-    """config.toml (celui du dossier Noctalia, ou `chemin`) sans ses @MARQUEURS@ (valeur nue : false ; ailleurs : vide)."""
+    """config.toml (celui du dossier Noctalia, ou `chemin`) sans ses marqueurs d'installation (valeur nue : false ; ailleurs : vide)."""
     if tomllib:
         try:
             with open(chemin or os.path.join(NOCTALIA_DIR, "config.toml"), encoding="utf-8") as f:

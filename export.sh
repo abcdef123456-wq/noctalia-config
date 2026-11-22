@@ -201,8 +201,20 @@ HOME_FILES=(
   .local/share/nemo/actions/nc-ia-resumer.nemo_action
   .config/xdg-desktop-portal/hyprland-portals.conf
   .config/noctalia/palettes/Apple.json
+  .config/noctalia/palettes/Brutaliste.json
+  .config/noctalia/palettes/ClairNeutre.json
+  .config/noctalia/palettes/Cyberjaune.json
+  .config/noctalia/palettes/Everforest.json
+  .config/noctalia/palettes/Matrice.json
+  .config/noctalia/palettes/Ocean.json
+  .config/noctalia/palettes/Papier.json
+  .config/noctalia/palettes/PluieVerte.json
   .config/noctalia/palettes/Retro.json
+  .config/noctalia/palettes/RoseAube.json
+  .config/noctalia/palettes/Sakura.json
+  .config/noctalia/palettes/SolarizedClair.json
   .config/noctalia/palettes/Synthwave.json
+  .config/noctalia/palettes/Vaporwave.json
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
   .config/nc/ia.zsh
