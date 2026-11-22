@@ -710,7 +710,7 @@ Item {
             }
             if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q)) {
                 calculer.pour = q
-                calculer.command = ["qalc", "-t", "-set", "mix 0", q.replace(/\s+en\s+/g, " to ")]
+                calculer.command = ["qalc", "-t", q.replace(/\s+en\s+/g, " to ")]      // pas d'option « mix » : inconnue de qalc 5.5 à 5.13
                 calculer.running = true
             }
         }
