@@ -257,8 +257,10 @@ class SessionPropre(unittest.TestCase):
         self.assertFalse(tue, f"{argv} ne doit pas être arrêté")
 
     def test_quickshell_commandes_et_ile_epargnes(self):
+        # Le shell.qml d'essai est sous le TMPDIR que voit le script (« ${TMPDIR:-/tmp} »), pas sous /tmp en dur
+        tmp = self.env.get("TMPDIR") or "/tmp"
         for argv in (["qs", "-c", "autre", "ipc", "call", "x"], ["qs", "-c", "autre", "kill"], ["qs", "-c", "autre", "log"],
-                     ["qs", "-c", "autre", "list"], ["qs", "-c", "nc-ile"], ["qs", "-p", "/tmp/nc-qs-capture.x/shell.qml"]):
+                     ["qs", "-c", "autre", "list"], ["qs", "-c", "nc-ile"], ["qs", "-p", f"{tmp}/nc-qs-capture.x/shell.qml"]):
             with self.subTest(argv=argv):
                 self.assertEpargne(argv)
 
