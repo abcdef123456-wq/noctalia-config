@@ -20,7 +20,7 @@ BASH = {"nc-boot-wallpaper": ["--zzz-inconnu", "x"], "nc-finger": ["--zzz-inconn
         "nc-session-propre": ["--zzz-inconnu", "abc", "6 7"]}
 PYTHON = {"nc-theme-sync": ["--zzz-inconnu"], "nc-verrou-place": ["--zzz-inconnu"], "nc-noctalia-avant": ["--zzz-inconnu"],
           "nc-icones": ["--zzz-inconnu"], "nc-meteo": ["--zzz-inconnu", "texte x"], "nc-demander": ["--zzz-inconnu"],
-          "nc-code": ["--zzz-inconnu"]}
+          "nc-code": ["--zzz-inconnu"], "nc-processus": ["--zzz-inconnu", "8080"]}
 
 
 class Base(unittest.TestCase):

@@ -128,3 +128,12 @@ copie suivante. `wl-copy` le recopie dans un fichier effacé aussitôt : `nc-mdp
 (sous `$XDG_RUNTIME_DIR`, rien n'est copié sans lui) ; wl-clipboard avant 2.3 (Debian 13) ignore ce dossier : son
 fichier, déjà effacé mais encore ouvert, est sous `/tmp`, donc sur le disque si `/tmp` n'est pas un tmpfs, tant que le mot
 de passe reste dans le presse-papiers.
+
+**Processus et ports dans le Spotlight (lecture seule)** : `port 8080` (ou `port :8080`) dit quel programme écoute sur
+ce port, en TCP et en UDP (`nc-processus port`, qui lit `ss -Hltune` sans élévation, paquet iproute2 : seulement l'inode
+de chaque socket, que l'on cherche dans les descripteurs de TES processus ; sinon la ligne dit « Utilisé par un autre
+compte » ; sans `ss`, cette recherche n'apparaît pas). `processus firefox` liste au plus 8 de tes processus dont le nom
+contient le mot (lettres, chiffres et `._-`, 32 au plus) : nom, pid et commande, filtrés des caractères de contrôle et
+de sens d'écriture, et bornés. Ces lignes s'ajoutent en tête des résultats ordinaires (applis, fichiers, calculs restent
+dessous). `port` seul ou suivi d'autre chose qu'un nombre de 1 à 65535 : la recherche ordinaire seule. Rien n'agit sur
+un processus, et rien ne tourne tant que tu ne le tapes pas.

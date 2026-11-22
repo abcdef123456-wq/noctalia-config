@@ -113,3 +113,13 @@ function ligneHeure(sortie, ville, douze, anglais, localMin) {
     var dec = (ecart < 0 ? "-" : "+") + Math.floor(a / 60) + " h" + (a % 60 ? " " + deux(a % 60) : "")
     return { texte: ville + " : " + heure + ", " + jour, ecart: dec }
 }
+
+// « port 8080 », « port :8080 » : { port: N } (1 à 65535) ; « processus firefox » : { nom: … } (lettres, chiffres,
+// « ._- », 1 à 32 caractères) ; null sinon (recherche ordinaire seule, rien n'est lancé ; nc-processus revérifie)
+function demandeProcessus(q) {
+    var s = String(q || "").trim()
+    var m = /^port\s+:?(\d{1,5})$/i.exec(s)
+    if (m) { var n = parseInt(m[1], 10); return n >= 1 && n <= 65535 ? { port: n } : null }
+    m = /^processus\s+([A-Za-z0-9._-]{1,32})$/i.exec(s)
+    return m ? { nom: m[1] } : null
+}

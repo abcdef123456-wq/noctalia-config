@@ -25,6 +25,8 @@
 // « Que se passe-t-il ? » (ou « ça marche pas », « diagnostic », « what's wrong »…, et sous « ? » vide) : le bilan du
 // bureau (nc-diag --json --rapide), expliqué par l'IA si elle est permise (nc-ia diagnostic --json), et des réparations
 // tirées de la table de nc-diag, chacune faite seulement avec Entrée ou un clic (nc-diag reparer ID) : Diagnostic.qml.
+// « port 8080 » (qui écoute, TCP et UDP) et « processus firefox » (tes processus) : nc-processus, en lecture seule ;
+// leurs lignes s'ajoutent en tête des résultats ordinaires (applis, fichiers, calculs restent dessous).
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -517,6 +519,40 @@ Item {
             r.chercher()
         }
     }
+    // « port 8080 » / « processus firefox » : la saisie passe par la liste blanche de Saisies.js, puis nc-processus la
+    // revérifie. Lecture seule : aucune ligne n'agit sur un processus
+    readonly property var demandeProc: Saisies.demandeProcessus(q)
+    property var procRetour: null              // { pour, ss, lignes } : la réponse de nc-processus pour la saisie « pour »
+    Process {
+        id: lireProc
+        property string pour: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (lireProc.pour !== r.q) return
+                var d = null
+                try { d = JSON.parse(text) } catch (e) {}
+                r.procRetour = { pour: lireProc.pour, ss: !d || d.ss !== false, lignes: d && Array.isArray(d.lignes) ? d.lignes : [] }
+                r.chercher()
+            }
+        }
+        onRunningChanged: if (!running && r.demandeProc && pour !== r.q) attente.restart()      // la saisie a changé entre-temps
+    }
+    // Les lignes de la réponse pour cette saisie ; [] tant qu'elle n'est pas là, et pour un port sans ss
+    function lignesProc(dp) {
+        let pr = procRetour
+        if (!pr || pr.pour !== q || dp.port && !pr.ss) return []
+        let lignes = pr.lignes.map(p => {
+            let ou = p.proto ? "Port " + p.port + " · " + String(p.proto).toUpperCase() : ""
+            if (p.autre) return { titre: ou, sous: Reglages.t("Utilisé par un autre compte", "Used by another account"), glyphe: "lock", s: 1000, garder: true, f: () => {} }
+            let cmd = String(p.commande || "")
+            return { titre: p.nom + " · pid " + p.pid, sous: (ou ? ou + " · " : "") + (cmd.length > 70 ? cmd.slice(0, 68) + "…" : cmd),
+                     glyphe: p.proto ? "lan" : "memory", s: 1000, garder: true, f: () => {} }
+        })
+        if (!lignes.length) lignes = [{ titre: dp.port ? Reglages.t("Rien n'écoute sur le port ", "Nothing listens on port ") + dp.port
+                                                       : Reglages.t("Aucun de tes processus ne s'appelle ", "None of your processes is named ") + nomGuillemets(dp.nom),
+                                        sous: Reglages.t("Processus", "Process"), glyphe: "search_off", s: 1000, garder: true, f: () => {} }]
+        return lignes
+    }
     function nomGuillemets(nom) { return Reglages.t("« ", "“") + nom + Reglages.t(" »", "”") }
     // Enregistrer la disposition actuelle : le Spotlight reste ouvert, la ligne de la nouvelle session y apparaît
     // (running ne passe à vrai qu'un instant après le lancement : « en cours » se lit aussi dans le retour)
@@ -751,6 +787,11 @@ Item {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
+            }
+            if (r.demandeProc) {        // une liste d'arguments, jamais de shell ; la saisie a déjà passé la liste blanche
+                lireProc.pour = q
+                lireProc.command = [Etat.bin + "nc-processus"].concat(r.demandeProc.port ? ["port", String(r.demandeProc.port)] : ["processus", r.demandeProc.nom])
+                lireProc.running = true
             }
             if (r.heureVille !== "") {
                 r.zonesVoulues = true
@@ -1207,6 +1248,9 @@ Item {
         if (estDiag(q)) out.push(Object.assign({ s: 1000 }, ligneDiag))
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
+        // « port 8080 » / « processus firefox » : leurs lignes en tête, les résultats ordinaires gardés dessous (3 au moins)
+        let cartes = demandeProc ? lignesProc(demandeProc).slice(0, Math.max(2, nbResultats - 3)) : []
+        if (cartes.length) out = cartes.concat(out.slice(0, Math.max(3, nbResultats - cartes.length)))
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
         if (q.startsWith(":") && emojiActif) {
             emojis.demander()

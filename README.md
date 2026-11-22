@@ -171,6 +171,8 @@ fichier. Rien n'est envoyé.
 qu'à la validation, jamais affiché, et l'historique de l'île ne le garde pas (ni une copie faite dans les 5 s
 qui suivent). Il reste dans le presse-papiers jusqu'à la copie suivante ; les autres lecteurs du presse-papiers le
 voient, sauf ceux qui respectent l'indice `--sensitive` (absent sur Debian 13) (détails : `docs/pages-ile.md`).
+**`port 8080`** dit quel programme écoute sur ce port (TCP et UDP, par `ss`, du paquet iproute2) et **`processus firefox`**
+liste tes processus de ce nom, en lecture seule ; ces lignes s'ajoutent aux résultats ordinaires.
 
 **Emoji dans le Spotlight** : `:` puis un mot (`:coeur`, `:rire`, `:heart`) propose des emoji, en français comme en
 anglais, sans accents ni casse ; Entrée copie l'emoji (`wl-copy`) et referme. Les 24 derniers choisis passent en

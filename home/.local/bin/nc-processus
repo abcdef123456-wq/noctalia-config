@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""nc-processus : processus et ports pour la recherche de l'île, en LECTURE SEULE. Sortie JSON.
+
+  nc-processus processus NOM     nos processus dont le nom contient NOM (8 au plus)
+  nc-processus port N            qui écoute sur le port N, en TCP et en UDP (8 lignes au plus)
+
+Saisies en liste blanche avant tout usage : NOM = lettres, chiffres, « ._- », 1 à 32 ; N = 1 à 65535.
+Ports : `ss -Hltune` (sans -p, donc sans aucun nom de processus dans sa sortie) donne l'inode de chaque socket ;
+le pid vient de NOS /proc/PID/fd qui pointent vers « socket:[inode] ». Un nom de processus ne peut donc pas
+forger un pid. Socket introuvable chez nous (autre compte) : la ligne le dit, sans pid.
+Nom et commande filtrés (caractères de contrôle, retours à la ligne, marques de sens d'écriture : catégories
+Unicode C*, Zl, Zp remplacées par une espace) et bornés en longueur avant le JSON.
+Ne lance jamais de shell, ne touche à aucun processus. Codes : 0 fait, 2 usage."""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import unicodedata
+
+MAX_LIGNES = 8
+NOM_OK = re.compile(r"[A-Za-z0-9._-]{1,32}")
+LONG_NOM, LONG_COMMANDE = 32, 160
+
+
+def lire(chemin):
+    try:
+        with open(chemin, "rb") as f:
+            return f.read(65536).decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
+def propre(texte, longueur):
+    """Texte affichable sur une ligne : contrôles, sauts de ligne et marques de sens (U+202A-202E, U+2066-2069…) → espace."""
+    t = "".join(" " if unicodedata.category(c)[0] == "C" or unicodedata.category(c) in ("Zl", "Zp") else c for c in texte)
+    return " ".join(t.split())[:longueur]
+
+
+def nos_pids():
+    """Les pid dont tous les uid sont le nôtre."""
+    moi = {str(os.getuid())}
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            uid = re.search(r"(?m)^Uid:\s+(.*)$", lire("/proc/%s/status" % d) or "")
+            if uid and set(uid.group(1).split()) == moi:
+                yield int(d)
+
+
+def info(pid):
+    """Notre processus PID, relu dans /proc ; None s'il a disparu."""
+    base = "/proc/%d/" % pid
+    comm = lire(base + "comm")
+    if comm is None:
+        return None
+    args = (lire(base + "cmdline") or "").split("\0")
+    try:
+        exe = os.path.basename(os.readlink(base + "exe")).replace(" (deleted)", "")
+    except OSError:
+        exe = ""
+    return {"pid": pid, "nom": propre(comm, LONG_NOM), "commande": propre(" ".join(a for a in args if a), LONG_COMMANDE),
+            "noms": {comm.strip().lower(), os.path.basename(args[0]).lower(), exe.lower()} - {""}}
+
+
+def processus(nom):
+    mot, out = nom.lower(), []
+    for pid in sorted(nos_pids()):
+        p = info(pid)
+        if p and pid != os.getpid() and any(mot in n for n in p["noms"]):
+            del p["noms"]
+            out.append(p)
+            if len(out) >= MAX_LIGNES:
+                break
+    return {"ss": True, "lignes": out}
+
+
+def proprietaires(inodes):
+    """inode → nos pid qui ont ce socket ouvert."""
+    cibles, trouves = {"socket:[%s]" % i: i for i in inodes}, {}
+    for pid in nos_pids():
+        try:
+            fds = os.listdir("/proc/%d/fd" % pid)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                lien = os.readlink("/proc/%d/fd/%s" % (pid, fd))
+            except OSError:
+                continue
+            if lien in cibles:
+                trouves.setdefault(cibles[lien], []).append(pid)
+    return trouves
+
+
+def port(n):
+    ss = shutil.which("ss")
+    if not ss:
+        return {"ss": False, "lignes": []}
+    try:
+        texte = subprocess.run([ss, "-Hltune"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        texte = ""
+    sockets = []
+    for l in texte.splitlines():
+        c = l.split()
+        if len(c) < 6 or c[0] not in ("tcp", "udp") or c[4].rsplit(":", 1)[-1] != str(n):
+            continue
+        # Le premier « ino: » après les adresses (le cgroup, plus loin, peut contenir n'importe quoi)
+        ino = next((x[4:] for x in c[6:] if x.startswith("ino:")), "")
+        sockets.append((c[0], ino if ino.isdigit() else ""))
+    pids = proprietaires({i for _, i in sockets if i})
+    vus, out = set(), []
+    for proto, ino in sockets:
+        lignes = [info(pid) for pid in sorted(pids.get(ino, []))]
+        for p in [x for x in lignes if x] or [None]:
+            cle = (proto, p["pid"] if p else None)
+            if cle in vus:
+                continue
+            vus.add(cle)
+            e = {"autre": True} if p is None else {"pid": p["pid"], "nom": p["nom"], "commande": p["commande"]}
+            e.update(proto=proto, port=n)
+            out.append(e)
+    return {"ss": True, "lignes": out[:MAX_LIGNES]}
+
+
+def main(argv):
+    a = argv[1:]
+    if a in (["--help"], ["-h"]):
+        print(__doc__)
+    elif len(a) == 2 and a[0] == "processus" and NOM_OK.fullmatch(a[1]):
+        print(json.dumps(processus(a[1]), ensure_ascii=False))
+    elif len(a) == 2 and a[0] == "port" and a[1].isascii() and a[1].isdigit() and len(a[1]) <= 5 and 1 <= int(a[1]) <= 65535:
+        print(json.dumps(port(int(a[1])), ensure_ascii=False))
+    else:
+        print("nc-processus : usage : nc-processus processus NOM | port N", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
