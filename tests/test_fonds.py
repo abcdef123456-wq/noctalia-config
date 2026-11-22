@@ -18,7 +18,7 @@ CREDITS = "CREDITS.tsv"
 ENTETE = "fichier\tsource\tauteur\tlicence"
 MIN_LARGEUR, MIN_HAUTEUR = 2560, 1600
 EXTENSIONS_IMAGE = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".avif", ".jxl")
-LICENCES = {"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "Unsplash", "Pexels", "Pixabay", "généré par noctalia-config"}
+LICENCES = {"Domaine public", "CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "Unsplash", "Pexels", "Pixabay", "généré par noctalia-config"}
 # Les 14 anciens fonds à la racine : sans crédit, hors des thèmes. Liste figée : un ajout ou un retrait se fait ici.
 ANCIENS_SANS_CREDIT = [
     "astronaut-dark-5120x2880-22768.jpg",
