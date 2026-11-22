@@ -42,7 +42,7 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
-      "margin_ends": 8,
+      "margin_ends": 0,
       "thickness": 40,
       "capsule": true,
       "background_opacity": 1.0,
@@ -122,7 +122,9 @@
         "group:plateau",
         "group:status",
         "group:jour"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "minimal",

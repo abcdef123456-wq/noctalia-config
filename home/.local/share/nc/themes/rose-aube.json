@@ -61,7 +61,9 @@
         "tray",
         "group:status",
         "t-heure"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "focus_hint",

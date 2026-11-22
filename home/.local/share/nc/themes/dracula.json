@@ -57,7 +57,9 @@
         "volume",
         "nc/batterie:batterie",
         "t-heure"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "regular",

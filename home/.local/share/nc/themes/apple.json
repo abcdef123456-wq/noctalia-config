@@ -59,7 +59,10 @@
         "logo",
         "workspaces",
         "nc/fenetres:titre"
-      ]
+      ],
+      "margin_ends": 0,
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "minimal",

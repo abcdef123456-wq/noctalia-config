@@ -2460,7 +2460,10 @@ _NOCT_PERMIS = {
         "position": _ch("top", "bottom", "left", "right"), "thickness": _nb(16, 64), "margin_edge": _nb(0, 40),
         "margin_ends": _nb(0, 40), "concave_edge_corners": _bool, "background_opacity": _nb(0, 1), "shadow": _bool,
         "capsule": _bool, "capsule_fill": _couleur, "capsule_opacity": _nb(0, 1), "capsule_thickness": _nb(0.2, 1),
-        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000), **_PASTILLE},
+        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000), **_PASTILLE,
+        # Coins du fond de la barre et marge intérieure aux deux bouts (docs.noctalia.dev/noctalia/bar/ ; config validate)
+        "radius": _nb(0, 80), "radius_top_left": _nb(0, 80), "radius_top_right": _nb(0, 80),
+        "radius_bottom_left": _nb(0, 80), "radius_bottom_right": _nb(0, 80), "padding": _nb(0, 48)},
     "widget.workspaces": {
         "style": _ch("regular", "minimal", "focus_hint"), "label_source": _ch("id", "name"), "show_labels": _bool,
         "labels_only_when_occupied": _bool, "max_label_chars": _ent(1, 8), "pill_scale": _nb(0.2, 1),

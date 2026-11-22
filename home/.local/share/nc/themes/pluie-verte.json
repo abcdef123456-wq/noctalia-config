@@ -41,7 +41,7 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
-      "margin_ends": 6,
+      "margin_ends": 0,
       "thickness": 40,
       "capsule": false,
       "background_opacity": 1.0,
@@ -56,7 +56,9 @@
         "tray",
         "group:status",
         "t-date"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "minimal",

@@ -53,7 +53,9 @@
       "end": [
         "nc/batterie:batterie",
         "t-date"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "minimal",

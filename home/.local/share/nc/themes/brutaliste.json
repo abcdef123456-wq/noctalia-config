@@ -85,7 +85,9 @@
         "group:plateau",
         "group:status",
         "group:jour"
-      ]
+      ],
+      "radius": 0,
+      "padding": 12
     },
     "widget.workspaces": {
       "style": "regular",

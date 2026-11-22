@@ -8,7 +8,9 @@
   une pilule on_surface : invisible, vu sur oled). En minimal, focused_color colore le chiffre lui-même : permis ;
 - une barre de côté est une pilule flottante centrée sur le bord (vue sur matrice), jamais une barre pleine hauteur
   collée au bord (ancien nord, que l'utilisateur n'aimait pas) : sans fond, à 6 px du bord au moins, tout dans des
-  groupes posés au centre, start et end vides.
+  groupes posés au centre, start et end vides ;
+- une barre collée au bord avec un fond le pose jusqu'aux coins de l'écran (radius 0, margin_ends 0 : vu sur
+  brutaliste, coins arrondis qui laissent voir le fond) ; l'air des pastilles passe par padding (12 au moins).
 Règles sur les fichiers des thèmes : pas de session, pas de Noctalia."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
 import contextlib
@@ -96,6 +98,14 @@ class Regles(unittest.TestCase):
                         self.assertTrue(b.get("center") and all(w.startswith("group:") for w in b["center"]),
                                         "tout dans des groupes au centre")
 
+    def test_barre_collee_remplit_les_coins(self):
+        for nom, d in themes().items():
+            for t, b in d.get("noctalia", {}).items():
+                if t.startswith("bar.") and b.get("margin_edge", 6) == 0 and b.get("background_opacity", 0.0) > 0:
+                    with self.subTest(theme=nom, barre=t):
+                        self.assertEqual((b.get("radius"), b.get("margin_ends")), (0, 0), "coins de l'écran mal remplis")
+                        self.assertGreaterEqual(b.get("padding", 0), 12, "rien plaqué contre le bord")
+
     def test_controle_du_controle(self):
         """Les règles attrapent bien les défauts vus : bandeau de 36, texte sans fond, heure en double."""
         d = {"reglages": {}, "noctalia": {"bar.default": {"position": "top", "margin_edge": 0, "thickness": 36,
@@ -106,6 +116,12 @@ class Regles(unittest.TestCase):
         self.assertEqual(b["fond"], 0)
         self.assertTrue(montre_l_heure(d, "t-h"))
         self.assertFalse(montre_l_heure({"noctalia": {"widget.t-d": {"type": "clock", "format": "{:%a %d %b}"}}}, "t-d"))
+        # l'ancienne barre de brutaliste (collée, pleine, bouts arrondis par défaut) est attrapée
+        with patch(__name__ + ".themes", lambda: {"brutaliste": {"noctalia": {"bar.default": {
+                "position": "top", "margin_edge": 0, "margin_ends": 0, "background_opacity": 1.0}}}}):
+            with self.assertRaises(AssertionError):
+                with patch.object(self, "subTest", lambda **k: contextlib.nullcontext()):
+                    self.test_barre_collee_remplit_les_coins()
         # l'ancienne barre de nord (pleine hauteur collée au bord, listes aux extrémités) est attrapée
         with patch(__name__ + ".themes", lambda: {"nord": {"noctalia": {"bar.default": {
                 "position": "left", "margin_edge": 0, "thickness": 52, "background_opacity": 0.9,
