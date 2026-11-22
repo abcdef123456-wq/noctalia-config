@@ -2396,6 +2396,34 @@ def _couleur(v):    # rôle connu ou #RGB, #RGBA, #RRGGBB, #RRGGBBAA (docs.nocta
     return isinstance(v, str) and (v in _ROLES or re.fullmatch(r"#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", v) is not None)
 
 
+def _lum(h):    # luminance relative (WCAG) d'une couleur #RGB[A] ou #RRGGBB[AA]
+    h = h[1:]
+    if len(h) in (3, 4):
+        h = "".join(c * 2 for c in h[:3])
+    v = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    v = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in v]
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+
+
+def _contraste(a, b):
+    """Contraste WCAG de deux couleurs hexadécimales ; None si l'une manque ou est un rôle (sa valeur dépend de la palette).
+    shortcut: l'alpha est ignoré (fond translucide pris comme opaque) ; à revoir si un thème pose des fonds de pastille
+    très transparents en hexadécimal."""
+    if not all(isinstance(x, str) and x.startswith("#") for x in (a, b)):
+        return None
+    x, y = sorted((_lum(a), _lum(b)))
+    return (y + 0.05) / (x + 0.05)
+
+
+# Forme et couleur des pastilles (docs.noctalia.dev/noctalia/bar/ ; « noctalia config validate » v5.3.0 les connaît toutes
+# et borne lui-même rayon 0–80 et contour 0–8) : sur une barre et sur un widget (préfixe capsule_), sur un groupe (sans
+# préfixe). Un groupe n'hérite PAS du capsule_fill de la barre : ses propres défauts (fill surface_container) priment.
+_PASTILLE = {"capsule_fill": _couleur, "capsule_foreground": _couleur, "capsule_border": _couleur,
+             "capsule_border_width": _nb(0, 8), "capsule_radius": _nb(0, 80)}
+_GROUPE = {"fill": _couleur, "foreground": _couleur, "border": _couleur, "border_width": _nb(0, 8), "radius": _nb(0, 80),
+           "opacity": _nb(0, 1), "padding": _nb(0, 48)}
+
+
 # Widgets de config.toml quand le config.toml installé est illisible (essais, avant l'installation) : ceux du config.toml
 # du dépôt (vérifié par tests/test_barre_composition.py)
 _WIDGETS_BARRE = {"logo", "workspaces", "nc/fenetres:titre", "nc/ile:pilule", "group:sys", "group:status", "tray",
@@ -2432,12 +2460,12 @@ _NOCT_PERMIS = {
         "position": _ch("top", "bottom", "left", "right"), "thickness": _nb(16, 64), "margin_edge": _nb(0, 40),
         "margin_ends": _nb(0, 40), "concave_edge_corners": _bool, "background_opacity": _nb(0, 1), "shadow": _bool,
         "capsule": _bool, "capsule_fill": _couleur, "capsule_opacity": _nb(0, 1), "capsule_thickness": _nb(0.2, 1),
-        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000)},
+        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000), **_PASTILLE},
     "widget.workspaces": {
         "style": _ch("regular", "minimal", "focus_hint"), "label_source": _ch("id", "name"), "show_labels": _bool,
-        "labels_only_when_occupied": _bool, "max_label_chars": _ent(1, 8), "pill_scale": _nb(0.2, 4),
-        "active_pill_size": _nb(0.2, 6), "inactive_pill_size": _nb(0.2, 6), "hide_when_empty": _bool,
-        "focused_color": _couleur, "occupied_color": _couleur, "empty_color": _couleur, "urgent_color": _couleur},
+        "labels_only_when_occupied": _bool, "max_label_chars": _ent(1, 8), "pill_scale": _nb(0.2, 1),
+        "active_pill_size": _nb(0.25, 6), "inactive_pill_size": _nb(0.25, 6), "hide_when_empty": _bool,
+        "focused_color": _couleur, "occupied_color": _couleur, "empty_color": _couleur, "urgent_color": _couleur, **_PASTILLE},
     "dock": {
         "enabled": _bool, "position": _ch("bottom", "left", "right"), "auto_hide": _bool, "icon_size": _nb(28, 72),
         "magnification": _bool, "magnification_scale": _nb(1, 2), "background_opacity": _nb(0, 1), "radius": _nb(0, 60),
@@ -2479,8 +2507,11 @@ _TYPES_THEME = {
         "title_scroll": _ch("none", "always", "on_hover"), "display": _ch("icon_and_text", "icon_only", "text_only")},
     "workspaces": _NOCT_PERMIS["widget.workspaces"],
 }
-_TYPES_THEME.update((t, {}) for t in ("tray", "network", "bluetooth", "volume", "battery", "brightness", "weather",
+# Pas de weather : sans [weather] réglé, il affiche « Pas de localisation » dans la barre (vu à l'écran)
+_TYPES_THEME.update((t, {}) for t in ("tray", "network", "bluetooth", "volume", "battery", "brightness",
                                       "power_profile", "launcher", "keyboard_layout", "nightlight", "caffeine", "privacy"))
+for _cles in _TYPES_THEME.values():
+    _cles.update(_PASTILLE)
 
 
 def _barre_installee():
@@ -2546,7 +2577,8 @@ def _verifier_noctalia(noct, refus):
                 non(t, "capsule_group")
             b["capsule_group"] = []
             for g in cg:
-                if (not isinstance(g, dict) or set(g) != {"id", "members"} or not isinstance(g["id"], str)
+                if (not isinstance(g, dict) or not {"id", "members"} <= set(g) <= {"id", "members"} | set(_GROUPE)
+                        or not all(_GROUPE[k](g[k]) for k in g if k in _GROUPE) or not isinstance(g["id"], str)
                         or not _RE_ID.fullmatch(g["id"]) or g["id"] in groupes or not isinstance(g["members"], list)
                         or not 1 <= len(g["members"]) <= 24
                         or not all(isinstance(m, str) and (m in widgets or m in _CONDITIONNELS) for m in g["members"])):
@@ -2555,7 +2587,7 @@ def _verifier_noctalia(noct, refus):
                 if not membres:
                     non(t, "capsule_group")
                 groupes.add(g["id"])
-                b["capsule_group"].append({"id": g["id"], "members": membres})
+                b["capsule_group"].append({"id": g["id"], "members": membres, **{k: g[k] for k in g if k in _GROUPE}})
         permis = widgets | {"group:" + g for g in groupes}
         for k in _LISTES:
             if k in kv:
@@ -2572,6 +2604,19 @@ def _verifier_noctalia(noct, refus):
                 refus(f"« noctalia.{t}.position » : un autre bord que la première barre ({premiere})",
                       f"\"noctalia.{t}.position\": another edge than the first bar ({premiere})")
         res[t] = b
+    # Texte lisible sur sa pastille : quand fond et texte sont tous deux en hexadécimal, 4,5:1 au moins (le texte d'un groupe
+    # ou d'un widget sans couleur propre est celui de sa barre)
+    texte_barre = noct.get("bar.default", {}).get("capsule_foreground")
+    paires = [(t, kv.get("capsule_fill"), kv.get("capsule_foreground", texte_barre)) for t, kv in noct.items() if t.startswith("widget.")]
+    for t in barres:
+        fg = noct[t].get("capsule_foreground")
+        paires.append((t, noct[t].get("capsule_fill"), fg))
+        paires += [(f"{t}.capsule_group.{g['id']}", g.get("fill"), g.get("foreground", fg)) for g in noct[t].get("capsule_group", [])]
+    for ou, fond, texte in paires:
+        c = _contraste(fond, texte)
+        if c is not None and c < 4.5:
+            refus(f"« noctalia.{ou} » : texte {texte} peu lisible sur {fond} (contraste {c:.1f}:1, 4,5 au moins)",
+                  f"\"noctalia.{ou}\": text {texte} hard to read on {fond} (contrast {c:.1f}:1, at least 4.5)")
     return {t: res[t] for t in noct}
 
 
