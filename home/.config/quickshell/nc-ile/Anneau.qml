@@ -8,7 +8,11 @@ Item {
     property real valeur: 0
     property string libelle: ""
     property real diametre: 160
-    property bool relief: false                  // ombre du texte posé sans carte (style « texte »)
+    property color couleur: Couleurs.texte       // couleurs lisibles sur le fond du widget (CarteWidget : pri, sec)
+    property color couleurSec: Couleurs.texteSec
+    property string police: Couleurs.police          // le pourcentage ; policePetite : le libellé
+    property string policePetite: Couleurs.police
+    property int taillePetite: 11
     readonly property int points: 40
     readonly property int allumes: Math.round(Math.max(0, Math.min(1, valeur)) * points)
     implicitWidth: diametre
@@ -34,18 +38,19 @@ Item {
         Texte {
             anchors.horizontalCenter: parent.horizontalCenter
             text: Math.round(Math.max(0, Math.min(1, anneau.valeur)) * 100) + "%"
+            color: anneau.couleur
+            font.family: anneau.police
             font.pixelSize: Math.round(anneau.diametre * 0.24)
             font.weight: Font.Bold
-            style: anneau.relief ? Text.Raised : Text.Normal; styleColor: Qt.rgba(0, 0, 0, 0.35)
         }
         Texte {
             anchors.horizontalCenter: parent.horizontalCenter
             text: anneau.libelle
-            secondaire: true
-            font.pixelSize: Math.max(10, Math.round(anneau.diametre * 0.075))
+            color: anneau.couleurSec
+            font.family: anneau.policePetite
+            font.pixelSize: anneau.taillePetite
             font.capitalization: Font.AllUppercase
             font.letterSpacing: Math.round(anneau.diametre / 60)
-            style: anneau.relief ? Text.Raised : Text.Normal; styleColor: Qt.rgba(0, 0, 0, 0.35)
         }
     }
 }

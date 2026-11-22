@@ -7,6 +7,11 @@
   éteint ; citation du jour (4 Kio, 200 caractères, une par jour) ; un seul minuteur (2 s, jauges ou anneau vus seulement)
   dans tous les fichiers du widget ; cartes (brutal : contour et ombre dure ; ronde : coins transparents), horloge géante,
   météo absente = rien, widgets d'un même coin empilés sans se toucher ni sortir de l'écran.
+- Chiffres d'une horloge : un fichier Chiffres<Nom>.qml par valeur de WIDGETS_CHIFFRES, ni plus ni moins ; séparateur de
+  « points » en deux disques (aucun glyphe « : ») ; aiguilles justes à 3 h et 6 h ; jauge à aiguille sur le même minuteur.
+- Lisibilité mesurée sur des rendus hors écran (échelle 1,6, taille « petit ») : chaque texte a 4,5:1 sur le fond réel
+  derrière lui (carte, ou voile du style « texte » sur un fond d'écran clair ET sombre) et 11 px au moins.
+- Musique cachée quand rien ne joue ; WIDGETS_POLICE (liste avec repli, petits textes : la suivante ; accepté par un thème).
 Tout se passe dans un dossier temporaire."""
 import json
 import re
@@ -15,16 +20,22 @@ import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
 
 from tests import _ile_hors_ecran as H
 from tests.test_themes import Base
 
 QML = H.QML
 OK = {"type": "horloge-fine", "coin": "haut-gauche", "taille": "grand"}
-FICHIERS = ("WidgetsTheme.qml", "CarteWidget.qml", "Anneau.qml")
+CHIFFRES = sorted(f.name for f in H.QML.glob("Chiffres*.qml"))
+FICHIERS = ("WidgetsTheme.qml", "CarteWidget.qml", "Anneau.qml", "JaugeAiguille.qml", *CHIFFRES)
+COMPOSANTS = ["Texte", "Ico", "CarteWidget", "Anneau", "JaugeAiguille"] + [Path(f).stem for f in CHIFFRES]
 _chargeur = SourceFileLoader("rendu_ile", str(H.REPO / "outils/rendu-ile.py"))
 RENDU = module_from_spec(spec_from_loader("rendu_ile", _chargeur))
 _chargeur.exec_module(RENDU)
+_chargeur = SourceFileLoader("nc_reglages_widgets", str(H.REPO / "home/.local/bin/nc-reglages"))
+NC = module_from_spec(spec_from_loader("nc_reglages_widgets", _chargeur))
+_chargeur.exec_module(NC)
 
 
 def lire(nom):
@@ -32,12 +43,14 @@ def lire(nom):
 
 
 COULEURS = ('pragma Singleton\nimport QtQuick\nQtObject { property string police: "Mono"; property bool majuscules: false\n'
-            ' readonly property color texte: "#ffffff"; readonly property color texteSec: "#98989d"\n'
+            ' readonly property color texte: "#ffffff"; readonly property color texteSec: "#686868"\n'
+            ' readonly property color fond: "#000000"\n'
             ' readonly property color carte: "#203040"; readonly property color gris2: "#2c2c2e"; readonly property color gris3: "#3a3a3c"\n'
             ' readonly property color accent: "#0a84ff"; readonly property color surAccent: "#ffffff"; readonly property color jauge: "#ffffff"\n'
             ' readonly property string contour: "degrade"; readonly property real verre: 1\n'
             ' function rayon(base, w, h) { return Math.min(base, Math.min(w, h) / 2) } }\n')
-ETAT = (' property bool widgetsCaches: false; property bool aMusique: false; property string titre: ""; property string artiste: ""\n'
+ETAT = (' property bool widgetsCaches: false; property bool aMusique: false; property bool joue: false\n'
+        ' property string titre: ""; property string artiste: ""\n'
         ' property string pochette: ""; property string iconeLecteur: ""\n'
         ' property var meteo: ({}); property bool meteoPilule: false\n'
         ' property var minute: new Date(2026, 10, 22, 9, 5)\n'
@@ -65,18 +78,38 @@ class Source(unittest.TestCase):
         w = lire("WidgetsTheme.qml")
         tous = [m for nom in FICHIERS for m in re.findall(r"\bTimer\s*\{[^}]*\}", lire(nom))]
         self.assertEqual(tous, ["Timer { id: echantillonneur; interval: 2000; repeat: true; running: w.vu && w.aJauges; onTriggered: w.echantillon() }"])
-        self.assertIn('liste[i].type === "jauges" || liste[i].type === "anneau"', w)
+        self.assertIn('["jauges", "anneau", "jauge-aiguille"].indexOf(liste[i].type) >= 0', w)
         self.assertIn("readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches", w)
         self.assertIn('Reglages.val("WIDGETS_BUREAU", "non") === "oui"', w)
         self.assertIn("slice(0, 4096)", w)
         self.assertIn("slice(0, 200)", w)
         for nom in FICHIERS:
-            for interdit in ("MouseArea", "Behavior", "Animation", "layer.effect", "MultiEffect", "Blur", "Canvas", "Process {"):
+            for interdit in ("MouseArea", "Behavior", "Animation", "layer.effect", "MultiEffect", "Blur", "Canvas", "Shape", "Process {"):
                 if not (nom == "WidgetsTheme.qml" and interdit == "Process {"):      # df, toutes les 30 s, jauges vues seulement
                     self.assertNotIn(interdit, lire(nom), nom)
         # Météo et musique : ce qu'Etat lit déjà (nc-meteo, MPRIS), aucun processus de plus
         self.assertNotIn('"nc-meteo"', lire("CarteWidget.qml"))
         self.assertIn("Etat.meteoPilule", lire("CarteWidget.qml"))
+
+    def test_un_fichier_chiffres_par_valeur_de_la_liste_fermee(self):
+        # Un nouveau style (volets, nixie…) = un fichier Chiffres<Nom>.qml ET son nom dans la liste, ni l'un sans l'autre
+        self.assertEqual(sorted(f[len("Chiffres"):-len(".qml")].lower() for f in CHIFFRES), sorted(NC.WIDGETS_CHIFFRES))
+        for f in CHIFFRES:
+            self.assertIn("required property var carte", lire(f), f)
+        self.assertTrue(set(NC.WIDGETS_VARIANTES) <= set(NC.WIDGETS_TYPES))
+        self.assertIn('Qt.resolvedUrl("Chiffres" + chiffres.charAt(0).toUpperCase() + chiffres.slice(1) + ".qml")', lire("CarteWidget.qml"))
+
+    def test_separateur_des_points_dessine(self):
+        # Le « : » de Doto sort en croix : deux disques, jamais un glyphe
+        p = lire("ChiffresPoints.qml")
+        self.assertNotRegex(p, r"(?s)Texte|Text \{|font\.")
+        self.assertIn('model: signe.modelData === ":" ? [2, 4] : []', p)
+
+    def test_widgets_police_declaree(self):
+        r = NC.PAR_CLE["WIDGETS_POLICE"]
+        self.assertEqual((r.section, r.genre, r.defaut), ("Île", "texte", ""))
+        self.assertTrue(r._aide.fr and r._aide.en and r._nom.fr and r._nom.en)
+        self.assertIn('Reglages.val("WIDGETS_POLICE", "")', lire("WidgetsTheme.qml"))
 
     def test_bureau_se_tait_quand_le_theme_a_des_widgets(self):
         b = lire("Bureau.qml")
@@ -123,6 +156,23 @@ class Validation(Base):
         self.assertIn("widgets.style", fr.stdout + fr.stderr)
         self.assertIn("widgets.style", en.stdout + en.stderr)
 
+    def test_chiffres_et_variantes(self):
+        self.refuse([dict(OK, chiffres="nixie")])
+        self.refuse([{"type": "date", "coin": "centre", "taille": "petit", "chiffres": "points"}])     # pas une horloge
+        self.refuse([{"type": "musique", "coin": "centre", "taille": "petit", "variante": "ligne"}])  # pas sa variante
+        self.refuse([dict(OK, variante="quart")])
+        bons = [{"type": "horloge-geante", "coin": "haut-gauche", "taille": "grand", "chiffres": "points"},
+                {"type": "horloge-geante", "coin": "bas-gauche", "taille": "petit", "style": "carte", "chiffres": "aiguille", "variante": "quart"},
+                {"type": "calendrier", "coin": "bas-droite", "taille": "petit", "variante": "ligne"},
+                {"type": "jauge-aiguille", "coin": "haut-droite", "taille": "petit", "style": "carte-ronde"}]
+        self.ecrire_theme("bon", widgets=bons, reglages={"WIDGETS_POLICE": "Doto, JetBrains Mono"})
+        r = self.nc("set", "STYLE", "bon")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.lignes_style()["WIDGETS_THEME"],
+                         "horloge-geante:haut-gauche:grand::points,horloge-geante:bas-gauche:petit:carte:aiguille:quart,"
+                         "calendrier:bas-droite:petit:::ligne,jauge-aiguille:haut-droite:petit:carte-ronde")
+        self.assertEqual(self.lignes_style()["WIDGETS_POLICE"], "Doto, JetBrains Mono")
+
     def test_style_conf_sans_widgets_et_avec(self):
         self.assertEqual(self.nc("set", "STYLE", "nord").returncode, 0)
         self.assertNotIn("WIDGETS_THEME", self.lignes_style())
@@ -138,13 +188,15 @@ class Validation(Base):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def executer(self, valeurs, scenario, citations=None, taille=(800, 600), captures=None):
+    def executer(self, valeurs, scenario, citations=None, taille=(800, 600), captures=None, fond=None):
         source = lire("WidgetsTheme.qml")
         for avant, apres in REMPLACEMENTS:
             self.assertIn(avant, source)
             source = source.replace(avant, apres.replace("LARGEUR", str(taille[0])).replace("HAUTEUR", str(taille[1])))
+        if fond:            # un fond d'écran uni sous les widgets
+            source = source.replace("visible: w.vu\n", 'visible: w.vu\n            Rectangle { anchors.fill: parent; color: "%s" }\n' % fond)
         with tempfile.TemporaryDirectory(prefix="nc-wt-") as d:
-            root = H.preparer(d, ["Texte", "Ico", "CarteWidget", "Anneau"], etat=ETAT,
+            root = H.preparer(d, COMPOSANTS, etat=ETAT,
                               extra={"Couleurs.qml": COULEURS, "WidgetsTheme.qml": source})
             scenario = scenario.replace("DOSSIER", str(root))
             if citations is not None:
@@ -163,6 +215,7 @@ class HorsEcran(unittest.TestCase):
             code, sortie = H.lancer(root, delai=40)
             images = {n: RENDU.lire_png(root / (n + ".png")) for n in (captures or ()) if (root / (n + ".png")).exists()}
         self.images = images
+        self.sortie = sortie
         echecs = [x for x in sortie.splitlines() if any(e in x for e in H.ERREURS)]
         self.assertEqual(code, 0, sortie[-1500:])
         self.assertEqual(echecs, [], sortie[-1500:])
@@ -172,12 +225,11 @@ class HorsEcran(unittest.TestCase):
   if (etape === 1) {
     verifier(w.liste.length === 5 && w.liste[0].style === "texte", "cinq, style texte par défaut : " + w.liste.length)
     verifier(w.lignes("horloge-fine")[0] === "09:05", "fine : " + w.lignes("horloge-fine"))
-    verifier(w.lignes("horloge-segments")[0] === "09 : 05", "segments")
     verifier(w.lignes("horloge-mots").join(" ") === "Il est neuf heures et cinq", "mots : " + w.lignes("horloge-mots"))
     var c = w.lignes("calendrier")
     verifier(c[0] === "novembre 2026" && c.join("|").indexOf("[22]") >= 0 && c.length === 8, "calendrier : " + c.join("|"))
     verifier(w.lignes("musique").length === 0, "pas de musique")
-    Etat.aMusique = true; Etat.titre = "T"; Etat.artiste = "A"; etape++; return }
+    Etat.aMusique = true; Etat.joue = true; Etat.titre = "T"; Etat.artiste = "A"; etape++; return }
   if (etape === 2) {
     verifier(w.lignes("musique").join("|") === "T|A", "musique")
     var j = w.lignes("jauges")
@@ -352,12 +404,122 @@ class HorsEcran(unittest.TestCase):
     verifier(m.implicitWidth === 0 && !m.visible, "sans météo, rien")
     verifier(u.implicitWidth === 0 && !u.visible, "sans musique, rien")
     Etat.meteo = { temp: 13, icone: "cloud", texte: "Nuageux", min: 8, max: 13 }; Etat.meteoPilule = true
-    Etat.aMusique = true; Etat.titre = "T"; Etat.artiste = "A"; etape++; return }
+    Etat.aMusique = true; Etat.joue = true; Etat.titre = "T"; Etat.artiste = "A"; etape++; return }
   if (etape === 4) { var f2 = w.fenetres[0].contentItem, m2 = trouver(f2, "nc-widget-meteo"), u2 = trouver(f2, "nc-widget-musique")
     verifier(m2.visible && m2.width > 0 && m2.width === m2.height, "météo dans une carte ronde")
     verifier(u2.visible && u2.y >= m2.y + m2.height, "musique dessous")
     Qt.quit() }
 """, taille=(2464, 1456))
+
+    def test_points_separateur_en_deux_disques(self):
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "horloge-geante:haut-gauche:grand::points"}, """
+  if (etape === 1 || etape === 2) { etape++; return }
+  if (etape === 3) { var g = trouver(w.fenetres[0].contentItem, "nc-widget-horloge-geante"), s = tous(g, "nc-chiffres-separateur")
+    verifier(g.visible && s.length === 2, "deux points : " + s.length)
+    for (var i = 0; i < 2; i++) verifier(s[i].visible && s[i].width > 4 && s[i].width === s[i].height && s[i].radius === s[i].width / 2, "un disque")
+    verifier(Math.abs(s[1].y - s[0].y - 2 * s[0].parent.height / 7) < 2, "rangées 2 et 4 : " + s[0].y + " " + s[1].y)
+    function texte(it) { if (it.text !== undefined && String(it.text).indexOf(":") >= 0) return true
+      for (var j = 0; j < it.children.length; j++) if (texte(it.children[j])) return true; return false }
+    verifier(!texte(g), "aucun glyphe « : »")
+    Qt.quit() }
+""", taille=(2464, 1456))
+
+    def test_aiguilles_a_3_h_et_6_h_et_jauge_a_aiguille(self):
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "horloge-fine:haut-gauche:moyen:carte:aiguille,jauge-aiguille:haut-droite:moyen:carte-ronde"}, """
+  function pointe(nom) { var c = trouver(w.fenetres[0].contentItem, "nc-widget-horloge-fine"), a = trouver(c, nom), o = a.parent
+    var p = a.mapToItem(o, a.width / 2, 0); return [p.x - o.width / 2, p.y - o.height / 2, a.height] }
+  if (etape === 1) { Etat.minute = new Date(2026, 10, 22, 15, 0); etape++; return }
+  if (etape === 2) { etape++; return }
+  if (etape === 3) { var h = pointe("nc-aiguille-heures"), m = pointe("nc-aiguille-minutes")
+    verifier(Math.abs(h[0] - h[2]) < 1.5 && Math.abs(h[1]) < 1.5, "3 h : heures à l'horizontale, à droite : " + h)
+    verifier(Math.abs(m[0]) < 1.5 && Math.abs(m[1] + m[2]) < 1.5, "3 h : minutes vers le haut : " + m)
+    var j = trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille")
+    verifier(j && j.visible && w.minuteur.running, "jauge à aiguille vue, minuteur partagé actif")
+    w.cpu = 0.5; etape++; return }
+  if (etape === 4) { var a = trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille")
+    verifier(Math.abs(a.rotation) < 0.01, "jauge à 50 % : aiguille droite : " + a.rotation)
+    w.cpu = 0; Etat.minute = new Date(2026, 10, 22, 18, 0); etape++; return }
+  if (etape === 5) { var h2 = pointe("nc-aiguille-heures")
+    verifier(Math.abs(h2[0]) < 1.5 && Math.abs(h2[1] - h2[2]) < 1.5, "6 h : heures vers le bas : " + h2)
+    verifier(Math.abs(trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille").rotation + 90) < 0.01, "jauge à 0 : à gauche")
+    Qt.quit() }
+""", taille=(2464, 1456))
+
+    def test_musique_cachee_quand_rien_ne_joue(self):
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "musique:haut-gauche:moyen:carte,musique:bas-gauche:moyen:carte::bandeau"}, """
+  function vus() { return tous(w.fenetres[0].contentItem, "nc-widget-musique").filter(m => m.visible && m.implicitWidth > 0).length }
+  if (etape === 1) { verifier(vus() === 0, "rien en lecture : aucune carte")
+    Etat.aMusique = true; Etat.titre = "T"; Etat.joue = false; etape++; return }
+  if (etape === 2) { verifier(vus() === 0, "en pause : aucune carte (jamais de pochette vide)"); Etat.joue = true; etape++; return }
+  if (etape === 3) { etape++; return }
+  if (etape === 4) { verifier(vus() === 2, "en lecture : les deux cartes : " + vus()); Etat.aMusique = false; etape++; return }
+  if (etape === 5) { verifier(vus() === 0, "fini : plus rien"); Qt.quit() }
+""", taille=(2464, 1456))
+
+    def test_widgets_police_repli_et_petits_textes(self):
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "date:centre:moyen"}, """
+  var f = Qt.fontFamilies()
+  if (etape === 1) { verifier(w.police === "Mono" && w.policePetite === "Mono", "vide : la police de l'île : " + w.police)
+    Reglages.valeurs = { WIDGETS_BUREAU: "oui", WIDGETS_THEME: "date:centre:moyen", WIDGETS_POLICE: "Absente, " + f[0] }; etape++; return }
+  if (etape === 2) { verifier(w.police === f[0] && w.policePetite === f[0], "repli : la première installée : " + w.police)
+    Reglages.valeurs = { WIDGETS_BUREAU: "oui", WIDGETS_THEME: "date:centre:moyen", WIDGETS_POLICE: f[0] + ", Absente, " + f[1] }; etape++; return }
+  if (etape === 3) { verifier(w.police === f[0] && w.policePetite === f[1], "petits textes : la suivante installée : " + w.policePetite)
+    Reglages.valeurs = { WIDGETS_BUREAU: "oui", WIDGETS_THEME: "date:centre:moyen", WIDGETS_POLICE: "Absente, Autre" }; etape++; return }
+  if (etape === 4) { verifier(w.police === "Mono", "aucune installée : la police de l'île"); Qt.quit() }
+""")
+
+    # ── Lisibilité : rendu hors écran à l'échelle 1,6 (2560 × 1600 → 1600 × 1000 logiques, marges ôtées), taille « petit » ──
+    def mesurer(self, theme, fond):
+        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": theme}, """
+  if (etape === 1) { Etat.meteo = { temp: 13, icone: "cloud", texte: "Nuageux", min: 8, max: 13 }; Etat.meteoPilule = true
+    Etat.aMusique = true; Etat.joue = true; Etat.titre = "Titre"; Etat.artiste = "Artiste"; w.cpu = 0.42; etape++; return }
+  if (etape === 2 || etape === 3) { etape++; return }
+  if (etape === 4) { etape = 10
+    var f = w.fenetres[0].contentItem, textes = [], objets = [], widgets = 0
+    function parcourir(it) { if (!it.visible) return
+      if (it.widget !== undefined && it.width > 0) widgets++
+      if (it.font !== undefined && it.text !== undefined && String(it.text) !== "" && it.width > 0) { var p = it.mapToItem(f, 0, 0)
+        textes.push({ x: p.x, y: p.y, l: it.width, h: it.height, c: String(it.color), px: it.font.pixelSize, t: String(it.text) }); objets.push(it) }
+      for (var i = 0; i < it.children.length; i++) parcourir(it.children[i]) }
+    parcourir(f)
+    console.log("MESURE " + JSON.stringify({ widgets: widgets, textes: textes }))
+    for (var j = 0; j < objets.length; j++) objets[j].opacity = 0       // le fond seul, sous chaque texte
+    f.grabToImage(function (r) { verifier(r.saveToFile("DOSSIER/fond.png"), "capture"); Qt.quit() }) }
+""", taille=(1504, 856), captures=("fond",), fond=fond)
+        ligne = [l for l in self.sortie.splitlines() if "MESURE " in l][-1]
+        return json.loads(ligne[ligne.index("MESURE ") + 7:]), self.images["fond"]
+
+    def verifier_lisible(self, theme, fond, nombre):
+        mesure, img = self.mesurer(theme, fond)
+        self.assertEqual(mesure["widgets"], nombre, "tous les widgets montrés")
+        largeur, hauteur, bpp, lignes = img
+
+        def lum(c):
+            f = [(x / 255 / 12.92 if x / 255 <= 0.04045 else ((x / 255 + 0.055) / 1.055) ** 2.4) for x in c[:3]]
+            return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]
+        self.assertGreater(len(mesure["textes"]), nombre)
+        for t in mesure["textes"]:
+            couleur = tuple(int(t["c"][i:i + 2], 16) for i in (len(t["c"]) - 6, len(t["c"]) - 4, len(t["c"]) - 2))
+            pires = []
+            for fx, fy in ((0.5, 0.5), (0.3, 0.35), (0.7, 0.65)):
+                x, y = min(largeur - 1, int(t["x"] + t["l"] * fx)), min(hauteur - 1, int(t["y"] + t["h"] * fy))
+                px = lignes[y][x * bpp:(x + 1) * bpp]
+                a, b = lum(couleur), lum(px)
+                pires.append((max(a, b) + 0.05) / (min(a, b) + 0.05))
+            with self.subTest(texte=t["t"], fond=fond):
+                self.assertGreaterEqual(min(pires), 4.5, f"{t['t']!r} {t['c']} : contraste {min(pires):.2f}")
+                self.assertGreaterEqual(t["px"], 11, f"{t['t']!r} : {t['px']} px")
+
+    def test_lisible_sur_les_cartes(self):
+        self.verifier_lisible("horloge-geante:haut-gauche:petit:carte,date:haut-droite:petit:carte-ronde,meteo:haut-droite:petit:carte-ronde,"
+                              "anneau:haut-droite:petit:carte-ronde,jauge-aiguille:bas-droite:petit:carte-ronde,musique:bas-droite:petit:carte,"
+                              "jauges:bas-gauche:petit:carte,calendrier:bas-gauche:petit:carte", "#101010", 8)
+
+    def test_lisible_sans_carte_sur_fond_clair_et_sombre(self):
+        theme = ("horloge-geante:haut-gauche:petit,accueil:haut-gauche:petit,date:haut-droite:petit,meteo:haut-droite:petit,"
+                 "anneau:bas-droite:petit,musique:bas-gauche:petit,calendrier:bas-gauche:petit:texte::ligne,horloge-mots:centre:petit")
+        for fond in ("#f4f4f4", "#ffffff", "#0b0b0b", "#808080"):
+            self.verifier_lisible(theme, fond, 8)
 
 
 if __name__ == "__main__":

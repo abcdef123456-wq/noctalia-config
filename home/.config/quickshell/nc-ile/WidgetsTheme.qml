@@ -1,14 +1,14 @@
 // Widgets de bureau choisis par le thème (champ « widgets » du thème, écrit dans style.conf :
-// WIDGETS_THEME=type:coin:taille[:style],…). Créé par shell.qml ; ne montre rien si WIDGETS_BUREAU n'est pas « oui » ou si le
+// WIDGETS_THEME=type:coin:taille[:style[:chiffres[:variante]]],…). Créé par shell.qml ; ne montre rien si WIDGETS_BUREAU n'est pas « oui » ou si le
 // thème n'a pas de widgets (alors Bureau.qml garde l'horloge et la date d'avant, à l'identique).
 // Types : horloge-fine, horloge-mots, horloge-segments, horloge-geante, calendrier, date, citation, musique, jauges, anneau,
-// meteo, accueil. Coins : haut-gauche, haut-droite, bas-gauche, bas-droite, centre. Tailles : petit, moyen, grand.
+// jauge-aiguille, meteo, accueil. Chiffres d'une horloge : un fichier Chiffres<Nom>.qml par style (CarteWidget.qml). Coins : haut-gauche, haut-droite, bas-gauche, bas-droite, centre. Tailles : petit, moyen, grand.
 // Styles (CarteWidget.qml) : texte (sans carte, le défaut), carte, carte-ronde, brutal. 8 widgets au plus : ceux d'un même
 // coin s'empilent (disposer), jamais l'un sur l'autre ni hors de l'écran.
 // Énergie : aucune pendule à soi. Horloges, date, accueil, calendrier et citation suivent Etat.minute ; météo et musique,
-// les signaux d'Etat (nc-meteo et MPRIS déjà lus par l'île) ; la citation relit son fichier une fois par jour. Jauges et
-// anneau partagent le seul minuteur (2 s), allumé seulement quand l'un d'eux est vu (écran allumé, non verrouillé, widgets
-// non cachés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
+// les signaux d'Etat (nc-meteo et MPRIS déjà lus par l'île) ; la citation relit son fichier une fois par jour. Jauges,
+// anneau et jauge à aiguille partagent le seul minuteur (2 s), allumé seulement quand l'un d'eux est vu (écran allumé, non
+// verrouillé, widgets non cachés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -23,14 +23,27 @@ Scope {
         var parts = String(Reglages.val("WIDGETS_THEME", "")).split(",")
         for (var i = 0; i < parts.length && r.length < 8; i++) {
             var p = parts[i].trim().split(":")
-            if (p.length === 3 || p.length === 4)
-                r.push({ type: p[0], coin: p[1], taille: p[2], style: ["carte", "carte-ronde", "brutal"].indexOf(p[3]) >= 0 ? p[3] : "texte" })
+            if (p.length >= 3 && p.length <= 6)
+                r.push({ type: p[0], coin: p[1], taille: p[2], style: ["carte", "carte-ronde", "brutal"].indexOf(p[3]) >= 0 ? p[3] : "texte",
+                         chiffres: /^[a-z]+$/.test(p[4] || "") ? p[4] : "", variante: p[5] || "" })
         }
         return r
     }
     readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches
-    readonly property bool aJauges: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "jauges" || liste[i].type === "anneau") return true; return false }
+    readonly property bool aJauges: { for (var i = 0; i < liste.length; i++) if (["jauges", "anneau", "jauge-aiguille"].indexOf(liste[i].type) >= 0) return true; return false }
     readonly property bool aCitation: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "citation") return true; return false }
+    // Musique : seulement quand un titre JOUE (en pause ou sans titre, la carte n'est pas là : jamais de pochette vide)
+    readonly property bool musique: Etat.aMusique && Etat.joue
+    // WIDGETS_POLICE : une liste « A, B », la première installée (même règle qu'ILE_POLICE) ; vide ou aucune : celle de l'île.
+    // Les petits textes (sous 30 px) prennent la suivante installée de la liste, s'il y en a une : une police à points
+    // (Doto) pour l'heure, une police pleine pour les libellés (« Doto, JetBrains Mono »)
+    readonly property var polices: {
+        var installees = Qt.fontFamilies(), l = String(Reglages.val("WIDGETS_POLICE", "")).split(","), r = []
+        for (var i = 0; i < l.length; i++) if (l[i].trim() !== "" && installees.indexOf(l[i].trim()) >= 0) r.push(l[i].trim())
+        return r.length > 0 ? r : [Couleurs.police]
+    }
+    readonly property string police: polices[0]
+    readonly property string policePetite: polices[Math.min(1, polices.length - 1)]
     readonly property string dossier: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/nc"
 
     // ── Citation du jour : ~/.config/nc/citations.txt, 4 Kio au plus, 200 caractères par ligne, une par jour ──
@@ -124,11 +137,10 @@ Scope {
     function lignes(type) {
         var d = Etat.minute
         if (type === "horloge-fine") return [Qt.formatTime(d, Reglages.val("ILE_HEURE", "24") === "12" ? "h:mm AP" : "hh:mm")]
-        if (type === "horloge-segments") return [Qt.formatTime(d, "hh") + " : " + Qt.formatTime(d, "mm")]
         if (type === "horloge-mots") return mots(d)
         if (type === "calendrier") return calendrier(d)
         if (type === "citation") return citation !== "" ? [citation] : []
-        if (type === "musique") return Etat.aMusique ? (Etat.artiste !== "" ? [Etat.titre, Etat.artiste] : [Etat.titre]) : []
+        if (type === "musique") return musique ? (Etat.artiste !== "" ? [Etat.titre, Etat.artiste] : [Etat.titre]) : []
         if (type === "jauges") return ["CPU  " + barre(cpu) + " " + pct(cpu), "RAM  " + barre(ram) + " " + pct(ram), "DSK  " + barre(disque) + " " + pct(disque)]
         return []
     }
@@ -138,6 +150,30 @@ Scope {
         if (Reglages.en) return h >= 5 && h < 12 ? "Good morning" : (h >= 12 && h < 18 ? "Good afternoon" : "Good evening")
         return h >= 5 && h < 18 ? "Bonjour" : "Bonsoir"
     }
+    function phraseMeteo(m) {
+        var t = (m.temp !== undefined ? m.temp : "") + "°"
+        return !Reglages.en && m.texte ? t + " et " + String(m.texte).toLowerCase() : t
+    }
+
+    // ── Lisibilité (WCAG) : luminance relative, contraste, mélange en sRGB (comme le dessin de Qt) ──
+    function lum(c) {
+        function f(x) { return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4) }
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    function contraste(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+    function melange(a, b, f) { return Qt.rgba(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f, 1) }
+    // La couleur c, rapprochée du blanc ou du noir (le plus lointain du fond) jusqu'à 4,6:1 sur ce fond (4,5 et l'arrondi)
+    function lisible(c, fond) {
+        var cible = contraste(Qt.rgba(1, 1, 1, 1), fond) >= contraste(Qt.rgba(0, 0, 0, 1), fond) ? Qt.rgba(1, 1, 1, 1) : Qt.rgba(0, 0, 0, 1)
+        for (var f = 0; f < 1; f += 0.05) { var m = melange(c, cible, f); if (contraste(m, fond) >= 4.6) return m }
+        return cible
+    }
+    // Voile d'un widget sans carte : 0,55 au moins, plus opaque tant que le texte n'a pas 4,6:1 sur le pire fond d'écran
+    function voile(texte, fond, pire) {
+        for (var a = 0.55; a < 1; a += 0.05) if (contraste(texte, melange(fond, pire, 1 - a)) >= 4.6) return a
+        return 1
+    }
+
     readonly property var base: ({ "horloge-fine": 96, "horloge-segments": 80, "horloge-mots": 34, "calendrier": 17, "citation": 22, "musique": 20, "jauges": 16 })
     readonly property var echelle: ({ "petit": 0.6, "moyen": 1, "grand": 1.5 })
 
