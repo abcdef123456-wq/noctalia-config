@@ -21,9 +21,17 @@ local NOM = 200            -- largeur fixe du nom une fois dépliée : la zone n
 local CAR = 7.4            -- largeur moyenne d'un caractère dans la barre, pour estimer la largeur repliée
 local signature = ""       -- pour ne redessiner que si ce qui est montré a changé
 
+-- L'écran de cette barre : lu au chargement et dans update(), jamais dans le rappel de runStream, où Noctalia 5.3 passe un
+-- contexte vide (outputName() vide : chaque écran montrait alors l'écran actif, comme isVertical() pour la batterie)
+local ecran = ""
+local function noterEcran()
+  local n = barWidget.outputName()
+  if n and n ~= "" then ecran = n end
+end
+
 local function choisir()
   if not etat then return end
-  local m = (etat.moniteurs or {})[barWidget.outputName() or ""] or { bureau = etat.bureau, fenetres = etat.fenetres }
+  local m = (etat.moniteurs or {})[ecran] or { bureau = etat.bureau, fenetres = etat.fenetres }
   vue = { bureau = m.bureau or 0, fenetres = m.fenetres or {}, masquees = etat.masquees or {} }
 end
 
@@ -151,6 +159,9 @@ end
 
 -- Seulement pour se replier après le survol : le reste arrive par le flux
 function update()
+  local avant = ecran
+  noterEcran()
+  if ecran ~= avant and etat then choisir(); rendre() end
   if oublierA > 0 and noctalia.nowMs() >= oublierA then
     oublierA = 0
     survolee = nil
@@ -181,5 +192,6 @@ end
 -- Le flux se relance tout seul s'il s'arrête (Hyprland redémarré…)
 -- Le chemin est entre apostrophes (celles qu'il contient sont protégées) : un dossier personnel avec espace ou apostrophe marche
 local cheminSur = "'" .. string.gsub(c.NC, "'", "'\\''") .. "'"
+noterEcran()
 noctalia.runStream("while :; do " .. cheminSur .. " suivre; sleep 2; done", recevoir)
 noctalia.setUpdateInterval(60000)

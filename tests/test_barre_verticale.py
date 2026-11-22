@@ -175,5 +175,15 @@ class SansPastilles(unittest.TestCase):
                                 self.assertEqual(b["start"], ["logo", "nc/fenetres:titre"], "logo puis le titre, sans trou")
                                 self.assertNotIn("workspaces", listes)
 
+class TitreEcran(unittest.TestCase):
+    """titre.luau : outputName() est vide dans le rappel de runStream ; l'écran est lu au chargement et dans update()."""
+    def test_ecran_lu_hors_des_rappels(self):
+        s = (PLUGINS / "nc-fenetres/titre.luau").read_text(encoding="utf-8")
+        appels = [l for l in s.splitlines() if "outputName()" in l and not l.lstrip().startswith("--")]
+        self.assertEqual(appels, ["  local n = barWidget.outputName()"], "outputName() lu ailleurs que dans noterEcran")
+        self.assertRegex(s, r"\nnoterEcran\(\)\nnoctalia\.runStream")             # au chargement
+        self.assertRegex(s, r"function update\(\)\n(?:.*\n){0,2}\s*noterEcran\(\)")   # et dans update()
+
+
 if __name__ == "__main__":
     unittest.main()
