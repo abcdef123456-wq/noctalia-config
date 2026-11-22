@@ -874,7 +874,7 @@ REGLAGES = [
       [("popin", L("Zoom léger", "Light zoom")), ("slide", L("Glissement", "Slide")),
        ("gnomed", L("Dépliée, façon GNOME", "Unfold, GNOME-style"))], groupe="hypr"),
     R("FENETRES_CARACTERE", "Animations", L("Caractère des animations", "Animation feel"), "choix", "auto", "",
-      [("auto", L("Automatique", "Automatic")), ("doux", L("Doux et lent", "Soft and slow")),
+      [("auto", L("Automatique", "Automatic")), ("doux", L("Doux", "Soft")),
        ("vif", L("Vif, léger dépassement", "Snappy, slight overshoot")), ("sec", L("Sec et court", "Crisp and short")),
        ("rebond", L("Rebond", "Bounce")), ("aucun", L("Quasi instantané", "Almost instant"))], groupe="hypr"),
     R("ANIM_BUREAUX", "Animations", L("Passage d'un bureau à l'autre", "Switching workspaces"), "choix", "slidefadevert", "",
