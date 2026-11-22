@@ -1,0 +1,38 @@
+{
+  "nom": "synthwave",
+  "libelle": {
+    "fr": "Synthwave (néon des années 80)",
+    "en": "Synthwave (80s neon)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Synthwave"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "2",
+    "ILE_RAYON": "rond",
+    "ILE_VERRE": "90",
+    "ILE_ANIM": "doux",
+    "ILE_LUEUR": "oui",
+    "FENETRES_ARRONDI": "16",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "34"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "synthwave",
+  "fond_de_depart": "synthwave-soleil.jpg",
+  "credits": [
+    {
+      "nom": "SynthWave '84 (couleurs de la palette)",
+      "lien": "https://github.com/robb0wen/synthwave-vscode",
+      "licence": "MIT"
+    }
+  ],
+  "widgets": []
+}

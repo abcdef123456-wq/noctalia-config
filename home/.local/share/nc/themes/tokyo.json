@@ -1,0 +1,33 @@
+{
+  "nom": "tokyo",
+  "libelle": {
+    "fr": "Tokyo Night (néons de nuit)",
+    "en": "Tokyo Night (night neons)"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Tokyo-Night"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "degrade",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_RAYON": "doux",
+    "ILE_VERRE": "92",
+    "ILE_ANIM": "vif",
+    "ILE_LUEUR": "oui",
+    "FENETRES_ARRONDI": "10",
+    "FENETRES_BORDURE": "2",
+    "FENETRES_OMBRE": "26",
+    "ANIM_BUREAUX": "slidefade"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "tokyo",
+  "fond_de_depart": "shinjuku-pluie.jpg",
+  "credits": [],
+  "widgets": []
+}

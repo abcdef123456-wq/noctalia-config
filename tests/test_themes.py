@@ -19,6 +19,7 @@ THEMES = REPO / "home/.local/share/nc/themes"
 BIN = REPO / "home/.local/bin"
 ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa"]
 FONDS = REPO / "home/Pictures/Wallpapers"
+ENRICHIS = {"apple"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
 
 
@@ -108,7 +109,10 @@ class Equivalence(Base):
         for nom in ORDRE:
             with self.subTest(theme=nom):
                 d = json.loads((THEMES / (nom + ".json")).read_text(encoding="utf-8"))
-                self.assertEqual(d["reglages"], styles.get(nom, {}))
+                if nom in ENRICHIS:     # un thème enrichi garde chaque valeur de l'ancien style, et en ajoute
+                    self.assertEqual({k: d["reglages"][k] for k in styles.get(nom, {})}, styles.get(nom, {}))
+                else:
+                    self.assertEqual(d["reglages"], styles.get(nom, {}))
                 pal = palettes.get(nom)
                 self.assertEqual([d["palette"]["source"], d["palette"]["nom"]] if pal else d["palette"]["source"],
                                  pal if pal else "fond")
@@ -128,7 +132,8 @@ class Equivalence(Base):
                 # Seul ajout voulu depuis les anciens styles : le dossier de fonds du thème, s'il en a un
                 self.assertEqual(vals.pop("FONDS_DOSSIER", ""),
                                  str(self.home / "Pictures/Wallpapers" / d["fonds"]) if d["fonds"] else "")
-                self.assertEqual(vals, styles.get(nom, {}))
+                attendu = dict(styles.get(nom, {}), **d["reglages"]) if nom in ENRICHIS else styles.get(nom, {})
+                self.assertEqual(vals, attendu)
 
     def test_choix_dans_l_ordre(self):
         spec = importlib.machinery.SourceFileLoader("nc_reglages_choix", str(BIN / "nc-reglages"))

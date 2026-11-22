@@ -1,0 +1,34 @@
+{
+  "nom": "retro",
+  "libelle": {
+    "fr": "Rétro terminal (phosphore vert)",
+    "en": "Retro terminal (green phosphor)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Retro"
+  },
+  "reglages": {
+    "ILE_STYLE": "terminal",
+    "ILE_CONTOUR": "discret",
+    "ILE_CONTOUR_EPAISSEUR": "1",
+    "ILE_RAYON": "carre",
+    "ILE_VERRE": "100",
+    "ILE_ANIM": "sec",
+    "ILE_POLICE": "DejaVu Sans Mono",
+    "ILE_MAJUSCULES": "oui",
+    "FENETRES_ARRONDI": "0",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_OMBRE": "0",
+    "ANIM_BUREAUX": "slide"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "retro",
+  "fond_de_depart": "retro-grille.jpg",
+  "credits": [],
+  "widgets": []
+}
