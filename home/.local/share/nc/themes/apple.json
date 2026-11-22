@@ -46,7 +46,10 @@
     "FENETRES_COINS_FORME": "doux",
     "DOCK": "oui",
     "DOCK_POSITION": "bottom",
-    "DOCK_AUTO": "non"
+    "DOCK_AUTO": "non",
+    "ILE_FORME": "encoche",
+    "WIDGETS_BUREAU": "oui",
+    "FENETRES_SEULE_CENTREE": "16:10"
   },
   "noctalia": {
     "bar.default": {
@@ -76,7 +79,27 @@
     "ombre": "noire"
   },
   "fonds": "apple",
-  "fond_de_depart": "electric-peak.jpg",
+  "fond_de_depart": "apple-collines.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-geante",
+      "coin": "haut-droite",
+      "taille": "petit",
+      "style": "carte",
+      "chiffres": "aiguille"
+    },
+    {
+      "type": "calendrier",
+      "coin": "haut-droite",
+      "taille": "moyen",
+      "style": "carte"
+    },
+    {
+      "type": "musique",
+      "coin": "haut-droite",
+      "taille": "moyen",
+      "style": "carte"
+    }
+  ]
 }
