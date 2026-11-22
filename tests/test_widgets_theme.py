@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
@@ -203,24 +204,31 @@ class Validation(Base):
         self.assertNotIn("WIDGETS_THEME", self.lignes_style())
 
 
+def chevauchements(theme):
+    """Widgets d'un thème posés sur sa barre ou sur l'île. Règle des coins : la fenêtre des widgets (WidgetsTheme.qml)
+    ignore les zones réservées et garde ses marges fixes ; un widget « haut-… » touche le bord haut de cette fenêtre,
+    « …-gauche » le bord gauche, etc. Ce bord doit laisser toute la barre (position, épaisseur et marge au bord lues dans
+    le thème) et, en haut, la bande de l'île (42 px, ReserveIle.qml). « centre » : au milieu, il ne touche aucun bord."""
+    m = re.search(r"margins \{ top: (\d+); left: (\d+); right: (\d+); bottom: (\d+) \}", lire("WidgetsTheme.qml"))
+    marges = dict(zip(("top", "left", "right", "bottom"), map(int, m.groups())))
+    bords = {"haut": "top", "bas": "bottom", "gauche": "left", "droite": "right"}
+    zones = {"top": 42}
+    for cle, b in theme.get("noctalia", {}).items():
+        if cle.startswith("bar."):
+            pos = b.get("position", "top")
+            zones[pos] = max(zones.get(pos, 0), b.get("thickness", 36) + b.get("margin_edge", 6))
+    return [f"{w['type']} en {w['coin']} : {zones[bords[mot]]} px de barre ou d'île, marge {marges[bords[mot]]}"
+            for w in theme.get("widgets", []) for mot in w["coin"].split("-")
+            if mot in bords and marges[bords[mot]] < zones.get(bords[mot], 0)]
+
+
 class ThemesDuDepot(unittest.TestCase):
-    """Les widgets de chaque thème du dépôt : valides, et jamais sur la barre ni sur l'île. Règle des coins : la fenêtre
-    des widgets (WidgetsTheme.qml) ignore les zones réservées et garde ses marges fixes ; un widget « haut-… » touche le
-    bord haut de cette fenêtre, « …-gauche » le bord gauche, etc. Ce bord doit laisser toute la barre (épaisseur + marge
-    au bord) et, en haut, l'île fermée (42 px, ReserveIle.qml). « centre » : au milieu, il ne touche aucun bord."""
+    """Les widgets de chaque thème du dépôt : valides, et jamais sur la barre ni sur l'île (chevauchements)."""
     def test_widgets_valides_et_hors_de_la_barre_et_de_l_ile(self):
-        m = re.search(r"margins \{ top: (\d+); left: (\d+); right: (\d+); bottom: (\d+) \}", lire("WidgetsTheme.qml"))
-        marges = dict(zip(("top", "left", "right", "bottom"), map(int, m.groups())))
-        bords = {"haut": "top", "bas": "bottom", "gauche": "left", "droite": "right"}
         themes = sorted((H.REPO / "home/.local/share/nc/themes").glob("*.json"))
         self.assertGreater(len(themes), 8)
         for f in themes:
             d = json.loads(f.read_text(encoding="utf-8"))
-            zones = {"top": 42}
-            for cle, b in d.get("noctalia", {}).items():
-                if cle.startswith("bar."):
-                    pos = b.get("position", "top")
-                    zones[pos] = max(zones.get(pos, 0), b.get("thickness", 36) + b.get("margin_edge", 6))
             widgets = d.get("widgets", [])
             with self.subTest(theme=f.stem):
                 self.assertIsInstance(widgets, list)
@@ -235,13 +243,25 @@ class ThemesDuDepot(unittest.TestCase):
                         self.assertTrue(w["type"].startswith("horloge-") and w["chiffres"] in NC.WIDGETS_CHIFFRES, w)
                     if "variante" in w:
                         self.assertIn(w["variante"], NC.WIDGETS_VARIANTES.get(w["type"], ()), w)
-                    for mot in w["coin"].split("-"):
-                        if mot in bords:
-                            bord = bords[mot]
-                            self.assertGreaterEqual(marges[bord], zones.get(bord, 0),
-                                                    f"{w['type']} en {w['coin']} : sur la barre ou l'île ({bord})")
+                self.assertEqual(chevauchements(d), [])
                 if widgets:     # des widgets : le thème les allume (la personne peut les couper, son choix reste)
                     self.assertEqual(d["reglages"].get("WIDGETS_BUREAU"), "oui")
+
+    def test_controle_du_controle(self):
+        # Un widget dans le coin de la barre (ou sous l'île) est vu ; ailleurs, rien
+        def theme(pos, epaisseur, marge, coin):
+            return {"noctalia": {"bar.default": {"position": pos, "thickness": epaisseur, "margin_edge": marge}},
+                    "widgets": [{"type": "date", "coin": coin, "taille": "petit"}]}
+        for pos, coin in (("bottom", "bas-gauche"), ("bottom", "bas-droite"), ("left", "haut-gauche"), ("right", "bas-droite"),
+                          ("top", "haut-droite")):
+            with self.subTest(pos=pos, coin=coin):
+                self.assertNotEqual(chevauchements(theme(pos, 100, 10, coin)), [])  # plus que toute marge
+                self.assertEqual(chevauchements(theme(pos, 30, 8, coin)), [])          # barre fine : la marge suffit
+        self.assertEqual(chevauchements(theme("bottom", 60, 10, "haut-gauche")), [])
+        self.assertEqual(chevauchements(theme("bottom", 60, 10, "centre")), [])
+        # l'île : une marge du haut plus petite que sa bande serait vue (même sans barre en haut)
+        with unittest.mock.patch(__name__ + ".lire", lambda nom: "margins { top: 30; left: 48; right: 48; bottom: 48 }"):
+            self.assertNotEqual(chevauchements(theme("bottom", 30, 8, "haut-gauche")), [])
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
