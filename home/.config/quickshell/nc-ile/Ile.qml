@@ -194,7 +194,8 @@ PanelWindow {
     }
 
     // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
-    // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
+    // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, sauf ILE_CONTOUR_FERMEE=oui (voir Couleurs.qml).
+    // Tout est statique : des rectangles qui suivent l'île, aucune animation au repos
     // Lueur (ILE_LUEUR) : trois filets d'accent très clairs, de plus en plus larges, derrière le contour ; sans flou ni effet
     Repeater {
         model: Couleurs.lueur ? [10, 6, 3] : []
@@ -204,7 +205,7 @@ PanelWindow {
             width: ile.width + 2 * modelData; height: ile.height + 2 * modelData
             radius: ile.radius + modelData
             color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
-            opacity: fen.ouverte ? 1 : 0
+            opacity: fen.ouverte || (Couleurs.contourFermee && !fen.pilCachee) ? 1 : 0
             visible: opacity > 0.01
             Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
         }
@@ -216,7 +217,7 @@ PanelWindow {
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
-        opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte) ? 1 : 0
+        opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0
         visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
         Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
         gradient: Gradient {

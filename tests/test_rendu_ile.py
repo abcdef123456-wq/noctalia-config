@@ -220,13 +220,13 @@ class Rendu(unittest.TestCase):
             self.assertAlmostEqual(w2 / w1, 2, delta=0.2)
             self.assertAlmostEqual(h2 / h1, 2, delta=0.2)
 
-    def marge_opaque(self, reglages):
-        """Nombre de pixels non transparents dans la marge de MARGE px autour de l'île (page, échelle 1)."""
+    def marge_opaque(self, reglages, etat="page"):
+        """Nombre de pixels non transparents dans la marge de MARGE px autour de l'île (échelle 1)."""
         m = charger_outil()
         with tempfile.TemporaryDirectory() as t:
             conf = Path(t) / "r.conf"
             conf.write_text(reglages)
-            png, journal = m.rendre("page", t, str(conf), None, None, 1)
+            png, journal = m.rendre(etat, t, str(conf), None, None, 1)
             self.assertIsNotNone(png, journal)
             self.assertEqual(Path(png).read_bytes()[25], 6)
             w, h, bpp, lignes = m.lire_png(png)
@@ -237,6 +237,14 @@ class Rendu(unittest.TestCase):
                     if (x < m.MARGE or y < m.MARGE or x >= w - m.MARGE or y >= h - m.MARGE) and lignes[y][x * 4 + 3]:
                         n += 1
             return n
+
+    def test_contour_fermee(self):
+        """ILE_CONTOUR_FERMEE : pilule fermée entourée seulement à « oui » (défaut : comme avant, rien)."""
+        for base in ("ILE_CONTOUR=discret\nILE_LUEUR=non\n",      # contour seul (discret : sans palette du terminal)
+                     "ILE_STYLE=terminal\nILE_CONTOUR=aucun\nILE_LUEUR=oui\n"):       # lueur seule
+            with self.subTest(base=base):
+                self.assertEqual(self.marge_opaque(base, "fermee"), 0)
+                self.assertGreater(self.marge_opaque(base + "ILE_CONTOUR_FERMEE=oui\n", "fermee"), 20)
 
     def test_contour_et_lueur_visibles_dans_la_marge(self):
         self.assertGreater(self.marge_opaque("ILE_LUEUR=oui\nILE_CONTOUR=degrade\n"), 50)

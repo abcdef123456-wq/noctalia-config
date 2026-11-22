@@ -45,6 +45,8 @@ Singleton {
     // ILE_ACCENTS=accent : jauges, barres de la musique et du volume dans la couleur d'accent du thème (sinon : texte)
     readonly property color jauge: Reglages.val("ILE_ACCENTS", "texte") === "accent" ? accent : texte
     readonly property bool lueur: Reglages.val("ILE_LUEUR", "non") === "oui"
+    // ILE_CONTOUR_FERMEE=oui : contour et lueur aussi autour de la pilule fermée (sinon : île ouverte seulement)
+    readonly property bool contourFermee: Reglages.val("ILE_CONTOUR_FERMEE", "non") === "oui"
     readonly property string police: Qt.fontFamilies().indexOf(Reglages.val("ILE_POLICE", "")) >= 0
                                      ? Reglages.val("ILE_POLICE", "") : "Adwaita Sans"
     // Ressorts de la largeur et de la hauteur de l'île, durée et courbe du rayon, durées du contour et du Spotlight

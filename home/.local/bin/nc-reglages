@@ -498,6 +498,9 @@ REGLAGES = [
        ("vif", L("Vif", "Snappy")), ("sec", L("Sec, sans rebond", "Crisp, no bounce"))]),
     R("ILE_LUEUR", "Île", L("Lueur autour de l'île ouverte", "Glow around the open island"), "ouinon", "non",
       L("Un halo doux de la couleur d'accent.", "A soft halo in the accent color.")),
+    R("ILE_CONTOUR_FERMEE", "Île", L("Contour et lueur aussi sur l'île fermée", "Outline and glow on the closed island too"), "ouinon", "non",
+      L("Le contour (et la lueur si elle est allumée) entoure aussi la pilule fermée. Rien ne bouge au repos.",
+        "The outline (and the glow if on) also surrounds the closed pill. Nothing moves at rest.")),
     R("ILE_MAJUSCULES", "Île", L("Textes en majuscules", "Uppercase texts"), "ouinon", "non",
       L("Les textes de l'île s'écrivent en majuscules.", "The island's texts are written in capitals.")),
     R("ILE_ACCENTS", "Île", L("Jauges et barres", "Gauges and bars"), "choix", "texte",
@@ -1840,7 +1843,7 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
-    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
+    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
