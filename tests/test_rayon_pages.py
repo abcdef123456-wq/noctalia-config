@@ -20,7 +20,7 @@ LITTERAL = re.compile(r"radius: *[0-9]+(?:\.[0-9]+)?(?![0-9.]|\s*[/*+\-?])")
 CERCLES = {
     "Assistant.qml": 3, "AssistantOrbe.qml": 1, "Calendrier.qml": 3, "Centre.qml": 3, "Charge.qml": 1, "ChoixTheme.qml": 1,
     "Claude.qml": 2, "CodeApercu.qml": 1, "CodeProjet.qml": 1, "Compact.qml": 2, "Fenetres.qml": 1, "Fiche.qml": 2,
-    "GarminTiroir.qml": 2, "Ile.qml": 2, "Jarvis.qml": 1, "Jeu.qml": 1, "PageAppel.qml": 1, "PageListe.qml": 2,
+    "FormeIle.qml": 2, "GarminTiroir.qml": 2, "Ile.qml": 2, "Jarvis.qml": 1, "Jeu.qml": 1, "PageAppel.qml": 1, "PageListe.qml": 2,
     "PageNotifs.qml": 2, "PageResume.qml": 1, "PageTerminal.qml": 1, "Parametres.qml": 2, "PresseAction.qml": 1,
     "Projection.qml": 2, "Recherche.qml": 1, "Son.qml": 2, "Systeme.qml": 3, "VpnCarte.qml": 1, "VpnPastille.qml": 1,
     "Vue.qml": 2,

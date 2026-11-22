@@ -231,18 +231,23 @@ PanelWindow {
     Rectangle {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
-        // Centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 = barre de base : 6 du bord, 36 de
-        // haut), ou dans la bande réservée de 42 px quand ILE_BANDE=oui (barre en bas ou sur un côté)
-        y: Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9)
+        // Encoche : collée au bord haut. Sinon centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 =
+        // barre de base : 6 du bord, 36 de haut), ou dans la bande réservée de 42 px quand ILE_BANDE=oui
+        y: Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9))
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
-        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
+        // Forme « point » : fermée, l'île n'est qu'un point plein d'accent de 10 px (ouverte, bannière ou carte : comme d'habitude)
+        readonly property bool pointFerme: Couleurs.forme === "point" && !fen.ouverte && !fen.enCarte && !fen.banniere && !fen.confirmGpu
+                                           && !fen.confirmNoeud && !fen.demandeClaude && !fen.sessionNoeud && !fen.recherche
+        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
-                                                   : (fen.banniere ? fen.hauteurBanniere : 30)))))
+                                                   : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : 30))))))
         width: cibleLargeur
         height: cibleHauteur
-        radius: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15), cibleLargeur, cibleHauteur)
-        color: Qt.alpha(Couleurs.fond, Couleurs.verre)
+        radius: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
+        color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.12 : Couleurs.verre)
+        border.width: Couleurs.forme === "cadre" ? 1 : 0
+        border.color: Couleurs.accent
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
@@ -276,6 +281,7 @@ PanelWindow {
         }
         Behavior on color { ColorAnimation { duration: 260 } }
         clip: true
+        FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
 
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
@@ -303,6 +309,7 @@ PanelWindow {
             // se réduit le temps qu'elle grandisse, au lieu d'être rogné des deux côtés (« 6:50 » ; long avec ILE_ANIM=doux)
             // Contenu de 32 px ou moins (forme « point ») ou largeur pas encore connue : échelle 1, jamais NaN ni 0 au repos
             scale: !(compact.largeur > 32) ? 1 : Math.max(0, Math.min(1, (ile.width - 32) / (compact.largeur - 32)))
+            visible: !ile.pointFerme
             opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)
                      : (ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))
             Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }

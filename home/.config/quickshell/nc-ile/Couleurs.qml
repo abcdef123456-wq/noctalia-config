@@ -11,6 +11,7 @@ pragma Singleton
 //   ILE_RAYON=auto ou normal (rayons d'origine, 100) | carre (0) | doux (50) | rond (200) ; ou 0 à 200 : % des rayons d'origine, plafonné à la demi-taille
 //   ILE_CONTOUR_EPAISSEUR=2 (0 à 4 px) ; ILE_VERRE=100 (85 à 100 % d'opacité du fond, sans flou)
 //   ILE_POLICE=Adwaita Sans, ou une liste « A, B » : la première installée (aucune : Adwaita Sans) ; ILE_MAJUSCULES=non | oui
+//   ILE_FORME=pilule (par défaut) | encoche (collée au bord haut, coins du haut carrés) | rectangle (coins faibles) | cadre (bordure d'accent, fond presque transparent) | point (fermée : un point d'accent de 10 px)
 //   ILE_ANIM=ressort (allure d'origine) | doux | vif | sec ; ILE_LUEUR=non | oui (halo autour de l'île ouverte)
 import QtQuick
 import Quickshell
@@ -32,8 +33,11 @@ Singleton {
         const n = /^[0-9]+$/.test(r) ? parseInt(r) : 100
         return n <= 200 ? n : 100                   // 100 : rayons d'origine
     }
+    readonly property string forme: ["encoche", "rectangle", "cadre", "point"].indexOf(Reglages.val("ILE_FORME", "")) >= 0 ? Reglages.val("ILE_FORME", "") : "pilule"
+    // Rectangle et cadre : tous les rayons de l'île (pages comprises) restent faibles
+    readonly property real rayonFinal: forme === "rectangle" || forme === "point" ? Math.min(rayonPct, 12) : (forme === "cadre" ? Math.min(rayonPct, 5) : rayonPct)
     // Rayon d'un élément de taille w x h : « base » est son rayon d'origine, multiplié par le réglage, jamais au-delà de la demi-taille
-    function rayon(base, w, h) { return Math.min(base * rayonPct / 100, Math.min(w, h) / 2) }
+    function rayon(base, w, h) { return Math.min(base * rayonFinal / 100, Math.min(w, h) / 2) }
     function entier(cle, defaut, mini, maxi) {
         const r = Reglages.val(cle, "")
         const n = /^[0-9]+$/.test(r) ? parseInt(r) : defaut

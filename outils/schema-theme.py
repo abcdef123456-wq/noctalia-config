@@ -244,15 +244,36 @@ def dessiner(theme_nom, theme, reg, noct, couleurs, neutre, largeur):
     noire = reg.get("ILE_STYLE") == "noir"
     fond_ile = "#000000" if noire else couleurs["surface"]
     verre = max(0, min(100, entier(reg.get("ILE_VERRE"), 100)))
-    d.rounded_rectangle([ix, iy, ix + iw - 1, iy + ih - 1], radius=int(ray),
-                        fill=fond_ile + "%02x" % int(255 * verre / 100.0) if verre < 100 else fond_ile)
+    forme = reg.get("ILE_FORME", "pilule")
+    if forme == "encoche":
+        iy = 0
+        ray = min(ray, 12 * s)
+    elif forme == "rectangle":
+        ray = min(ray, 12 * s * ih / p(46))
+    elif forme == "cadre":
+        ray = min(ray, 5 * s)
+    remplissage = fond_ile + "%02x" % int(255 * verre / 100.0) if verre < 100 else fond_ile
+    if forme == "cadre":
+        remplissage = fond_ile + "1f"
+    if forme == "point":
+        # fermée : un petit point plein d'accent de 10 px, centré à la place de la pilule
+        dp = p(10)
+        cx, cy = W // 2, iy + p(15)
+        d.ellipse([cx - dp // 2, cy - dp // 2, cx + dp // 2, cy + dp // 2], fill=prim)
+    else:
+        d.rounded_rectangle([ix, iy, ix + iw - 1, iy + ih - 1], radius=int(ray), fill=remplissage,
+                            corners=(False, False, True, True) if forme == "encoche" else None)
     epc = entier(reg.get("ILE_CONTOUR_EPAISSEUR"), 2)
     contour = reg.get("ILE_CONTOUR", "degrade")
-    if epc > 0 and contour != "aucun" and (reg.get("ILE_CONTOUR_FERMEE") == "oui" or True):
+    if forme != "point" and epc > 0 and contour != "aucun" and (reg.get("ILE_CONTOUR_FERMEE") == "oui" or True):
         col = hexa(melange(prim, sec, 0.5)) if contour == "degrade" else couleurs["outline"]
-        d.rounded_rectangle([ix, iy, ix + iw - 1, iy + ih - 1], radius=int(ray), outline=col, width=max(1, p(epc)))
+        if forme == "cadre":
+            col = hexa(melange(prim, sec, 0.0))
+        d.rounded_rectangle([ix, iy, ix + iw - 1, iy + ih - 1], radius=int(ray), outline=col, width=max(1, p(epc)),
+                            corners=(False, False, True, True) if forme == "encoche" else None)
     ft = police(max(8, p(15)))
-    d.text((ix + iw // 2, iy + ih // 2), "île", font=ft, fill=couleurs["onSurface"], anchor="mm")
+    if forme != "point":
+        d.text((ix + iw // 2, iy + ih // 2), "île", font=ft, fill=couleurs["onSurface"], anchor="mm")
 
     # légende
     d.rectangle([0, H, W, H + LEG], fill="#101114")
