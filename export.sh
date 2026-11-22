@@ -78,6 +78,7 @@ HOME_FILES=(
   .local/share/nc/finger.png
   .local/share/nc/emoji
   .local/share/nc/logos
+  .local/share/nc/themes
   .local/bin/nc-apps
   .local/bin/nc-boot-wallpaper
   .local/bin/nc-brightness

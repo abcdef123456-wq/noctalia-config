@@ -704,9 +704,7 @@ REGLAGES = [
         "couleurs du fond d'écran. Tes autres réglages passent toujours devant ceux du style.",
         "Colors of the whole desktop (bar, apps, terminal, island) and a few matching tweaks. noctalia-config: "
         "wallpaper colors. Your other settings always take precedence over the style's."),
-      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)"), ("oled", L("Noir pur (écran OLED)", "Pure black (OLED screen)")),
-       ("nord", "Nord"), ("catppuccin", "Catppuccin"), ("dracula", "Dracula"), ("gruvbox", "Gruvbox"),
-       ("kanagawa", "Kanagawa")], groupe="style"),
+      lambda: choix_styles(), groupe="style"),
     R("THEME_MODE", "Apparence", L("Thème", "Theme"), "choix", "dark",
       L("Les couleurs suivent toujours le fond d'écran.", "Colors always follow the wallpaper."),
       [("dark", L("Sombre", "Dark")), ("light", L("Clair", "Light"))], groupe="noctalia"),
@@ -2230,27 +2228,147 @@ def _ecrire(vals):
     relancer_rappels(avant, vals)
 
 
-# Ce que change chaque style (en plus de sa palette, de la barre et du dock, voir appliquer_style et
-# appliquer_noctalia) ; tes propres réglages passent devant
-STYLES = {
-    "apple": {
-        "ILE_STYLE": "noir", "ILE_CONTOUR": "aucun",
-        "FENETRES_ARRONDI": "12", "FENETRES_BORDURE": "1", "FENETRES_ESPACE": "6", "FENETRES_MARGE": "12",
-        "FENETRES_ASSOMBRIR": "non", "FENETRES_OUVERTURE": "gnomed", "ANIM_BUREAUX": "slide",
-        "ANIM_VERROU": "fade", "ANIM_FOND": "fade", "DOCK_TAILLE": "52", "DOCK_LOUPE": "oui", "BARRE_SYSTEME": "non",
-        "VERROU_FLOU": "35", "TERMINAL_LOGO": "macOS",
-    },
-    # Noir pur : fonds noirs (pixels éteints sur un écran OLED), île noire, pas d'assombrissement
-    "oled": {"ILE_STYLE": "noir", "ILE_CONTOUR": "aucun", "FENETRES_ASSOMBRIR": "non"},
-    "nord": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "10"},
-    "catppuccin": {"FENETRES_ARRONDI": "16", "ANIM_BUREAUX": "slidefade"},
-    "dracula": {"FENETRES_ARRONDI": "12"},
-    "gruvbox": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "8"},
-    "kanagawa": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "12"},
-}
-# Palette de Noctalia de chaque style (sans palette : celle du fond d'écran)
-PALETTES = {"apple": ["custom", "Apple"], "nord": ["builtin", "Nord"], "catppuccin": ["builtin", "Catppuccin"],
-            "dracula": ["builtin", "Dracula"], "gruvbox": ["builtin", "Gruvbox"], "kanagawa": ["builtin", "Kanagawa"]}
+# Les thèmes : UN fichier JSON par thème dans ~/.local/share/nc/themes (NC_THEMES_DIR pour les essais). Il donne la
+# palette de Noctalia, quelques réglages (tes propres réglages passent devant), des retouches de Noctalia, la forme des
+# bordures et ombres (nc-theme-sync), le dossier de fonds et le fond de départ ; voir appliquer_style et
+# appliquer_noctalia. Un thème mal écrit est refusé en entier (message clair), jamais appliqué à moitié.
+ORDRE_THEMES = ("noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa")
+_CLES_THEME = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits",
+               "widgets"}
+_themes_cache = [None, ({}, {})]
+
+
+def dossier_themes():
+    return os.environ.get("NC_THEMES_DIR") or os.path.join(HOME, ".local/share/nc/themes")
+
+
+def _verifier_theme(nom, d):
+    """Thème validé et normalisé, ou ValueError avec un message clair (FR/EN)."""
+    def refus(fr, en):
+        raise ValueError(T(fr, en))
+
+    def objet(x, ou, permis, obligatoires=()):
+        if not isinstance(x, dict):
+            refus(f"« {ou} » doit être un objet", f"\"{ou}\" must be an object")
+        for k in x:
+            if k not in permis:
+                refus(f"clé inconnue « {k} » dans « {ou} »", f"unknown key \"{k}\" in \"{ou}\"")
+        for k in obligatoires:
+            if k not in x:
+                refus(f"clé « {k} » manquante dans « {ou} »", f"missing key \"{k}\" in \"{ou}\"")
+
+    def texte(x, ou):
+        if not isinstance(x, str) or any(c in x for c in "\r\n\0"):
+            refus(f"« {ou} » doit être un texte sur une ligne", f"\"{ou}\" must be a one-line text")
+        return x
+
+    def nom_de_fichier(x, ou):
+        x = texte(x, ou)
+        if "/" in x or ".." in x:
+            refus(f"« {ou} » : ni « / » ni « .. »", f"\"{ou}\": no \"/\" or \"..\"")
+        return x
+
+    objet(d, "(racine)", _CLES_THEME, ("nom", "libelle", "palette", "reglages"))
+    if d["nom"] != nom:
+        refus(f"« nom » ({d['nom']!r}) différent du nom du fichier ({nom!r})",
+              f"\"nom\" ({d['nom']!r}) differs from the file name ({nom!r})")
+    objet(d["libelle"], "libelle", {"fr", "en"}, ("fr", "en"))
+    lib = L(texte(d["libelle"]["fr"], "libelle.fr"), texte(d["libelle"]["en"], "libelle.en"))
+    objet(d["palette"], "palette", {"source", "nom"}, ("source", "nom"))
+    src, pnom = d["palette"]["source"], texte(d["palette"]["nom"], "palette.nom")
+    if src not in ("builtin", "custom", "fond"):
+        refus(f"palette inconnue : source « {src} » (builtin, custom ou fond)",
+              f"unknown palette: source \"{src}\" (builtin, custom or fond)")
+    if (src == "fond") != (pnom == ""):
+        refus("palette : un nom pour builtin et custom, aucun pour fond",
+              "palette: a name for builtin and custom, none for fond")
+    if not isinstance(d["reglages"], dict):
+        refus("« reglages » doit être un objet", "\"reglages\" must be an object")
+    reglages = {}
+    for k, v in d["reglages"].items():
+        if k not in PAR_CLE or k == "STYLE":
+            refus(f"réglage inconnu « {k} »", f"unknown setting \"{k}\"")
+        if not isinstance(v, str):
+            refus(f"réglage « {k} » : une valeur en texte", f"setting \"{k}\": a text value")
+        try:
+            reglages[k] = PAR_CLE[k].valider(v)
+        except ValueError as e:
+            refus(f"réglage « {k} » refusé : {e}", f"setting \"{k}\" refused: {e}")
+    noct = d.get("noctalia", {})
+    if not isinstance(noct, dict) or not all(isinstance(t, dict) for t in noct.values()):
+        refus("« noctalia » : une table par clé de table Noctalia", "\"noctalia\": one table per Noctalia table")
+    for t, kv in noct.items():
+        texte(t, "noctalia")
+        for k, v in kv.items():
+            texte(k, f"noctalia.{t}")
+            if not isinstance(v, (bool, int, float, str)):
+                refus(f"« noctalia.{t}.{k} » : booléen, nombre ou texte",
+                      f"\"noctalia.{t}.{k}\": boolean, number or text")
+    sync = d.get("theme_sync", {"bordure": "degrade", "ombre": "coloree"})
+    objet(sync, "theme_sync", {"bordure", "ombre"}, ("bordure", "ombre"))
+    if sync["bordure"] not in ("degrade", "gris") or sync["ombre"] not in ("coloree", "noire"):
+        refus("theme_sync : bordure degrade ou gris, ombre coloree ou noire",
+              "theme_sync: border degrade or gris, shadow coloree or noire")
+    fonds = nom_de_fichier(d.get("fonds", ""), "fonds")
+    depart = nom_de_fichier(d.get("fond_de_depart", ""), "fond_de_depart")
+    credits = d.get("credits", [])
+    if not isinstance(credits, list):
+        refus("« credits » doit être une liste", "\"credits\" must be a list")
+    for c in credits:
+        objet(c, "credits", {"nom", "lien", "licence"}, ("nom", "lien", "licence"))
+        for k in c:
+            texte(c[k], f"credits.{k}")
+    if not isinstance(d.get("widgets", []), list):
+        refus("« widgets » doit être une liste", "\"widgets\" must be a list")
+    return {"nom": nom, "libelle": lib, "palette": [src, pnom], "reglages": reglages, "noctalia": noct,
+            "theme_sync": sync, "fonds": fonds, "fond_de_depart": depart, "credits": credits,
+            "widgets": d.get("widgets", [])}
+
+
+def charger_themes():
+    """(thèmes valides {nom: thème}, thèmes refusés {nom: message}) lus dans le dossier des thèmes."""
+    dossier = dossier_themes()
+    try:
+        noms = sorted(f for f in os.listdir(dossier) if f.endswith(".json"))
+        cle = (dossier, [(f, os.stat(os.path.join(dossier, f)).st_mtime_ns) for f in noms])
+    except OSError:
+        return {}, {}
+    if _themes_cache[0] == cle:
+        return _themes_cache[1]
+    ok, mauvais = {}, {}
+    for f in noms:
+        nom = f[:-5]
+        try:
+            with open(os.path.join(dossier, f), encoding="utf-8") as fh:
+                ok[nom] = _verifier_theme(nom, json.load(fh))
+        except ValueError as e:          # JSON invalide (JSONDecodeError en fait partie) ou thème refusé
+            mauvais[nom] = T(f"thème « {nom} » refusé : {e}", f"theme \"{nom}\" refused: {e}")
+        except OSError as e:
+            mauvais[nom] = T(f"thème « {nom} » illisible : {e}", f"theme \"{nom}\" unreadable: {e}")
+    _themes_cache[:] = [cle, (ok, mauvais)]
+    return ok, mauvais
+
+
+def choix_styles():
+    """Choix du réglage STYLE : les huit d'origine dans leur ordre, puis les autres par nom (thèmes valides)."""
+    ok = charger_themes()[0]
+    noms = [n for n in ORDRE_THEMES if n in ok] + sorted(n for n in ok if n not in ORDRE_THEMES)
+    return [(n, ok[n]["libelle"]) for n in noms] or [("noctalia", "noctalia-config")]   # sans dossier : le défaut reste valide
+
+
+def theme_choisi(nom):
+    """Le thème valide de ce nom ; ValueError (message clair) s'il est refusé ou n'existe pas."""
+    ok, mauvais = charger_themes()
+    if nom in ok:
+        return ok[nom]
+    if nom in mauvais:
+        raise ValueError(mauvais[nom])
+    if nom == "noctalia":                          # le défaut marche aussi sans dossier de thèmes
+        return {"nom": nom, "libelle": "noctalia-config", "palette": ["fond", ""], "reglages": {}, "noctalia": {},
+                "theme_sync": {"bordure": "degrade", "ombre": "coloree"}, "fonds": "", "fond_de_depart": "",
+                "credits": [], "widgets": []}
+    raise ValueError(T(f"thème « {nom} » introuvable dans {dossier_themes()}",
+                       f"theme \"{nom}\" not found in {dossier_themes()}"))
 
 
 def police_apple():
@@ -2325,6 +2443,7 @@ UN_INDICATEUR_VPN = (("VPN_PILULE_BARRE", "oui"), ("VPN_MASQUER_TRAY", "oui"), (
 def regler(vals, cle, v):
     """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
     r = PAR_CLE[cle]
+    theme = theme_choisi(str(v).strip()) if cle == "STYLE" else None    # thème mal écrit ou absent : refusé, rien n'est écrit
     v = r.valider(v)
     # Fichier relu juste avant d'écrire : un réglage changé ailleurs entre-temps (autre fenêtre de nc-reglages,
     # ligne de commande) n'est pas écrasé ; vals est mis à jour sur place avec l'état du fichier
@@ -2338,6 +2457,13 @@ def regler(vals, cle, v):
         else:
             vals[cle] = v
         ecrire(vals)
+    if theme and theme["fonds"] and theme["fond_de_depart"]:
+        # Thème choisi par la personne (pas à chaque réapplication) : son fond de départ
+        fond = os.path.join(HOME, "Pictures/Wallpapers", theme["fonds"], theme["fond_de_depart"])
+        try:
+            subprocess.run(["noctalia", "msg", "wallpaper-set", fond], capture_output=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            pass
     if cle == "LANGUE":
         # Langue changée : le texte suit tout de suite (écran des réglages ouvert)
         global EN
@@ -2657,13 +2783,14 @@ def appliquer_noctalia(vals):
             mettre("location", "custom_schedule", True)
             mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
             mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
-    if style_vals().get("STYLE") == "oled":
-        mettre("theme", "pure_black_dark", True)       # fonds noirs purs
-    if style_vals().get("STYLE") == "apple":
-        # Barre de menus façon Mac : une bande translucide sur toute la largeur (l'île y fait l'encoche), sans
-        # pastilles (le dock est déjà en verre dépoli)
-        mettre("bar.default", "capsule", False)
-        mettre("bar.default", "background_opacity", 0.55)
+    # Retouches de Noctalia du thème (oled : fonds noirs purs ; apple : barre de menus façon Mac, une bande translucide
+    # sur toute la largeur, sans pastilles, le dock étant déjà en verre dépoli) ; un thème refusé n'en donne aucune
+    try:
+        for table, kv in theme_choisi(style_vals().get("STYLE", "noctalia"))["noctalia"].items():
+            for cle, v in kv.items():
+                mettre(table, cle, v)
+    except ValueError:
+        pass
     TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
     for cle, table in (("ANIM_VERROU", "lockscreen"), ("ANIM_FOND", "wallpaper")):
         if cle in vals:
@@ -2759,9 +2886,12 @@ def appliquer_style(vals):
     """Écrit les valeurs du style choisi dans style.conf (lues par Hyprland, l'île et nc-reglages) et change la palette
     de Noctalia (Apple), en gardant celle d'avant pour la remettre."""
     style = vals.get("STYLE", "noctalia")
+    theme = theme_choisi(style)                    # thème mal écrit : ValueError ici, style.conf reste comme avant
     texte = "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\n"
     texte += f"STYLE={style}\n"
-    prereglage = dict(STYLES.get(style, {}))
+    prereglage = dict(theme["reglages"])
+    if theme["fonds"]:
+        prereglage["FONDS_DOSSIER"] = os.path.join(HOME, "Pictures/Wallpapers", theme["fonds"])
     if style == "apple":
         p = police_apple()
         if p:
@@ -2775,8 +2905,8 @@ def appliquer_style(vals):
     # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…) ; celle d'avant le premier
     # style est gardée pour la remettre
     actuelle = sortie(["noctalia", "msg", "color-scheme-get"]).strip()
-    cible = PALETTES.get(style)
-    des_styles = {" ".join(p) for p in PALETTES.values()}
+    cible = theme["palette"] if theme["palette"][0] != "fond" else None
+    des_styles = {" ".join(t["palette"]) for t in charger_themes()[0].values() if t["palette"][0] != "fond"}
     if not actuelle:
         pass                                       # Noctalia ne tourne pas : palette changée au prochain passage
     elif cible:

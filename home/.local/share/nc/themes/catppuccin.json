@@ -1,0 +1,24 @@
+{
+  "nom": "catppuccin",
+  "libelle": {
+    "fr": "Catppuccin",
+    "en": "Catppuccin"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Catppuccin"
+  },
+  "reglages": {
+    "FENETRES_ARRONDI": "16",
+    "ANIM_BUREAUX": "slidefade"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

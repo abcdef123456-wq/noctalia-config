@@ -1,0 +1,21 @@
+{
+  "nom": "noctalia",
+  "libelle": {
+    "fr": "noctalia-config",
+    "en": "noctalia-config"
+  },
+  "palette": {
+    "source": "fond",
+    "nom": ""
+  },
+  "reglages": {},
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

@@ -1,0 +1,43 @@
+{
+  "nom": "apple",
+  "libelle": {
+    "fr": "Apple (macOS, iPhone)",
+    "en": "Apple (macOS, iPhone)"
+  },
+  "palette": {
+    "source": "custom",
+    "nom": "Apple"
+  },
+  "reglages": {
+    "ILE_STYLE": "noir",
+    "ILE_CONTOUR": "aucun",
+    "FENETRES_ARRONDI": "12",
+    "FENETRES_BORDURE": "1",
+    "FENETRES_ESPACE": "6",
+    "FENETRES_MARGE": "12",
+    "FENETRES_ASSOMBRIR": "non",
+    "FENETRES_OUVERTURE": "gnomed",
+    "ANIM_BUREAUX": "slide",
+    "ANIM_VERROU": "fade",
+    "ANIM_FOND": "fade",
+    "DOCK_TAILLE": "52",
+    "DOCK_LOUPE": "oui",
+    "BARRE_SYSTEME": "non",
+    "VERROU_FLOU": "35",
+    "TERMINAL_LOGO": "macOS"
+  },
+  "noctalia": {
+    "bar.default": {
+      "capsule": false,
+      "background_opacity": 0.55
+    }
+  },
+  "theme_sync": {
+    "bordure": "gris",
+    "ombre": "noire"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

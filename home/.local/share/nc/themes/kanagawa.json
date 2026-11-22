@@ -1,0 +1,24 @@
+{
+  "nom": "kanagawa",
+  "libelle": {
+    "fr": "Kanagawa",
+    "en": "Kanagawa"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Kanagawa"
+  },
+  "reglages": {
+    "ILE_CONTOUR": "discret",
+    "FENETRES_ARRONDI": "12"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

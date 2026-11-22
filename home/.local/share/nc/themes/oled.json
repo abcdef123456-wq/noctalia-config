@@ -1,0 +1,29 @@
+{
+  "nom": "oled",
+  "libelle": {
+    "fr": "Noir pur (écran OLED)",
+    "en": "Pure black (OLED screen)"
+  },
+  "palette": {
+    "source": "fond",
+    "nom": ""
+  },
+  "reglages": {
+    "ILE_STYLE": "noir",
+    "ILE_CONTOUR": "aucun",
+    "FENETRES_ASSOMBRIR": "non"
+  },
+  "noctalia": {
+    "theme": {
+      "pure_black_dark": true
+    }
+  },
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

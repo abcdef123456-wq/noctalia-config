@@ -1,0 +1,23 @@
+{
+  "nom": "dracula",
+  "libelle": {
+    "fr": "Dracula",
+    "en": "Dracula"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Dracula"
+  },
+  "reglages": {
+    "FENETRES_ARRONDI": "12"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

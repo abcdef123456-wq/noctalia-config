@@ -1,0 +1,24 @@
+{
+  "nom": "gruvbox",
+  "libelle": {
+    "fr": "Gruvbox",
+    "en": "Gruvbox"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Gruvbox"
+  },
+  "reglages": {
+    "ILE_CONTOUR": "discret",
+    "FENETRES_ARRONDI": "8"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}

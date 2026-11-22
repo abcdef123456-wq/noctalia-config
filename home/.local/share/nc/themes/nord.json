@@ -1,0 +1,24 @@
+{
+  "nom": "nord",
+  "libelle": {
+    "fr": "Nord",
+    "en": "Nord"
+  },
+  "palette": {
+    "source": "builtin",
+    "nom": "Nord"
+  },
+  "reglages": {
+    "ILE_CONTOUR": "discret",
+    "FENETRES_ARRONDI": "10"
+  },
+  "noctalia": {},
+  "theme_sync": {
+    "bordure": "degrade",
+    "ombre": "coloree"
+  },
+  "fonds": "",
+  "fond_de_depart": "",
+  "credits": [],
+  "widgets": []
+}
