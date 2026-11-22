@@ -39,18 +39,49 @@
   },
   "noctalia": {
     "bar.default": {
-      "position": "left",
-      "margin_edge": 0,
-      "thickness": 52,
-      "background_opacity": 0.9,
+      "position": "bottom",
+      "margin_edge": 8,
+      "thickness": 44,
+      "background_opacity": 0.0,
+      "capsule": true,
       "capsule_fill": "surface_variant",
-      "start": ["logo", "workspaces"],
-      "center": [],
-      "end": ["tray", "group:status", "t-heure"]
+      "capsule_padding": 14,
+      "widget_spacing": 12,
+      "capsule_group": [
+        {
+          "id": "tout",
+          "members": [
+            "logo",
+            "workspaces",
+            "t-taches",
+            "network",
+            "bluetooth",
+            "volume",
+            "nc/batterie:batterie",
+            "t-heure"
+          ]
+        }
+      ],
+      "start": [],
+      "center": [
+        "group:tout"
+      ],
+      "end": [
+        "tray"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": false
+    },
+    "widget.t-taches": {
+      "type": "taskbar",
+      "show_running": true,
+      "only_active_workspace": true,
+      "show_window_title": false,
+      "show_active_indicator": true,
+      "active_indicator_color": "primary",
+      "item_spacing": 8
     },
     "widget.t-heure": {
       "type": "clock",

@@ -39,23 +39,41 @@
   },
   "noctalia": {
     "bar.default": {
-      "position": "left",
-      "margin_edge": 8,
-      "margin_ends": 24,
-      "thickness": 52,
+      "position": "bottom",
+      "margin_edge": 10,
+      "margin_ends": 16,
+      "thickness": 32,
+      "background_opacity": 0.0,
       "capsule": true,
-      "background_opacity": 0.92,
       "capsule_fill": "surface_variant",
-      "widget_spacing": 8,
+      "capsule_padding": 12,
+      "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ]
+        },
+        {
+          "id": "droite",
+          "members": [
+            "tray",
+            "network",
+            "bluetooth",
+            "volume",
+            "nc/batterie:batterie",
+            "t-heure"
+          ]
+        }
+      ],
       "start": [
-        "logo",
-        "workspaces"
+        "group:gauche"
       ],
       "center": [],
       "end": [
-        "tray",
-        "group:status",
-        "t-heure"
+        "group:droite"
       ]
     },
     "widget.workspaces": {

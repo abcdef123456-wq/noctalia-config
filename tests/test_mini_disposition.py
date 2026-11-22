@@ -60,7 +60,7 @@ class Donnees(unittest.TestCase):
 
     def test_nord(self):
         d = self.t["nord"]["disposition"]
-        self.assertEqual(d["barre"]["position"], "left")
+        self.assertEqual(d["barre"]["position"], "bottom")          # pilule unique en bas (plus de barre de côté)
         self.assertEqual(d["fenetres"]["disposition"], "master")
         self.assertEqual(d["fenetres"]["orientation"], "gauche")
 

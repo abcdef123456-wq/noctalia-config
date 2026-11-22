@@ -44,11 +44,11 @@ class CinqChoix(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(self.t[a], self.t[b], f"{a} et {b} ont les mêmes 5 choix")
 
-    def test_barres_en_bas_et_sur_un_cote(self):
+    def test_barres_en_bas_jamais_sur_un_cote(self):
         pos = [c[0][0] for c in self.t.values()]
         self.assertGreaterEqual(pos.count("bottom"), 2)
-        # Recettes : nord et matrice sur le côté (barres verticales) ; kanagawa en bandeau du haut, ocean en bas
-        self.assertGreaterEqual(sum(p in ("left", "right") for p in pos), 2)
+        # Vu à l'écran : l'utilisateur ne veut pas de barre de côté dans les thèmes (il peut toujours en mettre une lui-même)
+        self.assertEqual([p for p in pos if p in ("left", "right")], [])
 
 
 if __name__ == "__main__":

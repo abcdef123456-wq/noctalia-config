@@ -227,9 +227,16 @@ class EcritPourNoctalia(tt.Base):
         return lire_toml(self.toml.read_text(encoding="utf-8")) if self.toml.exists() else {}
 
     def test_barre_verticale_adaptee(self):
-        cotes = [n for n, d in themes().items() if barre(d)["position"] in ("left", "right")]
-        self.assertIn("nord", cotes)
-        for style in cotes:
+        # Plus aucun thème n'a de barre de côté ; le filtre vertical reste prouvé sur un thème factice (l'ancienne barre de nord)
+        d = json.loads((THEMES / "nord.json").read_text(encoding="utf-8"))
+        d["nom"] = "essai-cote"
+        d["noctalia"] = {"bar.default": {"position": "left", "margin_edge": 0, "thickness": 52, "background_opacity": 0.9,
+                                         "capsule_fill": "surface_variant", "start": ["logo", "workspaces"], "center": [],
+                                         "end": ["tray", "group:status", "t-heure"]},
+                         "widget.workspaces": {"style": "regular", "show_labels": False},
+                         "widget.t-heure": {"type": "clock", "format": "{:%H:%M}"}}
+        (self.themes / "essai-cote.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        for style in ("essai-cote",):
             with self.subTest(theme=style):
                 b = self.appliquer(style, BARRE_SYSTEME="oui", VPN_PILULE_BARRE="oui")["bar.default"]
                 self.assertIn(b["position"], ("left", "right"))

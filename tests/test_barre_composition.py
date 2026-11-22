@@ -195,23 +195,21 @@ class Composition(unittest.TestCase):
 
 
 class Nord(unittest.TestCase):
-    """nord (recette : barre verticale end4-e8) : à gauche, 52 px, logo et bureaux en points en haut, milieu vide, l'état
-    puis l'heure en bas ; ni titre de fenêtre ni jauges du thème. En vertical, clock remplace « : » par un retour à la
-    ligne quand vertical_format est vide (docs.noctalia.dev/noctalia/bar/widgets/clock/) : « HH » au-dessus de « MM »."""
+    """nord (validé à l'écran) : une seule pilule centrée en bas (logo, bureaux, applis du bureau, état, heure), barre sans
+    fond, le plateau à droite ; group:sys (BARRE_SYSTEME) tombe à droite en pastille."""
     def test_composition_de_nord(self):
         with nc_isole(style="nord") as (nc, f):
             t = barre(nc, f, {})
         b = t["bar"]["default"]
-        self.assertEqual((b["position"], b["thickness"]), ("left", 52))
-        self.assertEqual(b["start"], ["logo", "workspaces"])
-        self.assertEqual(b["center"], ["nc/ile:pilule"], "seule l'île en plugin, posée à l'installation")
-        self.assertEqual(b["end"], ["tray", "group:status", "notifications", "t-heure"],
-                         "group:sys retiré : jauges à texte rognées dans une barre verticale (correctif d'écran)")
+        self.assertEqual((b["position"], b["thickness"]), ("bottom", 44))
+        self.assertEqual(b["center"], ["nc/ile:pilule", "group:tout"], "l'île du plugin, posée à l'installation, puis la pilule")
+        self.assertEqual(b["end"], ["group:sys", "tray", "notifications"])
+        tout = [g for g in b["capsule_group"] if g["id"] == "tout"][0]["members"]
+        self.assertEqual(tout, ["logo", "workspaces", "t-taches", "network", "bluetooth", "volume", "nc/batterie:batterie", "t-heure"])
         self.assertEqual(t["widget"]["t-heure"], {"type": "clock", "format": "{:%H:%M}"})
-        self.assertIs(t["widget"]["workspaces"]["show_labels"], False)
         with nc_isole(style="nord", install="quickshell") as (nc, f):
             b = barre(nc, f, {"BARRE_SYSTEME": "non"})["bar"]["default"]
-        self.assertEqual((b["center"], b["end"]), ([], ["tray", "group:status", "t-heure"]))
+        self.assertEqual((b["center"], b["end"]), (["group:tout"], ["tray"]))
 
 
 class Refus(unittest.TestCase):
