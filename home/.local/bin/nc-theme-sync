@@ -66,6 +66,20 @@ def style_apple():
         return False
 
 
+def theme_sync():
+    """(bordure, ombre) du thème actif, lus dans son fichier (champ theme_sync) : bordure « degrade » ou « gris »,
+    ombre « coloree » ou « noire ». Fichier absent ou illisible : l'ancien comportement (gris et noire pour Apple seul)."""
+    defaut = ("gris", "noire") if style_apple() else ("degrade", "coloree")
+    try:
+        nom = [m[6:] for m in STYLE.read_text().split() if m.startswith("STYLE=")][0]
+        dossier = os.environ.get("NC_THEMES_DIR") or str(Path.home() / ".local/share/nc/themes")
+        ts = json.loads((Path(dossier) / (nom + ".json")).read_text(encoding="utf-8"))["theme_sync"]
+        b, o = ts.get("bordure"), ts.get("ombre")
+        return (b if b in ("degrade", "gris") else defaut[0], o if o in ("coloree", "noire") else defaut[1])
+    except (OSError, IndexError, ValueError, KeyError, AttributeError, TypeError):
+        return defaut
+
+
 def couleur_hex(v):
     """Couleur en « #rrggbb » minuscule, quel que soit le format de colors.json (#rrggbb, rrggbb, #rrggbbaa, #rgb,
     rgb(r, g, b), rgba(…)) ; None si illisible (chaîne vide, mot, nombre…). C'est le format que kitty sait lire."""
@@ -341,14 +355,15 @@ def main():
     p, s2, t3 = hx("mPrimary", "8fb3ff"), hx("mSecondary", "b9abff"), hx("mTertiary", "7fdbca")
     sv, osv = hx("mSurfaceVariant", "161a23"), hx("mOnSurfaceVariant", "a3a9b8")
     err, onp = hx("mError", "ffb4ab"), hx("mOnPrimary", "0b0d12")
-    # Style Apple : filet gris discret autour des fenêtres et ombre noire douce (pas de couleurs)
-    if apple:
+    # Bordure et ombre selon le thème (champ theme_sync) : filet gris ou dégradé, ombre noire douce ou colorée
+    bordure, ombre_t = theme_sync()
+    if bordure == "gris":
         fil = "ffffff" if dark else "000000"
         bord_actif, bord_inactif = f'"rgba({fil}38)"', f'"rgba({fil}1a)"'
-        ombre = "rgba(00000099)" if dark else "rgba(00000055)"
     else:
         bord_actif = f'{{ colors = {{ "rgba({p}ff)", "rgba({s2}ff)", "rgba({t3}ff)" }}, angle = 45 }}'
-        bord_inactif, ombre = f'"rgba({sv}aa)"', f"rgba({p}55)"
+        bord_inactif = f'"rgba({sv}aa)"'
+    ombre = ("rgba(00000099)" if dark else "rgba(00000055)") if ombre_t == "noire" else f"rgba({p}55)"
     hypr = f"""-- Généré par nc-theme-sync depuis les couleurs Noctalia. Ne pas éditer.
 hl.config({{
     general = {{
