@@ -17,7 +17,7 @@
     "ILE_LUEUR": "non",
     "ILE_CONTOUR_FERMEE": "oui",
     "WIDGETS_PLAQUE": "non",
-    "FENETRES_BORDURE": "2",
+    "FENETRES_BORDURE": "1",
     "FENETRES_OMBRE": "16",
     "ILE_STYLE": "terminal",
     "ILE_POLICE": "IBM Plex Sans, Inter",
@@ -33,6 +33,7 @@
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",
     "FENETRES_MAITRE_ORIENTATION": "gauche",
+    "FENETRES_MAITRE_PART": "0.60",
     "DOCK": "non",
     "ILE_BANDE": "oui"
   },
