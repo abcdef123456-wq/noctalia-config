@@ -4,6 +4,7 @@
 - Source : chaque composant touché appelle Couleurs.rayon (un rayon remis en dur fait échouer)."""
 import json
 import re
+import shutil
 import tempfile
 import unittest
 
@@ -47,6 +48,7 @@ def lancer(cas, tailles):
     return [json.loads(m) for m in re.findall(r"R:(\[.*\])", sortie)]
 
 
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
