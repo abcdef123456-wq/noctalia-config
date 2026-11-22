@@ -283,6 +283,7 @@ touche(SUPER .. " + SHIFT + code:42", hl.dsp.window.move({ out_of_group = true }
 touche(SUPER .. " + CTRL + code:23", hl.dsp.group.next(),           trad("Fenêtres|Onglet suivant du groupe", "Next tab in the group"))
 touche(SUPER .. " + CTRL + SHIFT + code:23", hl.dsp.group.prev(),   trad("Fenêtres|Onglet précédent du groupe", "Previous tab in the group"))
 
+touche(SUPER .. " + CTRL + code:52", cmd("~/.local/bin/nc-fenetre meme-appli"), trad("Fenêtres|Fenêtre suivante de la même appli", "Next window of the same app"))
 touche("ALT + code:23", cmd(barre .. "window-switcher"),            trad("Fenêtres|Passer d'une fenêtre à l'autre", "Switch between windows"))
 touche("ALT + SHIFT + code:23", cmd(barre .. "window-switcher"))
 touche(SUPER .. " + ALT + code:23", cmd(barre .. "window-switcher"))

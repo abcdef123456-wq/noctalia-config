@@ -60,6 +60,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Maj` + `G` | Sortir la fenêtre du groupe |
 | `Super` + `Ctrl` + `Tab` | Onglet suivant du groupe |
 | `Super` + `Ctrl` + `Maj` + `Tab` | Onglet précédent du groupe |
+| `Super` + `Ctrl` + `Z` | Fenêtre suivante de la même appli |
 | `Alt` + `Tab` | Passer d'une fenêtre à l'autre |
 | `Super` + `Ctrl` + `1…4` | Marque-pages : attacher, puis rappeler la fenêtre (1…4) |
 | `Super` + `Ctrl` + `Maj` + `1…4` | Marque-pages : rattacher la fenêtre active (1…4) |
