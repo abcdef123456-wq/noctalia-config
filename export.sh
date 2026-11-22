@@ -351,7 +351,8 @@ nouveaux_ecartes=0
 raison_nouveau() { # raison_nouveau FICHIER CHEMIN_DANS_~
   local f="$1" nom gps
   nom="${2##*/}"; nom="${nom,,}"
-  case "/${2,,}/" in */spell/*) t "liste noire" "blocklist"; return ;; esac
+  # mes-fonds/ : les fonds que tu ajoutes toi-même (carrousel, nc-fonds), jamais publiés
+  case "/${2,,}/" in */spell/*|*/mes-fonds/*) t "liste noire" "blocklist"; return ;; esac
   case "$nom" in
     auth.json|*.env|.netrwhist|*token*|*secret*|*.pem|*.key|id_*|*history*|*.sqlite|*.sqlite3)
       t "liste noire" "blocklist"; return ;;

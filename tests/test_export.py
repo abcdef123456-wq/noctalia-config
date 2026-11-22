@@ -593,6 +593,25 @@ class ExportIsole(unittest.TestCase):
                     self.assertIn("nouveau, pas publié : ~/Pictures/Wallpapers/photo.JPG (image", r.stderr)
                     self.assertEqual(self.etat(), "")
 
+    def test_mes_fonds_jamais_publies(self):
+        """Les fonds ajoutés par la personne (mes-fonds/, base et thèmes) : liste noire, même avec NC_EXPORT_NOUVEAUX."""
+        self.base_exportee()
+        self.env["NC_EXPORT_NOUVEAUX"] = "oui"
+        exiftool = self.bin / "exiftool"
+        exiftool.write_text("#!/bin/sh\n:\n")
+        exiftool.chmod(0o755)
+        fonds = self.home / "Pictures/Wallpapers"
+        for rel in ("mes-fonds/a.jpg", "nord/mes-fonds/b.png", "publie.jpg"):
+            (fonds / rel).parent.mkdir(parents=True, exist_ok=True)
+            (fonds / rel).write_bytes(b"\xff\xd8img")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cible = self.depot / "home/Pictures/Wallpapers"
+        self.assertTrue((cible / "publie.jpg").exists(), r.stderr)          # contrôle : un nouveau fond ordinaire part bien
+        self.assertFalse((cible / "mes-fonds").exists(), r.stderr)
+        self.assertFalse((cible / "nord/mes-fonds").exists(), r.stderr)
+        self.assertIn("nouveau, pas publié : ~/Pictures/Wallpapers/nord/mes-fonds/b.png (liste noire)", r.stderr)
+
     def test_e5_clone_partiel_refuse(self):
         """E5 : la garde « ancienne version » (git log --find-object) ne voit rien dans un clone --depth 1."""
         (self.depot / "home/.local/bin/nc-dictee").write_text("#!/bin/sh\necho version-2\n")
