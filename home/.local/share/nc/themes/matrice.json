@@ -101,25 +101,25 @@
     },
     {
       "type": "date",
-      "coin": "bas-droite",
+      "coin": "haut-droite",
       "taille": "moyen",
       "style": "carte-ronde"
     },
     {
       "type": "meteo",
-      "coin": "bas-droite",
+      "coin": "haut-droite",
       "taille": "moyen",
       "style": "carte-ronde"
     },
     {
       "type": "anneau",
-      "coin": "bas-droite",
+      "coin": "haut-droite",
       "taille": "moyen",
       "style": "carte-ronde"
     },
     {
       "type": "musique",
-      "coin": "bas-droite",
+      "coin": "haut-droite",
       "taille": "moyen",
       "style": "carte"
     }
