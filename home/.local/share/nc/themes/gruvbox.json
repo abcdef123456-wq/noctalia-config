@@ -35,7 +35,10 @@
     "FENETRES_MAITRE_ORIENTATION": "droite",
     "FENETRES_OUVERTURE": "popin",
     "ANIM_BUREAUX": "fade",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_FORME": "rectangle",
+    "WIDGETS_BUREAU": "oui",
+    "FENETRES_MAITRE_PART": "0.55"
   },
   "noctalia": {
     "bar.default": {
@@ -78,7 +81,33 @@
     "ombre": "coloree"
   },
   "fonds": "gruvbox",
-  "fond_de_depart": "coucher-arches.jpg",
+  "fond_de_depart": "meules-automne.jpg",
   "credits": [],
-  "widgets": []
+  "widgets": [
+    {
+      "type": "horloge-mots",
+      "coin": "haut-gauche",
+      "taille": "moyen",
+      "style": "brutal"
+    },
+    {
+      "type": "calendrier",
+      "coin": "haut-gauche",
+      "taille": "moyen",
+      "style": "brutal"
+    },
+    {
+      "type": "meteo",
+      "coin": "haut-gauche",
+      "taille": "moyen",
+      "style": "brutal",
+      "variante": "phrase"
+    },
+    {
+      "type": "musique",
+      "coin": "haut-droite",
+      "taille": "moyen",
+      "style": "brutal"
+    }
+  ]
 }
