@@ -3,7 +3,9 @@
 - une barre sans pastilles a un fond, sauf sur un thème noir pur (texte sans fond illisible sur un fond d'écran clair) ;
 - une barre du haut sans bande ne montre pas l'heure : l'île fermée la montre déjà (la date, oui) ;
 - un thème a au plus une seconde barre, sur un autre bord que la première ;
-- des bureaux en style « minimal » sans chiffres ne dessinent rien (pastille vide vue sur oled et papier).
+- les bureaux posés dans une barre montrent leur chiffre (minimal sans chiffres = pastille vide, vu sur oled et papier ;
+  l'utilisateur ne voyait pas les numéros) ; en pilules pleines, jamais focused_color=on_surface (chiffre on_surface sur
+  une pilule on_surface : invisible, vu sur oled). En minimal, focused_color colore le chiffre lui-même : permis.
 Règles sur les fichiers des thèmes : pas de session, pas de Noctalia."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
 import contextlib
@@ -65,16 +67,20 @@ class Regles(unittest.TestCase):
                 for t in autres:
                     self.assertNotEqual(d["noctalia"][t].get("position"), barre(d)["position"])
 
-    def test_bureaux_minimal_avec_chiffres(self):
+    def test_bureaux_avec_chiffres(self):
         for nom, d in themes().items():
+            if nom == "noctalia":           # la base, identique à config.toml
+                continue
             b = d.get("noctalia", {}).get("bar.default", {})
             membres = [m for g in b.get("capsule_group", []) for m in g.get("members", [])]
             # sans listes, celles de config.toml (qui posent les bureaux) restent
             pose = "workspaces" in barre(d)["listes"] + membres or not any(k in b for k in ("start", "center", "end"))
             w = d.get("noctalia", {}).get("widget.workspaces", {})
-            if pose and w.get("style") == "minimal":
+            if pose:
                 with self.subTest(theme=nom):
-                    self.assertIs(w.get("show_labels"), True, "style minimal sans chiffres : la pastille des bureaux est vide")
+                    self.assertIs(w.get("show_labels"), True, "les numéros des bureaux ne sont pas visibles")
+                    if w.get("style", "regular") != "minimal":
+                        self.assertNotEqual(w.get("focused_color"), "on_surface", "chiffre invisible sur la pilule active")
 
     def test_controle_du_controle(self):
         """Les règles attrapent bien les défauts vus : bandeau de 36, texte sans fond, heure en double."""
@@ -92,7 +98,14 @@ class Regles(unittest.TestCase):
                 "widget.workspaces": {"style": "minimal", "show_labels": False}}}}):
             with self.assertRaises(AssertionError):
                 with patch.object(self, "subTest", lambda **k: contextlib.nullcontext()):
-                    self.test_bureaux_minimal_avec_chiffres()
+                    self.test_bureaux_avec_chiffres()
+        # et l'ancienne table d'oled (chiffres posés, pilule active on_surface)
+        with patch(__name__ + ".themes", lambda: {"oled": {"noctalia": {
+                "bar.default": {"start": ["workspaces"]},
+                "widget.workspaces": {"style": "regular", "show_labels": True, "focused_color": "on_surface"}}}}):
+            with self.assertRaises(AssertionError):
+                with patch.object(self, "subTest", lambda **k: contextlib.nullcontext()):
+                    self.test_bureaux_avec_chiffres()
 
 
 if __name__ == "__main__":

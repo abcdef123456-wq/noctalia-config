@@ -72,7 +72,9 @@
     },
     "widget.workspaces": {
       "style": "regular",
-      "show_labels": false
+      "show_labels": true,
+      "label_source": "id",
+      "labels_only_when_occupied": false
     },
     "widget.t-taches": {
       "type": "taskbar",

@@ -172,8 +172,8 @@ class SansPastilles(unittest.TestCase):
                                     self.assertIn(w, b["end"])
                             self.assertEqual("cpu" in b["end"], c.get("BARRE_SYSTEME") != "non")
                             if style == "apple":
-                                self.assertEqual(b["start"], ["logo", "nc/fenetres:titre"], "logo puis le titre, sans trou")
-                                self.assertNotIn("workspaces", listes)
+                                self.assertEqual(b["start"], ["logo", "workspaces", "nc/fenetres:titre"],
+                                                 "logo, bureaux numérotés, titre : sans trou (vu à l'écran)")
 
 class TitreEcran(unittest.TestCase):
     """titre.luau : outputName() est vide dans le rappel de runStream ; l'écran est lu au chargement et dans update()."""

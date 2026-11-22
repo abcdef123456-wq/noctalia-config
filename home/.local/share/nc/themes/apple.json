@@ -55,11 +55,17 @@
       "position": "top",
       "margin_edge": 0,
       "thickness": 40,
-      "start": ["logo", "nc/fenetres:titre"]
+      "start": [
+        "logo",
+        "workspaces",
+        "nc/fenetres:titre"
+      ]
     },
     "widget.workspaces": {
       "style": "minimal",
-      "show_labels": false
+      "show_labels": true,
+      "label_source": "id",
+      "labels_only_when_occupied": false
     }
   },
   "theme_sync": {

@@ -88,8 +88,10 @@
     },
     "widget.workspaces": {
       "style": "regular",
-      "show_labels": false,
-      "pill_scale": 1.2
+      "show_labels": true,
+      "pill_scale": 1.0,
+      "label_source": "id",
+      "labels_only_when_occupied": false
     },
     "widget.t-applis": {
       "type": "taskbar",

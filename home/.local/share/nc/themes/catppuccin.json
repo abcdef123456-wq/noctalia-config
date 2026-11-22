@@ -75,12 +75,14 @@
     },
     "widget.workspaces": {
       "style": "regular",
-      "show_labels": false,
-      "pill_scale": 1.4,
+      "show_labels": true,
+      "pill_scale": 1.0,
       "active_pill_size": 3.0,
       "focused_color": "primary",
       "occupied_color": "tertiary",
-      "empty_color": "outline"
+      "empty_color": "outline",
+      "label_source": "id",
+      "labels_only_when_occupied": false
     },
     "widget.t-date": {
       "type": "clock",

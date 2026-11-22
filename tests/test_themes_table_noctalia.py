@@ -7,18 +7,20 @@ import unittest
 from tests import test_themes as tt
 
 # zy-reglages.toml d'apple et d'oled tels qu'ils sortaient de 6c144c5 (sans police : fc-list est un faux vide), barres
-# épaissies et reserve_space d'apple en plus (défauts vus à l'écran, test_defauts_ecran_v3)
+# épaissies et reserve_space d'apple en plus (défauts vus à l'écran, test_defauts_ecran_v3) ; bureaux numérotés (vu à l'écran :
+# l'utilisateur ne voyait pas les numéros ; chiffre d'oled en primary, il était blanc sur sa pilule blanche)
 ENTETE = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n\n"
 APPLE = ENTETE + ('[lockscreen]\nblur_intensity = 0.35\ntransition = ["fade"]\n\n'
                   '[dock]\nposition = "bottom"\nenabled = true\nauto_hide = false\nmagnification = true\nicon_size = 56\nreserve_space = true\n\n'
                   '[bar.default]\ncapsule = false\nbackground_opacity = 0.55\nposition = "top"\nmargin_edge = 0\nthickness = 40\n\n'
-                  '[widget.workspaces]\nstyle = "minimal"\nshow_labels = false\n\n'
+                  '[widget.workspaces]\nstyle = "minimal"\nshow_labels = true\nlabel_source = "id"\nlabels_only_when_occupied = false\n\n'
                   '[wallpaper]\ntransition = ["fade"]\ndirectory = "@FONDS@"\n')
 OLED = ENTETE + ('[theme]\npure_black_dark = true\n\n'
                  '[bar.default]\nposition = "top"\nmargin_edge = 6\nmargin_ends = 16\nthickness = 34\ncapsule = false\n'
                  'background_opacity = 0.0\n\n'
-                 '[widget.workspaces]\nstyle = "regular"\nshow_labels = false\npill_scale = 0.8\nactive_pill_size = 2.2\n'
-                 'inactive_pill_size = 0.6\nfocused_color = "on_surface"\noccupied_color = "outline"\nempty_color = "outline"\n\n'
+                 '[widget.workspaces]\nstyle = "regular"\nshow_labels = true\npill_scale = 1.0\nactive_pill_size = 2.2\n'
+                 'inactive_pill_size = 0.6\nfocused_color = "primary"\noccupied_color = "secondary"\nempty_color = "outline"\n'
+                 'label_source = "id"\nlabels_only_when_occupied = false\n\n'
                  '[dock]\nenabled = false\n\n[wallpaper]\ndirectory = "@FONDS@"\n')
 
 

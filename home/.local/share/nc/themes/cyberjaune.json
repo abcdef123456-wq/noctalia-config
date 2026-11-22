@@ -66,7 +66,7 @@
       "style": "regular",
       "show_labels": true,
       "label_source": "id",
-      "pill_scale": 1.2
+      "pill_scale": 1.0
     },
     "widget.t-heure": {
       "type": "clock",

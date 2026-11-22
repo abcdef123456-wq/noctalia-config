@@ -58,13 +58,15 @@
     },
     "widget.workspaces": {
       "style": "regular",
-      "show_labels": false,
-      "pill_scale": 0.8,
+      "show_labels": true,
+      "pill_scale": 1.0,
       "active_pill_size": 2.2,
       "inactive_pill_size": 0.6,
-      "focused_color": "on_surface",
-      "occupied_color": "outline",
-      "empty_color": "outline"
+      "focused_color": "primary",
+      "occupied_color": "secondary",
+      "empty_color": "outline",
+      "label_source": "id",
+      "labels_only_when_occupied": false
     }
   },
   "theme_sync": {

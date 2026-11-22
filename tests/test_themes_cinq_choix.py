@@ -17,7 +17,9 @@ def cinq_choix(t):
     # Défauts de config.toml : barre en haut, flottante (margin_edge 6, épaisseur 36), capsules, bureaux « regular »
     barre = (bar.get("position", "top"), bar.get("margin_edge", 6) == 0, bar.get("capsule", True),
              bar.get("thickness", 36))
-    bureaux = (ws.get("style", "regular"), ws.get("show_labels", True), ws.get("label_source", "id"))
+    # labels_only_when_occupied : tous les numéros, ou seulement ceux des bureaux occupés (config.toml : occupés seulement)
+    bureaux = (ws.get("style", "regular"), ws.get("show_labels", True), ws.get("label_source", "id"),
+               ws.get("labels_only_when_occupied", True))
     dispo = (r.get("FENETRES_DISPOSITION", "dwindle"), r.get("FENETRES_MAITRE_ORIENTATION", "auto"))
     dock = (r.get("DOCK", "oui") == "oui", r.get("DOCK_POSITION", "bottom"),
             r.get("DOCK_AUTO", "oui") == "oui")

@@ -78,7 +78,9 @@
     },
     "widget.workspaces": {
       "style": "focus_hint",
-      "show_labels": false
+      "show_labels": true,
+      "label_source": "id",
+      "labels_only_when_occupied": false
     },
     "widget.t-heure": {
       "type": "clock",
