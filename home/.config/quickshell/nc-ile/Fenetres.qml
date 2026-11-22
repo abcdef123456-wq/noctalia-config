@@ -20,7 +20,14 @@ Item {
     Component.onCompleted: Hyprland.refreshToplevels()
 
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
-    function faire(action, t) { Quickshell.execDetached(t ? [Etat.bin + "nc-fenetre", action, adresse(t)] : [Etat.bin + "nc-fenetre", action]) }
+    readonly property bool widgets: Reglages.val("WIDGETS_BUREAU", "non") === "oui"
+    // « Tout masquer / afficher » cachent aussi les widgets du bureau ; « widgets » les bascule seuls (rien sur disque)
+    function faire(action, t) {
+        if (action === "widgets") { Etat.widgetsCaches = !Etat.widgetsCaches; return }
+        if (action === "tout-masquer") Etat.widgetsCaches = true
+        else if (action === "tout-afficher") Etat.widgetsCaches = false
+        Quickshell.execDetached(t ? [Etat.bin + "nc-fenetre", action, adresse(t)] : [Etat.bin + "nc-fenetre", action])
+    }
 
     Item {
         id: tete
@@ -34,8 +41,9 @@ Item {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 14
             Repeater {
                 model: [
-                    { texte: Reglages.t("Tout masquer", "Hide All"), action: "tout-masquer", ok: p.fenetres.length > 0 },
-                    { texte: Reglages.t("Tout afficher", "Show All"), action: "tout-afficher", ok: p.masquees.length > 0 }
+                    { texte: Reglages.t("Tout masquer", "Hide All"), action: "tout-masquer", ok: p.fenetres.length > 0 || (p.widgets && !Etat.widgetsCaches) },
+                    { texte: Reglages.t("Tout afficher", "Show All"), action: "tout-afficher", ok: p.masquees.length > 0 || Etat.widgetsCaches },
+                    { texte: Reglages.t("Widgets du bureau : ", "Desktop widgets: ") + (Etat.widgetsCaches ? Reglages.t("afficher", "show") : Reglages.t("cacher", "hide")), action: "widgets", ok: p.widgets }
                 ]
                 Texte {
                     required property var modelData

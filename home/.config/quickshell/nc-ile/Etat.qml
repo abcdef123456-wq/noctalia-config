@@ -377,6 +377,8 @@ Singleton {
         onLoadFailed: etat.verrouille = false
     }
     Timer { interval: 30000; repeat: true; running: !etat.ecranVu; onTriggered: { marqueEteint.reload(); marqueVerrou.reload() } }
+    // « Tout masquer » (page Fenêtres) cache aussi les widgets du bureau (Bureau.qml) ; seulement dans l'île, jamais sur disque
+    property bool widgetsCaches: false
     function majHeure() {
         var d = new Date(); maintenant = d
         if (d.getMinutes() !== minute.getMinutes() || d.getHours() !== minute.getHours() || d.getDate() !== minute.getDate()) minute = d

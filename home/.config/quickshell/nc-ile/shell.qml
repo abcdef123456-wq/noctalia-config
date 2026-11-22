@@ -224,6 +224,11 @@ ShellRoot {
         model: ["aurore", "vivant"].indexOf(Reglages.val("FOND_ANIME", "non")) >= 0 && !Reglages.sobre ? Quickshell.screens : []
         Fond { vivant: Reglages.val("FOND_ANIME", "non") === "vivant" }
     }
+    // Widgets du bureau (nc-reglages → Île → WIDGETS_BUREAU) : créés seulement à « oui »
+    Variants {
+        model: Reglages.val("WIDGETS_BUREAU", "non") === "oui" ? Quickshell.screens : []
+        Bureau {}
+    }
 
     IpcHandler {
         target: "ile"
