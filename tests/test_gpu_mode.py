@@ -303,6 +303,30 @@ class GpuMode(unittest.TestCase):
         self.lancer("basculer", "hybride")
         self.assertEqual(gsync.read_text().strip(), "0")
 
+    def test_gsync_sudo_seulement_dans_un_terminal(self):
+        """Hors session graphique, l'écriture passe par sudo : jamais sans terminal (pam_faillock compterait l'échec)."""
+        import pty
+        self.legion()
+        (self.sys / "module/legion_laptop").mkdir(parents=True)
+        gsync = self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")
+        gsync.chmod(0o444)
+        self.addCleanup(gsync.chmod, 0o644)
+        if os.access(gsync, os.W_OK):
+            self.skipTest("fichier toujours inscriptible (root)")
+        r = self.lancer("basculer", "--sans-question", "dediee", graphique=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("sudo", self.appels(), "sans terminal : sudo jamais lancé")
+        maitre, esclave = pty.openpty()
+        try:
+            env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", NC_SYSFS=str(self.sys),
+                       JOURNAL=str(self.journal))
+            subprocess.run([str(SCRIPT), "basculer", "--sans-question", "dediee"], env=env, stdin=esclave,
+                           capture_output=True, text=True, timeout=20)
+        finally:
+            os.close(maitre)
+            os.close(esclave)
+        self.assertIn("sudo tee", self.appels(), "dans un terminal : sudo demande le mot de passe")
+
     def test_gsync_sans_module_charge_ignore(self):
         self.legion()
         self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")

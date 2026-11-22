@@ -197,6 +197,8 @@ ecrire_sys() {
   if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&1; then
     printf '%s\n' "$v" | pkexec tee "$f" >/dev/null
   else
+    # Sans terminal, sudo ne peut pas demander le mot de passe : chaque essai raté compterait pour pam_faillock
+    [ -t 0 ] || return 1
     printf '%s\n' "$v" | sudo tee "$f" >/dev/null
   fi
 }
