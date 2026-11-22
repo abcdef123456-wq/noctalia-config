@@ -23,6 +23,10 @@
   "DOCK=oui",
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=non",
+  "ILE_FORME=encoche",
+  "WIDGETS_BUREAU=oui",
+  "FENETRES_SEULE_CENTREE=16:10",
+  "WIDGETS_THEME=horloge-geante:haut-droite:petit:carte:aiguille,calendrier:haut-droite:moyen:carte,musique:haut-droite:moyen:carte",
   "ILE_Y=5"
  ],
  "oled": [
@@ -163,6 +167,10 @@
   "FENETRES_OUVERTURE=popin",
   "ANIM_BUREAUX=fade",
   "DOCK=non",
+  "ILE_FORME=rectangle",
+  "WIDGETS_BUREAU=oui",
+  "FENETRES_MAITRE_PART=0.55",
+  "WIDGETS_THEME=horloge-mots:haut-gauche:moyen:brutal,calendrier:haut-gauche:moyen:brutal,meteo:haut-gauche:moyen:brutal::phrase,musique:haut-droite:moyen:brutal",
   "ILE_Y=5"
  ],
  "kanagawa": [
@@ -171,7 +179,7 @@
   "ILE_VERRE=100",
   "ILE_LUEUR=non",
   "ILE_ACCENTS=accent",
-  "ILE_CONTOUR_FERMEE=non",
+  "ILE_CONTOUR_FERMEE=oui",
   "WIDGETS_PLAQUE=oui",
   "FENETRES_BORDURE=1",
   "FENETRES_OMBRE=20",
@@ -191,6 +199,10 @@
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=oui",
   "ILE_BANDE=non",
+  "WIDGETS_BUREAU=oui",
+  "FENETRES_COLONNE_LARGEUR=0.80",
+  "FENETRES_SEULE_CENTREE=16:10",
+  "WIDGETS_THEME=horloge-geante:haut-gauche:petit:carte,calendrier:haut-gauche:moyen:carte,meteo:haut-gauche:moyen:carte,musique:haut-droite:grand:carte",
   "ILE_Y=5"
  ]
 }
