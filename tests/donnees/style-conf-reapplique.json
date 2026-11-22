@@ -47,7 +47,8 @@
   "FENETRES_COINS_FORME=rond",
   "FENETRES_MAITRE_ORIENTATION=centre",
   "FENETRES_FOND=noir",
-  "DOCK=non"
+  "DOCK=non",
+  "BARRE_SYSTEME=non"
  ],
  "nord": [
   "ILE_CONTOUR_EPAISSEUR=1",
@@ -181,6 +182,6 @@
   "DOCK=oui",
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=oui",
-  "ILE_BANDE=oui"
+  "ILE_BANDE=non"
  ]
 }

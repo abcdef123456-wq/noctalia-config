@@ -55,7 +55,7 @@ class Donnees(unittest.TestCase):
 
     def test_kanagawa(self):
         d = self.t["kanagawa"]["disposition"]
-        self.assertEqual(d["barre"]["position"], "right")
+        self.assertEqual(d["barre"]["position"], "top")          # bandeau d'encre en haut (recette)
         self.assertEqual(d["fenetres"]["disposition"], "scrolling")
 
     def test_nord(self):
