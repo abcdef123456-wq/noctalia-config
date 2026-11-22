@@ -142,10 +142,22 @@ local duree = ({ lente = 1.5, normale = 1, rapide = 0.65 })[nc.reglage("FENETRES
 local bureaux = ({ slidefadevert = "slidefadevert 15%", slidefade = "slidefade 15%", slidevert = "slidevert", slide = "slide",
                    fade = "fade" })[nc.reglage("ANIM_BUREAUX", "slidefadevert")] or "slidefadevert 15%"
 local ouverture = ({ popin = "popin 90%", slide = "slide", gnomed = "gnomed" })[nc.reglage("FENETRES_OUVERTURE", "popin")] or "popin 90%"
-hl.curve("emphasized",      { type = "bezier", points = { { 0.05, 0.7 }, { 0.1, 1 } } })
-hl.curve("emphasizedAccel", { type = "bezier", points = { { 0.3, 0 },    { 0.8, 0.15 } } })
-hl.curve("standard",        { type = "bezier", points = { { 0.2, 0 },    { 0, 1 } } })
-hl.curve("linear",          { type = "bezier", points = { { 0, 0 },      { 1, 1 } } })
+-- Caractère (nc-reglages, FENETRES_CARACTERE) : mêmes noms de courbes, autres points ; « auto » = les courbes d'origine.
+-- Les points en y hors de [0, 1] font dépasser l'animation (bezier d'Hyprland). Inconnu : auto. Le facteur s'applique à duree.
+local caracteres = {
+    auto   = { f = 1,    e = { { 0.05, 0.7 }, { 0.1, 1 } },    a = { { 0.3, 0 },  { 0.8, 0.15 } }, s = { { 0.2, 0 },  { 0, 1 } },    l = { { 0, 0 }, { 1, 1 } } },
+    doux   = { f = 1.4,  e = { { 0.2, 0.6 }, { 0.3, 1 } },     a = { { 0.4, 0 },  { 0.7, 0.3 } },   s = { { 0.4, 0 },  { 0.2, 1 } },  l = { { 0.25, 0.1 }, { 0.75, 0.9 } } },
+    vif    = { f = 0.75, e = { { 0.2, 0.9 }, { 0.2, 1.08 } },  a = { { 0.5, 0 },  { 0.9, 0.3 } },   s = { { 0.1, 0.8 }, { 0.2, 1.04 } }, l = { { 0.1, 0.1 }, { 0.9, 0.9 } } },
+    sec    = { f = 0.55, e = { { 0.4, 0.1 }, { 0.6, 0.9 } },   a = { { 0.5, 0.1 }, { 0.9, 0.5 } },  s = { { 0.4, 0.2 }, { 0.6, 0.8 } },  l = { { 0.33, 0.33 }, { 0.66, 0.66 } } },
+    rebond = { f = 1.1,  e = { { 0.3, 1.3 }, { 0.5, 1 } },     a = { { 0.5, -0.2 }, { 0.8, 0.2 } }, s = { { 0.2, 1.25 }, { 0.4, 1 } },  l = { { 0.2, 0.2 }, { 0.8, 0.8 } } },
+    aucun  = { f = 0.1,  e = { { 0, 1 }, { 0, 1 } },           a = { { 0, 1 }, { 0, 1 } },          s = { { 0, 1 }, { 0, 1 } },         l = { { 0, 1 }, { 0, 1 } } },
+}
+local car = caracteres[nc.reglage("FENETRES_CARACTERE", "auto")] or caracteres.auto
+duree = duree * car.f
+hl.curve("emphasized",      { type = "bezier", points = car.e })
+hl.curve("emphasizedAccel", { type = "bezier", points = car.a })
+hl.curve("standard",        { type = "bezier", points = car.s })
+hl.curve("linear",          { type = "bezier", points = car.l })
 
 hl.animation({ leaf = "global",           enabled = true, speed = 5 * duree,   bezier = "standard" })
 hl.animation({ leaf = "border",           enabled = true, speed = 5 * duree,   bezier = "standard" })
