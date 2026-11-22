@@ -2409,6 +2409,40 @@ def theme_choisi(nom):
                        f"theme \"{nom}\" not found in {dossier_themes()}"))
 
 
+COULEURS_NEUTRES = {"primary": "#8ab4f8", "secondary": "#c58af9", "tertiary": "#81c995", "surface": "#1e1f24",
+                    "onSurface": "#e3e3e8"}
+
+
+def themes_json(vals):
+    """Liste des thèmes valides (lecture seule, aucun réseau) pour le carrousel de l'île : palette résolue en couleurs.
+    Palette custom : lue dans le fichier ; builtin ou fond : couleurs neutres, marquées « approximative »."""
+    actif = valeur(vals, "STYLE")
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache")
+    ok = charger_themes()[0]
+    sortie_ = []
+    for nom in [n for n, _ in choix_styles() if n in ok]:
+        t = ok[nom]
+        src, pnom = t["palette"]
+        couleurs, approx = dict(COULEURS_NEUTRES), True
+        if src == "custom" and re.fullmatch(r"[\w .+-]+", pnom):
+            try:
+                with open(os.path.join(HOME, ".config/noctalia/palettes", pnom + ".json"), encoding="utf-8") as fh:
+                    m = json.load(fh)["dark"]
+                lues = {c: m["m" + c[0].upper() + c[1:]] for c in couleurs}
+                if all(isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v) for v in lues.values()):
+                    couleurs, approx = lues, False
+            except (OSError, ValueError, KeyError, TypeError):
+                pass                               # palette illisible : couleurs neutres, dites approximatives
+        miniature = ""
+        if t["fond_de_depart"]:
+            f = os.path.join(cache, "nc/carousel", os.path.basename(t["fond_de_depart"]) + ".W.webp")
+            miniature = f if os.path.isfile(f) else ""
+        sortie_.append({"nom": nom, "libelle": str(t["libelle"]), "actif": nom == actif, "palette": {"source": src, "nom": pnom},
+                        "couleurs": couleurs, "palette_approximative": approx, "reglages": t["reglages"],
+                        "miniature": miniature})
+    return sortie_
+
+
 def police_apple():
     """SF Pro si elle est installée, sinon Inter (très proche), sinon rien."""
     familles = set(sortie(["fc-list", ":", "family"]).replace(",", "\n").splitlines())
@@ -4789,6 +4823,8 @@ def cli(a):
             groupes.add(regler(vals, cle, v))
         appliquer([g for g in groupes if g], vals)
         print(T("Un seul indicateur VPN : la pilule de la barre.", "A single VPN indicator: the bar pill."))
+    elif a == ["themes", "--json"]:
+        print(json.dumps(themes_json(vals), ensure_ascii=False))
     elif a[0] == "get" and len(a) == 2 and a[1] in PAR_CLE:
         print(valeur_sure(vals, a[1])[0])
     elif a[0] == "set" and len(a) == 4 and a[1] == "--distant":
