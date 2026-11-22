@@ -11,7 +11,7 @@
 -- Deux groupes, jamais d'autres fonds : ceux du dossier de Noctalia (le thème, ou la racine dans la base), puis « Mes fonds »
 -- (son sous-dossier mes-fonds, à toi, qu'aucune mise à jour ne touche). Un titre au-dessus de la bande dit le groupe.
 -- Sous la bande : « Ajouter un fond… » (copie dans Mes fonds), « Ouvrir le dossier », et pour un de TES fonds au centre,
--- « Mettre à la corbeille ». Tout passe par ~/.local/bin/nc-fonds (les mêmes boutons sont dans nc-reglages → Fonds d'écran).
+-- « Mettre à la corbeille », pour un fond livré « Masquer ce fond ». Tout passe par ~/.local/bin/nc-fonds (les mêmes boutons sont dans nc-reglages → Fonds d'écran).
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
 local function env(nom)
@@ -38,6 +38,7 @@ local function tr(fr, en) return EN and en or fr end
 
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")
 local NC_FONDS = noctalia.expandPath("~/.local/bin/nc-fonds")
+local MASQUES = noctalia.expandPath("~/.config/nc/fonds-masques.conf")
 
 -- DEBUT cle
 -- Cache PAR DOSSIER : THUMBS/<clé>/. Clé : chemin du dossier sans « / » final, chaque octet hors [A-Za-z0-9._-] écrit %XX.
@@ -72,9 +73,20 @@ local function valeurConf(conf, cle)
   end
   return v
 end
--- Images de chaque groupe à la suite ; chacune garde son dossier (chemin complet), son groupe (g, perso) et ses vignettes
--- (clé de SON dossier). api : listDir, fileInfo, fileExists ; exts : extensions d'images
-local function listerFonds(groupes, racine, api, exts)
+-- Fonds masqués (~/.config/nc/fonds-masques.conf, écrit par nc-fonds masquer) : un chemin par ligne, relatif à
+-- ~/Pictures/Wallpapers (base) s'il y est, sinon complet
+local function cheminMasque(path, base)
+  if path:sub(1, #base + 1) == base .. "/" then return path:sub(#base + 2) end
+  return path
+end
+local function lireMasques(texte)
+  local m = {}
+  for l in string.gmatch(texte or "", "[^\n]+") do m[l] = true end
+  return m
+end
+-- Images de chaque groupe à la suite, sans les masquées ; chacune garde son dossier (chemin complet), son groupe (g, perso)
+-- et ses vignettes (clé de SON dossier). api : listDir, fileInfo, fileExists ; exts : extensions d'images
+local function listerFonds(groupes, racine, api, exts, masques, base)
   local out = {}
   for g, gr in ipairs(groupes) do
     local d = gr.dossier
@@ -86,7 +98,7 @@ local function listerFonds(groupes, racine, api, exts)
       if exts[ext] then
         local path = d .. "/" .. f
         local info = api.fileInfo(path)
-        if info and not info.isDir then
+        if info and not info.isDir and not (masques and masques[cheminMasque(path, base)]) then
           -- Vignette absente (pas encore découpée) : rien n'est affiché, jamais l'image d'origine (jusqu'à 8K)
           local tw, tn = thumbs .. f .. ".W.webp", thumbs .. f .. ".N.webp"
           table.insert(out, {
@@ -154,7 +166,8 @@ local function loadList()
   if not dir then return end
   -- Dans un thème : style.conf pose FONDS_DOSSIER
   dansTheme = (valeurConf(noctalia.readFile(noctalia.expandPath("~/.config/nc/style.conf")) or "", "FONDS_DOSSIER") or "") ~= ""
-  all = listerFonds(groupesDuCarrousel(dir), THUMBS, noctalia, EXTS)
+  local base = noctalia.expandPath("~/Pictures/Wallpapers"):gsub("/+$", "")
+  all = listerFonds(groupesDuCarrousel(dir), THUMBS, noctalia, EXTS, lireMasques(noctalia.readFile(MASQUES)), base)
   local total = {}
   for _, w in ipairs(all) do
     w.title = prettify(w.file)
@@ -350,6 +363,11 @@ local function boutons()
   if w and w.perso then
     table.insert(kids, bouton("corbeille", tr("Mettre à la corbeille", "Move to trash"), "trash", function()
       noctalia.runAsync({ NC_FONDS, "retirer", w.path }, relire, 15000)
+    end))
+  elseif w then
+    -- Un fond livré ne se supprime pas (la mise à jour le remettrait) : il se masque
+    table.insert(kids, bouton("masquer", tr("Masquer ce fond", "Hide this wallpaper"), "eye-off", function()
+      noctalia.runAsync({ NC_FONDS, "masquer", w.path }, relire, 15000)
     end))
   end
   if message then table.insert(kids, ui.label({ text = message, fontSize = TEXTE, color = "on_surface", maxLines = 1 })) end

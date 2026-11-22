@@ -7,19 +7,25 @@
 #   nc-fonds ajouter [IMAGE…]        COPIE les images dans « Mes fonds » (sans image : le sélecteur de fichiers) ; refus
 #                                    clair si ce n'est pas une image, avertissement (pas de refus) sous 2560 x 1600
 #   nc-fonds retirer IMAGE           met à la corbeille un fond de « Mes fonds » (jamais un fond livré)
+#   nc-fonds masquer IMAGE           un fond livré que tu ne veux plus : ajouté à ~/.config/nc/fonds-masques.conf (un
+#                                    chemin relatif à ~/Pictures/Wallpapers par ligne), le carrousel ne le montre plus ;
+#                                    le fichier reste (supprimé, la mise à jour suivante le remettrait)
+#   nc-fonds reafficher              vide cette liste : les fonds masqués reviennent
 # --notifier (avec ajouter) : le message part aussi en notification (le carrousel s'est fermé pour le sélecteur).
 # Code 0 si c'est fait (ou annulé), 1 si refusé (message sur la sortie d'erreur), 2 pour un usage inconnu.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 IM=$(command -v magick >/dev/null && echo magick || echo convert)
 EXTS="jpg jpeg png webp bmp avif jxl"          # celles que nc-carousel-thumbs découpe
-usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE"; }
+usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE | masquer IMAGE | reafficher"; }
 refus() { echo "$1" >&2; exit 1; }
 
 # Le dossier des fonds lu comme Noctalia : une seule règle, celle de nc-carousel-thumbs
 src=$("${0%/*}/nc-carousel-thumbs" --dossier 2>/dev/null) || src=""
 [ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
 mes="$src/mes-fonds"
+FONDS="$HOME/Pictures/Wallpapers"
+MASQUES="$HOME/.config/nc/fonds-masques.conf"     # même chemin et même règle dans panel.luau (cheminMasque)
 
 notifier=0
 ajouter() {
@@ -95,6 +101,22 @@ case "${1:-}" in
       refus "$(t "Seuls tes fonds (Mes fonds) vont à la corbeille ; un fond livré se masque." "Only your wallpapers (My wallpapers) go to the trash; a bundled one is hidden instead.")"
     gio trash -- "$p" 2>/dev/null || refus "$(t "Corbeille impossible (gio absent ?) : rien n'est supprimé." "Cannot move to the trash (gio missing?): nothing deleted.")"
     echo "$(t "« ${p##*/} » est à la corbeille." "\"${p##*/}\" moved to the trash.")" ;;
+  masquer)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    # -s : chemin sans suivre les liens, comme le carrousel l'écrit (relatif à ~/Pictures/Wallpapers s'il y est)
+    p=$(realpath -es -- "$2" 2>/dev/null) && [ -f "$p" ] || refus "$(t "Fichier introuvable." "File not found.")"
+    [ "$(basename -- "$(dirname -- "$p")")" != mes-fonds ] ||
+      refus "$(t "Un fond à toi ne se masque pas : mets-le à la corbeille." "Your own wallpaper is not hidden: move it to the trash.")"
+    rel="${p#"$FONDS"/}"
+    case "$rel" in *$'\n'*) refus "$(t "Nom de fichier illisible pour la liste." "File name unreadable for the list.")" ;; esac
+    mkdir -p -- "${MASQUES%/*}" || refus "$(t "Impossible d'écrire $MASQUES." "Cannot write $MASQUES.")"
+    grep -qxF -- "$rel" "$MASQUES" 2>/dev/null || printf '%s\n' "$rel" >> "$MASQUES" ||
+      refus "$(t "Impossible d'écrire $MASQUES." "Cannot write $MASQUES.")"
+    echo "$(t "« ${p##*/} » est masqué : il ne revient plus dans le carrousel (Réglages → Fonds d'écran → Réafficher)." "\"${p##*/}\" is hidden: it no longer shows in the carousel (Settings → Wallpapers → Show again).")" ;;
+  reafficher)
+    n=$(grep -c . "$MASQUES" 2>/dev/null) || n=0
+    rm -f -- "$MASQUES"
+    echo "$(t "$n fond(s) réaffiché(s)." "$n wallpaper(s) shown again.")" ;;
   -h|--help|aide) usage ;;
   *) usage >&2; exit 2 ;;
 esac

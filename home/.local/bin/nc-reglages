@@ -5056,7 +5056,12 @@ def catalogue(vals):
                 ("action:fonds-ouvrir", T("Ouvrir « Mes fonds »", "Open “My wallpapers”"),
                  T("Ouvre le dossier mes-fonds du thème en cours (créé s'il manque) : tes images y sont à l'abri des mises à jour.",
                    "Opens the current theme's mes-fonds folder (created if missing): your pictures there are safe from updates."),
-                 ["nc-fonds", "ouvrir"], T("Ouvrir", "Open")))):
+                 ["nc-fonds", "ouvrir"], T("Ouvrir", "Open")),
+                ("action:fonds-reafficher", T("Réafficher les fonds masqués", "Show hidden wallpapers again"),
+                 T("Les fonds livrés que tu as masqués dans le carrousel (« Masquer ce fond ») reviennent. Rien n'a été "
+                   "supprimé : la liste est ~/.config/nc/fonds-masques.conf.",
+                   "The bundled wallpapers you hid in the carousel (“Hide this wallpaper”) come back. Nothing was "
+                   "deleted: the list is ~/.config/nc/fonds-masques.conf."), ["nc-fonds", "reafficher"], T("Réafficher", "Show")))):
             res.insert(k + 2, dict(cle=cle_f, section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"), nom=nom_f,
                                    genre="action", defaut="", aide=aide_f, choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
                                    valeur="", affiche=aff_f, modifie=False, groupe="", commande=cmd_f, relire=True))

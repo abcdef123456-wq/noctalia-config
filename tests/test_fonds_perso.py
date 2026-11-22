@@ -4,8 +4,11 @@ F1 : ~/Pictures/Wallpapers/<thème>/mes-fonds/ (et mes-fonds/ à la racine pour 
 jamais touché par install.sh (boucle de copie rejouée) ni par nc-maj (vrais dépôts git, faux install.sh en sh).
 F3 : nc-fonds ajoute (copie), ouvre, met à la corbeille un fond à toi (jamais un fond livré) ; faux magick, zenity,
 gio, systemctl et xdg-open en sh qui notent leurs arguments.
+F4 : un fond livré se masque (liste fonds-masques.conf, le fichier reste) ; le carrousel ne le montre plus ;
+« reafficher » vide la liste. Contrôle : l'ancien carrousel (9dc038d) montre le fond masqué.
 Tout se passe dans un dossier temporaire : HOME et XDG_* y pointent."""
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -20,6 +23,7 @@ NC_MAJ = REPO / "home/.local/bin/nc-maj"
 NC_FONDS = REPO / "home/.local/bin/nc-fonds"
 PANEL = REPO / "home/.local/share/noctalia/plugins/nc-carousel/panel.luau"
 REGLAGES = REPO / "home/.local/bin/nc-reglages"
+LUA = shutil.which("lua") or shutil.which("lua5.4")
 # La boucle de copie d'install.sh, telle quelle
 BOUCLE = INSTALL[INSTALL.index("while IFS= read -r -d '' src; do\n  rel=\"${src#\"$root/\"}\""):
                  INSTALL.index('done < <(find "$root" -type f -print0)') + len('done < <(find "$root" -type f -print0)')]
@@ -125,7 +129,7 @@ class F1Maj(Base):
         self.assertEqual(self.etat_mes_fonds(), avant)
 
 
-class Fonds(Base):
+class EnvFonds(Base):
     """nc-fonds dans un faux HOME, avec de faux programmes."""
     def setUp(self):
         super().setUp()
@@ -164,6 +168,8 @@ class Fonds(Base):
     def journal_de(self, nom):
         return [l for l in self.journal.read_text().splitlines() if l.startswith(nom + " ")]
 
+
+class F3Fonds(EnvFonds):
     def test_dossier_du_theme_et_de_la_base(self):
         self.assertEqual(self.lance("dossier").stdout.strip(), f"{self.fonds}/mes-fonds")
         mes = self.theme()
@@ -260,6 +266,74 @@ class Fonds(Base):
         reglages = REGLAGES.read_text(encoding="utf-8")
         self.assertIn('["nc-fonds", "ajouter"]', reglages)
         self.assertIn('["nc-fonds", "ouvrir"]', reglages)
+
+
+class F4Masquer(EnvFonds):
+    def masques(self):
+        f = self.home / ".config/nc/fonds-masques.conf"
+        return f.read_text().splitlines() if f.exists() else None
+
+    def test_masquer_un_fond_livre_garde_le_fichier(self):
+        r = self.lance("masquer", str(self.fonds / "nord/n.png"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.lance("masquer", str(self.fonds / "nord/../nord/n.png"))     # deux fois : une seule ligne
+        self.assertEqual(self.masques(), ["nord/n.png"])
+        self.assertTrue((self.fonds / "nord/n.png").exists())             # jamais supprimé (il reviendrait)
+        r = self.lance("reafficher")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 fond(s) réaffiché(s)", r.stdout)
+        self.assertIsNone(self.masques())
+
+    def test_un_fond_a_toi_ne_se_masque_pas(self):
+        mes = self.theme()
+        self.lance("ajouter", str(self.image))
+        r = self.lance("masquer", str(mes / "mon fond.png"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("corbeille", r.stderr)
+        self.assertIsNone(self.masques())
+
+    def lance_liste(self, src, appel):
+        bloc = src.split("-- DEBUT cle", 1)[1].split("-- FIN cle", 1)[0].split("\n", 1)[1]
+        prog = bloc + r"""
+local fichiers = {
+  ["/h/u/Pictures/Wallpapers/nord"] = { "a.png", "b.png", "mes-fonds" },
+  ["/h/u/Pictures/Wallpapers/nord/mes-fonds"] = { "m.png" },
+}
+local api = {
+  listDir = function(d) local l = fichiers[(d:gsub("/$", ""))]; if not l then return nil end
+    local c = {} for i, f in ipairs(l) do c[i] = f end return c end,
+  fileInfo = function(p) return { isDir = fichiers[p] ~= nil } end,
+  fileExists = function() return true end,
+}
+local out = {}
+for _, w in ipairs(""" + appel + r""") do out[#out + 1] = w.path end
+io.write(table.concat(out, "\n"))
+"""
+        f = self.r / "liste.lua"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.split("\n")
+
+    @unittest.skipUnless(LUA, "lua absent")
+    def test_le_carrousel_cache_les_masques(self):
+        l = self.lance_liste(PANEL.read_text(encoding="utf-8"),
+                             'listerFonds(groupesDuCarrousel("/h/u/Pictures/Wallpapers/nord"), "/c/", api, { png = true }, '
+                             'lireMasques("nord/b.png\\n/ailleurs/x.png\\n"), "/h/u/Pictures/Wallpapers")')
+        self.assertEqual(l, ["/h/u/Pictures/Wallpapers/nord/a.png", "/h/u/Pictures/Wallpapers/nord/mes-fonds/m.png"])
+        r = subprocess.run(["git", "-C", str(REPO), "show", "9dc038d:home/.local/share/noctalia/plugins/nc-carousel/panel.luau"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            self.skipTest("9dc038d absent (clone partiel)")
+        vieux = self.lance_liste(r.stdout, 'listerFonds({ "/h/u/Pictures/Wallpapers/nord" }, "/c/", api, { png = true }, '
+                                           '{ ["nord/b.png"] = true }, "/h/u/Pictures/Wallpapers")')
+        self.assertIn("/h/u/Pictures/Wallpapers/nord/b.png", vieux, "contrôle : l'ancien carrousel montrait le fond masqué")
+
+    def test_boutons_masquer_et_reafficher(self):
+        panneau = PANEL.read_text(encoding="utf-8")
+        i = panneau.index("elseif w then")
+        self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 400])     # seulement pour un fond livré
+        self.assertIn('["nc-fonds", "reafficher"]', REGLAGES.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
