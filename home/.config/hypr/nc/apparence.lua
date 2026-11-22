@@ -4,8 +4,20 @@
 -- Famille des fenêtres réglable par un thème (nc-reglages) : « auto », absent ou inconnu = les valeurs d'origine.
 local disposition = ({ dwindle = "dwindle", master = "master", scrolling = "scrolling" })[nc.reglage("FENETRES_DISPOSITION", "dwindle")] or "dwindle"
 -- Orientation de la grande fenêtre : seulement en master (sinon rien n'est posé)
+-- Maître au centre avec de l'air (FENETRES_MAITRE_CENTRE_AIR = oui) : orientation « centre » si aucune n'est choisie
+local maitre_air = (disposition == "master") and nc.reglage("FENETRES_MAITRE_CENTRE_AIR", "auto") == "oui"
 local maitre_orientation = (disposition == "master")
-    and ({ gauche = "left", droite = "right", haut = "top", bas = "bottom", centre = "center" })[nc.reglage("FENETRES_MAITRE_ORIENTATION", "auto")] or nil
+    and ({ gauche = "left", droite = "right", haut = "top", bas = "bottom", centre = "center" })[nc.reglage("FENETRES_MAITRE_ORIENTATION", "auto")]
+    or (maitre_air and "center" or nil)
+-- Rangement (nc-reglages) : un nombre dans l'intervalle, sinon nil (« auto », absent ou faux : rien n'est posé)
+local function borne(cle, mini, maxi)
+    local n = tonumber(nc.reglage(cle, "auto"))
+    return (n and n >= mini and n <= maxi) and n or nil
+end
+local maitre_part = (disposition == "master") and borne("FENETRES_MAITRE_PART", 0.3, 0.8) or nil
+local colonne = (disposition == "scrolling") and borne("FENETRES_COLONNE_LARGEUR", 0.3, 1.0) or nil
+local coupe = (disposition == "dwindle") and borne("FENETRES_COUPE", 0.3, 1.7) or nil
+local seule = ({ ["16:10"] = { x = 16, y = 10 }, ["4:3"] = { x = 4, y = 3 }, ["1:1"] = { x = 1, y = 1 } })[nc.reglage("FENETRES_SEULE_CENTREE", "non")]
 local fond = ({ auto = "rgb(0b0d12)", noir = "rgb(000000)" })[nc.reglage("FENETRES_FOND", "auto")] or "rgb(0b0d12)"
 local ombre_decalage = ({ auto = { 0, 4 }, aucun = { 0, 0 }, bas = { 0, 8 }, dure = { 8, 8 } })[nc.reglage("FENETRES_OMBRE_DECALAGE", "auto")] or { 0, 4 }
 
@@ -183,6 +195,16 @@ hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5 * duree, b
 -- Bureaux cachés (terminal déroulant, bloc-notes) : descendent du haut de l'écran et y remontent
 hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidevert -100%" })
 hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5 * duree,   bezier = "standard" })
+
+-- Rangement : posé à part et sous pcall (option absente d'une ancienne version : ignorée) ; rien si tout est « auto »
+if maitre_part or maitre_air or colonne or coupe or seule then
+    pcall(hl.config, {
+        master    = { mfact = maitre_part, slave_count_for_center_master = maitre_air and 0 or nil },
+        scrolling = { column_width = colonne },
+        dwindle   = { default_split_ratio = coupe },
+        layout    = { single_window_aspect_ratio = seule },
+    })
+end
 
 -- Hyprland 0.56 et plus : pas de barre d'onglets pour un groupe d'une seule fenêtre (option absente avant : ignorée)
 if nc.hypr_min and nc.hypr_min(0, 56, 0) then

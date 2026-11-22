@@ -38,6 +38,11 @@ Niveau 1 (sans root) :
 | `FENETRES_MAITRE_ORIENTATION` | `auto`, `gauche`, `droite`, `haut`, `bas`, `centre` | Côté de la grande fenêtre, seulement en `master` ; `auto` = comme avant. |
 | `FENETRES_FOND` | `auto`, `noir` | Couleur derrière les fenêtres (`misc.background_color`) ; `auto` = comme avant. |
 | `FENETRES_OMBRE_DECALAGE` | `auto`, `aucun`, `bas`, `dure` | Décalage de l'ombre (`shadow.offset`) ; `auto` = comme avant. |
+| `FENETRES_MAITRE_PART` | `auto`, 0.30 à 0.80 | Part de la grande fenêtre (`master.mfact`), seulement en `master`. |
+| `FENETRES_MAITRE_CENTRE_AIR` | `auto`, `oui` | Grande fenêtre au centre même seule (`slave_count_for_center_master = 0`), seulement en `master`. |
+| `FENETRES_SEULE_CENTREE` | `non`, `16:10`, `4:3`, `1:1` | Une fenêtre seule garde ce format, centrée (`layout.single_window_aspect_ratio`). |
+| `FENETRES_COLONNE_LARGEUR` | `auto`, 0.3 à 1.0 | Largeur des colonnes (`scrolling.column_width`), seulement en `scrolling`. |
+| `FENETRES_COUPE` | `auto`, 0.3 à 1.7 | Partage d'une nouvelle fenêtre (`dwindle.default_split_ratio`), seulement en `dwindle`. |
 | `FENETRES_OMBRE` | 0, 22 | |
 | `HZ_PERFORMANCE`, `HZ_BALANCED_AC` | `max` | écran |
 | `HZ_BALANCED_BAT`, `HZ_ECO` | `max` ; `60` seulement dans un profil marqué « film sur batterie » (écran de plus de 60 Hz) | écran |
