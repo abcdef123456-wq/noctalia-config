@@ -2736,7 +2736,7 @@ def _verifier_theme(nom, d):
         objet(w, "widgets", {"type", "coin", "taille", "style", "chiffres", "variante"}, ("type", "coin", "taille"))
         for k, permis in (("type", WIDGETS_TYPES), ("coin", WIDGETS_COINS), ("taille", WIDGETS_TAILLES), ("style", WIDGETS_STYLES),
                           ("chiffres", WIDGETS_CHIFFRES if str(w.get("type")).startswith("horloge-") else ()),
-                          ("variante", WIDGETS_VARIANTES.get(w.get("type"), ()))):
+                          ("variante", WIDGETS_VARIANTES.get(w["type"], ()) if isinstance(w["type"], str) else ())):
             if k in w and w[k] not in permis:
                 refus(f"« widgets.{k} » : {', '.join(permis) or '-'}", f"\"widgets.{k}\": {', '.join(permis) or '-'}")
     return {"nom": nom, "libelle": lib, "palette": [src, pnom], "reglages": reglages, "noctalia": noct,

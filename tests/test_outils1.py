@@ -390,6 +390,15 @@ class VerrouPlace(Base):
         self.assertEqual(tomllib.loads(etat)["lockscreen_widgets"]["widget_order"], ["nc-heure"])
         self.assertNotIn('"autre"', etat)
 
+    def test_widget_order_sans_crochet_fermant_rien_d_efface(self):
+        """Tableau mal fermé : on ne remplace rien, et surtout la suite du fichier n'est pas effacée."""
+        casse = self.CONFIG.replace('widget_order = ["nc-heure"]', 'widget_order = [\n  "nc-heure",')
+        (self.etat / "settings.toml").write_text(casse)
+        self.lancer()
+        etat = (self.etat / "settings.toml").read_text()
+        self.assertIn('widget_order = [\n  "nc-heure",', etat)
+        self.assertIn('type = "nc/verrou:heure"', etat)
+
     def _ecrans(self, noms):
         ecrans = json.dumps([{"name": n, "width": 2000 if n == "DP-1" else 800, "height": 1000, "scale": 1.0,
                               "transform": 0} for n in noms])

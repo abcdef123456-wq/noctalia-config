@@ -36,12 +36,17 @@ def pixel(png, x, y):
     return tuple(lignes[y][x * 4:x * 4 + 4])
 
 
-def rendre(outil, dossier, etat, forme=None):
+# Pages coupées par défaut depuis le commit de référence (Reglages.qml, pagesCoupees) : rouvertes pour comparer à égalité
+PAGES_REF = "".join("ILE_PAGE_%s=oui\n" % n.upper() for n in ("assistant", "claude", "sante", "jeu", "appel", "terminal",
+                                                               "fenetres", "minuteur"))
+
+
+def rendre(outil, dossier, etat, forme=None, en_plus=""):
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL")}
     cmd = [sys.executable, str(outil), "--sortie", str(dossier)]
     if forme:
         conf = Path(dossier) / ("%s.conf" % forme)
-        conf.write_text("ILE_FORME=%s\n" % forme)
+        conf.write_text("ILE_FORME=%s\n" % forme + en_plus)
         cmd += ["--reglages", str(conf)]
     r = subprocess.run(cmd + [etat], capture_output=True, text=True, env=env, timeout=240)
     assert r.returncode == 0, r.stderr
@@ -172,7 +177,7 @@ class Rendu(unittest.TestCase):
             d1.mkdir()
             d2.mkdir()
             vieux = rendre(ref / "outils/rendu-ile.py", d1, etat)
-            neuf = rendre(OUTIL, d2, etat, "pilule")
+            neuf = rendre(OUTIL, d2, etat, "pilule", PAGES_REF)
             self.assertEqual(vieux.read_bytes(), neuf.read_bytes(), etat)
 
 

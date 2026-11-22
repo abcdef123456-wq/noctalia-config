@@ -141,6 +141,8 @@ class Validation(Base):
         self.refuse([{"type": "citation", "coin": "centre"}])
         self.refuse([dict(OK, extra=1)])
         self.refuse(["horloge-fine"])
+        self.refuse([dict(OK, type=["horloge-geante"], variante="x")], "widgets.type")   # liste : refus, pas de trace
+        self.refuse([dict(OK, type={"a": 1}, variante="x")], "widgets.type")
 
     def test_huit_au_plus_et_nouveaux_types_et_styles(self):
         self.refuse([OK] * 9)
