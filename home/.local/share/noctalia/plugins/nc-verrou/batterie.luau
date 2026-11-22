@@ -24,6 +24,29 @@ end
 local EN = langue() == "en"
 local function tr(fr, en) return EN and en or fr end
 
+-- DEBUT couleur : identique dans heure, batterie et musique (tests/test_verrou_police_couleur.py le vérifie) ; Lua et Luau
+-- Blanc, ou mPrimary de colors.json si VERROU_COULEUR=accent ; fichier absent, de plus de 64 Ko ou mal formé : blanc
+local BLANC = "#ffffff"
+local function choisirCouleur(reglage, json)
+  if reglage ~= "accent" or type(json) ~= "string" or #json > 65536 then return BLANC end
+  local c = string.match(json, '"mPrimary"%s*:%s*"(#%x%x%x%x%x%x)"')
+  return c or BLANC
+end
+-- VERROU_COULEUR dans style.conf puis reglages.conf ; la couleur n'est lue que pour « accent »
+local function couleurVerrou(reglage)
+  if reglage == nil then
+    for _, nom in ipairs({ "~/.config/nc/style.conf", "~/.config/nc/reglages.conf" }) do
+      local t = noctalia.readFile(noctalia.expandPath(nom)) or ""
+      for k, v in string.gmatch(t, "([%u%d_]+)=([^\n]*)") do
+        if k == "VERROU_COULEUR" then reglage = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "") end
+      end
+    end
+  end
+  if reglage ~= "accent" then return BLANC end
+  return choisirCouleur(reglage, noctalia.readFile(noctalia.expandPath("~/.config/noctalia/colors.json")))
+end
+-- FIN couleur
+
 local L, H = 200, 40
 local derniere = nil
 
@@ -45,7 +68,8 @@ function rendre()
   local statut, pc = etat()
   local branche = statut == "Charging" or statut == "Full" or statut == "Not charging"
   EN = langue() == "en"
-  local cle = tostring(branche) .. pc .. tostring(EN)
+  local couleur = branche and couleurVerrou() or BLANC     -- relue (5 s) seulement quand la batterie est montrée
+  local cle = tostring(branche) .. pc .. tostring(EN) .. couleur
   if cle == derniere then return end
   derniere = cle
   if not statut or not branche then
@@ -54,7 +78,7 @@ function rendre()
   end
   desktopWidget.render(ui.row({ width = L, height = H, align = "center", justify = "center", gap = 6 }, {
     ui.glyph({ name = "bolt", size = 18, color = "#30d158" }),
-    ui.label({ text = tr(pc .. " %", pc .. "%"), fontSize = 16, fontWeight = "semibold", color = "#ffffff" }),
+    ui.label({ text = tr(pc .. " %", pc .. "%"), fontSize = 16, fontWeight = "semibold", color = couleur }),
   }))
 end
 

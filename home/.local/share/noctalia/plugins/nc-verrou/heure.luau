@@ -3,7 +3,7 @@
 -- grande heure, et un message à toi en dessous si tu en as mis un.
 -- Réglages (nc-reglages → Verrouillage) : VERROU_HORLOGE (grande, fine, petite), VERROU_PHOTO (oui/non),
 -- VERROU_MESSAGE (texte ; « aucun » : rien), VERROU_POLICE (familles installées séparées par des virgules ; vide : police de
--- Noctalia), VERROU_COULEUR (blanc, accent). Relus chaque minute. Batterie et musique restent blanches.
+-- Noctalia), VERROU_COULEUR (blanc, accent). Relus chaque minute. La batterie et la musique suivent le même réglage.
 -- Taille : box_width / box_height du widget dans config.toml (640 × 280).
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
@@ -69,6 +69,9 @@ local function famillesInstallees(sortie)
   end
   return t
 end
+-- FIN choix
+
+-- DEBUT couleur : identique dans heure, batterie et musique (tests/test_verrou_police_couleur.py le vérifie) ; Lua et Luau
 -- Blanc, ou mPrimary de colors.json si VERROU_COULEUR=accent ; fichier absent, de plus de 64 Ko ou mal formé : blanc
 local BLANC = "#ffffff"
 local function choisirCouleur(reglage, json)
@@ -76,7 +79,20 @@ local function choisirCouleur(reglage, json)
   local c = string.match(json, '"mPrimary"%s*:%s*"(#%x%x%x%x%x%x)"')
   return c or BLANC
 end
--- FIN choix
+-- VERROU_COULEUR dans style.conf puis reglages.conf ; la couleur n'est lue que pour « accent »
+local function couleurVerrou(reglage)
+  if reglage == nil then
+    for _, nom in ipairs({ "~/.config/nc/style.conf", "~/.config/nc/reglages.conf" }) do
+      local t = noctalia.readFile(noctalia.expandPath(nom)) or ""
+      for k, v in string.gmatch(t, "([%u%d_]+)=([^\n]*)") do
+        if k == "VERROU_COULEUR" then reglage = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "") end
+      end
+    end
+  end
+  if reglage ~= "accent" then return BLANC end
+  return choisirCouleur(reglage, noctalia.readFile(noctalia.expandPath("~/.config/noctalia/colors.json")))
+end
+-- FIN couleur
 
 local polices = nil        -- liste fc-list, lue une seule fois au démarrage (nil tant qu'elle n'est pas arrivée)
 if noctalia.runAsync then
@@ -101,10 +117,7 @@ function rendre()
   local taille, graisse = 150, "bold"
   if horloge == "fine" then graisse = "regular" elseif horloge == "petite" then taille, graisse = 96, "semibold" end
   if message ~= "" and taille > 130 then taille = 130 end        -- place pour le message
-  local couleur = BLANC
-  if r.VERROU_COULEUR == "accent" then
-    couleur = choisirCouleur("accent", noctalia.readFile(noctalia.expandPath("~/.config/noctalia/colors.json")))
-  end
+  local couleur = couleurVerrou(r.VERROU_COULEUR or "")
   local police = polices and choisirPolice(r.VERROU_POLICE, polices)
   local haut = photo and ui.image({ path = PHOTO, width = 56, height = 56, fit = "cover", radius = 28 })
     or ui.glyph({ name = "lock", size = 22, color = "#ffffff", opacity = 0.85 })

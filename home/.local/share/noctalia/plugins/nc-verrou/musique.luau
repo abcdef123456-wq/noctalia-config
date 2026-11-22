@@ -8,11 +8,35 @@
 --   Vie privée : VERROU_MUSIQUE (nc-reglages → Apparence) = tout | sans-navigateur (défaut) | icone. Un navigateur
 --   affiche le titre de l'onglet : avec sans-navigateur il n'y a que son icône et « Lecture en cours » ; avec icone,
 --   tous les lecteurs n'ont que leur icône. Les boutons précédent / suivant ne sont cliquables qu'avec « tout ».
+--   Couleur : le titre suit VERROU_COULEUR (blanc ou accent) ; capsule noire, gris et boutons ne changent pas.
 --   Énergie : écran éteint (fichier nc-ecran-eteint de nc-ecran), plus aucun lancement ; 5 s au lieu de 1 s si rien ne joue.
 --   Navigateurs sans métadonnées : « Épisode 3 – Série – Crunchyroll » devient « Épisode 3 – Série », source « Crunchyroll ».
 -- Taille : box_width / box_height du widget dans config.toml (680 × 104).
 
-local NOIR, BLANC, GRIS, PISTE, TUILE = "#000000", "#ffffff", "#98989d", "#3a3a3c", "#1c1c1e"
+-- DEBUT couleur : identique dans heure, batterie et musique (tests/test_verrou_police_couleur.py le vérifie) ; Lua et Luau
+-- Blanc, ou mPrimary de colors.json si VERROU_COULEUR=accent ; fichier absent, de plus de 64 Ko ou mal formé : blanc
+local BLANC = "#ffffff"
+local function choisirCouleur(reglage, json)
+  if reglage ~= "accent" or type(json) ~= "string" or #json > 65536 then return BLANC end
+  local c = string.match(json, '"mPrimary"%s*:%s*"(#%x%x%x%x%x%x)"')
+  return c or BLANC
+end
+-- VERROU_COULEUR dans style.conf puis reglages.conf ; la couleur n'est lue que pour « accent »
+local function couleurVerrou(reglage)
+  if reglage == nil then
+    for _, nom in ipairs({ "~/.config/nc/style.conf", "~/.config/nc/reglages.conf" }) do
+      local t = noctalia.readFile(noctalia.expandPath(nom)) or ""
+      for k, v in string.gmatch(t, "([%u%d_]+)=([^\n]*)") do
+        if k == "VERROU_COULEUR" then reglage = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "") end
+      end
+    end
+  end
+  if reglage ~= "accent" then return BLANC end
+  return choisirCouleur(reglage, noctalia.readFile(noctalia.expandPath("~/.config/noctalia/colors.json")))
+end
+-- FIN couleur
+
+local NOIR, GRIS, PISTE, TUILE = "#000000", "#98989d", "#3a3a3c", "#1c1c1e"
 local L, H = 680, 104
 local MEDIA = noctalia.expandPath("~/.local/bin/nc-verrou-media")
 local NAVIGATEURS = { "firefox", "chrom", "brave", "vivaldi", "opera", "edge", "zen", "librewolf", "floorp", "epiphany",
@@ -23,6 +47,7 @@ local media = nil          -- { etat, titre, source, pochette, icone, duree, pos
 local derniereLecture = 0
 local ecranEteint = false
 local mode = "sans-navigateur"   -- VERROU_MUSIQUE, relu à chaque lecture
+local couleur = BLANC            -- VERROU_COULEUR (titre), relu à chaque lecture
 
 local function maintenant() return noctalia.nowMs() end
 
@@ -58,21 +83,25 @@ local function temps(s)
 end
 
 -- VERROU_MUSIQUE dans style.conf puis reglages.conf (comme heure.luau) ; valeur inconnue : le défaut
+-- Rend aussi VERROU_COULEUR (même lecture des deux fichiers : rien n'est lu deux fois par seconde)
 local function lireMode()
-  local m = "sans-navigateur"
+  local m, c = "sans-navigateur", ""
   for _, nom in ipairs({ "~/.config/nc/style.conf", "~/.config/nc/reglages.conf" }) do
     local t = noctalia.readFile(noctalia.expandPath(nom)) or ""
     for k, v in string.gmatch(t, "([%u%d_]+)=([^\n]*)") do
       if k == "VERROU_MUSIQUE" then m = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "") end
+      if k == "VERROU_COULEUR" then c = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "") end
     end
   end
   if m ~= "tout" and m ~= "icone" then m = "sans-navigateur" end
-  return m
+  return m, c
 end
 
 local function lire()
   derniereLecture = maintenant()
-  mode = lireMode()
+  local reglageCouleur
+  mode, reglageCouleur = lireMode()
+  couleur = couleurVerrou(reglageCouleur)
   noctalia.runAsync({ MEDIA }, function(r)
     local l = string.gsub(r.stdout or "", "\n$", "")
     local c = {}
@@ -131,11 +160,11 @@ function rendre()
   end
   local progression = media.duree > 0 and math.max(0, math.min(1, media.position / media.duree)) or 0
   local textes = {
-    ui.label({ text = media.titre, maxLines = 1, fontWeight = "semibold", fontSize = 17, color = BLANC }),
+    ui.label({ text = media.titre, maxLines = 1, fontWeight = "semibold", fontSize = 17, color = couleur }),
     ui.label({ text = media.source, maxLines = 1, fontSize = 14, color = GRIS }),
   }
   if prive then
-    textes = mode == "icone" and {} or { ui.label({ text = "Lecture en cours", maxLines = 1, fontWeight = "semibold", fontSize = 17, color = BLANC }) }
+    textes = mode == "icone" and {} or { ui.label({ text = "Lecture en cours", maxLines = 1, fontWeight = "semibold", fontSize = 17, color = couleur }) }
   elseif media.duree > 0 then
     table.insert(textes, ui.row({ gap = 8, align = "center" }, {
       ui.label({ text = temps(media.position), fontSize = 11, color = GRIS, width = 40 }),

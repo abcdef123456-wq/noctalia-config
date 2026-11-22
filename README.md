@@ -25,7 +25,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
   - l'heure et la date peuvent prendre une police (`VERROU_POLICE`, une liste « A, B » : la première installée est prise, sinon
     celle de Noctalia) et la couleur d'accent du bureau (`VERROU_COULEUR=accent`, que Rétro et Synthwave posent) ;
     `VERROU_POLICE` attend un essai à l'écran avant d'entrer dans un thème : aucun thème ne la pose, à toi de l'essayer ;
-  - limite : la batterie et la musique du verrouillage restent en blanc, quel que soit ce réglage ;
+  - la batterie (pourcentage) et le titre de la musique suivent aussi `VERROU_COULEUR` ; la capsule noire, les gris et les boutons ne changent pas ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
 - look façon Apple : île dynamique noir pur qui se déploie depuis la pilule et s'y rétracte (ressort physique),
   symboles dessinés dans l'esprit des SF Symbols dans l'île ; ailleurs, thème d'icônes maison « NC » (dossiers,
