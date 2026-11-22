@@ -199,6 +199,8 @@ HOME_FILES=(
   .local/share/nemo/actions/nc-ia-resumer.nemo_action
   .config/xdg-desktop-portal/hyprland-portals.conf
   .config/noctalia/palettes/Apple.json
+  .config/noctalia/palettes/Retro.json
+  .config/noctalia/palettes/Synthwave.json
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
   .config/nc/ia.zsh

@@ -80,6 +80,20 @@ def theme_sync():
         return defaut
 
 
+def palette_exacte():
+    """Le fichier de la palette « custom » du thème actif (Apple, Retro, Synthwave…), dont le terminal garde les
+    couleurs exactes ; sans thème lisible : celle d'Apple pour le style apple, sinon None (couleurs recalculées)."""
+    try:
+        nom = [m[6:] for m in STYLE.read_text().split() if m.startswith("STYLE=")][0]
+        dossier = os.environ.get("NC_THEMES_DIR") or str(Path.home() / ".local/share/nc/themes")
+        pal = json.loads((Path(dossier) / (nom + ".json")).read_text(encoding="utf-8"))["palette"]
+        if pal.get("source") != "custom" or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", str(pal.get("nom", ""))):
+            return None
+        return PALETTE_APPLE.parent / (pal["nom"] + ".json")
+    except (OSError, IndexError, ValueError, KeyError, AttributeError, TypeError):
+        return PALETTE_APPLE if style_apple() else None
+
+
 def couleur_hex(v):
     """Couleur en « #rrggbb » minuscule, quel que soit le format de colors.json (#rrggbb, rrggbb, #rrggbbaa, #rgb,
     rgb(r, g, b), rgba(…)) ; None si illisible (chaîne vide, mot, nombre…). C'est le format que kitty sait lire."""
@@ -306,11 +320,11 @@ def main():
     normal["white"] = oklch_to_rgb(fL - (0.10 if dark else -0.10), fC, fH)
     bright["white"] = fg
 
-    # Style Apple : les couleurs exactes du Terminal de macOS (palette Apple de Noctalia), sans recalcul
-    apple = style_apple()
-    if apple:
+    # Palette « custom » du thème (Apple : le Terminal de macOS ; Retro, Synthwave…) : ses couleurs exactes, sans recalcul
+    exacte = palette_exacte()
+    if exacte:
         try:
-            t = json.loads(PALETTE_APPLE.read_text())["dark" if dark else "light"]["terminal"]
+            t = json.loads(exacte.read_text())["dark" if dark else "light"]["terminal"]
             for n in t["normal"]:
                 normal[n], bright[n] = hex_to_rgb(t["normal"][n]), hex_to_rgb(t["bright"][n])
             sel_bg = hex_to_rgb(t["selectionBg"])

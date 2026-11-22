@@ -293,5 +293,24 @@ class ThemeSync(Base):
         self.assertNotEqual(a, self.couleurs_lua("gris", self.themes))
 
 
+    def kitty(self, style):
+        self.couleurs_lua(style, self.themes)
+        return (self.home / ".config/kitty/themes/noctalia-dynamic.conf").read_text(encoding="utf-8")
+
+    def test_palette_custom_couleurs_exactes_du_terminal(self):
+        """Une palette « custom » du thème (Retro, Synthwave, Apple) donne au terminal ses couleurs exactes ;
+        une palette intégrée à Noctalia : couleurs recalculées comme avant."""
+        pal = self.home / ".config/noctalia/palettes"
+        pal.mkdir(parents=True)
+        shutil.copy(REPO / "home/.config/noctalia/palettes/Retro.json", pal / "Retro.json")
+        self.ecrire_theme("vert", palette={"source": "custom", "nom": "Retro"})
+        self.assertIn("color2 #33ff66", self.kitty("vert"))
+        self.assertIn("color3 #ffb000", self.kitty("vert"))
+        self.ecrire_theme("vert", palette={"source": "builtin", "nom": "Nord"})
+        self.assertNotIn("color2 #33ff66", self.kitty("vert"))
+        self.ecrire_theme("vert", palette={"source": "custom", "nom": "../../x"})     # nom refusé : rien de lu ailleurs
+        self.assertNotIn("color2 #33ff66", self.kitty("vert"))
+
+
 if __name__ == "__main__":
     unittest.main()
