@@ -13,9 +13,11 @@
   derrière lui (carte, ou voile du style « texte » sur un fond d'écran clair ET sombre) et 11 px au moins.
 - Musique cachée quand rien ne joue ; WIDGETS_POLICE (liste avec repli, petits textes : la suivante ; accepté par un thème).
 Tout se passe dans un dossier temporaire."""
+import hashlib
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -520,6 +522,60 @@ class HorsEcran(unittest.TestCase):
                  "anneau:bas-droite:petit,musique:bas-gauche:petit,calendrier:bas-gauche:petit:texte::ligne,horloge-mots:centre:petit")
         for fond in ("#f4f4f4", "#ffffff", "#0b0b0b", "#808080"):
             self.verifier_lisible(theme, fond, 8)
+
+
+class Doto(unittest.TestCase):
+    """install.sh : la police Doto téléchargée comme Material Symbols (question, ~/.local/share/fonts, fc-cache), à un
+    commit figé du dépôt google/fonts, gardée seulement avec la bonne empreinte. Le bloc est lancé seul, faux curl."""
+    def bloc(self):
+        s = (H.REPO / "install.sh").read_text(encoding="utf-8")
+        return s[s.index("  # Police à points Doto"):s.index("\nelif have qs; then")]
+
+    def test_url_figee_et_empreinte(self):
+        b = self.bloc()
+        self.assertRegex(b, r"DOTO_URL='https://raw\.githubusercontent\.com/google/fonts/[0-9a-f]{40}/ofl/doto/Doto%5BROND,wght%5D\.ttf'")
+        self.assertRegex(b, r"\n  DOTO_SHA256=[0-9a-f]{64}\n")
+        self.assertIn("Open Font License", b)
+        self.assertIn('fc-cache -f "$(dirname "$POLICE_DOTO")"', b)
+
+    def lancer(self, reponse, curl_code=0, bon=True):
+        with tempfile.TemporaryDirectory(prefix="nc-doto-") as d:
+            racine = Path(d)
+            (racine / "bin").mkdir(); (racine / "home").mkdir()
+            for nom, corps in (("curl", 'o=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && o="$2"; shift; done\n'
+                                        '[ %d -eq 0 ] || exit %d\nprintf "faux-doto" > "$o"' % (curl_code, curl_code)),
+                               ("fc-list", "exit 0"), ("fc-cache", 'echo "fc-cache $*" >> "$HOME/journal"')):
+                (racine / "bin" / nom).write_text("#!/bin/sh\n" + corps + "\n"); (racine / "bin" / nom).chmod(0o755)
+            bloc = self.bloc()
+            if bon:     # la même logique, avec l'empreinte du faux fichier
+                bloc = re.sub(r"DOTO_SHA256=[0-9a-f]{64}", "DOTO_SHA256=" + hashlib.sha256(b"faux-doto").hexdigest(), bloc)
+            script = ('t() { printf "%s" "$1"; }; info() { echo "INFO $*"; }; ok() { echo "OK $*"; }; warn() { echo "WARN $*"; }\n'
+                      'have() { command -v "$1" >/dev/null 2>&1; }; ask() { [ "$REPONSE" = o ]; }\n'
+                      "ILE=quickshell; FAMILY=arch; MODE=full\nif true; then\n" + bloc + "\nfi\n")
+            env = {"PATH": f"{racine}/bin:/usr/bin:/bin", "HOME": str(racine / "home"), "TMPDIR": str(racine), "REPONSE": reponse}
+            r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30, check=False)
+            police = racine / "home/.local/share/fonts/Doto.ttf"
+            restes = sorted(x.name for x in police.parent.iterdir()) if police.parent.exists() else []
+            journal = (racine / "home/journal").read_text() if (racine / "home/journal").exists() else ""
+            return r, police.exists(), restes, journal
+
+    def test_oui_installe_puis_fc_cache(self):
+        r, ok, restes, journal = self.lancer("o")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(ok, r.stdout + r.stderr)
+        self.assertEqual(restes, ["Doto.ttf"])
+        self.assertIn("fc-cache -f", journal)
+
+    def test_mauvaise_empreinte_sans_reseau_ou_refus_rien_ne_casse(self):
+        for cas in ({"reponse": "o", "bon": False}, {"reponse": "o", "curl_code": 6}, {"reponse": "n"}):
+            with self.subTest(**cas):
+                r, ok, restes, journal = self.lancer(**cas)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertFalse(ok)
+                self.assertEqual(restes, [], "aucun fichier à moitié téléchargé")
+                self.assertEqual(journal, "")
+                if cas["reponse"] == "o":
+                    self.assertIn("WARN", r.stdout)
 
 
 if __name__ == "__main__":

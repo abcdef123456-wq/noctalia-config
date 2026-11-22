@@ -1607,6 +1607,26 @@ if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-q
     fi
   fi
   [ -s "$POLICE_ICONES" ] || ILE=noctalia
+  # Police à points Doto, pour les widgets du bureau d'un thème (WIDGETS_POLICE « Doto, JetBrains Mono ») : facultative,
+  # sans elle (refus, pas de réseau) la police suivante de la liste est prise. Doto : The Doto Project Authors
+  # (https://github.com/oliverlalan/Doto), licence SIL Open Font License 1.1 ; le fichier du dépôt google/fonts à un
+  # commit figé, gardé seulement si son empreinte sha256 est la bonne. Aucun paquet de distribution : partout pareil.
+  POLICE_DOTO="$HOME/.local/share/fonts/Doto.ttf"
+  DOTO_URL='https://raw.githubusercontent.com/google/fonts/2c982e6bdf88fefbe9e34e78695d8e9e02d788ec/ofl/doto/Doto%5BROND,wght%5D.ttf'
+  DOTO_SHA256=6f4fe7d37853b91df3698daa84cde2dbe1c9695d88c986e6510134910337d426
+  if [ "$ILE" = quickshell ] && [ "$FAMILY" != nixos ] && [ "$MODE" != files ] && [ ! -s "$POLICE_DOTO" ] && have curl && have sha256sum &&
+     ! fc-list : family 2>/dev/null | grep -qi '^doto'; then
+    info "$(t "Widgets du bureau : police à points Doto (licence OFL), https://github.com/oliverlalan/Doto" "Desktop widgets: Doto dot font (OFL license), https://github.com/oliverlalan/Doto")"
+    if ask "$(t "La télécharger (450 Ko) ?" "Download it (450 KB)?")" n; then
+      mkdir -p "$(dirname "$POLICE_DOTO")"
+      if curl -fsSL --retry 3 --connect-timeout 30 --max-time 300 -o "$POLICE_DOTO.tmp" "$DOTO_URL" &&
+         [ "$(sha256sum "$POLICE_DOTO.tmp" | cut -d' ' -f1)" = "$DOTO_SHA256" ]; then
+        mv "$POLICE_DOTO.tmp" "$POLICE_DOTO"; fc-cache -f "$(dirname "$POLICE_DOTO")" >/dev/null 2>&1 || true; ok "$(t "Police Doto installée." "Doto font installed.")"
+      else
+        rm -f "$POLICE_DOTO.tmp"; warn "$(t "Doto non installée (réseau ou empreinte) : les widgets prennent la police suivante de leur liste." "Doto not installed (network or checksum): widgets use the next font in their list.")"
+      fi
+    fi
+  fi
 elif have qs; then
   warn "$(t "Quickshell est incompatible ou ses modules sont incomplets : l'île du plugin Noctalia est utilisée." "Quickshell is incompatible or its modules are incomplete: the Noctalia plugin island is used.")"
 fi
