@@ -6,6 +6,9 @@
 ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), page (la page Système ouverte),
 recherche (Spotlight avec un texte tapé). Un PNG par état : DOSSIER/ETAT.png.
 --polices : dossier de polices lu en plus, en lecture seule (défaut : $XDG_DATA_HOME/fonts ou ~/.local/share/fonts).
+--echelle N : 1 (défaut), 2 ou 3 ; l'image est N fois plus grande, dessinée à cette taille (pas agrandie après coup).
+Le système est factice (Processeur, 8 cœurs, 16 Go, 45 °C, disque 40 %, batterie 80 %, ni Wi-Fi ni météo ni musique réels) :
+les images ne montrent rien de la machine. Les faux scripts vivent dans le HOME temporaire, jamais dans le dépôt.
 --reglages / --palette : un reglages.conf (lignes CLE=valeur) et un palette-ile.json posés dans le HOME factice, là où
 l'île les lit : l'outil ne connaît aucune clé, il simule un thème tel quel.
 
@@ -75,6 +78,23 @@ PILOTE = """
     }
 """
 
+# Faux scripts posés dans le HOME temporaire à la place de ceux du dépôt : valeurs neutres, rien de la vraie machine.
+FAUX_ETAT = """#!/bin/sh
+case "$1" in
+  systeme|system) printf '%s\n' cpu=12 'cpu_nom=Processeur 8 coeurs' ram=40 ram_utilisee=6.4 ram_totale=16.0 temperature=45 \
+    disque=40 disque_libre=300 'allume=2 h 05' sante=95 cycles=120 ;;
+  jeu|game) printf '%s\n' cpu=12 cpu_temp=45 ;;
+  profils|profiles) echo ppd=1 ;;
+  sante|health|capteurs|sensors|limite-bin|charge-limit-path|wifi|bt|bluetooth|son|sound|audio|media|sans-media) ;;
+  *) printf '%s\n' volume=60 muet=0 micro_muet=0 luminosite=70 jeu=0 halo=0 batterie=80 batterie_etat=Discharging ;;
+esac
+"""
+FAUX_APPS = """#!/bin/sh
+[ "$1" = list ] && echo '[{"id":"firefox.desktop","name":"Firefox","generic":"Navigateur web","comment":"","keywords":"","exe":"firefox","icon":"","wmclass":""},{"id":"firmware.desktop","name":"Firmware","generic":"Mises à jour","comment":"","keywords":"","exe":"firmware","icon":"","wmclass":""}]'
+exit 0
+"""
+FAUX = {"nc-apps": FAUX_APPS, "nc-logiciels": "#!/bin/sh\necho '[]'\n", "nc-gpu-mode": "#!/bin/sh\necho '{}'\n", "nc-ile-etat": FAUX_ETAT, "nc-meteo": "#!/bin/sh\nexit 1\n", "nc-brightness": "#!/bin/sh\necho 70\n"}
+
 
 def sans_couche(texte):
     """Une fenêtre layer-shell devient une fenêtre ordinaire : mêmes enfants, mêmes bindings, sans les propriétés de couche."""
@@ -107,8 +127,15 @@ def dans_le_depot(chemin):
 def preparer(root, etat, reglages, palette):
     for sous in ("run", "home/.config/nc", "home/.local", "cache", "state", "data", "config", "tmp"):
         (root / sous).mkdir(mode=0o700, parents=True, exist_ok=True)
-    # l'île lance $HOME/.local/bin/nc-apps (recherche) : lien vers ceux du dépôt, lus seulement
-    (root / "home/.local/bin").symlink_to(DEPOT / "home/.local/bin")
+    # l'île lance $HOME/.local/bin/nc-apps (recherche) : liens vers les scripts du dépôt (lus seulement), sauf les faux
+    bin_ = root / "home/.local/bin"
+    bin_.mkdir()
+    for f in (DEPOT / "home/.local/bin").iterdir():
+        if f.name not in FAUX:
+            (bin_ / f.name).symlink_to(f)
+    for nom, texte in FAUX.items():
+        (bin_ / nom).write_text(texte)
+        (bin_ / nom).chmod(0o755)
     ile = root / "ile"
     shutil.copytree(str(QML), str(ile))
     for f in ile.glob("*.qml"):
@@ -151,25 +178,27 @@ def config_polices(root, polices):
     return f
 
 
-def environnement(root, png, polices=None):
+def environnement(root, png, polices=None, echelle=1):
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL")}
     env.update(HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
                XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / "state"), XDG_RUNTIME_DIR=str(root / "run"),
                TMPDIR=str(root / "tmp"), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", NCR_PNG=str(png),
                DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "run/pas-de-bus"),
                DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "run/pas-de-bus-systeme"), NC_LANGUE="fr")
+    if echelle != 1:
+        env["QT_SCALE_FACTOR"] = str(echelle)
     if polices:
         env["FONTCONFIG_FILE"] = str(config_polices(root, polices))
     return env
 
 
-def rendre(etat, sortie, reglages, palette, polices=None):
+def rendre(etat, sortie, reglages, palette, polices=None, echelle=1):
     """Un qs par état. Retourne (chemin du PNG ou None, journal)."""
     racine = Path(tempfile.mkdtemp(prefix="nci-", dir="/tmp"))
     png = Path(sortie) / (etat + ".png")
     try:
         ile = preparer(racine, etat, reglages, palette)
-        p = subprocess.Popen(["qs", "--no-color", "-p", str(ile / "shell.qml")], env=environnement(racine, png, polices),
+        p = subprocess.Popen(["qs", "--no-color", "-p", str(ile / "shell.qml")], env=environnement(racine, png, polices, echelle),
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
         try:
             journal, _ = p.communicate(timeout=LIMITE)
@@ -191,6 +220,7 @@ def main(argv=None):
     a.add_argument("--reglages", help="reglages.conf à simuler (CLE=valeur)")
     a.add_argument("--palette", help="palette-ile.json à simuler")
     a.add_argument("--polices", help="dossier de polices lu en plus (défaut : le dossier fonts de l'utilisateur)")
+    a.add_argument("--echelle", type=int, default=1, help="1 (défaut), 2 ou 3 : taille de l'image")
     a.add_argument("etats", nargs="+", choices=ETATS, metavar="ETAT", help="un ou plusieurs de : " + ", ".join(ETATS))
     o = a.parse_args(argv)
     if dans_le_depot(o.sortie):
@@ -198,6 +228,9 @@ def main(argv=None):
         return 2
     if o.polices and not os.path.isdir(o.polices):
         print("rendu-ile : dossier de polices introuvable : " + o.polices, file=sys.stderr)
+        return 2
+    if o.echelle not in (1, 2, 3):
+        print("rendu-ile : l'échelle doit être 1, 2 ou 3", file=sys.stderr)
         return 2
     polices = o.polices or polices_par_defaut()
     for f in (o.reglages, o.palette):
@@ -210,7 +243,7 @@ def main(argv=None):
     os.makedirs(o.sortie, exist_ok=True)
     code = 0
     for etat in o.etats:
-        png, journal = rendre(etat, o.sortie, o.reglages, o.palette, polices)
+        png, journal = rendre(etat, o.sortie, o.reglages, o.palette, polices, o.echelle)
         if png:
             print(png)
         else:

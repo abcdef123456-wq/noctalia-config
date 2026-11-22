@@ -123,6 +123,50 @@ class Polices(unittest.TestCase):
             self.assertEqual(r.returncode, 2, r.stderr)
 
 
+    def test_echelle_hors_limites_refusee(self):
+        with tempfile.TemporaryDirectory() as t:
+            for n in ("0", "4"):
+                r = subprocess.run([sys.executable, str(OUTIL), "--sortie", t, "--echelle", n, "fermee"],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("échelle", r.stderr)
+
+
+def charger_outil():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rendu_ile", OUTIL)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def modeles_cpu():
+    try:
+        lignes = Path("/proc/cpuinfo").read_text(errors="replace").splitlines()
+    except OSError:
+        return set()
+    return {l.split(":", 1)[1].strip() for l in lignes if l.startswith("model name") and ":" in l}
+
+
+class SystemeFactice(unittest.TestCase):
+    def test_faux_scripts_dans_le_home_temporaire(self):
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            m.preparer(root, "page", None, None)
+            bin_ = root / "home/.local/bin"
+            for nom in m.FAUX:
+                f = bin_ / nom
+                self.assertTrue(f.is_file() and not f.is_symlink(), nom)
+                self.assertTrue(os.access(str(f), os.X_OK), nom)
+                self.assertTrue((DEPOT / "home/.local/bin" / nom).exists() is False or
+                                f.read_text() != (DEPOT / "home/.local/bin" / nom).read_text(), nom)
+            for modele in modeles_cpu():
+                for f in root.rglob("*"):
+                    if f.is_file() and not f.is_symlink():
+                        self.assertNotIn(modele, f.read_text(errors="replace"), str(f))
+
+
 @unittest.skipUnless(shutil.which("qs"), "Quickshell (qs) absent")
 class Rendu(unittest.TestCase):
     @classmethod
@@ -148,6 +192,28 @@ class Rendu(unittest.TestCase):
         f = lire_png(self.dossier / "fermee.png")
         p = lire_png(self.dossier / "page.png")
         self.assertLess(f[0] * f[1], p[0] * p[1])
+
+    def test_echelle_2_double_la_taille(self):
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            png, journal = m.rendre("fermee", t, None, None, None, 2)
+            self.assertIsNotNone(png, journal)
+            w1, h1, _ = lire_png(self.dossier / "fermee.png")
+            w2, h2, _ = lire_png(png)
+            self.assertAlmostEqual(w2 / w1, 2, delta=0.2)
+            self.assertAlmostEqual(h2 / h1, 2, delta=0.2)
+
+    def test_rien_de_reel_dans_les_images_ni_le_journal(self):
+        m = charger_outil()
+        modeles = modeles_cpu()
+        with tempfile.TemporaryDirectory() as t:
+            png, journal = m.rendre("page", t, None, None, None, 1)
+            self.assertIsNotNone(png, journal)
+            produits = [Path(png).read_bytes().decode("latin-1"), journal]
+            for modele in modeles:
+                for texte in produits:
+                    self.assertNotIn(modele, texte)
+                    self.assertNotIn(modele.encode("utf-8").decode("latin-1"), texte)
 
 
 if __name__ == "__main__":
