@@ -151,6 +151,7 @@ FloatingWindow {
         ecriture.stdinEnabled = c[2] === "SNIPPET_AJOUTER" && c[3] === "-"
         ecriture.entree = ecriture.stdinEnabled ? (entrees.shift() || "") : ""
         ecriture.command = c
+        ecriture.parti = false
         ecriture.running = true
     }
     // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin.
@@ -272,7 +273,10 @@ FloatingWindow {
     Process {
         id: ecriture
         property string entree: ""
-        onStarted: if (stdinEnabled) { write(entree); entree = ""; stdinEnabled = false }
+        property bool parti: false
+        onStarted: { parti = true; if (stdinEnabled) { write(entree); entree = ""; stdinEnabled = false } }
+        // commande absente : onExited n'arrive jamais, seul running repasse à false
+        onRunningChanged: if (!running && !parti) { entree = ""; stdinEnabled = false; fen.message = Reglages.t("Commande introuvable.", "Command not found."); fen.erreur = true; fen.suivant() }
         stdout: StdioCollector { onStreamFinished: { fen.message = text.trim().split("\n").pop() || ""; fen.erreur = false } }
         stderr: StdioCollector { onStreamFinished: if (text.trim()) { fen.message = text.trim().split("\n").pop(); fen.erreur = true } }
         onExited: (code, status) => { if (code !== 0 && !fen.erreur) { fen.message = Reglages.t("Valeur refusée.", "Value rejected."); fen.erreur = true }; fen.charger(); fen.suivant() }

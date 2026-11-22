@@ -968,7 +968,8 @@ class DelaiParTrame(ModuleCharge):
                     ".local/share/systemd/user/x.service", ".xprofile", ".codex/auth.json", ".gemini/oauth_creds.json",
                     ".local/share/opencode/auth.json", ".aws/credentials", ".docker/config.json", ".npmrc",
                     ".config/google-chrome/Default/Login Data", ".local/share/jarvis-bis/.env",
-                    ".local/share/TelegramDesktop/tdata/x", ".password-store/x.gpg", ".claude.json"):
+                    ".local/share/TelegramDesktop/tdata/x", ".password-store/x.gpg", ".claude.json",
+                    ".config/nc/assistant.conf", ".config/nc/ia.conf", ".config/nc/snippets.conf"):    # snippets : secrets en clair
             for ecriture in (False, True):
                 self.assertIsNotNone(m.protege((h / rel).resolve(), ecriture), (rel, ecriture))
         for rel in (".config/hypr/hyprland.conf", ".config/uwsm/env", ".config/quickshell/nc-ile/shell.qml",
@@ -980,6 +981,13 @@ class DelaiParTrame(ModuleCharge):
             self.assertIsNotNone(m.protege((h / rel).resolve(), False), rel)
         for rel in ("Documents/a.txt", ".config/hyprpaper.conf", "Notes/x"):
             self.assertIsNone(m.protege((h / rel).resolve(), True), rel)
+
+    def test_snippets_conf_protege_partout(self):
+        """Retouche 1 : snippets.conf (secrets en clair) comme assistant.conf, dans nc-noeud, nc-bac et nc-assistant."""
+        m = self.charger()
+        for rel in (".config/nc/snippets.conf", ".config/nc/assistant.conf"):
+            self.assertIn(rel, m.BAC.PROTEGES, rel)
+        self.assertIn(".config/nc/snippets.conf", m.A.PROTEGES_PLUS)
 
     def test_secrets_masques(self):
         m = self.charger()

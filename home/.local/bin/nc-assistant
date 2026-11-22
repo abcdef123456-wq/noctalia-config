@@ -1558,7 +1558,7 @@ SYSTEME_REFUSE = ("/proc", "/sys", "/dev", "/etc/shadow", "/etc/gshadow", "/etc/
                   "/etc/ssl/private", "/run/user", "/run/secrets")
 # En plus des listes de nc-bac (qui manquent peut-être) : l'essentiel, et les fichiers cités dans l'issue #31
 PROTEGES_PLUS = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".mozilla", ".config/nc/ia.conf",
-                 ".claude/.credentials.json", ".codex/auth.json", ".netrc", ".git-credentials", ".config/gh/hosts.yml",
+                 ".config/nc/snippets.conf", ".claude/.credentials.json", ".codex/auth.json", ".netrc", ".git-credentials", ".config/gh/hosts.yml",
                  ".aws", ".kube", ".docker/config.json"]
 NOM_SENSIBLE = re.compile(r"\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa).*", re.IGNORECASE | re.DOTALL)
 # Le contenu : une clé privée, ou une clé d'API (mêmes familles que le contrôle de export.sh, plus AWS et Slack)

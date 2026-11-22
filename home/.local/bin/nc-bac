@@ -15,7 +15,7 @@ from pathlib import Path
 PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".config/autostart", ".config/environment.d",
             ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".zshrc", ".zshenv", ".zprofile", ".zlogin",
             ".zlogout", ".profile", ".config/fish", ".xprofile", ".xinitrc", ".xsession", ".xsessionrc",
-            ".pam_environment", ".config/nc/assistant.conf", ".config/nc/ia.conf",
+            ".pam_environment", ".config/nc/assistant.conf", ".config/nc/ia.conf", ".config/nc/snippets.conf",
             ".config/gh", ".config/hub", ".git-credentials", ".netrc", ".password-store", ".local/share/keyrings",
             ".local/share/kwalletd", ".mozilla", ".librewolf", ".zen", ".floorp", ".thunderbird", ".config/chromium",
             ".config/google-chrome", ".config/BraveSoftware", ".config/vivaldi", ".config/microsoft-edge",

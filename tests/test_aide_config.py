@@ -51,6 +51,31 @@ class Index(unittest.TestCase):
     def chercher(self, q):
         return json.loads(self.lancer("chercher", q, "--json").stdout)
 
+    def test_snippets_suivis_et_secret_jamais_indexe(self):
+        # Les snippets ajoutés ou retirés changent l'index ; un secret n'y entre jamais (ni titre ni mot)
+        for f in BIN.glob("nc-*"):
+            if f.is_file() and not (self.home / ".local/bin" / f.name).exists():
+                shutil.copy2(f, self.home / ".local/bin" / f.name)
+        rg = str(self.home / ".local/bin/nc-reglages")
+
+        def reg(*a, entree=None):
+            r = subprocess.run([rg, "snippets", *a], env=self.env, input=entree, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+        def textes():
+            self.assertEqual(self.lancer("index").returncode, 0)
+            index = json.loads((self.home / ".cache/nc/aide-config.json").read_text())
+            return json.dumps(index["entrees"], ensure_ascii=False)
+        self.assertNotIn("Zorglub public", textes())
+        reg("ajouter", "zq", "Zorglub public", "texte visible")
+        reg("ajouter", "--secret", "cbx", "Zorglub secret", "-", entree="x")
+        t = textes()
+        self.assertIn("Zorglub public", t)
+        self.assertNotIn("Zorglub secret", t)
+        self.assertNotIn("cbx", t)
+        reg("retirer", "zq")
+        self.assertNotIn("Zorglub public", textes())
+
     def test_index_reponses_et_cache(self):
         r = self.lancer("index")
         self.assertEqual(r.returncode, 0, r.stderr)

@@ -181,7 +181,7 @@ class Fichier(Dossier):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.f.read_text(), "adr\tMon adresse\t1 rue" + BS + "n75000\n")
         self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
-        self.assertEqual([p.name for p in self.f.parent.iterdir()], ["snippets.conf"], "pas de temporaire laissé")
+        self.assertEqual(sorted(p.name for p in self.f.parent.iterdir() if p.suffix != ".lock"), ["snippets.conf"], "pas de temporaire laissé")
         self.assertEqual(reglages(self.d, "snippets", "liste").stdout.decode(), "adr\tMon adresse\t1 rue" + BS + "n75000\n")
         self.assertIn("existe déjà", reglages(self.d, "snippets", "ajouter", "adr", "Autre", "x").stderr.decode())
         self.assertEqual(reglages(self.d, "snippets", "retirer", "adr").returncode, 0)
@@ -206,7 +206,7 @@ class Fichier(Dossier):
             self.assertNotEqual(r.returncode, 0, args)
             self.assertIn("rien n'est écrit", r.stderr.decode(), args)
             self.assertEqual(self.sha(), avant, "fichier identique à l'octet")
-            self.assertEqual([p.name for p in self.f.parent.iterdir()], ["snippets.conf"])
+            self.assertEqual(sorted(p.name for p in self.f.parent.iterdir() if p.suffix != ".lock"), ["snippets.conf"])
 
     def test_plus_de_50_lignes_refuse_a_l_octet(self):
         self.refus_a_l_octet("".join(f"a{i}\tT\tx\n" for i in range(51)))
@@ -261,14 +261,33 @@ class Secret(Dossier):
         self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
         conf = self.d / "config/nc/reglages.conf"
         self.assertFalse(conf.exists() and "SNIPPET" in conf.read_text(), "jamais écrit dans reglages.conf")
-        for saisie, mot in (("adr Mon adresse", "écris"), ("adr : x", "écris"), ("", "écris"), ("g G : x", "mot de la recherche"),
-                            ("!adr A : " + SECRET + BS + "x", "texte refusé"), ("!adr A : " + SECRET + chr(0x202E), "refusé")):
+        for saisie, mot, argv in (("adr Mon adresse", "écris", True), ("adr : x", "écris", True), ("", "écris", True),
+                                  ("g G : x", "mot de la recherche", True),
+                                  ("!adr A : " + SECRET + BS + "x", "texte refusé", False),   # un secret : entrée standard seule
+                                  ("!adr A : " + SECRET + chr(0x202E), "refusé", False)):
             for args, entree in ((("set", "SNIPPET_AJOUTER", saisie), None), (("set", "SNIPPET_AJOUTER", "-"), saisie)):
+                if entree is None and not argv:
+                    continue
                 r = reglages(self.d, *args, entree=entree)
                 self.assertNotEqual(r.returncode, 0, saisie)
                 self.assertIn(mot, r.stderr.decode(), saisie)
                 self.assertNotIn(SECRET.encode(), r.stderr + r.stdout)
         self.assertEqual(len(m.snippets_lire()), 2)
+
+    def test_secret_jamais_en_argument(self):
+        """Point 4 : la forme argv d'un secret est refusée (liste des processus) ; le message dit comment faire, sans le texte ;
+        rien n'est écrit. Un snippet ordinaire garde la forme en ligne ; l'entrée standard marche."""
+        for args in (("set", "SNIPPET_AJOUTER", "!wifi Wifi : " + SECRET),
+                     ("snippets", "ajouter", "--secret", "wifi", "Wifi", SECRET)):
+            r = reglages(self.d, *args)
+            self.assertNotEqual(r.returncode, 0, args)
+            self.assertIn("printf %s", r.stderr.decode(), args)
+            self.assertNotIn(SECRET.encode(), r.stdout + r.stderr, args)
+            self.assertFalse(self.f.exists(), args)
+        self.assertEqual(reglages(self.d, "snippets", "ajouter", "adr", "A", "texte en ligne").returncode, 0)
+        self.assertEqual(reglages(self.d, "snippets", "ajouter", "--secret", "wifi", "Wifi", "-", entree=SECRET).returncode, 0)
+        self.assertEqual(reglages(self.d, "set", "SNIPPET_AJOUTER", "-", entree="!w2 W2 : " + SECRET).returncode, 0)
+        self.assertEqual([x[0] for x in module(self.d).snippets_lire()], ["adr", "wifi", "w2"])
 
     def test_jamais_a_distance(self):
         r = reglages(self.d, "set", "--distant", "SNIPPET_AJOUTER", "adr A : x")
@@ -307,6 +326,61 @@ class Secret(Dossier):
             r = reglages(self.d, "snippets", "ajouter", "a", "T", "-", entree=entree)
             self.assertNotEqual(r.returncode, 0)
         self.assertFalse(self.f.exists())
+
+
+class Verrou(Dossier):
+    """Point 3 : deux nc-reglages en parallèle gardent les deux lignes (lecture-modification-écriture sous verrou)."""
+
+    def test_deux_ajouts_en_parallele_15_fois(self):
+        for i in range(15):
+            self.ecrire("")
+            ps = [subprocess.Popen(["python3", "-I", str(REGLAGES), "snippets", "ajouter", mot, "T", "x"], env=env_de(self.d),
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for mot in ("aa", "bb")]
+            self.assertEqual([p.wait(timeout=30) for p in ps], [0, 0], i)
+            self.assertEqual(sorted(self.f.read_text().split()), sorted(["aa", "T", "x", "bb", "T", "x"]), i)
+        self.assertEqual(stat.S_IMODE((self.f.parent / "snippets.conf.lock").stat().st_mode), 0o600)
+
+    def test_acces_apres_lecture_0600(self):
+        """Point 8 : nc-reglages remet snippets.conf en 0600 dès qu'il le lit."""
+        self.ecrire("adr\tA\tx\n")
+        self.f.chmod(0o644)
+        self.assertEqual(reglages(self.d, "snippets", "liste").returncode, 0)
+        self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
+
+    def test_fenetre_snippets_est_une_section(self):
+        self.assertEqual(module(self.d).section_demandee("snippets"), "Snippets")
+
+    def test_mot_point_virgule_ne_lance_rien(self):
+        """Point 6 : « ;mot » est exclu de la recherche de fichiers (nc-apps files) et de logiciels (nc-logiciels chercher)."""
+        src = (tlw.QML / "Recherche.qml").read_text(encoding="utf-8")
+        for marque in ('modePaquets === "auto" && q.length >= 3 && !/^(', 'q.length >= 3 && !/^('):
+            ligne = next(l for l in src.splitlines() if marque in l)
+            self.assertIn("|;|", ligne)
+
+
+@unittest.skipUnless(NODE, "node requis")
+class MemeRegle(Dossier):
+    """Une seule règle de caractères : Saisies.js (ce que l'île montre) et nc-reglages (ce qu'il écrit, liste et retire)."""
+
+    def test_72_cas_memes_reponses_et_tout_se_retire(self):
+        cas = tlw.cas_snippets()
+        self.assertEqual(len(cas), 72)
+        m = module(self.d)
+        reponses = js("%s.map(function (l) { var r = analyseSnippets(l); return r.length ? [r[0].mot, r[0].titre, r[0].texte, r[0].secret] : null })"
+                      % json.dumps(cas))
+        acceptes = 0
+        for c, rj in zip(cas, reponses):
+            py = m.snippet_comprise(c)
+            py = list(py) if py else None
+            self.assertEqual(py, rj, ascii(c[:60]))
+            if py:
+                acceptes += 1
+                # Tout ce que l'île montre se liste et se retire par nc-reglages
+                self.ecrire(c + NL)
+                self.assertIn(py[0], reglages(self.d, "snippets", "liste").stdout.decode())
+                self.assertEqual(reglages(self.d, "snippets", "retirer", py[0]).returncode, 0, ascii(c[:60]))
+                self.assertEqual(m.snippets_lire(), [], ascii(c[:60]))
+        self.assertTrue(10 < acceptes < 60, acceptes)               # un contrôle qui accepte ou refuse tout ne prouve rien
 
 
 @unittest.skipUnless(NODE, "node requis")
@@ -438,45 +512,84 @@ ShellRoot {
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class RechercheHorsEcran(unittest.TestCase):
+    def lancer(self, d, script, sans=()):
+        """Recherche.qml réel dans un qs hors écran ; `sans` : commandes absentes du PATH (wl-copy, nc-mdp)."""
+        root = Path(d)
+        q = root / "qml"
+        shutil.copytree(tlw.QML, q)
+        for sous in ("run", "cache", "state", "data", "config", "tmp"):
+            (root / sous).mkdir(mode=0o700)
+        (root / "config/nc").mkdir()
+        (root / "config/nc/snippets.conf").write_text("adr\tAdresse\t1 rue" + BS + "n75000\naw\tWifi\t" + SECRET + "\tsecret\nbad\n")
+        for nom, code in tlw.STUBS.items():
+            (q / (nom + ".qml")).write_text(code)
+        (q / "qmldir").write_text("\n".join(("singleton " if n in tlw.SINGLETONS else "") + n + " 1.0 " + n + ".qml" for n in tlw.NOMS)
+                                  + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
+        b = root / ".local/bin"
+        b.mkdir(parents=True)
+        faux = dict(tlw.FAUX_BIN)
+        faux["wl-copy"] = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HOME/wl-argv"\ncat > "$HOME/wl-stdin"\n'
+        faux["nc-mdp"] = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HOME/mdp-argv"\ncat > "$HOME/mdp-stdin"\n'
+        for nom in sans:
+            faux.pop(nom, None)
+        for nom, code in faux.items():
+            (b / nom).write_text(code)
+            (b / nom).chmod(0o755)
+        (q / "shell.qml").write_text(script.replace("@SECRET@", SECRET))
+        chemin = str(b) + os.pathsep + os.environ["PATH"]
+        if sans:                                           # PATH réduit : le vrai wl-copy du système ne doit pas répondre
+            (root / "pur").mkdir()
+            for outil in ("qs", "sh", "cat", "env", "python3"):
+                if shutil.which(outil):
+                    (root / "pur" / outil).symlink_to(shutil.which(outil))
+            chemin = str(b) + os.pathsep + str(root / "pur")
+        env = dict(os.environ, HOME=d, XDG_CONFIG_HOME=str(root / "config"), XDG_CACHE_HOME=str(root / "cache"),
+                   XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "run"),
+                   TMPDIR=str(root / "tmp"), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", PATH=chemin)
+        for k in ("WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "BROWSER", "DBUS_SESSION_BUS_ADDRESS"):
+            env.pop(k, None)
+        r = subprocess.run([shutil.which("qs"), "--no-color", "-p", str(q / "shell.qml")], env=env, text=True,
+                           capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+        sortie = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, sortie)
+        for erreur in ("ReferenceError", "TypeError", "is not a type", "Binding loop"):
+            self.assertNotIn(erreur, sortie)
+        self.assertNotIn(SECRET, sortie, "jamais dans le journal de qs")
+        return root
+
     def test_cartes_et_copie_par_l_entree(self):
         with tempfile.TemporaryDirectory(prefix="ncsq-") as d:
-            root = Path(d)
-            q = root / "qml"
-            shutil.copytree(tlw.QML, q)
-            for sous in ("run", "cache", "state", "data", "config", "tmp"):
-                (root / sous).mkdir(mode=0o700)
-            (root / "config/nc").mkdir()
-            (root / "config/nc/snippets.conf").write_text("adr\tAdresse\t1 rue" + BS + "n75000\naw\tWifi\t" + SECRET + "\tsecret\nbad\n")
-            for nom, code in tlw.STUBS.items():
-                (q / (nom + ".qml")).write_text(code)
-            (q / "qmldir").write_text("\n".join(("singleton " if n in tlw.SINGLETONS else "") + n + " 1.0 " + n + ".qml" for n in tlw.NOMS)
-                                      + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
-            b = root / ".local/bin"
-            b.mkdir(parents=True)
-            faux = dict(tlw.FAUX_BIN)
-            faux["wl-copy"] = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HOME/wl-argv"\ncat > "$HOME/wl-stdin"\n'
-            faux["nc-mdp"] = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HOME/mdp-argv"\ncat > "$HOME/mdp-stdin"\n'
-            for nom, code in faux.items():
-                (b / nom).write_text(code)
-                (b / nom).chmod(0o755)
-            (q / "shell.qml").write_text(SCRIPT.replace("@SECRET@", SECRET))
-            env = dict(os.environ, HOME=d, XDG_CONFIG_HOME=str(root / "config"), XDG_CACHE_HOME=str(root / "cache"),
-                       XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "run"),
-                       TMPDIR=str(root / "tmp"), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
-                       PATH=str(b) + os.pathsep + os.environ["PATH"])
-            for k in ("WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "BROWSER", "DBUS_SESSION_BUS_ADDRESS"):
-                env.pop(k, None)
-            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True,
-                               timeout=60, stdin=subprocess.DEVNULL)
-            sortie = r.stdout + r.stderr
-            self.assertEqual(r.returncode, 0, sortie)
-            for erreur in ("ReferenceError", "TypeError", "is not a type", "Binding loop"):
-                self.assertNotIn(erreur, sortie)
-            self.assertNotIn(SECRET, sortie, "jamais dans le journal de qs")
+            root = self.lancer(d, SCRIPT)
             self.assertEqual((root / "wl-stdin").read_text(), "1 rue" + NL + "75000")
             self.assertEqual((root / "wl-argv").read_text(), "--type\ntext/plain;charset=utf-8\n")
             self.assertEqual((root / "mdp-stdin").read_text(), SECRET)
             self.assertEqual((root / "mdp-argv").read_text(), "--stdin\n")
+
+    def test_commande_absente_se_voit_et_ne_bloque_pas(self):
+        """Point 5 : wl-copy et nc-mdp absents : « Copie impossible » à l'écran, texte vidé, la file continue."""
+        with tempfile.TemporaryDirectory(prefix="ncsq-") as d:
+            self.lancer(d, SCRIPT_ABSENT, sans=("wl-copy", "nc-mdp"))
+
+
+# Mêmes cartes, mais wl-copy et nc-mdp n'existent pas : onExited n'arrive jamais, seul onRunningChanged le dit
+SCRIPT_ABSENT = SCRIPT.split(" Timer { interval: 100")[0] + ''' Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "") return
+   champ.text = ";a"; etape++; return }
+  if (etape === 1) { if (spot.snippets.length !== 2) return
+   spot.valider(0, false); etape++; return }
+  if (etape === 2) { if (spot.resultats.length !== 1 || spot.resultats[0].sous !== "Snippets") return
+   verifier(spot.resultats[0].titre === "Copie impossible" || spot.resultats[0].titre === "Copy failed", "message : " + spot.resultats[0].titre)
+   verifier(Etat.fermetures === 0, "ne ferme pas sur un échec")
+   champ.text = ";aw"; etape++; return }
+  if (etape === 3) { if (spot.resultats.length !== 1 || spot.resultats[0].sous !== "secret") return
+   spot.valider(0, false); etape++; return }
+  if (etape === 4) { if (spot.resultats.length !== 1 || spot.resultats[0].sous !== "Snippets") return
+   verifier(spot.resultats[0].titre === "Copie impossible" || spot.resultats[0].titre === "Copy failed", "nc-mdp absent : échec visible"); etape++; return }
+  if (etape === 5) { Qt.quit() }
+ } }
+ Timer { interval: 25000; running: true; onTriggered: { console.error("bloqué à l'étape " + etape + " " + JSON.stringify(spot.resultats.map(x => x.titre))); Qt.exit(9) } }
+}'''
 
 
 class SauvegardeEtBureau(unittest.TestCase):

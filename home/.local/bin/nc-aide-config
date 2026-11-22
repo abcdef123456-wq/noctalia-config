@@ -108,7 +108,7 @@ def depot():
 
 
 def sources():
-    s = [BIN / "nc-reglages", BIN / "nc-aide", CONFIG / "nc/raccourcis.conf", CONFIG / "hypr/nc/raccourcis.lua"]
+    s = [BIN / "nc-reglages", BIN / "nc-aide", CONFIG / "nc/raccourcis.conf", CONFIG / "hypr/nc/raccourcis.lua", CONFIG / "nc/snippets.conf"]
     d = depot()
     if d:
         s += [d / f for f in DOCS]
@@ -138,6 +138,8 @@ def depuis_reglages():
         return []
     res = []
     for l in lignes:
+        if l.get("secret"):                                        # un snippet secret n'entre jamais dans l'index
+            continue
         if l.get("section") == "Nouveautés":                       # l'historique des mises à jour : pas des réglages
             continue
         if l.get("genre") == "raccourci":

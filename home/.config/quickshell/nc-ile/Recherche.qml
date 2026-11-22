@@ -519,11 +519,16 @@ Item {
         if (copieurMdp.running) return
         copieurMdp.n = n
         copieurMdp.command = [Etat.bin + "nc-mdp", String(n)]
+        copieurMdp.parti = false
         copieurMdp.running = true
     }
     Process {
         id: copieurMdp
         property int n: 0
+        property bool parti: false
+        onStarted: parti = true
+        // commande absente : onExited n'arrive jamais, seul running repasse à false
+        onRunningChanged: if (!running && !parti) { r.retourMdp = { ok: false, titre: Reglages.t("Copie impossible", "Copy failed") }; r.chercher() }
         onExited: code => {
             r.retourMdp = code === 0
                 ? { ok: true, titre: Reglages.t("Mot de passe de ", "Password of ") + n + Reglages.t(" caractères copié", " characters copied") }
@@ -539,12 +544,16 @@ Item {
         copieurSnippet.texte = s.texte
         copieurSnippet.command = s.secret ? [Etat.bin + "nc-mdp", "--stdin"] : ["wl-copy", "--type", "text/plain;charset=utf-8"]
         copieurSnippet.stdinEnabled = true
+        copieurSnippet.parti = false
         copieurSnippet.running = true
     }
     Process {
         id: copieurSnippet
         property string texte: ""
-        onStarted: { write(texte); texte = ""; stdinEnabled = false }
+        property bool parti: false
+        onStarted: { parti = true; write(texte); texte = ""; stdinEnabled = false }
+        // commande absente (wl-copy, nc-mdp) : onExited n'arrive jamais ; on vide le texte et on le dit
+        onRunningChanged: if (!running && !parti) { texte = ""; stdinEnabled = false; r.retourSnippet = true; r.chercher() }
         onExited: code => { texte = ""; if (code === 0) Etat.fermer(); else { r.retourSnippet = true; r.chercher() } }
     }
     // « port 8080 » / « processus firefox » : la saisie passe par la liste blanche de Saisies.js, puis nc-processus la
@@ -780,7 +789,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|;|g |yt |w |\/|sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -835,7 +844,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|;|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true

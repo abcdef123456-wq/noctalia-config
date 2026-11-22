@@ -3,6 +3,7 @@ branchement dans Recherche.qml (qs hors écran) et gestion par « nc-reglages li
 import importlib.machinery
 import importlib.util
 import json
+import concurrent.futures
 import os
 from pathlib import Path
 import shutil
@@ -20,6 +21,28 @@ REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
 REGLAGES = REPO / "home/.local/bin/nc-reglages"
 AMZ = "amz\tAmazon\thttps://www.amazon.fr/s?k=%s"
+BS = chr(92)
+
+
+# Les 29 pièges de caractères, fabriqués par chr() : un seul tableau pour les snippets (test_snippets) et les liens web
+PIEGES = ([chr(0x1B) + "[31m", chr(13), chr(0), chr(0x85)]
+          + [chr(c) for c in (0xA0, 0x202E, 0x200B, 0xFEFF, 0xE0041, 0x1D173, 0xF0000, 0xFFF0, 0x378)]
+          + ["<b>x</b>", BS, BS + "n", BS + "x"]
+          + [chr(c) for c in (0x1F600, 0xAD, 0x61C, 0x115F, 0x3164, 0xFE0F)] + [""]
+          + [chr(c) for c in (0xE007F, 0x2066, 0x34F, 0x1BCA0, 0x17B4)])
+
+
+def cas_snippets():
+    """Les 72 lignes de snippets.conf : chaque piège dans le titre puis dans le texte, et 14 cas de forme."""
+    T = chr(9)
+    cas = []
+    for p in PIEGES:
+        cas += ["adr" + T + "Titre" + p + T + "texte", "adr" + T + "Titre" + T + "tex" + p + "te"]
+    cas += ["adr\tTitre\ttexte\tsecret", "adr\tTitre\ttexte\tSECRET", "adr\tTitre\ttexte\tsecret\t", "adr\tTitre\ttexte\r\r",
+            "#adr\tTitre\ttexte", " adr\tTitre\ttexte", "Adr\tT\tx", "mdp\tT\tx", "adr\t\tx", "adr\tT\t",
+            "adr\t" + chr(0xE9) * 40 + "\tx", "adr\t" + chr(0x1F600) * 40 + "\tx", "adr\tT\t" + chr(0x1F600) * 2000,
+            "adr\tT\t" + "a" * 2001]
+    return cas
 
 
 def analyse(texte):
@@ -58,6 +81,21 @@ class Pures(unittest.TestCase):
             self.assertEqual(prefixes("abc\tn" + chr(cp) + "n\thttps://x.fr/%s"), [], hex(cp))
         self.assertEqual(prefixes("abc\tCafé crème\thttps://x.fr/%s"), ["abc"])
         self.assertEqual(prefixes("abc\t\u65e5\u672c\thttps://x.fr/%s"), ["abc"])
+
+    def test_nom_meme_regle_que_python(self):
+        """Le nom d'un lien : mêmes réponses de Saisies.js (analyseLiens) et de nc-reglages (liens_web_valide) pour chaque piège."""
+        loader = importlib.machinery.SourceFileLoader("ncreglages_nom", str(REGLAGES))
+        mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncreglages_nom", loader))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            loader.exec_module(mod)
+        noms = ["N" + p + "n" for p in PIEGES] + ["N" * 40, "N" * 41, ""]
+        lignes = [f"abc\t{n}\thttps://x.fr/%s" for n in noms]
+        reponses = js("%s.map(function (l) { return analyseLiens(l).length })" % json.dumps(lignes))
+        for n, r in zip(noms, reponses):
+            self.assertEqual(r == 1, mod.liens_web_valide("abc", n, "https://x.fr/%s"), ascii(n))
+        self.assertGreater(sum(reponses), 5)                       # le contrôle ne passe pas à vide
+        self.assertLess(sum(reponses), len(noms) - 10)
 
     def test_reserves_identiques_a_nc_reglages(self):
         """Les deux listes de mots réservés (Saisies.js et nc-reglages) sont les mêmes."""
@@ -109,6 +147,17 @@ class Reglages(unittest.TestCase):
         self.d = Path(self.t.name)
         self.f = self.d / "config/nc/liens-web.conf"
 
+    def test_deux_ajouts_en_parallele_15_fois(self):
+        """Lecture-modification-écriture sous verrou : les deux lignes sont là, 15 fois sur 15."""
+        for i in range(15):
+            self.f.parent.mkdir(parents=True, exist_ok=True)
+            self.f.write_text("")
+            with concurrent.futures.ThreadPoolExecutor(2) as ex:
+                rs = list(ex.map(lambda n: cli(self.d, "ajouter", n, "N", "https://x.fr/%s").returncode, ("aa", "bb")))
+            self.assertEqual(rs, [0, 0], i)
+            self.assertEqual(sorted(l.split("\t")[0] for l in self.f.read_text().splitlines()), ["aa", "bb"], i)
+        self.assertEqual(stat.S_IMODE((self.f.parent / "liens-web.conf.lock").stat().st_mode), 0o600)
+
     def test_ajouter_liste_retirer(self):
         self.assertEqual(cli(self.d, "liste").stdout, "")
         r = cli(self.d, "ajouter", "amz", "Amazon", "https://www.amazon.fr/s?k=%s")
@@ -143,7 +192,7 @@ class Reglages(unittest.TestCase):
         r = cli(self.d, "ajouter", "amz", "Amazon", "https://x.fr/%s")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
-        self.assertEqual([p.name for p in self.f.parent.iterdir()], ["liens-web.conf"], "pas de temporaire laissé")
+        self.assertEqual([p.name for p in self.f.parent.iterdir() if p.suffix != ".lock"], ["liens-web.conf"], "pas de temporaire laissé")
 
     def test_dossier_lien_refuse(self):
         (self.d / "ailleurs").mkdir()
@@ -200,7 +249,7 @@ class Reglages(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0, a)
             self.assertIn("rien n'est écrit", r.stderr)
             self.assertEqual(hashlib.sha256(self.f.read_bytes()).hexdigest(), avant, "fichier identique à l'octet")
-            self.assertEqual([p.name for p in self.f.parent.iterdir()], ["liens-web.conf"])
+            self.assertEqual([p.name for p in self.f.parent.iterdir() if p.suffix != ".lock"], ["liens-web.conf"])
         r = self.reglage("nouveau Nom https://x.fr/%s")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(hashlib.sha256(self.f.read_bytes()).hexdigest(), avant, "chemin graphique : identique aussi")
@@ -256,7 +305,7 @@ class Reglages(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.f.read_text(), "amz\tAmazon France\thttps://www.amazon.fr/s?k=%s\n")
         self.assertEqual(stat.S_IMODE(self.f.stat().st_mode), 0o600)
-        self.assertEqual([p.name for p in self.f.parent.iterdir()], ["liens-web.conf"])
+        self.assertEqual([p.name for p in self.f.parent.iterdir() if p.suffix != ".lock"], ["liens-web.conf"])
         self.assertIn("existe déjà", self.reglage("amz Autre https://x.fr/%s").stderr)
 
     def test_refus_par_la_fenetre(self):
