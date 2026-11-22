@@ -257,6 +257,17 @@ class Rendu(unittest.TestCase):
     def test_sans_contour_ni_lueur_la_marge_est_transparente(self):
         self.assertEqual(self.marge_opaque("ILE_LUEUR=non\nILE_CONTOUR=aucun\n"), 0)
 
+    def test_ile_carree_et_opaque_reste_en_rgba_avec_coin_transparent(self):
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            conf = Path(t) / "r.conf"
+            conf.write_text("ILE_RAYON=carre\nILE_VERRE=100\nILE_CONTOUR=discret\nILE_CONTOUR_EPAISSEUR=1\nILE_LUEUR=non\n")
+            for e in ETATS:
+                png, journal = m.rendre(e, t, str(conf), None, None, 1)
+                self.assertIsNotNone(png, e + " : " + journal)
+                self.assertEqual(Path(png).read_bytes()[25], 6, e)
+                self.assertEqual(m.lire_png(png)[3][0][3], 0, e + " : coin non transparent")
+
     def test_rien_de_reel_dans_les_images_ni_le_journal(self):
         m = charger_outil()
         modeles = modeles_cpu()
