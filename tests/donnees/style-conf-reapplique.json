@@ -22,7 +22,8 @@
   "FENETRES_COINS_FORME=doux",
   "DOCK=oui",
   "DOCK_POSITION=bottom",
-  "DOCK_AUTO=non"
+  "DOCK_AUTO=non",
+  "ILE_Y=5"
  ],
  "oled": [
   "ILE_CONTOUR_EPAISSEUR=0",
@@ -48,7 +49,8 @@
   "FENETRES_MAITRE_ORIENTATION=centre",
   "FENETRES_FOND=noir",
   "DOCK=non",
-  "BARRE_SYSTEME=non"
+  "BARRE_SYSTEME=non",
+  "ILE_Y=8"
  ],
  "nord": [
   "ILE_CONTOUR_EPAISSEUR=1",
@@ -102,7 +104,8 @@
   "FENETRES_COINS_FORME=doux",
   "DOCK=oui",
   "DOCK_POSITION=left",
-  "DOCK_AUTO=non"
+  "DOCK_AUTO=non",
+  "ILE_Y=13"
  ],
  "dracula": [
   "ILE_CONTOUR=degrade",
@@ -155,7 +158,8 @@
   "FENETRES_MAITRE_ORIENTATION=droite",
   "FENETRES_OUVERTURE=popin",
   "ANIM_BUREAUX=fade",
-  "DOCK=non"
+  "DOCK=non",
+  "ILE_Y=5"
  ],
  "kanagawa": [
   "ILE_CONTOUR_EPAISSEUR=1",
@@ -182,6 +186,7 @@
   "DOCK=oui",
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=oui",
-  "ILE_BANDE=non"
+  "ILE_BANDE=non",
+  "ILE_Y=5"
  ]
 }

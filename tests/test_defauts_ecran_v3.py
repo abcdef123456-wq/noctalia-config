@@ -52,18 +52,19 @@ def y_ile(d):
     return b["margin_edge"] + (b["thickness"] - ILE_FERMEE) // 2 if b["position"] == "top" else ILE_Y
 
 
-def hauteur_ile(d):
+def hauteur_ile(d, y=None):
     """Bas de l'île fermée : y + hauteur, plus le contour quand il entoure aussi la pilule fermée (Couleurs.qml)."""
     reglages = d.get("reglages", {})
     e = int(reglages.get("ILE_CONTOUR_EPAISSEUR", "2"))
     contour = reglages.get("ILE_CONTOUR_FERMEE") == "oui" and reglages.get("ILE_CONTOUR", "degrade") != "aucun"
-    return y_ile(d) + ILE_FERMEE + (e if contour else 0)
+    return (y_ile(d) if y is None else y) + ILE_FERMEE + (e if contour else 0)
 
 
-def regle_hauteur(d):
-    """Vrai si l'île fermée tient dans la barre du haut, ou si la bande lui garde sa place."""
+def regle_hauteur(d, y=None):
+    """Vrai si l'île fermée tient dans la barre du haut, ou si la bande lui garde sa place (y : celui de l'île, par
+    défaut centré comme Ile.qml le fait aujourd'hui)."""
     b = barre(d)
-    return d["reglages"].get("ILE_BANDE") == "oui" or b["thickness"] + b["margin_edge"] >= hauteur_ile(d)
+    return d["reglages"].get("ILE_BANDE") == "oui" or b["thickness"] + b["margin_edge"] >= hauteur_ile(d, y)
 
 
 def lire_toml(texte):
@@ -113,7 +114,8 @@ class ReglesDesThemes(unittest.TestCase):
                         nom, barre(d)["thickness"], barre(d)["margin_edge"], hauteur_ile(d)))
 
     def test_apple_et_gruvbox_explicites(self):
-        """Vus à l'écran : l'île pendait sous la barre. Contrôle du contrôle : leurs barres de 7378cd3 échouent."""
+        """Vus à l'écran : l'île pendait sous la barre. Contrôle du contrôle : leurs barres de 7378cd3, avec l'île à y fixe
+        (9, comme à l'époque), échouent."""
         t = themes()
         for nom, ancienne in (("apple", 30), ("gruvbox", 34)):
             with self.subTest(theme=nom):
@@ -122,7 +124,7 @@ class ReglesDesThemes(unittest.TestCase):
                 d["noctalia"]["bar.default"]["thickness"] = ancienne
                 if nom == "gruvbox":
                     d["reglages"]["ILE_CONTOUR_FERMEE"] = "oui"
-                self.assertFalse(regle_hauteur(d))
+                self.assertFalse(regle_hauteur(d, ILE_Y))
 
     def test_base_tient_deja(self):
         self.assertTrue(regle_hauteur(themes()["noctalia"]))

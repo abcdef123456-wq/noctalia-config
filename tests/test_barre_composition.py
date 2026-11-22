@@ -262,7 +262,7 @@ class Refus(unittest.TestCase):
         "groupe sans membre": {"bar.default": {"capsule_group": [{"id": "g", "members": ["nc/vpn:vpn"]}]}},
         "id de groupe de config.toml": {"bar.default": {"capsule_group": [{"id": "status", "members": ["tray"]}]}},
         "clé de groupe en plus": {"bar.default": {"capsule_group": [{"id": "g", "members": ["tray"], "fill": "x"}]}},
-        "sept groupes": {"bar.default": {"capsule_group": [{"id": f"g{i}", "members": ["tray"]} for i in range(7)]}},
+        "neuf groupes": {"bar.default": {"capsule_group": [{"id": f"g{i}", "members": ["tray"]} for i in range(9)]}},
         "liste qui n'est pas une liste": {"bar.default": {"end": "tray"}},
         "flou": {"bar.default": {"compositor_blur": True}},
         "rôle de couleur inconnu de Noctalia": {"bar.default": {"capsule_fill": "surface_container"}},

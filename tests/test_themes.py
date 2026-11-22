@@ -122,6 +122,7 @@ class Equivalence(Base):
                 vals = self.lignes_style()
                 self.assertEqual(vals.pop("STYLE"), nom)
                 vals.pop("POLICE", None)              # décidée par police_apple(), pas par le thème
+                vals.pop("ILE_Y", None)               # calculé d'après la barre du haut (test_defauts_ecran_v3, Centrage)
                 d = json.loads((THEMES / (nom + ".json")).read_text(encoding="utf-8"))
                 # Seul ajout voulu depuis les anciens styles : le dossier de fonds du thème, s'il en a un
                 self.assertEqual(vals.pop("FONDS_DOSSIER", ""),
