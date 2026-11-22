@@ -100,12 +100,15 @@ class Rendu(unittest.TestCase):
         assert r.returncode == 0, r.stderr[-800:]
         return sortie
 
-    def identiques(self, palette):
+    def identiques(self, palette, essais=2):
         a, b = self.rendre("ref", palette or "defaut", palette), self.rendre("new", palette or "defaut", palette)
         for e in ETATS:
             x, y = lire_png(a / (e + ".png")), lire_png(b / (e + ".png"))
             if e == "bureau":  # la première ligne varie d'un rendu à l'autre, même sur l'arbre de référence
                 x, y = (x[0], x[1], x[2][1:]), (y[0], y[1], y[2][1:])
+                if x != y and essais > 1:
+                    # l'horloge du bureau a pu changer de minute entre les deux rendus : on refait les deux, une fois
+                    return self.identiques(palette, essais - 1)
             self.assertEqual(x, y, "%s (%s)" % (e, palette))
 
     def test_sans_palette_identique_a_la_reference(self):
