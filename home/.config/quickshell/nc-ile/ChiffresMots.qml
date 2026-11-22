@@ -1,5 +1,5 @@
 // Chiffres « mots » : l'heure en toutes lettres, à cinq minutes près (« Il est » / « neuf heures et cinq »).
-// Chargé par CarteWidget.qml d'après le champ « chiffres ».
+// Chargé par CarteWidget.qml d'après le champ « chiffres ». L'heure en grand, « Il est » petit au-dessus (hiérarchie).
 import QtQuick
 
 Column {
@@ -16,9 +16,9 @@ Column {
             width: Math.min(implicitWidth, mots.carte.largeurUtile)
             horizontalAlignment: mots.carte.aligne
             text: modelData
-            color: index > 0 ? mots.carte.sec : mots.carte.pri
-            font.family: mots.carte.policeDe(Math.max(11, Math.round(mots.taille * (index === 0 ? 1 : 0.6))))
-            font.pixelSize: Math.max(11, Math.round(mots.taille * (index === 0 ? 1 : 0.6)))
+            color: index === 0 ? mots.carte.sec : mots.carte.pri
+            font.family: mots.carte.policeDe(Math.max(11, Math.round(mots.taille * (index === 0 ? 0.45 : 1))))
+            font.pixelSize: Math.max(11, Math.round(mots.taille * (index === 0 ? 0.45 : 1)))
         }
     }
 }
