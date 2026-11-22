@@ -477,7 +477,9 @@ _FREQ_AIDE = L("Fréquence de l'écran du portable dans ce profil.", "Refresh ra
 _JAMAIS = L("Jamais", "Never")
 
 REGLAGES = [
-    *[R("ILE_PAGE_" + cle.upper(), "Pages de l’île", L(fr, en), "ouinon", "oui",
+    # Défaut « non » : JARVIS, Agents IA, Santé, Jeu, Appel, Terminal, Fenêtres, Minuteur (même liste dans Reglages.qml)
+    *[R("ILE_PAGE_" + cle.upper(), "Pages de l’île", L(fr, en), "ouinon",
+        "non" if cle in ("assistant", "claude", "sante", "jeu", "appel", "terminal", "fenetres", "minuteur") else "oui",
         L("Afficher cette page dans l’île. Les fonctions et les notifications restent disponibles. Toutes désactivées : seule la pilule reste, avec le Spotlight.",
           "Show this island page. Features and notifications remain available. All disabled: keep only the pill and Spotlight."))
       for cle, fr, en in (

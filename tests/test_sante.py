@@ -219,7 +219,7 @@ class Reglage(unittest.TestCase):
             r.valider("200")
         self.assertEqual(settings["MATERIEL"]["CHALEUR_ALERTE"], "ile")
         self.assertEqual(settings["MATERIEL"]["ILE_PAGE_SANTE"], "ile")
-        self.assertEqual(settings["PAR_CLE"]["ILE_PAGE_SANTE"].defaut, "oui")
+        self.assertEqual(settings["PAR_CLE"]["ILE_PAGE_SANTE"].defaut, "non")
         self.assertNotIn("CHALEUR_ALERTE", settings["DISTANT_PERMIS"])
 
 

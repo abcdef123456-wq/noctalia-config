@@ -10,6 +10,7 @@ import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
+COUPEES = "assistant claude sante jeu appel terminal fenetres minuteur".split()  # défaut « non » (refonte de l'île à venir)
 PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme sante calendrier meteo presse fenetres appel terminal".split()
 
 
@@ -24,7 +25,8 @@ class ReglagesPages(unittest.TestCase):
             for page in PAGES:
                 r = keys["ILE_PAGE_" + page.upper()]
                 self.assertEqual(r.valider("non"), "non")
-                self.assertEqual(r.defaut, "oui")
+                self.assertEqual(r.defaut, "non" if page in COUPEES else "oui")
+                self.assertEqual(r.valider("oui"), "oui")
                 self.assertEqual(r.section, "Pages de l’île")
 
 
@@ -125,6 +127,16 @@ else if(etape===3){controler();nav.height=0;etape++}
 else if(etape===4){verifier(points().every(p=>!p.visible),"points pendant la fermeture");Qt.quit()}
 ''', scale=scale)
 
+    def test_defaut_qml_des_pages_et_choix_oui_garde(self):
+        self.executer('''
+if(etape===0){etape++;return}
+var coupees=%s
+nav.pages.forEach(n=>verifier(Reglages.pageActive(n)===(coupees.indexOf(n)<0),"défaut de "+n))
+Reglages.valeurs={ILE_PAGE_ASSISTANT:"oui",ILE_PAGE_MUSIQUE:"non"}
+verifier(Reglages.pageActive("assistant")&&!Reglages.pageActive("musique"),"choix écrit non respecté")
+Qt.quit()
+''' % COUPEES)
+
     def test_nom_accessible_est_le_libelle_pas_l_identifiant(self):
         self.executer('''
 if(etape===0){etape++;return}
@@ -137,7 +149,7 @@ Qt.quit()
 
     def test_preferences_filter_dynamic_and_static_pages_and_allow_all_off(self):
         self.executer('''
-if(etape===0){Etat.enCharge=true;Etat.jeu=true;Etat.minuteurFin=Date.now()+10000;Etat.meteo={temp:20};etape++}
+if(etape===0){Reglages.valeurs={ILE_PAGE_ASSISTANT:"oui",ILE_PAGE_JEU:"oui"};Etat.enCharge=true;Etat.jeu=true;Etat.minuteurFin=Date.now()+10000;Etat.meteo={temp:20};etape++}
 else if(etape===1){
  verifier(Etat.vues.indexOf("charge")>=0,"activité absente")
  Etat.basculer("TEST",true);Etat.aller("assistant")

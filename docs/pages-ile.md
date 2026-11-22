@@ -7,12 +7,13 @@ Système, Santé, Calendrier, Météo, Presse-papiers, Fenêtres, Appel et Termi
 ventilateurs, profil d'énergie, alerte de surchauffe) n'existe que sur une machine qui a des capteurs
 (`nc-ile-etat capteurs`).
 
-Les choix sont conservés dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Les pages restent activées
-par défaut ; les pages d’activité n’apparaissent que lorsqu’elles ont du contenu. Exemple :
+Les choix sont conservés dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Huit pages sont coupées par
+défaut (JARVIS, Agents IA, Santé, Jeu, Appel, Terminal, Fenêtres, Minuteur) ; les autres sont activées. Un « oui »
+déjà réglé est gardé. Les pages d’activité n’apparaissent que lorsqu’elles ont du contenu. Exemple :
 
 ```sh
-nc-settings set ILE_PAGE_ASSISTANT non
-nc-settings set ILE_PAGE_CLAUDE non
+nc-settings set ILE_PAGE_ASSISTANT oui
+nc-settings set ILE_PAGE_MUSIQUE non
 nc-settings reset ILE_PAGE_ASSISTANT
 ```
 
