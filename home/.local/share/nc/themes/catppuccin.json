@@ -40,17 +40,51 @@
   "noctalia": {
     "bar.default": {
       "position": "top",
-      "margin_edge": 6,
+      "margin_edge": 8,
+      "margin_ends": 14,
       "thickness": 40,
       "capsule": true,
       "capsule_thickness": 0.92,
-      "capsule_padding": 12
+      "capsule_padding": 14,
+      "widget_spacing": 14,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "group:gauche",
+        "media"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:status",
+        "group:jour"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": false,
       "pill_scale": 1.4,
-      "active_pill_size": 3.0
+      "active_pill_size": 3.0,
+      "focused_color": "primary",
+      "occupied_color": "tertiary",
+      "empty_color": "outline"
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%a %d %b}"
     }
   },
   "theme_sync": {

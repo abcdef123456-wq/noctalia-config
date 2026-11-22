@@ -15,8 +15,10 @@ APPLE = ENTETE + ('[lockscreen]\nblur_intensity = 0.35\ntransition = ["fade"]\n\
                   '[widget.workspaces]\nstyle = "minimal"\nshow_labels = false\n\n'
                   '[wallpaper]\ntransition = ["fade"]\ndirectory = "@FONDS@"\n')
 OLED = ENTETE + ('[theme]\npure_black_dark = true\n\n'
-                 '[bar.default]\nposition = "top"\nmargin_edge = 6\nthickness = 34\ncapsule = false\nbackground_opacity = 0.0\n\n'
-                 '[widget.workspaces]\nstyle = "focus_hint"\nshow_labels = true\n\n'
+                 '[bar.default]\nposition = "top"\nmargin_edge = 6\nmargin_ends = 16\nthickness = 34\ncapsule = false\n'
+                 'background_opacity = 0.0\n\n'
+                 '[widget.workspaces]\nstyle = "regular"\nshow_labels = false\npill_scale = 0.8\nactive_pill_size = 2.2\n'
+                 'inactive_pill_size = 0.6\nfocused_color = "on_surface"\noccupied_color = "outline"\nempty_color = "outline"\n\n'
                  '[dock]\nenabled = false\n\n[wallpaper]\ndirectory = "@FONDS@"\n')
 
 

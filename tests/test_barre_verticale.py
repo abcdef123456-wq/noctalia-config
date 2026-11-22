@@ -5,6 +5,7 @@ d'ici fait pareil. La batterie lit donc l'orientation dans lire() (update, survo
 Pilules VPN et Garmin : en colonne sur un côté. apple : logo puis titre, et aucun groupe qui garderait sa pastille.
 Faux HOME (test_barre_composition.nc_isole) ; jamais le vrai HOME."""
 from pathlib import Path
+import json
 import re
 import shutil
 import subprocess
@@ -150,10 +151,14 @@ assert(larg(RENDU) <= LIMITE)
 
 
 class SansPastilles(unittest.TestCase):
-    """apple et oled : barre sans pastilles, donc aucun groupe (Noctalia lui donne toujours la sienne)."""
+    """Tout thème dont la barre est sans pastilles (apple, oled, barres plates des recettes) : aucun groupe (Noctalia lui
+    donne toujours la sienne) ; ses membres restent, posés à nu."""
     def test_tout_ou_rien(self):
         for install in bc.INSTALLS:
-            for style in ("apple", "oled"):
+            plats = sorted(p.stem for p in bc.THEMES.glob("*.json")
+                           if json.loads(p.read_text(encoding="utf-8")).get("noctalia", {}).get("bar.default", {}).get("capsule") is False)
+            self.assertTrue({"apple", "oled"} <= set(plats))
+            for style in plats:
                 with bc.nc_isole(install=install, style=style) as (nc, f):
                     for c in bc.COMBOS:
                         with self.subTest(install=install, style=style, interrupteurs=c):
@@ -162,8 +167,9 @@ class SansPastilles(unittest.TestCase):
                             listes = b.get("start", []) + b.get("center", []) + b["end"]
                             self.assertFalse([w for w in listes if w.startswith("group:")], "un groupe garde sa pastille")
                             self.assertNotIn("capsule_group", b)
-                            for w in ("network", "bluetooth", "volume", "nc/batterie:batterie", "power_profile"):
-                                self.assertIn(w, b["end"])
+                            if style == "apple":
+                                for w in ("network", "bluetooth", "volume", "nc/batterie:batterie", "power_profile"):
+                                    self.assertIn(w, b["end"])
                             self.assertEqual("cpu" in b["end"], c.get("BARRE_SYSTEME") != "non")
                             if style == "apple":
                                 self.assertEqual(b["start"], ["logo", "nc/fenetres:titre"], "logo puis le titre, sans trou")

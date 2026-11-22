@@ -35,17 +35,35 @@
     "DOCK": "oui",
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "oui",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "non"
   },
   "noctalia": {
     "bar.default": {
-      "position": "right",
-      "margin_edge": 8,
-      "thickness": 40
+      "position": "top",
+      "margin_edge": 0,
+      "margin_ends": 0,
+      "thickness": 40,
+      "capsule": false,
+      "background_opacity": 0.8,
+      "widget_spacing": 16,
+      "start": [
+        "workspaces"
+      ],
+      "center": [],
+      "end": [
+        "nc/batterie:batterie",
+        "t-date"
+      ]
     },
     "widget.workspaces": {
       "style": "minimal",
-      "show_labels": true
+      "show_labels": true,
+      "label_source": "id",
+      "labels_only_when_occupied": false
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%d %b}"
     }
   },
   "theme_sync": {

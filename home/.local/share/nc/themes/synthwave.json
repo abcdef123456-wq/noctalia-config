@@ -33,19 +33,53 @@
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",
     "FENETRES_MAITRE_ORIENTATION": "haut",
-    "DOCK": "non"
+    "DOCK": "non",
+    "ILE_BANDE": "oui"
   },
   "noctalia": {
     "bar.default": {
-      "position": "top",
-      "margin_edge": 6,
-      "thickness": 44,
-      "capsule": true
+      "position": "bottom",
+      "margin_edge": 8,
+      "margin_ends": 16,
+      "thickness": 46,
+      "capsule": true,
+      "capsule_padding": 14,
+      "widget_spacing": 12,
+      "background_opacity": 0.0,
+      "capsule_group": [
+        {
+          "id": "gauche",
+          "members": [
+            "logo",
+            "workspaces"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "group:gauche"
+      ],
+      "center": [
+        "group:jour"
+      ],
+      "end": [
+        "tray",
+        "group:status"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": false,
       "pill_scale": 1.3
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%A %d %B}"
     }
   },
   "theme_sync": {

@@ -39,13 +39,44 @@
     "bar.default": {
       "position": "bottom",
       "margin_edge": 0,
-      "thickness": 28,
-      "background_opacity": 0.9
+      "margin_ends": 0,
+      "thickness": 36,
+      "background_opacity": 0.96,
+      "capsule": false,
+      "widget_spacing": 10,
+      "start": [
+        "logo",
+        "workspaces",
+        "t-taches"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "network",
+        "bluetooth",
+        "volume",
+        "nc/batterie:batterie",
+        "t-heure"
+      ]
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": true,
       "label_source": "id"
+    },
+    "widget.t-taches": {
+      "type": "taskbar",
+      "show_running": true,
+      "only_active_workspace": true,
+      "show_window_title": true,
+      "window_title_max_width": 160,
+      "show_active_indicator": true,
+      "active_indicator_color": "primary",
+      "item_spacing": 8
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M   %d/%m/%Y}"
     }
   },
   "theme_sync": {

@@ -56,7 +56,25 @@ def regle_hauteur(d):
 
 
 def lire_toml(texte):
-    """Le zy-reglages.toml écrit par nc-reglages (toml_val : JSON pour les textes et listes, true/false, nombres)."""
+    """Le zy-reglages.toml écrit par nc-reglages, à plat par nom de table ([bar.default] → "bar.default"). Avec tomllib
+    (tables en ligne des groupes de pastilles comprises) ; sans, repli ligne à ligne (JSON pour les textes et listes)."""
+    try:
+        import tomllib
+    except ImportError:
+        tomllib = None
+    if tomllib:
+        tables = {}
+        for l in texte.splitlines():
+            m = re.fullmatch(r"\[(.+)\]", l)
+            if m:
+                tables.setdefault(m.group(1), {})
+        d = tomllib.loads(texte)
+        for nom in tables:
+            v = d
+            for partie in re.findall(r'"[^"]*"|[^.]+', nom):
+                v = v[partie.strip('"')]
+            tables[nom] = v
+        return tables
     tables, t = {}, None
     for l in texte.splitlines():
         m = re.fullmatch(r"\[(.+)\]", l)
@@ -209,7 +227,9 @@ class EcritPourNoctalia(tt.Base):
         return lire_toml(self.toml.read_text(encoding="utf-8")) if self.toml.exists() else {}
 
     def test_barre_verticale_adaptee(self):
-        for style in ("nord", "kanagawa"):
+        cotes = [n for n, d in themes().items() if barre(d)["position"] in ("left", "right")]
+        self.assertIn("nord", cotes)
+        for style in cotes:
             with self.subTest(theme=style):
                 b = self.appliquer(style, BARRE_SYSTEME="oui", VPN_PILULE_BARRE="oui")["bar.default"]
                 self.assertIn(b["position"], ("left", "right"))
@@ -229,7 +249,7 @@ class EcritPourNoctalia(tt.Base):
         self.assertIn("group:sys", b["end"])
 
     def test_dock_visible_reserve_sa_place(self):
-        t = self.appliquer("tokyo")                       # contrôle du contrôle : à 7378cd3, rien
+        t = self.appliquer("catppuccin")                  # dock à gauche toujours visible ; à 7378cd3, rien
         self.assertIs(t["dock"]["auto_hide"], False)
         self.assertIs(t["dock"].get("reserve_space"), True)
         self.assertIs(self.appliquer("apple")["dock"].get("reserve_space"), True)

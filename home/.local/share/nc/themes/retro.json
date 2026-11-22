@@ -42,14 +42,41 @@
     "bar.default": {
       "position": "bottom",
       "margin_edge": 0,
-      "thickness": 24,
+      "margin_ends": 0,
+      "thickness": 26,
       "capsule": false,
-      "background_opacity": 1.0
+      "background_opacity": 1.0,
+      "widget_spacing": 12,
+      "start": [
+        "t-session",
+        "workspaces",
+        "t-titre"
+      ],
+      "center": [],
+      "end": [
+        "volume",
+        "nc/batterie:batterie",
+        "t-heure"
+      ]
     },
     "widget.workspaces": {
-      "style": "focus_hint",
+      "style": "minimal",
       "show_labels": true,
       "label_source": "id"
+    },
+    "widget.t-session": {
+      "type": "text",
+      "text": "[nc]"
+    },
+    "widget.t-titre": {
+      "type": "active_window",
+      "display": "text_only",
+      "max_length": 420,
+      "title_scroll": "none"
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M %d-%b-%y}"
     }
   },
   "theme_sync": {

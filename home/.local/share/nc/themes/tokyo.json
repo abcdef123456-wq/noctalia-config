@@ -33,24 +33,104 @@
     "FENETRES_DISPOSITION": "master",
     "FENETRES_MAITRE_ORIENTATION": "droite",
     "FENETRES_COINS_FORME": "doux",
-    "DOCK": "oui",
+    "DOCK": "non",
     "DOCK_POSITION": "bottom",
-    "DOCK_AUTO": "non"
+    "DOCK_AUTO": "non",
+    "BARRE_SYSTEME": "non"
   },
   "noctalia": {
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
+      "margin_ends": 8,
       "thickness": 40,
-      "background_opacity": 0.85
+      "background_opacity": 0.85,
+      "capsule": true,
+      "widget_spacing": 10,
+      "capsule_group": [
+        {
+          "id": "jauges",
+          "members": [
+            "t-cpu",
+            "t-temp",
+            "t-ram",
+            "t-disque"
+          ]
+        },
+        {
+          "id": "jour",
+          "members": [
+            "t-date"
+          ]
+        }
+      ],
+      "start": [
+        "logo",
+        "workspaces",
+        "nc/fenetres:titre"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "group:jauges",
+        "group:status",
+        "group:jour"
+      ]
+    },
+    "bar.bas": {
+      "position": "bottom",
+      "margin_edge": 6,
+      "thickness": 44,
+      "background_opacity": 0.0,
+      "capsule": true,
+      "capsule_padding": 12,
+      "start": [],
+      "center": [
+        "t-taches"
+      ],
+      "end": []
     },
     "widget.workspaces": {
       "style": "regular",
       "show_labels": true,
       "label_source": "id"
     },
-    "dock": {
-      "margin_edge": 0
+    "widget.t-cpu": {
+      "type": "sysmon",
+      "stat": "cpu_usage",
+      "visualization": "gauge",
+      "show_value": true
+    },
+    "widget.t-temp": {
+      "type": "sysmon",
+      "stat": "cpu_temp",
+      "visualization": "gauge",
+      "show_value": true
+    },
+    "widget.t-ram": {
+      "type": "sysmon",
+      "stat": "ram_used",
+      "visualization": "gauge",
+      "show_value": true
+    },
+    "widget.t-disque": {
+      "type": "sysmon",
+      "stat": "disk_used_pct",
+      "visualization": "gauge",
+      "show_value": true
+    },
+    "widget.t-taches": {
+      "type": "taskbar",
+      "show_running": true,
+      "show_window_title": false,
+      "show_active_indicator": true,
+      "active_indicator_color": "primary",
+      "item_spacing": 10,
+      "icon_scale": 1.2
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%a %d %b}"
     }
   },
   "theme_sync": {

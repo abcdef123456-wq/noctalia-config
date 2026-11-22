@@ -34,7 +34,8 @@
     "FENETRES_COINS_FORME": "rond",
     "FENETRES_MAITRE_ORIENTATION": "centre",
     "FENETRES_FOND": "noir",
-    "DOCK": "non"
+    "DOCK": "non",
+    "BARRE_SYSTEME": "non"
   },
   "noctalia": {
     "theme": {
@@ -43,13 +44,27 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 6,
+      "margin_ends": 16,
       "thickness": 34,
       "capsule": false,
-      "background_opacity": 0.0
+      "background_opacity": 0.0,
+      "start": [
+        "workspaces"
+      ],
+      "center": [],
+      "end": [
+        "nc/batterie:batterie"
+      ]
     },
     "widget.workspaces": {
-      "style": "focus_hint",
-      "show_labels": true
+      "style": "regular",
+      "show_labels": false,
+      "pill_scale": 0.8,
+      "active_pill_size": 2.2,
+      "inactive_pill_size": 0.6,
+      "focused_color": "on_surface",
+      "occupied_color": "outline",
+      "empty_color": "outline"
     }
   },
   "theme_sync": {

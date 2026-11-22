@@ -41,14 +41,34 @@
     "bar.default": {
       "position": "top",
       "margin_edge": 0,
+      "margin_ends": 0,
       "thickness": 40,
       "capsule": false,
-      "background_opacity": 0.95
+      "background_opacity": 1.0,
+      "widget_spacing": 14,
+      "font_weight": 700,
+      "start": [
+        "workspaces",
+        "nc/fenetres:titre"
+      ],
+      "center": [],
+      "end": [
+        "tray",
+        "network",
+        "volume",
+        "nc/batterie:batterie",
+        "t-date"
+      ]
     },
     "widget.workspaces": {
       "style": "focus_hint",
       "show_labels": true,
-      "label_source": "id"
+      "label_source": "id",
+      "labels_only_when_occupied": false
+    },
+    "widget.t-date": {
+      "type": "clock",
+      "format": "{:%a %d %b}"
     }
   },
   "theme_sync": {
