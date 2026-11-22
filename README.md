@@ -130,6 +130,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 |---|---|
 | Capture de l'écran · d'une zone · à annoter | **Impr. écran** · **Super + P** · **Super + Maj + S** |
 | Capture de l'écran dans 5 s (compte à rebours en notification) · l'annuler. Autre délai : `nc-capture ecran --dans 3\|5\|10` (1 à 30) | **Ctrl + Impr. écran** · **Ctrl + Maj + Impr. écran** (ou `nc-capture annuler`) |
+| Habiller une capture (coins arrondis, ombre, dégradé du thème, nouveau fichier « …-habillee.png », l'original reste intact) : bouton **Habiller** de la notification, ou `nc-capture habiller FICHIER` (si ImageMagick est installé) | — |
 | Projeter sur un second écran ou un projecteur : écran du PC seulement, dupliquer, étendre (côté au choix), second écran seulement (comme Windows + P) | **Super + O** |
 | Historique du presse-papiers · émojis | **Super + Maj + V** · **Super + .** |
 | Lumière de nuit · ne pas déranger | **Super + N** · **Super + Maj + N** |
