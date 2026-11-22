@@ -55,7 +55,7 @@ Item {
                     readonly property bool actif: Modes.actif === modelData.id
                     width: contenu.width; spacing: 8
                     Rectangle {
-                        width: parent.width; height: 52; radius: 16
+                        width: parent.width; height: 52; radius: Couleurs.rayon(16, width, height)
                         color: ligne.actif ? Couleurs.accent : (zone.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         Behavior on color { ColorAnimation { duration: 160 } }
                         Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: ligne.modelData.icone; taille: 24
@@ -111,7 +111,7 @@ Item {
             Row {
                 spacing: 8
                 Rectangle {
-                    width: contenu.width - 8 - ajouter.implicitWidth; height: 34; radius: 17; color: Couleurs.gris2
+                    width: contenu.width - 8 - ajouter.implicitWidth; height: 34; radius: Couleurs.rayon(17, width, height); color: Couleurs.gris2
                     border.width: 1; border.color: nouveau.activeFocus ? Couleurs.accent : "transparent"
                     TextInput {
                         id: nouveau

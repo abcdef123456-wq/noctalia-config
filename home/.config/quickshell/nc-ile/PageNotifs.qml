@@ -124,7 +124,7 @@ Item {
                         id: pf
                         required property var modelData
                         objectName: "nc-notifs-filtre-" + modelData.id
-                        width: lf.implicitWidth + 18; height: 26; radius: 13
+                        width: lf.implicitWidth + 18; height: 26; radius: Couleurs.rayon(13, width, height)
                         color: p.filtre === modelData.id ? Couleurs.accent : (zf.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         Texte { id: lf; anchors.centerIn: parent; text: pf.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold; color: p.filtre === pf.modelData.id ? Couleurs.surAccent : Couleurs.texte }
                         MouseArea { id: zf; anchors.fill: parent; hoverEnabled: true; onClicked: { p.filtre = pf.modelData.id; p.choix = -1 } }
@@ -134,7 +134,7 @@ Item {
                 }
             }
             Rectangle {
-                anchors.left: filtres.right; anchors.leftMargin: 8; anchors.right: parent.right; height: 30; radius: 15
+                anchors.left: filtres.right; anchors.leftMargin: 8; anchors.right: parent.right; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: Couleurs.gris2; border.width: 1; border.color: champ.activeFocus ? Couleurs.accent : "transparent"
                 Ico { x: 9; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 15; color: Couleurs.texteSec }
                 TextInput {
@@ -159,7 +159,7 @@ Item {
                     id: pm
                     required property string modelData
                     objectName: "nc-notifs-masquee-" + modelData
-                    width: lm.implicitWidth + 36; height: 26; radius: 13; color: zm.containsMouse ? Couleurs.gris3 : Couleurs.gris2
+                    width: lm.implicitWidth + 36; height: 26; radius: Couleurs.rayon(13, width, height); color: zm.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                     Texte { id: lm; x: 10; anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12
                             text: pm.modelData + (Notifs.masques[pm.modelData] < 0 ? "" : " · " + Qt.formatTime(new Date(Notifs.masques[pm.modelData]), "hh:mm")) }
                     Ico { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; nom: "close"; taille: 13; color: Couleurs.texteSec }
@@ -191,7 +191,7 @@ Item {
                 objectName: "nc-notifs-partage"
                 visible: Partage.silence
                 readonly property string appli: capture.item ? capture.item.appli : ""
-                width: parent.width; height: visible ? (appli !== "" ? 74 : 56) : 0; radius: 16; color: Couleurs.carte
+                width: parent.width; height: visible ? (appli !== "" ? 74 : 56) : 0; radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
                 Loader { id: capture; active: Partage.silence; source: "PartageCapture.qml" }
                 Rectangle { id: pointPartage; x: 18; anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
                 Column {
@@ -210,7 +210,7 @@ Item {
             Rectangle {
                 objectName: "nc-notifs-npd-auto"
                 visible: Partage.auto && !Partage.silence
-                width: parent.width; height: visible ? 56 : 0; radius: 16; color: Couleurs.carte
+                width: parent.width; height: visible ? 56 : 0; radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
                 Ico { id: iconeNpd; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: Partage.jeuAuto ? "sports_esports" : "cast"; taille: 20; color: Couleurs.accentClair }
                 Column {
                     anchors.left: iconeNpd.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 2
@@ -225,7 +225,7 @@ Item {
             Rectangle {
                 objectName: "nc-notifs-resume"
                 visible: p.resumeIA !== "" || p.resumeErreur !== "" || resumeur.running
-                width: parent.width; height: visible ? colResume.implicitHeight + 24 : 0; radius: 16; color: Couleurs.carte
+                width: parent.width; height: visible ? colResume.implicitHeight + 24 : 0; radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
                 Column {
                     id: colResume
                     x: 14; y: 12; width: parent.width - 28 - 24; spacing: 4
@@ -249,7 +249,7 @@ Item {
                 id: maj
                 objectName: "nc-notifs-maj"
                 visible: Reglages.val("MAJ_SYSTEME", "notif") !== "non"
-                width: parent.width; height: visible ? 56 : 0; radius: 16; color: Couleurs.carte
+                width: parent.width; height: visible ? 56 : 0; radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
                 property var detail: null
                 readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
                 readonly property int total: detail ? (detail.total || 0) : 0
@@ -305,7 +305,7 @@ Item {
                             id: bm
                             required property var modelData
                             objectName: "nc-notifs-maj-" + modelData.id
-                            width: lbm.implicitWidth + 20; height: 28; radius: 14
+                            width: lbm.implicitWidth + 20; height: 28; radius: Couleurs.rayon(14, width, height)
                             opacity: modelData.id === "chercher" && verif.running ? 0.5 : 1
                             color: modelData.id === "maj" ? Couleurs.accent : (zbm.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                             Texte { id: lbm; anchors.centerIn: parent; text: bm.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold
@@ -354,7 +354,7 @@ Item {
                             anchors.left: parent.left; anchors.leftMargin: 4; anchors.verticalCenter: parent.verticalCenter; spacing: 6
                             Texte { text: groupe.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true }
                             Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter; width: lc.implicitWidth + 12; height: 18; radius: 9
+                                anchors.verticalCenter: parent.verticalCenter; width: lc.implicitWidth + 12; height: 18; radius: Couleurs.rayon(9, width, height)
                                 color: groupe.modelData.nonLues ? Couleurs.accent : Couleurs.gris3
                                 Texte { id: lc; anchors.centerIn: parent; text: groupe.modelData.notifs.length; font.pixelSize: 11; font.weight: Font.DemiBold; color: groupe.modelData.nonLues ? Couleurs.surAccent : Couleurs.texteSec }
                             }
@@ -375,7 +375,7 @@ Item {
                             objectName: "nc-notif-" + modelData.id
                             width: liste.width
                             height: contenu.implicitHeight + 24
-                            radius: 18
+                            radius: Couleurs.rayon(18, width, height)
                             color: survolCarte.hovered || choisie ? Couleurs.gris2 : Couleurs.carte
                             border.width: choisie ? 1.5 : 0; border.color: Couleurs.accent
                             Behavior on color { ColorAnimation { duration: 120 } }
@@ -399,7 +399,7 @@ Item {
 
                             ClippingRectangle {
                                 id: ic
-                                x: 12; y: 12; width: 34; height: 34; radius: 9
+                                x: 12; y: 12; width: 34; height: 34; radius: Couleurs.rayon(9, width, height)
                                 color: im.status === Image.Ready ? "transparent" : Couleurs.gris2
                                 Image { id: im; anchors.fill: parent; source: Notifs.icone(carte.modelData); sourceSize: Qt.size(68, 68); fillMode: Image.PreserveAspectCrop }
                                 Ico { anchors.centerIn: parent; nom: "notifications"; taille: 18; visible: im.status !== Image.Ready }
@@ -453,7 +453,7 @@ Item {
                                         model: Notifs.boutons(carte.modelData)
                                         Rectangle {
                                             required property var modelData
-                                            width: lbc.implicitWidth + 24; height: 28; radius: 14
+                                            width: lbc.implicitWidth + 24; height: 28; radius: Couleurs.rayon(14, width, height)
                                             color: zbc.pressed ? Couleurs.gris4 : Couleurs.gris3
                                             Texte { id: lbc; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
                                             MouseArea { id: zbc; anchors.fill: parent; onClicked: Notifs.agir(carte.modelData, parent.modelData) }
@@ -479,7 +479,7 @@ Item {
                                             id: choixMenu
                                             required property var modelData
                                             objectName: "nc-notif-" + carte.modelData.id + "-" + carte.menu + "-" + modelData.id
-                                            width: lcm.implicitWidth + 22; height: 26; radius: 13
+                                            width: lcm.implicitWidth + 22; height: 26; radius: Couleurs.rayon(13, width, height)
                                             color: zcm.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                                             Texte { id: lcm; anchors.centerIn: parent; text: choixMenu.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold }
                                             MouseArea { id: zcm; anchors.fill: parent; hoverEnabled: true
@@ -492,7 +492,7 @@ Item {
                                 }
                                 Rectangle {
                                     visible: carte.menu === "repondre"
-                                    width: parent.width; height: 32; radius: 16; color: Couleurs.gris3
+                                    width: parent.width; height: 32; radius: Couleurs.rayon(16, width, height); color: Couleurs.gris3
                                     border.width: 1; border.color: reponse.activeFocus ? Couleurs.accent : "transparent"
                                     onVisibleChanged: if (visible) reponse.forceActiveFocus()
                                     TextInput {

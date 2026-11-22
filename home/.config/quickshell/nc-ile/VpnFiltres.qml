@@ -31,7 +31,7 @@ Column {
         }
     }
     Rectangle {
-        width: parent.width; height: 38; radius: 19
+        width: parent.width; height: 38; radius: Couleurs.rayon(19, width, height)
         color: Qt.alpha(Couleurs.carte, 0.6)
         border.width: 1; border.color: champ.activeFocus ? Qt.alpha(Couleurs.accent, 0.7) : Qt.alpha(Couleurs.texte, 0.1)
         Ico { id: loupe; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 18; color: Couleurs.texteSec }

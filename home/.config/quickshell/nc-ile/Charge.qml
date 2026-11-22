@@ -90,7 +90,7 @@ Item {
         Module {
             objectName: "blocConso"
             visible: charge.aWatts || charge.programmes.length > 0
-            width: contenu.width; radius: 18
+            width: contenu.width; radius: Couleurs.rayon(18, width, height)
             height: colConso.implicitHeight + 24
             Column {
                 id: colConso
@@ -149,7 +149,7 @@ Item {
                 : dort ? Reglages.t("Carte NVIDIA : endormie (0 W)", "NVIDIA GPU: asleep (0 W)")
                 : Reglages.t("Carte NVIDIA : allumée", "NVIDIA GPU: on") + (charge.rtx.cause ? " — " + charge.rtx.cause : "")
             visible: texte !== "" && !pourquoi.ouvert
-            width: contenu.width; height: 44; radius: 18
+            width: contenu.width; height: 44; radius: Couleurs.rayon(18, width, height)
             Ico {
                 id: icoRtx
                 anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter
@@ -176,7 +176,7 @@ Item {
             readonly property var s: charge.sante || {}
             readonly property var lim: s.limite || null
             visible: (typeof s.garde === "number" || typeof s.cycles === "number" || lim !== null) && !pourquoi.ouvert
-            width: contenu.width; radius: 18
+            width: contenu.width; radius: Couleurs.rayon(18, width, height)
             height: colSante.implicitHeight + 24
             Column {
                 id: colSante

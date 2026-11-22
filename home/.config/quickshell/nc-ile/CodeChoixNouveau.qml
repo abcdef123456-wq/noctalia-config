@@ -27,7 +27,7 @@ Column {
             width: choix.width; height: 46
             readonly property bool actif: index === choix.selection
             Rectangle {
-                anchors.fill: parent; radius: 12
+                anchors.fill: parent; radius: Couleurs.rayon(12, width, height)
                 color: ligne.actif ? Qt.alpha(Couleurs.accent, 0.22) : "transparent"
                 Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
             }

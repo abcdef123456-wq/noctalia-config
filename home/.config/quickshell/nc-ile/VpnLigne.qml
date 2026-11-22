@@ -9,7 +9,7 @@ Rectangle {
     property bool monte: false
     property bool occupe: false                   // une action est en cours sur cette ligne
     signal clic()                                 // ligne cliquée (connecter) ou bouton (déconnecter)
-    height: 44; radius: 14
+    height: 44; radius: Couleurs.rayon(14, width, height)
     color: zone.containsMouse ? Qt.alpha(Couleurs.accent, 0.2) : Qt.alpha(Couleurs.carte, 0.55)
     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
     opacity: occupe ? 0.6 : 1
@@ -17,7 +17,7 @@ Rectangle {
     Rectangle {
         id: point
         x: 14; anchors.verticalCenter: parent.verticalCenter
-        width: 9; height: 9; radius: 5
+        width: 9; height: 9; radius: Couleurs.rayon(5, width, height)
         color: ligne.monte ? Couleurs.vert : Couleurs.gris4
     }
     Column {
@@ -35,7 +35,7 @@ Rectangle {
         objectName: "nc-vpn-bouton"
         visible: ligne.monte
         anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
-        width: libelle.implicitWidth + 24; height: 28; radius: 14
+        width: libelle.implicitWidth + 24; height: 28; radius: Couleurs.rayon(14, width, height)
         color: zoneBouton.containsMouse ? Qt.alpha(Couleurs.rouge, 0.3) : Qt.alpha(Couleurs.gris3, 0.7)
         Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
         Texte { id: libelle; anchors.centerIn: parent; text: Reglages.t("Déconnecter", "Disconnect"); font.pixelSize: 12 }

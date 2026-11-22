@@ -20,14 +20,14 @@ Item {
             spacing: 6
             Rectangle {
                 visible: !!(a.projet && a.projet.branche)
-                height: 22; width: libBranche.implicitWidth + 30; radius: 11
+                height: 22; width: libBranche.implicitWidth + 30; radius: Couleurs.rayon(11, width, height)
                 color: Qt.alpha(Couleurs.accent, 0.18)
                 Ico { x: 8; anchors.verticalCenter: parent.verticalCenter; nom: "fork_right"; taille: 14; color: Couleurs.accent }
                 Texte { id: libBranche; x: 24; height: parent.height; text: a.projet && a.projet.branche ? a.projet.branche : ""; font.pixelSize: 11; font.weight: Font.DemiBold }
             }
             Rectangle {
                 visible: !!(a.projet && a.projet.langage)
-                height: 22; width: libLangage.implicitWidth + 20; radius: 11
+                height: 22; width: libLangage.implicitWidth + 20; radius: Couleurs.rayon(11, width, height)
                 color: Qt.alpha(Couleurs.carte, 0.7); border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
                 Texte { id: libLangage; anchors.centerIn: parent; text: a.projet && a.projet.langage ? a.projet.langage : ""; font.pixelSize: 11; color: a.texteSecondaire }
             }
@@ -71,7 +71,7 @@ Item {
         width: parent.width
         // jamais plus bas que l'aperçu, avec une marge avant le pied ; le texte est coupé à la dernière ligne entière (…)
         height: Math.max(0, Math.min(texteReadme.implicitHeight + 24, a.height - haut.height - 12 - 10))
-        radius: 12; color: Qt.alpha(Couleurs.carte, 0.55)
+        radius: Couleurs.rayon(12, width, height); color: Qt.alpha(Couleurs.carte, 0.55)
         clip: true
         Texte {
             id: texteReadme

@@ -17,7 +17,7 @@ Flow {
             required property var modelData
             required property int index
             readonly property string nom: typeof modelData === "string" ? modelData : String(modelData.nom || "")
-            height: 26; radius: 13
+            height: 26; radius: Couleurs.rayon(13, width, height)
             width: Math.min(pieces.width, 8 + 14 + 5 + etiquette.implicitWidth + (pieces.retirable ? 5 + 16 + 6 : 10))
             color: pieces.retirable ? Couleurs.carte : Qt.alpha(pieces.teinte, 0.15)
             border.width: 1

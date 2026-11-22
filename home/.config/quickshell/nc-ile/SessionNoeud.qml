@@ -22,7 +22,7 @@ Item {
     onCaptureTsChanged: if (captureN > 0 && captureTs > 0) flash.restart()
     Rectangle {
         id: voile
-        anchors.fill: parent; radius: 28; color: "white"; opacity: 0; z: 5
+        anchors.fill: parent; radius: Couleurs.rayon(28, width, height); color: "white"; opacity: 0; z: 5
         enabled: false
         SequentialAnimation on opacity {
             id: flash
@@ -60,7 +60,7 @@ Item {
     Rectangle {
         objectName: "nc-session-arreter"
         anchors.right: parent.right; anchors.rightMargin: 18; y: 38
-        width: Math.max(96, la.implicitWidth + 30); height: 34; radius: 17
+        width: Math.max(96, la.implicitWidth + 30); height: 34; radius: Couleurs.rayon(17, width, height)
         color: za.containsMouse ? Couleurs.gris3 : Couleurs.gris2
         scale: za.pressed ? 0.95 : 1
         Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 6; damping: 0.45 } }

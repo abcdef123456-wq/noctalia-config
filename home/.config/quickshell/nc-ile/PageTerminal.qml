@@ -39,7 +39,7 @@ Item {
 
         Module {
             objectName: "nc-terminal-aller"
-            width: parent.width; height: 52; radius: 16; cliquable: true
+            width: parent.width; height: 52; radius: Couleurs.rayon(16, width, height); cliquable: true
             onClic: Terminal.aller()
             Row {
                 anchors.centerIn: parent; spacing: 10

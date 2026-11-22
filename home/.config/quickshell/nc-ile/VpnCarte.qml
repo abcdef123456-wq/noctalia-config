@@ -18,7 +18,7 @@ Rectangle {
     readonly property bool ipLigne: Reglages.val("VPN_IP_PUBLIQUE", "non") === "oui" && !VpnEtat.masque
     readonly property string indispo: Reglages.t("indisponible", "unavailable")
 
-    radius: 22
+    radius: Couleurs.rayon(22, width, height)
     height: contenu.implicitHeight + 36
     color: Qt.alpha(Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.texte, 0.08)), 0.85)       // un peu plus clair que la page, même sans flou
     border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)
@@ -94,7 +94,7 @@ Rectangle {
                 objectName: "nc-vpn-tout"
                 visible: c.monte
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                width: libelleTout.implicitWidth + 36; height: 38; radius: 19
+                width: libelleTout.implicitWidth + 36; height: 38; radius: Couleurs.rayon(19, width, height)
                 color: zoneTout.containsMouse ? Qt.alpha(Couleurs.rouge, 0.34) : Qt.alpha(Couleurs.rouge, 0.18)
                 border.width: 1; border.color: Qt.alpha(Couleurs.rouge, 0.45)
                 opacity: c.libre ? 1 : 0.6

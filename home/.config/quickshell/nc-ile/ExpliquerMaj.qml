@@ -22,7 +22,7 @@ Module {
     property string erreurLocale: ""
 
     visible: montre
-    radius: 18
+    radius: Couleurs.rayon(18, width, height)
     height: col.implicitHeight + 24
     clip: true
 
@@ -68,7 +68,7 @@ Module {
             spacing: 10
             Rectangle {
                 objectName: "expliquerMajBouton"
-                width: lbe.implicitWidth + 28; height: 30; radius: 15
+                width: lbe.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
                 opacity: dem.enCours ? 0.5 : 1
                 color: zbe.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lbe; anchors.centerIn: parent; text: Reglages.t("Expliquer", "Explain"); font.pixelSize: 13; font.weight: Font.DemiBold; color: Couleurs.accent }
@@ -79,7 +79,7 @@ Module {
             Rectangle {
                 objectName: "expliquerMajArreter"
                 visible: dem.enCours
-                width: lar.implicitWidth + 24; height: 30; radius: 15
+                width: lar.implicitWidth + 24; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: zar.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lar; anchors.centerIn: parent; text: Reglages.t("Arrêter", "Stop"); font.pixelSize: 13; font.weight: Font.DemiBold }
                 MouseArea { id: zar; anchors.fill: parent; hoverEnabled: true; onClicked: dem.arreter() }

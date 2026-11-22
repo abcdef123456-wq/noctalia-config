@@ -51,7 +51,7 @@ Rectangle {
         return Reglages.t("L'application " + modele.fournisseur + " n'est pas installée. Installe-la avec le gestionnaire de paquets de ta distribution, puis rouvre cette fenêtre.",
                           "The " + modele.fournisseur + " app is not installed. Install it with your distribution's package manager, then reopen this window.")
     }
-    height: contenu.implicitHeight + 36; radius: 18
+    height: contenu.implicitHeight + 36; radius: Couleurs.rayon(18, width, height)
     color: Qt.alpha(Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.texte, 0.08)), 0.85)       // un peu plus clair que la page, même sans flou
     border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)
 
@@ -69,7 +69,7 @@ Rectangle {
             Rectangle {
                 objectName: "nc-vpn-fournisseur-login"
                 visible: k.modele.peutLogin === true && k.modele.etat === "sans_compte" && !k.modele.bientot && !k.modele.attente && !k.abonnement
-                width: libelleLogin.implicitWidth + 32; height: 32; radius: 16
+                width: libelleLogin.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
                 color: zoneLogin.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6
                 Texte { id: libelleLogin; anchors.centerIn: parent; text: Reglages.t("Se connecter au compte", "Log in to the account"); font.pixelSize: 12; font.weight: Font.DemiBold }
@@ -89,7 +89,7 @@ Rectangle {
             Rectangle {
                 objectName: "nc-vpn-fournisseur-ouvrir"
                 visible: k.modele.peutLogin === true && k.modele.etat === "pilote_appli" && !k.modele.bientot && !k.modele.attente
-                width: libelleOuvrir.implicitWidth + 32; height: 32; radius: 16
+                width: libelleOuvrir.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
                 color: zoneOuvrir.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6
                 Accessible.role: Accessible.Button

@@ -216,7 +216,7 @@ PanelWindow {
     Rectangle {
         id: cadre
         x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
-        radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
+        radius: Couleurs.rayon(10, width, height); color: Qt.rgba(1, 1, 1, 0.03)
         border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
         opacity: 1 - v.fin
     }
@@ -243,7 +243,7 @@ PanelWindow {
                 id: pastille
                 required property var modelData
                 readonly property bool actif: modelData.id === v.choisi
-                width: Math.max(64, etiq.implicitWidth + 28); height: 40; radius: 20
+                width: Math.max(64, etiq.implicitWidth + 28); height: 40; radius: Couleurs.rayon(20, width, height)
                 color: depotBureau.containsDrag ? Couleurs.accent : (actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2))
                 border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
                 Behavior on color { ColorAnimation { duration: 120 } }
@@ -466,7 +466,7 @@ PanelWindow {
 
                     // Le cadre de l'écran
                     Rectangle {
-                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
+                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: Couleurs.rayon(18, width, height)
                         // Le bureau voisin sur lequel on lâcherait une fenêtre : cerclé
                         readonly property bool vise: v.coteVise !== 0 && face.index - zone.courant === v.coteVise
                         color: Qt.rgba(1, 1, 1, vise ? 0.1 : 0.04)
@@ -511,7 +511,7 @@ PanelWindow {
                                 }
                             }
                             Rectangle {
-                                anchors.fill: parent; anchors.margins: 2; radius: 12; z: 1
+                                anchors.fill: parent; anchors.margins: 2; radius: Couleurs.rayon(12, width, height); z: 1
                                 visible: depot.containsDrag && v.traine !== case_.modelData
                                 color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
                             }
@@ -531,7 +531,7 @@ PanelWindow {
                                 opacity: v.traine === case_.modelData ? 0.3 : 1
 
                                 Rectangle {
-                                    anchors.fill: parent; anchors.margins: -3; radius: 14
+                                    anchors.fill: parent; anchors.margins: -3; radius: Couleurs.rayon(14, width, height)
                                     color: "transparent"; border.width: 3
                                     border.color: survol.hovered ? Couleurs.accent : "transparent"
                                 }
@@ -569,7 +569,7 @@ PanelWindow {
                                 }
                                 // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
                                 Rectangle {
-                                    anchors.fill: parent; radius: 12; color: Couleurs.gris2
+                                    anchors.fill: parent; radius: Couleurs.rayon(12, width, height); color: Couleurs.gris2
                                     visible: case_.masquee && !imageGardee.visible && !capture.hasContent
                                     Image {
                                         anchors.centerIn: parent
@@ -581,14 +581,14 @@ PanelWindow {
                                 // Translucide et cerclée, pour la distinguer des fenêtres affichées
                                 Rectangle {
                                     visible: case_.estompee; z: 1
-                                    anchors.fill: parent; radius: 10
+                                    anchors.fill: parent; radius: Couleurs.rayon(10, width, height)
                                     color: "transparent"; border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.4)
                                 }
                                 // Badge « Masquée », en haut à gauche
                                 Rectangle {
                                     visible: case_.estompee; z: 2
                                     anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
-                                    width: badge.implicitWidth + 34; height: 28; radius: 14; color: Qt.rgba(0, 0, 0, 0.65)
+                                    width: badge.implicitWidth + 34; height: 28; radius: Couleurs.rayon(14, width, height); color: Qt.rgba(0, 0, 0, 0.65)
                                     Ico { anchors.verticalCenter: parent.verticalCenter; x: 9; nom: "visibility_off"; taille: 15; color: "#ffffff" }
                                     Texte { id: badge; anchors.verticalCenter: parent.verticalCenter; x: 28; text: Reglages.t("Masquée", "Hidden")
                                             font.pixelSize: 12; font.weight: Font.DemiBold; color: "#ffffff" }
@@ -597,7 +597,7 @@ PanelWindow {
                                 Rectangle {
                                     z: 2; visible: parent.width > 100; opacity: 1 - v.fin
                                     anchors.bottom: parent.bottom; anchors.bottomMargin: 8; anchors.horizontalCenter: parent.horizontalCenter
-                                    width: Math.min(parent.width - 16, nom.implicitWidth + 22); height: 26; radius: 13; color: Qt.rgba(0, 0, 0, 0.65)
+                                    width: Math.min(parent.width - 16, nom.implicitWidth + 22); height: 26; radius: Couleurs.rayon(13, width, height); color: Qt.rgba(0, 0, 0, 0.65)
                                     Row {
                                         id: nom
                                         anchors.centerIn: parent; spacing: 6
@@ -698,7 +698,7 @@ PanelWindow {
                         distanceToPlane: zone.fw * 1.6
                     }
                     Rectangle {
-                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
+                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: Couleurs.rayon(18, width, height)
                         color: Qt.rgba(1, 1, 1, nouveau.vise ? 0.1 : 0.04)
                         border.width: nouveau.vise ? 3 : 1; border.color: nouveau.vise ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.2)
                     }
@@ -780,7 +780,7 @@ PanelWindow {
         Drag.source: main
         Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
         ClippingRectangle {
-            anchors.fill: parent; radius: 12; color: Couleurs.carte
+            anchors.fill: parent; radius: Couleurs.rayon(12, width, height); color: Couleurs.carte
             border.width: 2; border.color: Couleurs.accent
             ScreencopyView {
                 anchors.fill: parent; anchors.margins: 2

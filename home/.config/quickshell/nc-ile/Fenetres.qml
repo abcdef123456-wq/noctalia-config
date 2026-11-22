@@ -94,7 +94,7 @@ Item {
                             readonly property var ipc: modelData.lastIpcObject || ({})
                             readonly property bool masquee: groupe.modelData.masquee
                             readonly property bool active: !masquee && Hyprland.activeToplevel === modelData
-                            width: liste.width; height: p.serre ? 46 : 58; radius: 14
+                            width: liste.width; height: p.serre ? 46 : 58; radius: Couleurs.rayon(14, width, height)
                             color: survolLigne.hovered ? Couleurs.carteSurvol : Couleurs.carte
                             HoverHandler { id: survolLigne }
                             border.width: active ? 1.5 : 0; border.color: Couleurs.accent

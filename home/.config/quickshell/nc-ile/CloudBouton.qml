@@ -7,7 +7,7 @@ Rectangle {
     property bool danger: false
     property bool principal: false
     signal clic()
-    height: 30; width: t.implicitWidth + 24; radius: 15
+    height: 30; width: t.implicitWidth + 24; radius: Couleurs.rayon(15, width, height)
     opacity: enabled ? 1 : 0.45
     color: danger ? Couleurs.rouge : (principal ? Couleurs.accent : (zone.containsMouse ? Couleurs.carteSurvol : Couleurs.carte))
     Texte { id: t; anchors.centerIn: parent; text: b.texte; color: b.danger || b.principal ? Couleurs.surAccent : Couleurs.texte }

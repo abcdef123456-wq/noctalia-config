@@ -75,7 +75,7 @@ Item {
                     objectName: "nc-notif-ia-" + modelData.id
                     visible: modelData.ok
                     opacity: dem.enCours || n.ailleurs ? 0.5 : 1
-                    width: lia.implicitWidth + 22; height: 26; radius: 13
+                    width: lia.implicitWidth + 22; height: 26; radius: Couleurs.rayon(13, width, height)
                     color: zia.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                     Texte { id: lia; anchors.centerIn: parent; text: bia.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold; color: Couleurs.accent }
                     MouseArea { id: zia; anchors.fill: parent; hoverEnabled: true; onClicked: n.demander(bia.modelData.id) }
@@ -86,7 +86,7 @@ Item {
             Rectangle {
                 objectName: "nc-notif-ia-arreter"
                 visible: dem.enCours
-                width: lar.implicitWidth + 22; height: 26; radius: 13
+                width: lar.implicitWidth + 22; height: 26; radius: Couleurs.rayon(13, width, height)
                 color: zar.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lar; anchors.centerIn: parent; text: Reglages.t("Arrêter", "Stop"); font.pixelSize: 12; font.weight: Font.DemiBold }
                 MouseArea { id: zar; anchors.fill: parent; hoverEnabled: true; onClicked: dem.arreter() }
@@ -119,7 +119,7 @@ Item {
                 required property var modelData
                 required property int index
                 objectName: "nc-notif-ia-suggestion-" + index
-                width: col.width; height: lsg.implicitHeight + 14; radius: 13
+                width: col.width; height: lsg.implicitHeight + 14; radius: Couleurs.rayon(13, width, height)
                 color: zsg.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lsg; x: 12; y: 7; width: parent.width - 24; wrapMode: Text.Wrap; elide: Text.ElideNone; font.pixelSize: 12
                         text: (n.copiees[sug.index] ? Reglages.t("Copié · ", "Copied · ") : "") + sug.modelData }

@@ -98,7 +98,7 @@ FloatingWindow {
         readonly property var test: fen.essais[ia.id]
         readonly property bool api: ia.genre === "api"
         width: parent ? parent.width : 0
-        height: corps.implicitHeight + 24; radius: 18; color: Couleurs.gris2
+        height: corps.implicitHeight + 24; radius: Couleurs.rayon(18, width, height); color: Couleurs.gris2
         Column {
             id: corps
             x: 16; y: 12; width: parent.width - 32; spacing: 8
@@ -118,7 +118,7 @@ FloatingWindow {
             Row {
                 visible: l.api; width: parent.width; spacing: 8
                 Rectangle {
-                    width: parent.width - enr.width - eff.width - 16; height: 36; radius: 18; color: Couleurs.fond
+                    width: parent.width - enr.width - eff.width - 16; height: 36; radius: Couleurs.rayon(18, width, height); color: Couleurs.fond
                     border.width: 1.5; border.color: saisie.activeFocus ? Couleurs.accent : "transparent"
                     TextInput {
                         id: saisie

@@ -29,7 +29,7 @@ Item {
         property string detail
         property real taux: 0
         property color couleur: Couleurs.texte
-        width: (sy.width - 10) / 2; height: 86; radius: 18
+        width: (sy.width - 10) / 2; height: 86; radius: Couleurs.rayon(18, width, height)
         // Même structure pour les quatre blocs (titre, chiffre, barre), centrée verticalement ; le détail éventuel
         // (« 7,4 / 30,6 Go », « 284 Go libres ») est sur la ligne du chiffre, à droite
         Column {
@@ -52,8 +52,8 @@ Item {
                 }
             }
             Rectangle {
-                width: parent.width; height: 5; radius: 2.5; color: Couleurs.gris3
-                Rectangle { height: parent.height; radius: 2.5; color: Qt.colorEqual(me.couleur, Couleurs.texte) ? Couleurs.jauge : me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
+                width: parent.width; height: 5; radius: Couleurs.rayon(2.5, width, height); color: Couleurs.gris3
+                Rectangle { height: parent.height; radius: Couleurs.rayon(2.5, width, height); color: Qt.colorEqual(me.couleur, Couleurs.texte) ? Couleurs.jauge : me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
             }
         }
     }
@@ -92,7 +92,7 @@ Item {
             // Batterie
             Module {
                 visible: Etat.aBatterie
-                width: sy.width; height: 64; radius: 18
+                width: sy.width; height: 64; radius: Couleurs.rayon(18, width, height)
                 Row {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
                     Rectangle {
@@ -119,7 +119,7 @@ Item {
                 id: protection
                 readonly property string v: sy.val("protection")
                 visible: v === "0" || v === "1"
-                width: sy.width; height: 56; radius: 18
+                width: sy.width; height: 56; radius: Couleurs.rayon(18, width, height)
                 Column {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 16
                     anchors.right: inter.left; anchors.rightMargin: 10
@@ -130,7 +130,7 @@ Item {
                     id: inter
                     readonly property bool allume: Etat.valeur("protection", protection.v) === "1"
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                    width: 46; height: 28; radius: 14; color: allume ? Couleurs.vert : Couleurs.gris3
+                    width: 46; height: 28; radius: Couleurs.rayon(14, width, height); color: allume ? Couleurs.vert : Couleurs.gris3
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Rectangle {
                         width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2; x: inter.allume ? 20 : 2
@@ -153,7 +153,7 @@ Item {
                 ]
                 Module {
                     required property var modelData
-                    width: sy.width; height: 56; radius: 16; cliquable: true
+                    width: sy.width; height: 56; radius: Couleurs.rayon(16, width, height); cliquable: true
                     visible: !Etat.profilsAbsents
                     onClic: Etat.choisirProfil(modelData.p)
                     Row {

@@ -124,7 +124,7 @@ Item {
         property string texte: ""
         property bool fait: false
         signal clic()
-        width: Math.min(Math.max(86, lp.implicitWidth + 28), parent ? parent.width : 0); height: 32; radius: 16
+        width: Math.min(Math.max(86, lp.implicitWidth + 28), parent ? parent.width : 0); height: 32; radius: Couleurs.rayon(16, width, height)
         color: fait ? Couleurs.accent : (enabled && (zp.containsMouse || activeFocus) ? Couleurs.gris4 : Couleurs.gris2)
         scale: zp.pressed ? 0.94 : 1
         Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 6; damping: 0.4 } }
@@ -171,7 +171,7 @@ Item {
                 Rectangle {
                     visible: !page.dansDashboard
                     anchors.verticalCenter: parent.verticalCenter
-                    width: badge.implicitWidth + 30; height: 26; radius: 13
+                    width: badge.implicitWidth + 30; height: 26; radius: Couleurs.rayon(13, width, height)
                     color: Qt.alpha(page.teinteEtat, 0.16)
                     border.width: 1; border.color: Qt.alpha(page.teinteEtat, 0.35)
                     Rectangle { x: 10; anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 3.5; color: page.teinteEtat }
@@ -290,7 +290,7 @@ Item {
                         Rectangle {
                             required property var modelData
                             visible: modelData.num > page.depuis      // fenêtre de chat : les messages d'avant son ouverture restent dans l'île
-                            width: liste.width; height: corps.implicitHeight + 24; radius: 16
+                            width: liste.width; height: corps.implicitHeight + 24; radius: Couleurs.rayon(16, width, height)
                             color: modelData.role === "vous" ? Couleurs.gris2 : Couleurs.carte
                             Column {
                                 id: corps
@@ -349,7 +349,7 @@ Item {
                     }
                     Rectangle {
                         objectName: "nc-jarvis-thinking"
-                        width: liste.width; height: visible ? 62 : 0; radius: 16
+                        width: liste.width; height: visible ? 62 : 0; radius: Couleurs.rayon(16, width, height)
                         visible: AssistantEtat.enCours
                         color: Couleurs.carte
                         Accessible.role: Accessible.StaticText
@@ -441,7 +441,7 @@ Item {
             id: modeles
             visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts && !page.historiqueOuvert
             anchors.bottom: (previsualisation.visible ? previsualisation.top : saisie.top); anchors.bottomMargin: 12
-            width: parent.width; height: 140; radius: 18
+            width: parent.width; height: 140; radius: Couleurs.rayon(18, width, height)
             color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
             Texte {
                 x: 12; y: 12; font.pixelSize: 11; font.weight: Font.Bold
@@ -628,7 +628,7 @@ Item {
                 visible: page.propositionsVisibles
                 anchors.bottom: parent.top; anchors.bottomMargin: 6
                 z: 10; width: parent.width; height: Math.min(5, page.propositions.length) * 42 + 12
-                radius: 14; color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
+                radius: Couleurs.rayon(14, width, height); color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
                 ListView {
                     id: listeSuggestions
                     anchors.fill: parent; anchors.margins: 6; clip: true
@@ -637,7 +637,7 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         required property int index
-                        width: listeSuggestions.width; height: 42; radius: 8
+                        width: listeSuggestions.width; height: 42; radius: Couleurs.rayon(8, width, height)
                         color: index === page.indiceSuggestion ? Couleurs.gris3 : "transparent"
                         Column {
                             x: 10; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 20; spacing: 2
@@ -719,7 +719,7 @@ Item {
         objectName: "nc-jarvis-drop-hint"
         anchors.fill: parent; anchors.margins: 2
         visible: zoneDepot.containsDrag
-        radius: 18; color: Qt.alpha(page.cyan, 0.12)
+        radius: Couleurs.rayon(18, width, height); color: Qt.alpha(page.cyan, 0.12)
         border.width: 2; border.color: page.cyan
         Texte {
             anchors.centerIn: parent; width: parent.width - 32

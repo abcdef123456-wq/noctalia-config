@@ -54,7 +54,7 @@ Column {
         onChoisi: v => Modes.regler(e.mode.id, "notifs_ia", v)
     }
     Rectangle {
-        width: parent.width; height: 34; radius: 17; color: Couleurs.gris2
+        width: parent.width; height: 34; radius: Couleurs.rayon(17, width, height); color: Couleurs.gris2
         border.width: 1; border.color: nom.activeFocus ? Couleurs.accent : "transparent"
         TextInput {
             id: nom

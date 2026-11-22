@@ -187,8 +187,8 @@ Item {
                     Rectangle {
                         id: ev
                         required property var modelData
-                        width: agenda.width; height: 50; radius: 14; color: Couleurs.carte
-                        Rectangle { x: 12; y: 10; width: 4; height: 30; radius: 2; color: ev.modelData.couleur }
+                        width: agenda.width; height: 50; radius: Couleurs.rayon(14, width, height); color: Couleurs.carte
+                        Rectangle { x: 12; y: 10; width: 4; height: 30; radius: Couleurs.rayon(2, width, height); color: ev.modelData.couleur }
                         Column {
                             x: 24; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 36; spacing: 1
                             Texte { width: parent.width; elide: Text.ElideRight; font.pixelSize: 13; font.weight: Font.DemiBold

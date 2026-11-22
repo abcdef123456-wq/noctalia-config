@@ -69,7 +69,7 @@ Item {
             id: bouton
             objectName: "nc-presse-ouvrir"
             visible: a.genre === "url" || a.genre === "chemin"
-            anchors.verticalCenter: parent.verticalCenter; height: 24; width: etiquette.implicitWidth + 22; radius: 12
+            anchors.verticalCenter: parent.verticalCenter; height: 24; width: etiquette.implicitWidth + 22; radius: Couleurs.rayon(12, width, height)
             color: zone.containsMouse ? Couleurs.accentClair : Couleurs.accent
             Texte {
                 id: etiquette

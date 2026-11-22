@@ -86,7 +86,7 @@ Item {
         objectName: "nc-vpn-reessayer"
         visible: l.paysIndispo
         anchors.top: vide.bottom; anchors.topMargin: 8
-        width: libelleReessayer.implicitWidth + 32; height: 32; radius: 16
+        width: libelleReessayer.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
         color: zoneReessayer.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
         opacity: VpnEtat.cible === "" ? 1 : 0.6
         Accessible.role: Accessible.Button

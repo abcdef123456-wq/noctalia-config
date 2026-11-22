@@ -49,7 +49,7 @@ Item {
                 MouseArea { id: zone; anchors.fill: ville; visible: ville.visible; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: { saisie.visible = true; saisie.text = ""; saisie.forceActiveFocus() } }
                 Rectangle {
-                    visible: saisie.visible; anchors.fill: parent; anchors.margins: -3; radius: 8; color: Couleurs.gris2
+                    visible: saisie.visible; anchors.fill: parent; anchors.margins: -3; radius: Couleurs.rayon(8, width, height); color: Couleurs.gris2
                     border.width: 1.5; border.color: Couleurs.jaune
                 }
                 TextInput {
@@ -100,7 +100,7 @@ Item {
     Rectangle {
         id: heures
         anchors.top: haut.bottom; anchors.topMargin: 14
-        width: parent.width; height: 78; radius: 16; color: Couleurs.carte
+        width: parent.width; height: 78; radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
         Row {
             anchors.centerIn: parent; spacing: 0
             Repeater {
@@ -136,11 +136,11 @@ Item {
                 Texte { x: 88; anchors.verticalCenter: parent.verticalCenter; text: ligne.modelData.min + "°"; secondaire: true; width: 34; horizontalAlignment: Text.AlignRight; font.pixelSize: 13 }
                 Rectangle {
                     x: 130; anchors.verticalCenter: parent.verticalCenter
-                    width: ligne.width - 180; height: 5; radius: 2.5; color: Couleurs.gris3
+                    width: ligne.width - 180; height: 5; radius: Couleurs.rayon(2.5, width, height); color: Couleurs.gris3
                     Rectangle {
                         x: parent.width * (ligne.modelData.min - ligne.bas) / ligne.ecart
                         width: Math.max(6, parent.width * (ligne.modelData.max - ligne.modelData.min) / ligne.ecart)
-                        height: parent.height; radius: 2.5
+                        height: parent.height; radius: Couleurs.rayon(2.5, width, height)
                         gradient: Gradient { orientation: Gradient.Horizontal
                             GradientStop { position: 0; color: Couleurs.bleu } GradientStop { position: 1; color: Couleurs.orange } }
                     }

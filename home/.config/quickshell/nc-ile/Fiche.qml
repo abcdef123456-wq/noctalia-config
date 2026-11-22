@@ -266,7 +266,7 @@ PanelWindow {
             id: boutonAjouter
             objectName: "nc-fiche-plus"
             anchors.right: boutonModifier.left; anchors.rightMargin: 10; y: 20
-            width: rangeeAjouter.implicitWidth + 24; height: 30; radius: 15
+            width: rangeeAjouter.implicitWidth + 24; height: 30; radius: Couleurs.rayon(15, width, height)
             color: zAjouter.containsMouse ? Couleurs.gris3 : Couleurs.gris2
             Row {
                 id: rangeeAjouter; anchors.centerIn: parent; spacing: 6
@@ -280,7 +280,7 @@ PanelWindow {
             id: boutonModifier
             objectName: "nc-fiche-modifier"
             anchors.right: parent.right; anchors.rightMargin: 28; y: 20
-            width: libModifier.implicitWidth + 28; height: 30; radius: 15
+            width: libModifier.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
             color: fiche.edition ? Couleurs.accent : (zModifier.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
             Texte {
                 id: libModifier; anchors.centerIn: parent; font.weight: Font.DemiBold
@@ -322,7 +322,7 @@ PanelWindow {
                         // Le voile : le fond de la palette à 25 %, sous le texte de la colonne
                         Rectangle {
                             objectName: "nc-fiche-voile"
-                            anchors.fill: parent; anchors.margins: -10; radius: 10
+                            anchors.fill: parent; anchors.margins: -10; radius: Couleurs.rayon(10, width, height)
                             color: Qt.alpha(Couleurs.fond, fiche.voileColonne)
                         }
                         Column {
@@ -360,7 +360,7 @@ PanelWindow {
         // Message : résultat d'une écriture, ou combinaison déjà prise avec « Remplacer »
         // Sur un voile du fond, comme les colonnes (un peu plus marqué : il apparaît seul, au bas de la carte)
         Rectangle {
-            anchors.centerIn: rangeeMessage; width: rangeeMessage.width + 24; height: 34; radius: 17
+            anchors.centerIn: rangeeMessage; width: rangeeMessage.width + 24; height: 34; radius: Couleurs.rayon(17, width, height)
             visible: rangeeMessage.visible; color: Qt.alpha(Couleurs.fond, 0.5)
         }
         Row {
@@ -374,12 +374,12 @@ PanelWindow {
                 text: Raccourcis.message; color: Raccourcis.erreur ? Couleurs.rouge : Couleurs.texte; font.pixelSize: 12
             }
             Rectangle {
-                visible: !!fiche.conflit; width: libRemplacer.implicitWidth + 22; height: 26; radius: 13; color: Couleurs.rouge
+                visible: !!fiche.conflit; width: libRemplacer.implicitWidth + 22; height: 26; radius: Couleurs.rayon(13, width, height); color: Couleurs.rouge
                 Texte { id: libRemplacer; anchors.centerIn: parent; text: Reglages.t("Remplacer", "Replace"); color: "#ffffff"; font.pixelSize: 12 }
                 MouseArea { objectName: "nc-fiche-remplacer"; anchors.fill: parent; onClicked: fiche.remplacer() }
             }
             Rectangle {
-                visible: !!fiche.conflit; width: libAnnuler.implicitWidth + 22; height: 26; radius: 13; color: Couleurs.gris2
+                visible: !!fiche.conflit; width: libAnnuler.implicitWidth + 22; height: 26; radius: Couleurs.rayon(13, width, height); color: Couleurs.gris2
                 Texte { id: libAnnuler; anchors.centerIn: parent; text: Reglages.t("Annuler", "Cancel"); font.pixelSize: 12 }
                 MouseArea { anchors.fill: parent; onClicked: fiche.conflit = null }
             }
@@ -511,7 +511,7 @@ PanelWindow {
         Rectangle {
             visible: fiche.edition && ligne.mien
             x: description.x; y: ligne.longues ? description.y : (ligne.height - 24) / 2
-            width: description.width; height: 24; radius: 7
+            width: description.width; height: 24; radius: Couleurs.rayon(7, width, height)
             color: Qt.alpha(Couleurs.carte, 0.6); border.width: 1; border.color: champNom.activeFocus ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
             TextInput {
                 id: champNom
@@ -580,7 +580,7 @@ PanelWindow {
         id: carteAjout
         visible: fiche.ajout && !Raccourcis.capture && fiche.montree
         anchors.centerIn: parent
-        width: 440; height: colonneAjout.height + 36; radius: 22
+        width: 440; height: colonneAjout.height + 36; radius: Couleurs.rayon(22, width, height)
         color: Qt.alpha(Couleurs.fond, 0.94); border.width: 1; border.color: Qt.alpha(Couleurs.accent, 0.5)
         MouseArea { anchors.fill: parent }
         Column {
@@ -596,7 +596,7 @@ PanelWindow {
                     model: fiche.suggestions(champCible.texte)
                     Rectangle {
                         required property var modelData
-                        height: 26; width: libAppli.implicitWidth + 20; radius: 13
+                        height: 26; width: libAppli.implicitWidth + 20; radius: Couleurs.rayon(13, width, height)
                         color: zAppli.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                         Texte { id: libAppli; anchors.centerIn: parent; text: modelData.name || modelData.id; font.pixelSize: 12 }
                         MouseArea {
@@ -608,7 +608,7 @@ PanelWindow {
             }
             Champ { id: champNomAjout; indice: Reglages.t("Son nom (facultatif)", "Its name (optional)") }
             Rectangle {
-                width: libChoisir.implicitWidth + 28; height: 32; radius: 16
+                width: libChoisir.implicitWidth + 28; height: 32; radius: Couleurs.rayon(16, width, height)
                 color: champCible.texte.trim() ? Couleurs.accent : Couleurs.gris3
                 Texte { id: libChoisir; anchors.centerIn: parent; text: Reglages.t("Choisir les touches", "Choose the keys")
                         color: champCible.texte.trim() ? Couleurs.surAccent : fiche.texteSecondaire }
@@ -635,7 +635,7 @@ PanelWindow {
             }
             Rectangle {
                 visible: fiche.iaPrete && !fiche.proposition && (champIA.texte.trim() !== "" || demandeIA.running)
-                width: libProposer.implicitWidth + 28; height: 32; radius: 16
+                width: libProposer.implicitWidth + 28; height: 32; radius: Couleurs.rayon(16, width, height)
                 color: demandeIA.running ? Couleurs.gris3 : Couleurs.accent
                 Texte { id: libProposer; anchors.centerIn: parent
                         text: demandeIA.running ? Reglages.t("L'IA réfléchit…", "The AI is thinking…") : Reglages.t("Proposer", "Suggest")
@@ -667,7 +667,7 @@ PanelWindow {
                 Row {
                     spacing: 8
                     Rectangle {
-                        width: libAjouterIA.implicitWidth + 28; height: 32; radius: 16
+                        width: libAjouterIA.implicitWidth + 28; height: 32; radius: Couleurs.rayon(16, width, height)
                         color: champTouchesIA.texte.trim() ? Couleurs.accent : Couleurs.gris3
                         Texte { id: libAjouterIA; anchors.centerIn: parent; text: Reglages.t("Ajouter", "Add")
                                 color: champTouchesIA.texte.trim() ? Couleurs.surAccent : fiche.texteSecondaire }
@@ -675,7 +675,7 @@ PanelWindow {
                                     onClicked: fiche.ajouterProposition() }
                     }
                     Rectangle {
-                        width: libAnnulerIA.implicitWidth + 28; height: 32; radius: 16
+                        width: libAnnulerIA.implicitWidth + 28; height: 32; radius: Couleurs.rayon(16, width, height)
                         color: zAnnulerIA.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                         Texte { id: libAnnulerIA; anchors.centerIn: parent; text: Reglages.t("Annuler", "Cancel") }
                         MouseArea { id: zAnnulerIA; objectName: "nc-fiche-ia-annuler"; anchors.fill: parent; hoverEnabled: true
@@ -690,7 +690,7 @@ PanelWindow {
         property string indice: ""
         signal valide()                             // Entrée
         function forceActiveFocus() { saisie.forceActiveFocus() }
-        width: parent.width; height: 32; radius: 9
+        width: parent.width; height: 32; radius: Couleurs.rayon(9, width, height)
         color: Qt.alpha(Couleurs.carte, 0.8); border.width: 1; border.color: saisie.activeFocus ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
         TextInput {
             id: saisie
@@ -709,7 +709,7 @@ PanelWindow {
         property string aide: ""
         visible: !!Raccourcis.capture && fiche.montree
         anchors.centerIn: parent
-        width: 420; height: 132; radius: 22
+        width: 420; height: 132; radius: Couleurs.rayon(22, width, height)
         color: Qt.alpha(Couleurs.fond, 0.95); border.width: 1.5; border.color: Couleurs.accent
         MouseArea { anchors.fill: parent }
         Column {

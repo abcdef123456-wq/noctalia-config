@@ -47,7 +47,7 @@ Item {
         objectName: "nc-vpn-importer"
         visible: VpnEtat.disponible
         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-        width: importLibelle.implicitWidth + 44; height: 32; radius: 16
+        width: importLibelle.implicitWidth + 44; height: 32; radius: Couleurs.rayon(16, width, height)
         color: zoneImport.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
         border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
         Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }

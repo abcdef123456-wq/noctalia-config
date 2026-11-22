@@ -29,7 +29,7 @@ Module {
     property string etatAction: ""                   // "", encours, fait, echec
 
     visible: actif
-    radius: 18
+    radius: Couleurs.rayon(18, width, height)
     height: col.implicitHeight + 24
     clip: true
 
@@ -195,7 +195,7 @@ Module {
                 height: confirmation ? conf.implicitHeight + 20 : bouton.implicitHeight + 16
                 Rectangle {
                     id: fond
-                    anchors.fill: parent; radius: 16
+                    anchors.fill: parent; radius: Couleurs.rayon(16, width, height)
                     color: a.confirmation ? Couleurs.gris3 : (zone.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                     opacity: p.etatAction === "encours" ? 0.5 : 1
                     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
@@ -245,7 +245,7 @@ Module {
                                 id: b
                                 required property var modelData
                                 objectName: modelData.nom
-                                width: Math.max(88, lb.implicitWidth + 28); height: 32; radius: 16
+                                width: Math.max(88, lb.implicitWidth + 28); height: 32; radius: Couleurs.rayon(16, width, height)
                                 color: modelData.principal ? (zb.containsMouse ? Couleurs.texteDoux : Couleurs.texte)
                                                            : (zb.containsMouse ? Couleurs.gris4 : Couleurs.gris3)
                                 scale: zb.pressed ? 0.95 : 1

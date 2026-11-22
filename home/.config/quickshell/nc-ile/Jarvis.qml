@@ -173,7 +173,7 @@ FloatingWindow {
                 id: pastille
                 required property var modelData
                 readonly property bool actif: fen.page === modelData.id
-                width: etiq.implicitWidth + 50; height: 40; radius: 20
+                width: etiq.implicitWidth + 50; height: 40; radius: Couleurs.rayon(20, width, height)
                 color: actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                 border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
                 Behavior on color { ColorAnimation { duration: 120 } }
@@ -229,7 +229,7 @@ FloatingWindow {
                     ]
                     Rectangle {
                         required property var modelData
-                        width:col.width; height:58; radius:16; color:Couleurs.gris2
+                        width:col.width; height:58; radius: Couleurs.rayon(16, width, height); color:Couleurs.gris2
                         Texte { x:18; anchors.verticalCenter:parent.verticalCenter; text:parent.modelData.t; font.weight:Font.DemiBold }
                         Texte { anchors.right:parent.right; anchors.rightMargin:18; anchors.verticalCenter:parent.verticalCenter; text:parent.modelData.v; secondaire:true }
                     }
@@ -447,7 +447,7 @@ FloatingWindow {
         MouseArea { anchors.fill:parent }
         Rectangle {
             anchors.centerIn:parent; width:Math.min(520,fen.width-48); height:confirmCol.implicitHeight+48
-            radius:22; color:Couleurs.carte; border.width:1; border.color:Couleurs.gris3
+            radius: Couleurs.rayon(22, width, height); color:Couleurs.carte; border.width:1; border.color:Couleurs.gris3
             Column {
                 id:confirmCol; x:24; y:24; width:parent.width-48; spacing:20
                 Section { text:Reglages.t("Confirmer l’action", "Confirm action") }

@@ -11,7 +11,7 @@ Item {
     default property alias contenu: zone.data
     width: 400; height: Math.max(56, zone.childrenRect.height + 18)
     Rectangle {
-        anchors.fill: parent; radius: 12
+        anchors.fill: parent; radius: Couleurs.rayon(12, width, height)
         color: ligne.choisie ? Qt.alpha(Couleurs.accent, 0.14) : "transparent"
         Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
     }

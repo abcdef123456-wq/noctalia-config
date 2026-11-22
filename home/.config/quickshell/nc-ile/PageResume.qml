@@ -34,7 +34,7 @@ Item {
         Module {
             objectName: "nc-resume-meteo"
             visible: !!p.c.meteo
-            width: parent.width; height: visible ? 56 : 0; radius: 16
+            width: parent.width; height: visible ? 56 : 0; radius: Couleurs.rayon(16, width, height)
             Row {
                 anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14; spacing: 12
                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: p.c.meteo ? p.c.meteo.icone : "cloud"; taille: 30; color: Couleurs.jaune }
@@ -51,7 +51,7 @@ Item {
         Module {
             objectName: "nc-resume-agenda"
             visible: p.c.nbEvenements > 0
-            width: parent.width; height: visible ? agenda.implicitHeight + 24 : 0; radius: 16
+            width: parent.width; height: visible ? agenda.implicitHeight + 24 : 0; radius: Couleurs.rayon(16, width, height)
             Column {
                 id: agenda
                 x: 14; y: 12; width: parent.width - 28; spacing: 5
@@ -75,7 +75,7 @@ Item {
         Module {
             objectName: "nc-resume-maj"
             visible: p.c.maj > 0
-            width: parent.width; height: visible ? 52 : 0; radius: 16
+            width: parent.width; height: visible ? 52 : 0; radius: Couleurs.rayon(16, width, height)
             Row {
                 anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14; spacing: 12
                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: "system_update"; taille: 22; color: Couleurs.accent }
@@ -91,7 +91,7 @@ Item {
         Module {
             objectName: "nc-resume-garmin"
             visible: p.c.garmin !== undefined && p.c.garmin !== ""
-            width: parent.width; height: visible ? 44 : 0; radius: 16
+            width: parent.width; height: visible ? 44 : 0; radius: Couleurs.rayon(16, width, height)
             Texte { anchors.centerIn: parent; width: parent.width - 28; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     font.pixelSize: 13; font.weight: Font.DemiBold; text: p.c.garmin || "" }
         }
@@ -99,7 +99,7 @@ Item {
         Module {
             objectName: "nc-resume-batterie"
             visible: p.c.batterie >= 0
-            width: parent.width; height: visible ? 44 : 0; radius: 16
+            width: parent.width; height: visible ? 44 : 0; radius: Couleurs.rayon(16, width, height)
             Row {
                 anchors.centerIn: parent; spacing: 10
                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: "battery_android_full"; taille: 20; color: p.c.batterie <= 20 ? Couleurs.orange : Couleurs.texte }

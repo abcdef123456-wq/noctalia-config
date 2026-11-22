@@ -12,7 +12,7 @@ Rectangle {
     property bool changer: false                  // « Changer » au lieu de « Connecter »
     property bool occupe: false
     signal clic()
-    height: 46; radius: 15
+    height: 46; radius: Couleurs.rayon(15, width, height)
     color: zone.containsMouse && !actif ? Qt.alpha(Couleurs.accent, 0.16) : Qt.alpha(Couleurs.carte, actif ? 0.8 : 0.5)
     border.width: actif ? 1 : 0; border.color: Qt.alpha(Couleurs.vert, 0.5)
     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
@@ -21,7 +21,7 @@ Rectangle {
     Rectangle {
         id: point
         x: 16; anchors.verticalCenter: parent.verticalCenter
-        width: 9; height: 9; radius: 5
+        width: 9; height: 9; radius: Couleurs.rayon(5, width, height)
         color: r.actif ? Couleurs.vert : Qt.alpha(Couleurs.texteSec, 0.5)
     }
     Texte {
@@ -42,7 +42,7 @@ Rectangle {
             objectName: "nc-vpn-rangee-bouton"
             anchors.verticalCenter: parent.verticalCenter
             visible: !r.actif
-            width: libelle.implicitWidth + 28; height: 30; radius: 15
+            width: libelle.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
             color: zone.containsMouse ? Qt.alpha(Couleurs.accent, 0.35) : Qt.alpha(Couleurs.gris3, 0.7)
             Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
             Texte { id: libelle; anchors.centerIn: parent; font.pixelSize: 12

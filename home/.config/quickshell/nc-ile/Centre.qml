@@ -202,7 +202,7 @@ Item {
                 }
                 // Mode édition : voile, nom, œil et flèches ; le module en dessous ne réagit plus
                 Rectangle {
-                    anchors.fill: parent; radius: 18
+                    anchors.fill: parent; radius: Couleurs.rayon(18, width, height)
                     visible: centre.edition
                     color: Qt.rgba(0, 0, 0, 0.62)
                     border.width: case_.choisi ? 2 : 0; border.color: Couleurs.accent
@@ -210,7 +210,7 @@ Item {
                     // Le nom du module, dans une petite pastille lisible par-dessus le contenu voilé
                     Rectangle {
                         anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8
-                        width: nomModule.implicitWidth + 16; height: 22; radius: 11; color: Couleurs.gris3
+                        width: nomModule.implicitWidth + 16; height: 22; radius: Couleurs.rayon(11, width, height); color: Couleurs.gris3
                         visible: parent.width >= 150
                         Texte { id: nomModule; anchors.centerIn: parent; text: centre.modules[case_.identifiant].nom; font.pixelSize: 12; font.weight: Font.DemiBold }
                     }
@@ -266,7 +266,7 @@ Item {
                     id: masque
                     required property string modelData
                     objectName: "nc-centre-masque-" + modelData
-                    width: lm.implicitWidth + 44; height: 28; radius: 14; color: zm.containsMouse ? Couleurs.gris3 : Couleurs.gris2
+                    width: lm.implicitWidth + 44; height: 28; radius: Couleurs.rayon(14, width, height); color: zm.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                     Ico { x: 10; anchors.verticalCenter: parent.verticalCenter; nom: centre.modules[masque.modelData].icone; taille: 15; color: Couleurs.texteSec }
                     Texte { id: lm; x: 30; anchors.verticalCenter: parent.verticalCenter; text: centre.modules[masque.modelData].nom; font.pixelSize: 12 }
                     MouseArea {
@@ -291,7 +291,7 @@ Item {
                         id: action
                         required property var modelData
                         objectName: "nc-centre-" + modelData.id
-                        width: la.implicitWidth + 28; height: 32; radius: 16
+                        width: la.implicitWidth + 28; height: 32; radius: Couleurs.rayon(16, width, height)
                         color: modelData.accent ? Couleurs.accent : (za.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         Texte { id: la; anchors.centerIn: parent; text: action.modelData.texte; font.weight: Font.DemiBold; font.pixelSize: 13; color: action.modelData.accent ? Couleurs.surAccent : Couleurs.texte }
                         MouseArea { id: za; anchors.fill: parent; hoverEnabled: true; onClicked: action.modelData.id === "terminer" ? centre.terminer() : centre.reinitialiser() }
@@ -327,7 +327,7 @@ Item {
                                                     : (actif ? Reglages.t("Activé", "On") : Reglages.t("Désactivé", "Off"))
                         width: parent.width; height: 41
                         Rectangle {
-                            anchors.fill: parent; anchors.leftMargin: -6; anchors.rightMargin: -6; radius: 12
+                            anchors.fill: parent; anchors.leftMargin: -6; anchors.rightMargin: -6; radius: Couleurs.rayon(12, width, height)
                             color: zl.containsMouse && lc.modelData.page !== "" ? Couleurs.gris2 : "transparent"
                             Behavior on color { ColorAnimation { duration: 120 } }
                         }
@@ -364,7 +364,7 @@ Item {
                 Row {
                     spacing: 10; width: parent.width
                     ClippingRectangle {
-                        width: 54; height: 54; radius: 12; color: Couleurs.gris2
+                        width: 54; height: 54; radius: Couleurs.rayon(12, width, height); color: Couleurs.gris2
                         Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
                         Image { anchors.centerIn: parent; width: 34; height: 34; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(68, 68); visible: Etat.pochette === "" }
                         Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
@@ -378,9 +378,9 @@ Item {
                 }
                 // Progression
                 Rectangle {
-                    width: parent.width; height: 4; radius: 2; color: Couleurs.gris3
+                    width: parent.width; height: 4; radius: Couleurs.rayon(2, width, height); color: Couleurs.gris3
                     Rectangle {
-                        height: parent.height; radius: 2; color: Couleurs.texte
+                        height: parent.height; radius: Couleurs.rayon(2, width, height); color: Couleurs.texte
                         width: Etat.lecteur && Etat.lecteur.length > 0 ? parent.width * Math.min(1, Etat.lecteur.position / Etat.lecteur.length) : 0
                     }
                 }

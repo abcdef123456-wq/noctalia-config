@@ -34,7 +34,7 @@ Item {
             visible: navigation.height >= height && bord >= 0 && opacity > 0.02
             Rectangle {
                 anchors.centerIn: parent
-                width: 6; height: point.distance === 0 ? 14 : 6; radius: 3
+                width: 6; height: point.distance === 0 ? 14 : 6; radius: Couleurs.rayon(3, width, height)
                 color: Couleurs.texte
             }
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: navigation.choisir(point.modelData) }

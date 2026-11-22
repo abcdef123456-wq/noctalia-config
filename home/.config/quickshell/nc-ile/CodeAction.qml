@@ -12,7 +12,7 @@ Rectangle {
     // Largeur complète (icône + libellé + touche), connue même en mode compact : Code.qml en a besoin pour décider du mode
     readonly property real largeurPleine: 22 + 16 + 7 + libTexte.implicitWidth + (touche !== "" ? 7 + libTouche.implicitWidth + 10 : 0)
     signal clic()
-    width: compact ? 34 : largeurPleine; height: 30; radius: 15
+    width: compact ? 34 : largeurPleine; height: 30; radius: Couleurs.rayon(15, width, height)
     color: zone.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
     border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
@@ -24,7 +24,7 @@ Rectangle {
         Rectangle {
             visible: bouton.touche !== "" && !bouton.compact
             anchors.verticalCenter: parent.verticalCenter
-            width: libTouche.implicitWidth + 10; height: 18; radius: 5
+            width: libTouche.implicitWidth + 10; height: 18; radius: Couleurs.rayon(5, width, height)
             color: Qt.alpha(Couleurs.fond, 0.5); border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
             Texte { id: libTouche; anchors.centerIn: parent; text: bouton.touche; font.pixelSize: 10; secondaire: true; elide: Text.ElideNone }
         }

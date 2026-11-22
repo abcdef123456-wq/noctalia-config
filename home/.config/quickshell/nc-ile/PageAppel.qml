@@ -45,7 +45,7 @@ Item {
                     Rectangle {
                         required property int index
                         readonly property real facteur: [0.5, 0.8, 1, 0.8, 0.5][index]
-                        width: 4; radius: 2
+                        width: 4; radius: Couleurs.rayon(2, width, height)
                         height: Appel.muet ? 8 : 8 + Appel.niveau * 24 * facteur
                         anchors.verticalCenter: parent.verticalCenter
                         color: Appel.muet ? Couleurs.gris4 : Couleurs.vert
@@ -75,7 +75,7 @@ Item {
         // Couper / réactiver le micro, sur la source de l'appel (sinon la source par défaut)
         Module {
             objectName: "nc-appel-micro"
-            width: parent.width; height: 52; radius: 16; cliquable: true
+            width: parent.width; height: 52; radius: Couleurs.rayon(16, width, height); cliquable: true
             color: Appel.muet ? Couleurs.fondOrange : Couleurs.carte
             onClic: Appel.basculerMicro()
             Row {

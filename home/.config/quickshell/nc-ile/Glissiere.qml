@@ -10,7 +10,7 @@ ClippingRectangle {
     signal change(real v)
     signal appuiLong()
     color: Couleurs.gris2
-    radius: 26
+    radius: Couleurs.rayon(26, width, height)
     scale: zone.pressed ? 1.03 : 1
     Behavior on scale { SpringAnimation { spring: 5; damping: 0.4 } }
 

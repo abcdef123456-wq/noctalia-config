@@ -142,7 +142,7 @@ Item {
             Module {
                 objectName: "alerteChaleur"
                 visible: Chaleur.alerte
-                width: sa.width; radius: 18
+                width: sa.width; radius: Couleurs.rayon(18, width, height)
                 height: colAlerte.implicitHeight + 24
                 color: Qt.rgba(Couleurs.rouge.r, Couleurs.rouge.g, Couleurs.rouge.b, 0.16)
                 Column {
@@ -159,7 +159,7 @@ Item {
                     Rectangle {
                         objectName: "boutonPerformance"
                         visible: Chaleur.performancePossible
-                        width: perfTexte.implicitWidth + 36; height: 32; radius: 16; color: Couleurs.orange
+                        width: perfTexte.implicitWidth + 36; height: 32; radius: Couleurs.rayon(16, width, height); color: Couleurs.orange
                         scale: zonePerf.pressed ? 0.95 : 1
                         Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }
                         Row {
@@ -199,7 +199,7 @@ Item {
             Module {
                 objectName: "conseilChauffe"
                 visible: sa.conseilVisible
-                width: sa.width; radius: 18
+                width: sa.width; radius: Couleurs.rayon(18, width, height)
                 height: texteConseil.implicitHeight + 24
                 color: Qt.rgba(Couleurs.orange.r, Couleurs.orange.g, Couleurs.orange.b, 0.16)
                 Row {
@@ -224,7 +224,7 @@ Item {
             Module {
                 objectName: "blocCourbes"
                 visible: sa.histoTemp.length >= 2 || sa.histoCharge.length >= 2
-                width: sa.width; radius: 18
+                width: sa.width; radius: Couleurs.rayon(18, width, height)
                 height: colCourbes.implicitHeight + 24
                 Column {
                     id: colCourbes
@@ -250,7 +250,7 @@ Item {
             Module {
                 objectName: "blocFans"
                 visible: sa.fans.length > 0
-                width: sa.width; radius: 18
+                width: sa.width; radius: Couleurs.rayon(18, width, height)
                 height: colFans.implicitHeight + 24
                 Column {
                     id: colFans
@@ -272,9 +272,9 @@ Item {
                             }
                             Rectangle {
                                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                                height: 5; radius: 2.5; color: Couleurs.gris3
+                                height: 5; radius: Couleurs.rayon(2.5, width, height); color: Couleurs.gris3
                                 Rectangle {
-                                    height: parent.height; radius: 2.5; color: sa.teinteFan(fan.modelData)
+                                    height: parent.height; radius: Couleurs.rayon(2.5, width, height); color: sa.teinteFan(fan.modelData)
                                     width: parent.width * fan.part
                                     Behavior on width { enabled: !Reglages.sobre; NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
                                 }
@@ -288,7 +288,7 @@ Item {
             Module {
                 objectName: "blocProfil"
                 visible: Etat.performanceDisponible
-                width: sa.width; radius: 18
+                width: sa.width; radius: Couleurs.rayon(18, width, height)
                 height: colProfil.implicitHeight + 24
                 Column {
                     id: colProfil
@@ -311,7 +311,7 @@ Item {
                                 required property var modelData
                                 objectName: "profil"
                                 readonly property bool actif: Etat.profil === modelData.p
-                                width: (colProfil.width - 16) / 3; height: 36; radius: 18
+                                width: (colProfil.width - 16) / 3; height: 36; radius: Couleurs.rayon(18, width, height)
                                 color: actif ? modelData.couleur : (zoneP.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                                 Behavior on color { ColorAnimation { duration: 160 } }
                                 scale: zoneP.pressed ? 0.95 : 1

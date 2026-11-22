@@ -309,7 +309,7 @@ FloatingWindow {
         }
         Rectangle {
             id: champ
-            anchors.horizontalCenter: parent.horizontalCenter; y: 18; width: Math.min(440, tout.width - 460); height: 40; radius: 20
+            anchors.horizontalCenter: parent.horizontalCenter; y: 18; width: Math.min(440, tout.width - 460); height: 40; radius: Couleurs.rayon(20, width, height)
             color: Couleurs.gris2; border.width: 1; border.color: champRecherche.activeFocus ? Couleurs.accent : "transparent"
             Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 18; color: Couleurs.texteSec }
             TextInput {
@@ -412,7 +412,7 @@ FloatingWindow {
                 property bool aConfirmer: false        // action dangereuse : sa question est posée sur la ligne
                 readonly property bool estCourante: ListView.isCurrentItem
                 onEstCouranteChanged: if (!estCourante) aConfirmer = false
-                width: liste.width; height: Math.max(62, contenu.implicitHeight + 24); radius: 16
+                width: liste.width; height: Math.max(62, contenu.implicitHeight + 24); radius: Couleurs.rayon(16, width, height)
                 color: ligne.ListView.isCurrentItem ? Couleurs.carteSurvol : Couleurs.carte
                 border.width: ligne.ListView.isCurrentItem && liste.activeFocus ? 1.5 : 0; border.color: Couleurs.accent
                 function editer() { saisie.forceActiveFocus(); saisie.selectAll() }
@@ -423,7 +423,7 @@ FloatingWindow {
                     Row {
                         spacing: 8
                         Texte { text: ligne.r.nom; font.weight: Font.DemiBold; font.pixelSize: 14 }
-                        Rectangle { visible: fen.recherche.trim() !== ""; anchors.verticalCenter: parent.verticalCenter; width: sec.implicitWidth + 14; height: 20; radius: 10; color: Couleurs.gris3
+                        Rectangle { visible: fen.recherche.trim() !== ""; anchors.verticalCenter: parent.verticalCenter; width: sec.implicitWidth + 14; height: 20; radius: Couleurs.rayon(10, width, height); color: Couleurs.gris3
                                     Texte { id: sec; anchors.centerIn: parent; text: ligne.r.sectionNom; font.pixelSize: 11; secondaire: true } }
                         Ico { visible: ligne.r.modifie; anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 14; color: Couleurs.accent }
                     }
@@ -451,7 +451,7 @@ FloatingWindow {
                     // Bascule oui / non
                     Rectangle {
                         visible: ligne.r.genre === "ouinon"; anchors.verticalCenter: parent.verticalCenter
-                        width: 48; height: 28; radius: 14
+                        width: 48; height: 28; radius: Couleurs.rayon(14, width, height)
                         color: ligne.r.valeur === "oui" ? Couleurs.accent : Couleurs.gris3
                         Behavior on color { ColorAnimation { duration: 140 } }
                         Rectangle { width: 22; height: 22; radius: 11; y: 3; x: ligne.r.valeur === "oui" ? parent.width - 25 : 3; color: "#ffffff"
@@ -476,7 +476,7 @@ FloatingWindow {
                             fen.regler(ligne.r.cle, c[(i + d + c.length) % c.length][0])
                         }
                         AssistantCommande { rond: true; width: 30; height: 30; icone: "chevron_left"; onClic: parent.decaler(-1) }
-                        Rectangle { width: Math.max(120, aff.implicitWidth + 24); height: 30; radius: 15; color: Couleurs.gris2
+                        Rectangle { width: Math.max(120, aff.implicitWidth + 24); height: 30; radius: Couleurs.rayon(15, width, height); color: Couleurs.gris2
                                     Texte { id: aff; anchors.centerIn: parent; text: ligne.r.affiche; font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 260) } }
                         AssistantCommande { rond: true; width: 30; height: 30; icone: "chevron_right"; onClic: parent.decaler(1) }
                     }
@@ -489,9 +489,9 @@ FloatingWindow {
                             Texte { anchors.horizontalCenter: parent.horizontalCenter; text: ligne.r.affiche; font.pixelSize: 12; font.weight: Font.DemiBold }
                             Rectangle {
                                 id: barre
-                                width: 150; height: 8; radius: 4; color: Couleurs.gris3
+                                width: 150; height: 8; radius: Couleurs.rayon(4, width, height); color: Couleurs.gris3
                                 readonly property real part: Math.max(0, Math.min(1, (Number(ligne.r.valeur) - ligne.r.mini) / Math.max(1, ligne.r.maxi - ligne.r.mini)))
-                                Rectangle { width: parent.width * barre.part; height: parent.height; radius: 4; color: Couleurs.accent; Behavior on width { enabled: !zb.pressed; NumberAnimation { duration: 120 } } }
+                                Rectangle { width: parent.width * barre.part; height: parent.height; radius: Couleurs.rayon(4, width, height); color: Couleurs.accent; Behavior on width { enabled: !zb.pressed; NumberAnimation { duration: 120 } } }
                                 Rectangle { x: parent.width * barre.part - 7; y: -3; width: 14; height: 14; radius: 7; color: "#ffffff"; visible: zb.containsMouse || zb.pressed }
                                 MouseArea {
                                     id: zb
@@ -506,7 +506,7 @@ FloatingWindow {
                     // Texte et dossier : un champ, Entrée pour valider
                     Rectangle {
                         visible: ligne.r.genre === "texte" || ligne.r.genre === "dossier"; anchors.verticalCenter: parent.verticalCenter
-                        width: 260; height: 34; radius: 17; color: Couleurs.gris2; border.width: 1; border.color: saisie.activeFocus ? Couleurs.accent : "transparent"
+                        width: 260; height: 34; radius: Couleurs.rayon(17, width, height); color: Couleurs.gris2; border.width: 1; border.color: saisie.activeFocus ? Couleurs.accent : "transparent"
                         TextInput {
                             id: saisie
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
@@ -539,7 +539,7 @@ FloatingWindow {
                     // Raccourci : ses touches en touche de clavier, puis changer, désactiver / réactiver, retirer
                     Rectangle {
                         visible: ligne.r.genre === "raccourci"; anchors.verticalCenter: parent.verticalCenter
-                        width: touches.implicitWidth + 24; height: 32; radius: 9; color: Couleurs.gris2
+                        width: touches.implicitWidth + 24; height: 32; radius: Couleurs.rayon(9, width, height); color: Couleurs.gris2
                         border.width: 1; border.color: Couleurs.gris4
                         opacity: ligne.r.desactive ? 0.5 : 1
                         Texte { id: touches; anchors.centerIn: parent; text: ligne.r.affiche; font.pixelSize: 13; font.weight: Font.DemiBold
@@ -566,7 +566,7 @@ FloatingWindow {
             anchors.fill: parent; visible: !!fen.capture; color: Qt.rgba(0, 0, 0, 0.55); z: 20
             MouseArea { anchors.fill: parent; onClicked: fen.finCapture("") }
             Rectangle {
-                anchors.centerIn: parent; width: Math.min(560, parent.width - 80); height: colCapture.implicitHeight + 48; radius: 22
+                anchors.centerIn: parent; width: Math.min(560, parent.width - 80); height: colCapture.implicitHeight + 48; radius: Couleurs.rayon(22, width, height)
                 color: Couleurs.carte; border.width: 1.5; border.color: Couleurs.accent
                 Column {
                     id: colCapture

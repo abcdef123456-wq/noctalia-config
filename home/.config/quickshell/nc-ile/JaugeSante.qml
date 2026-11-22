@@ -11,7 +11,7 @@ Rectangle {
     property real taux: 0                  // 0 à 1 : remplissage de l'arc
     property color teinte: Couleurs.vert
     property bool sans: false              // pas de mesure (carte graphique endormie) : arc vide, valeur grisée
-    width: 118; height: 118; radius: 20; color: Couleurs.carte
+    width: 118; height: 118; radius: Couleurs.rayon(20, width, height); color: Couleurs.carte
 
     readonly property real plein: sans ? 0 : Math.max(0, Math.min(1, taux))
     property real anime: plein

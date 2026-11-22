@@ -8,7 +8,7 @@ ClippingRectangle {
     property real valeur: 0
     property string icone: ""
     signal change(real v)
-    height: 28; radius: 14
+    height: 28; radius: Couleurs.rayon(14, width, height)
     color: Couleurs.gris3
     Rectangle {
         height: parent.height; color: Couleurs.texte

@@ -129,7 +129,7 @@ Item {
                 Row {
                     width: parent.width; spacing: 8
                     Rectangle {
-                        width: parent.width - boutonDossier.width - 8; height: 28; radius: 14
+                        width: parent.width - boutonDossier.width - 8; height: 28; radius: Couleurs.rayon(14, width, height)
                         color: Qt.alpha(Couleurs.carte, 0.6); border.width: 1; border.color: champDossier.activeFocus ? Qt.alpha(Couleurs.accent, 0.7) : Qt.alpha(Couleurs.texte, 0.1)
                         TextInput {
                             id: champDossier

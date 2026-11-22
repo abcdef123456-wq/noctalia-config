@@ -135,7 +135,7 @@ Item {
         id: musique
         montre: c.mode === "musique"
         ClippingRectangle {
-            width: 20; height: 20; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
+            width: 20; height: 20; radius: Couleurs.rayon(6, width, height); color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
             anchors.verticalCenter: parent.verticalCenter
             Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
             Image { anchors.fill: parent; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(40, 40); visible: Etat.pochette === "" }
@@ -151,7 +151,7 @@ Item {
                 model: 5
                 Rectangle {
                     required property int index
-                    width: 3; radius: 1.5
+                    width: 3; radius: Couleurs.rayon(1.5, width, height)
                     height: 6 + Etat.bandes[index] * 10
                     anchors.verticalCenter: parent.verticalCenter
                     color: Couleurs.jauge
@@ -189,10 +189,10 @@ Item {
             taille: 18; color: jauge.vol && Etat.muet ? Couleurs.texteSec : Couleurs.texte
         }
         Rectangle {
-            width: 130; height: 6; radius: 3; color: Couleurs.gris3
+            width: 130; height: 6; radius: Couleurs.rayon(3, width, height); color: Couleurs.gris3
             anchors.verticalCenter: parent.verticalCenter
             Rectangle {
-                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: Couleurs.jauge
+                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: Couleurs.rayon(3, width, height); color: Couleurs.jauge
                 Behavior on width { SpringAnimation { spring: 5; damping: 0.5 } }
             }
         }
@@ -204,7 +204,7 @@ Item {
         id: piste
         montre: c.mode === "piste"
         ClippingRectangle {
-            width: 22; height: 22; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
+            width: 22; height: 22; radius: Couleurs.rayon(6, width, height); color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
             anchors.verticalCenter: parent.verticalCenter
             Image { anchors.fill: parent; source: Etat.pochette !== "" ? Etat.pochette : Etat.iconeLecteur; sourceSize: Qt.size(44, 44); fillMode: Image.PreserveAspectCrop
                     asynchronous: Etat.pochette !== "" }   // icônes du thème : jamais hors du fil principal (plantage de Qt)
@@ -433,7 +433,7 @@ Item {
                 model: 4
                 Rectangle {
                     required property int index
-                    width: 3; radius: 1.5
+                    width: 3; radius: Couleurs.rayon(1.5, width, height)
                     height: 5 + Appel.niveau * [8, 12, 10, 6][index]
                     anchors.verticalCenter: parent.verticalCenter
                     color: Couleurs.vert

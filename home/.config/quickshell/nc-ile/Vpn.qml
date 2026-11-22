@@ -112,7 +112,7 @@ FloatingWindow {
             // Le détail du kill switch : limites toujours visibles, confirmation avant d'activer
             Rectangle {
                 visible: vpn.ksDetail && VpnEtat.disponible && !VpnEtat.masque
-                width: parent.width; height: protections.height + 28; radius: 18
+                width: parent.width; height: protections.height + 28; radius: Couleurs.rayon(18, width, height)
                 color: Qt.alpha(Couleurs.carte, 0.5)
                 border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.08)
                 VpnProtections {

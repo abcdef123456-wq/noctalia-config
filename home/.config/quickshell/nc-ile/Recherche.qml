@@ -1423,7 +1423,7 @@ Item {
         // Plan de rangement en zones (« me montrer le plan d'abord ») : une mini-carte de l'écran plutôt qu'une liste
         readonly property var zones: !enDiag && r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []
         anchors.top: barre.bottom; anchors.topMargin: 4
-        x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
+        x: 14; width: parent.width - 28; radius: Couleurs.rayon(16, width, height); color: Couleurs.gris2
         height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0)
                          + (miniCarte.visible ? 10 + miniCarte.height : 0) + 14, 420)
         clip: true
@@ -1464,7 +1464,7 @@ Item {
             visible: zoneReponse.zones.length > 0 && !zoneReponse.attend && r.reponseAide === ""
             anchors.top: texteReponse.bottom; anchors.topMargin: 10
             x: 14; width: Math.min(parent.width - 28, 300); height: Math.round(width * 10 / 16)
-            radius: 12; color: Qt.alpha(Couleurs.fond, 0.6)
+            radius: Couleurs.rayon(12, width, height); color: Qt.alpha(Couleurs.fond, 0.6)
             Repeater {
                 model: zoneReponse.zones
                 Rectangle {
@@ -1501,7 +1501,7 @@ Item {
                 readonly property bool choisi: index === r.sel
                 readonly property bool confirme: index === r.confirmer
                 readonly property bool supprimable: !!modelData.suppr
-                width: liste.width; height: r.hauteurLigne; radius: 14
+                width: liste.width; height: r.hauteurLigne; radius: Couleurs.rayon(14, width, height)
                 // En confirmation : le fond de l'île à peine teinté de rouge (le texte rouge y garde son contraste, ce
                 // qu'il ne ferait pas sur gris2)
                 color: confirme ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.14)) : choisi ? Couleurs.gris2 : "transparent"

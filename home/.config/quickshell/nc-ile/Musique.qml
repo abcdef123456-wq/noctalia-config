@@ -20,7 +20,7 @@ Item {
         Row {
             width: parent.width; height: 72; spacing: 14
             ClippingRectangle {
-                width: 72; height: 72; radius: 16; color: Couleurs.gris2
+                width: 72; height: 72; radius: Couleurs.rayon(16, width, height); color: Couleurs.gris2
                 Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
                 Image { anchors.centerIn: parent; width: 44; height: 44; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(88, 88); visible: Etat.pochette === "" }
                 Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
@@ -43,7 +43,7 @@ Item {
                     model: 5
                     Rectangle {
                         required property int index
-                        width: 4; radius: 2
+                        width: 4; radius: Couleurs.rayon(2, width, height)
                         height: Etat.joue ? 8 + Etat.bandes[index] * 20 : 8
                         anchors.verticalCenter: parent.verticalCenter
                         color: Couleurs.jauge; opacity: Etat.joue ? 1 : 0.4
@@ -56,9 +56,9 @@ Item {
         Column {
             width: parent.width; spacing: 6
             Rectangle {
-                width: parent.width; height: 6; radius: 3; color: Couleurs.gris3
+                width: parent.width; height: 6; radius: Couleurs.rayon(3, width, height); color: Couleurs.gris3
                 Rectangle {
-                    height: parent.height; radius: 3; color: Couleurs.jauge
+                    height: parent.height; radius: Couleurs.rayon(3, width, height); color: Couleurs.jauge
                     width: m.duree > 0 ? parent.width * Math.min(1, m.position / m.duree) : 0
                 }
                 MouseArea {

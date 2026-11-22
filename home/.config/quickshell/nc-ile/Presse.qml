@@ -62,7 +62,7 @@ Item {
         visible: PressePapiers.liste.length > 0
         Rectangle {
             id: zoneRecherche
-            anchors.left: parent.left; anchors.right: filtres.left; anchors.rightMargin: 8; height: 32; radius: 16
+            anchors.left: parent.left; anchors.right: filtres.left; anchors.rightMargin: 8; height: 32; radius: Couleurs.rayon(16, width, height)
             color: Couleurs.gris2; border.width: 1; border.color: champ.activeFocus ? Couleurs.accent : "transparent"
             Ico { x: 10; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 16; color: Couleurs.texteSec }
             TextInput {
@@ -85,7 +85,7 @@ Item {
                     id: pf
                     required property var modelData
                     objectName: "nc-presse-filtre-" + modelData.id
-                    width: lf.implicitWidth + 18; height: 26; radius: 13
+                    width: lf.implicitWidth + 18; height: 26; radius: Couleurs.rayon(13, width, height)
                     color: p.filtre === modelData.id ? Couleurs.accent : (zf.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                     Texte { id: lf; anchors.centerIn: parent; text: pf.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold; color: p.filtre === pf.modelData.id ? Couleurs.surAccent : Couleurs.texte }
                     MouseArea { id: zf; anchors.fill: parent; hoverEnabled: true; onClicked: { p.filtre = pf.modelData.id; p.choix = -1 } }
@@ -134,7 +134,7 @@ Item {
                     readonly property bool deplie: !!p.deplies[modelData.id]
                     objectName: "nc-presse-" + modelData.id
                     readonly property int hautTexte: image ? 86 : Math.min(deplie ? 320 : 64, txt.implicitHeight + 20)
-                    width: liste.width; height: hautTexte + (act.utile ? act.height : 0); radius: 14
+                    width: liste.width; height: hautTexte + (act.utile ? act.height : 0); radius: Couleurs.rayon(14, width, height)
                     color: zone.containsMouse || choisi ? Couleurs.carteSurvol : Couleurs.carte
                     border.width: choisi ? 1.5 : 0; border.color: Couleurs.accent
                     property bool copie: false
@@ -147,7 +147,7 @@ Item {
                     }
                     ClippingRectangle {
                         visible: el.image
-                        x: 10; y: 8; width: 110; height: 70; radius: 9; color: Couleurs.gris2
+                        x: 10; y: 8; width: 110; height: 70; radius: Couleurs.rayon(9, width, height); color: Couleurs.gris2
                         Image { anchors.fill: parent; source: el.image && !p.masque ? p.urlFichier(el.modelData.chemin) : ""; fillMode: Image.PreserveAspectCrop
                                 asynchronous: true; sourceSize: Qt.size(220, 140) }
                     }

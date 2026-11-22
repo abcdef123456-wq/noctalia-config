@@ -10,7 +10,7 @@ Column {
             id: l
             required property var modelData
             required property int index
-            width: t.width; height: 40; radius: 20
+            width: t.width; height: 40; radius: Couleurs.rayon(20, width, height)
             color: Qt.alpha(Couleurs.carte, 0.6)
             Row {
                 anchors.verticalCenter: parent.verticalCenter

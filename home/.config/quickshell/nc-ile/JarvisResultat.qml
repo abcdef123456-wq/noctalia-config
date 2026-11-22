@@ -24,7 +24,7 @@ Column {
     }
     Rectangle {
         visible:r.message!==""; width:parent.width; height:visible?texte.implicitHeight+32:0
-        radius:18; color:Couleurs.carte
+        radius: Couleurs.rayon(18, width, height); color:Couleurs.carte
         TextEdit { id:texte; x:16;y:16;width:parent.width-32;height:contentHeight;text:AssistantEtat.formater(r.message)
                    color:Couleurs.texte; font.family: Couleurs.police;font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText
                    Keys.onPressed: (e) => { if (e.matches(StandardKey.Copy)) { AssistantEtat.copierSansInvisible(selectedText); e.accepted = true } } }
@@ -36,7 +36,7 @@ Column {
             required property var modelData
             readonly property var item:modelData.item||{}
             readonly property string kind:modelData.kind
-            width:r.width; height:col.implicitHeight+28; radius:16; color:Couleurs.carte
+            width:r.width; height:col.implicitHeight+28; radius: Couleurs.rayon(16, width, height); color:Couleurs.carte
             Column {
                 id:col;x:14;y:14;width:parent.width-28;spacing:8
                 Texte { width:parent.width;text:AssistantEtat.formater(String(carte.item.name||carte.item.title||carte.item.prompt||carte.item.role||carte.item.text||carte.item.message||carte.item.unit||carte.item.id||"—"));textFormat:Text.MarkdownText;wrapMode:Text.Wrap;elide:Text.ElideNone;font.weight:Font.DemiBold;font.pixelSize:14 }

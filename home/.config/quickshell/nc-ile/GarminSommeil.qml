@@ -22,7 +22,7 @@ Column {
                 readonly property real v: typeof so.phases[index] === "number" && isFinite(so.phases[index]) && so.phases[index] > 0 ? so.phases[index] : 0
                 objectName: "nc-garmin-sommeil-" + index
                 visible: v > 0
-                height: 10; radius: 5
+                height: 10; radius: Couleurs.rayon(5, width, height)
                 width: Math.max(4, (so.width - 6) * v / so.total)
                 color: so.couleurs[index]
             }

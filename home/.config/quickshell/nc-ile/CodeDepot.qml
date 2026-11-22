@@ -12,7 +12,7 @@ Item {
     width: 300; height: 46
 
     Rectangle {
-        anchors.fill: parent; radius: 12
+        anchors.fill: parent; radius: Couleurs.rayon(12, width, height)
         color: ligne.actif ? Qt.alpha(Couleurs.accent, 0.22) : "transparent"
         Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
     }
@@ -48,7 +48,7 @@ Item {
         objectName: "nc-code-depot-etiquette"
         visible: !!(ligne.depot && (ligne.depot.la || ligne.depot.pris))
         anchors.right: parent.right; anchors.rightMargin: 12; y: 8
-        width: libEtiquette.implicitWidth + 16; height: 18; radius: 9
+        width: libEtiquette.implicitWidth + 16; height: 18; radius: Couleurs.rayon(9, width, height)
         color: ligne.depot && ligne.depot.la ? Qt.alpha(Couleurs.accent, 0.18) : Qt.alpha(Couleurs.carte, 0.7)
         Texte {
             id: libEtiquette; anchors.centerIn: parent; font.pixelSize: 10; elide: Text.ElideNone

@@ -10,7 +10,7 @@ Rectangle {
     property real jauge: -1                       // 0..1 ; négatif = pas de jauge
     property var courbe: []                       // liste de nombres ; vide = pas de courbe
     default property alias extra: reste.data
-    radius: 22
+    radius: Couleurs.rayon(22, width, height)
     color: Qt.alpha(Couleurs.carte, 0.7)
     implicitHeight: col.implicitHeight + 28
 

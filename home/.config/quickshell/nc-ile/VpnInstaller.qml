@@ -28,7 +28,7 @@ Column {
     Rectangle {
         objectName: "nc-vpn-installer-bouton"
         visible: i.auto
-        width: libelleInstaller.implicitWidth + 32; height: 32; radius: 16
+        width: libelleInstaller.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
         color: zoneInstaller.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
         opacity: VpnEtat.cible === "" && VpnEtat.installation === "" ? 1 : 0.6
         Accessible.role: Accessible.Button
@@ -41,7 +41,7 @@ Column {
     Rectangle {
         objectName: "nc-vpn-installer-voir"
         visible: i.guide
-        width: libelleVoir.implicitWidth + 32; height: 32; radius: 16
+        width: libelleVoir.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
         color: zoneVoir.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
         Accessible.role: Accessible.Button
         Accessible.name: libelleVoir.text
@@ -60,7 +60,7 @@ Column {
     Rectangle {
         objectName: "nc-vpn-installer-page"
         visible: i.guide && i.etapesVisibles
-        width: libellePage.implicitWidth + 32; height: 32; radius: 16
+        width: libellePage.implicitWidth + 32; height: 32; radius: Couleurs.rayon(16, width, height)
         color: zonePage.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
         Accessible.role: Accessible.Button
         Accessible.name: libellePage.text

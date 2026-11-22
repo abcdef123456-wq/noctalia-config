@@ -70,7 +70,7 @@ FloatingWindow {
             property var entree: null
             z: 10
             visible: Drag.active
-            width: Math.min(260, nomFantome.implicitWidth + 50); height: 34; radius: 17
+            width: Math.min(260, nomFantome.implicitWidth + 50); height: 34; radius: Couleurs.rayon(17, width, height)
             color: Couleurs.carteSurvol; border.width: 1; border.color: Couleurs.accent; opacity: 0.94
             Drag.keys: ["nc-cloud-entree"]
             Drag.hotSpot.x: 16; Drag.hotSpot.y: 17
@@ -152,7 +152,7 @@ FloatingWindow {
                 Rectangle {
                     objectName: "nc-cloud-annulable"
                     visible: cloud.pret && CloudEtat.annulable !== null
-                    width: parent.width; height: 40; radius: 14; color: Couleurs.carte
+                    width: parent.width; height: 40; radius: Couleurs.rayon(14, width, height); color: Couleurs.carte
                     Texte { anchors.left: parent.left; anchors.leftMargin: 14; anchors.right: annulerSuppression.left; anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
                             text: Reglages.t("Supprimé : ", "Deleted: ") + (CloudEtat.annulable ? CloudEtat.annulable.nom : "") }
@@ -239,7 +239,7 @@ FloatingWindow {
                     Rectangle {
                         objectName: "nc-cloud-presse-confirmation"
                         visible: CloudEtat.presse !== null
-                        width: parent.width; radius: 14; color: Couleurs.carte
+                        width: parent.width; radius: Couleurs.rayon(14, width, height); color: Couleurs.carte
                         height: presseColonne.implicitHeight + 20
                         Column {
                             id: presseColonne
@@ -336,7 +336,7 @@ FloatingWindow {
                     visible: cloud.pret && !CloudEtat.deplacement
                     width: parent.width; spacing: 8
                     Rectangle {
-                        width: 220; height: 30; radius: 15; color: Couleurs.gris2
+                        width: 220; height: 30; radius: Couleurs.rayon(15, width, height); color: Couleurs.gris2
                         border.width: 1; border.color: nomNouveau.activeFocus ? Couleurs.accent : "transparent"
                         TextInput {
                             id: nomNouveau
@@ -385,7 +385,7 @@ FloatingWindow {
                 Rectangle {
                     objectName: "nc-cloud-recus"
                     visible: cloud.pret && CloudEtat.recus.length > 0
-                    width: parent.width; height: recus.implicitHeight + 20; radius: 14
+                    width: parent.width; height: recus.implicitHeight + 20; radius: Couleurs.rayon(14, width, height)
                     color: Couleurs.carte; border.width: 1; border.color: Couleurs.accent
                     Column {
                         id: recus
@@ -445,7 +445,7 @@ FloatingWindow {
                 Rectangle {
                     objectName: "nc-cloud-note"
                     visible: cloud.pret && (CloudEtat.note !== "" || CloudEtat.noteRefus !== "" || CloudEtat.noteMessage !== "")
-                    width: parent.width; height: colNote.implicitHeight + 20; radius: 14
+                    width: parent.width; height: colNote.implicitHeight + 20; radius: Couleurs.rayon(14, width, height)
                     color: Couleurs.carte; border.width: CloudEtat.note !== "" ? 1 : 0; border.color: Couleurs.accent
                     Column {
                         id: colNote
@@ -500,7 +500,7 @@ FloatingWindow {
                             required property var modelData
                             required property int index
                             objectName: "nc-cloud-envoi-" + index
-                            width: parent.width; height: colEnvoi.implicitHeight + 16; radius: 12; color: Couleurs.carte
+                            width: parent.width; height: colEnvoi.implicitHeight + 16; radius: Couleurs.rayon(12, width, height); color: Couleurs.carte
                             readonly property real part: modelData.taille > 0 ? Math.min(1, modelData.envoye / modelData.taille) : 0
                             Column {
                                 id: colEnvoi
@@ -522,8 +522,8 @@ FloatingWindow {
                                 }
                                 Rectangle {
                                     visible: envoi.modelData.etat === "en_cours"
-                                    width: parent.width; height: 4; radius: 2; color: Couleurs.gris2
-                                    Rectangle { width: parent.width * envoi.part; height: parent.height; radius: 2; color: Couleurs.accent }
+                                    width: parent.width; height: 4; radius: Couleurs.rayon(2, width, height); color: Couleurs.gris2
+                                    Rectangle { width: parent.width * envoi.part; height: parent.height; radius: Couleurs.rayon(2, width, height); color: Couleurs.accent }
                                 }
                                 Texte {
                                     visible: ["echec", "refuse", "inconnu"].indexOf(envoi.modelData.etat) >= 0 && envoi.modelData.message !== ""
@@ -552,7 +552,7 @@ FloatingWindow {
                 Rectangle {
                     objectName: "nc-cloud-deplacement"
                     visible: cloud.pret && !!CloudEtat.deplacement
-                    width: parent.width; height: bandeau.implicitHeight + 20; radius: 14
+                    width: parent.width; height: bandeau.implicitHeight + 20; radius: Couleurs.rayon(14, width, height)
                     color: Couleurs.carte; border.width: 1; border.color: Couleurs.accent
                     Column {
                         id: bandeau
@@ -605,7 +605,7 @@ FloatingWindow {
                             readonly property bool renommage: cloud.aRenommer === modelData.id
                             readonly property bool apercuPret: !fichier && !!CloudEtat.apercu && CloudEtat.apercu.id === modelData.id
                             objectName: "nc-cloud-entree-" + modelData.id
-                            width: parent.width; height: Math.max(48, colonne.implicitHeight + 16); radius: 14
+                            width: parent.width; height: Math.max(48, colonne.implicitHeight + 16); radius: Couleurs.rayon(14, width, height)
                             color: choisie || zoneLigne.containsMouse ? Couleurs.carteSurvol : Couleurs.carte
                             border.width: cibleLigne.containsDrag ? 2 : (choisie ? 1 : 0); border.color: Couleurs.accent
                             // Un clic choisit, un double-clic ouvre ; les actions s'ajoutent SOUS le nom, la ligne ne bouge pas.
@@ -649,7 +649,7 @@ FloatingWindow {
                                         text: ligne.modelData.name; elide: Text.ElideMiddle; font.weight: Font.DemiBold }
                                 Rectangle {
                                     visible: ligne.renommage
-                                    width: Math.min(parent.width, 320); height: 28; radius: 14; color: Couleurs.gris2
+                                    width: Math.min(parent.width, 320); height: 28; radius: Couleurs.rayon(14, width, height); color: Couleurs.gris2
                                     border.width: 1; border.color: Couleurs.accent
                                     TextInput {
                                         id: nouveauNom

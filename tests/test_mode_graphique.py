@@ -69,7 +69,7 @@ class Carte(unittest.TestCase):
             (root / "Couleurs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property color fond:"black"; '
                                                'readonly property color texte:"white"; readonly property color texteSec:"#98989d"; '
                                                'readonly property color texteDoux:"#d1d1d6"; readonly property color gris2:"#2c2c2e"; '
-                                               'readonly property color gris3:"#3a3a3c"}')
+                                               'readonly property color gris3:"#3a3a3c"; function rayon(b,w,h){return Math.min(b,Math.min(w,h)/2)}}')
             (root / "qmldir").write_text("\n".join(("singleton " if n in ("ModeGraphique", "Reglages", "Couleurs") else "")
                                                    + n + " 1.0 " + n + ".qml"
                                                    for n in ("ModeGraphique", "ConfirmationGpu", "Texte", "Ico", "Reglages", "Couleurs")))

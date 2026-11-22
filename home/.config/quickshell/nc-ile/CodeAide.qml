@@ -9,7 +9,7 @@ Row {
     readonly property color teinte: Qt.tint(Couleurs.texteSec, Qt.alpha(Couleurs.texte, 0.35))
     spacing: 6
     Rectangle {
-        width: libTouche.implicitWidth + 12; height: 20; radius: 6
+        width: libTouche.implicitWidth + 12; height: 20; radius: Couleurs.rayon(6, width, height)
         color: Qt.alpha(Couleurs.carte, 0.7); border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
         Texte { id: libTouche; anchors.centerIn: parent; text: aide.touche; font.pixelSize: 10; elide: Text.ElideNone; color: aide.teinte }
     }

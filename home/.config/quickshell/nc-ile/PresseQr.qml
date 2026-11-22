@@ -33,7 +33,7 @@ Rectangle {
     Column {
         anchors.centerIn: parent; spacing: 12; width: parent.width - 40
         Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter; width: 250; height: 250; radius: 14; color: "white"
+            anchors.horizontalCenter: parent.horizontalCenter; width: 250; height: 250; radius: Couleurs.rayon(14, width, height); color: "white"
             visible: !q.masque && q.png !== ""
             Image { anchors.fill: parent; anchors.margins: 12; fillMode: Image.PreserveAspectFit; smooth: false
                     source: q.png !== "" ? "file://" + q.png.split("/").map(encodeURIComponent).join("/") : "" }
@@ -52,7 +52,7 @@ Rectangle {
         }
         Rectangle {
             objectName: "nc-presse-qr-retour"
-            anchors.horizontalCenter: parent.horizontalCenter; height: 30; width: lb.implicitWidth + 28; radius: 15
+            anchors.horizontalCenter: parent.horizontalCenter; height: 30; width: lb.implicitWidth + 28; radius: Couleurs.rayon(15, width, height)
             color: zr.containsMouse ? Couleurs.accentClair : Couleurs.accent
             Texte { id: lb; anchors.centerIn: parent; font.pixelSize: 13; font.weight: Font.DemiBold; color: Couleurs.surAccent; text: Reglages.t("Retour", "Back") }
             MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; onClicked: q.fermer() }

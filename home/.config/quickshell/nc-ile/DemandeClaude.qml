@@ -18,7 +18,7 @@ Item {
         property color teinte: Agents.couleur
         property bool principal: false
         signal clic()
-        width: Math.max(86, lb.implicitWidth + 28); height: 32; radius: 16
+        width: Math.max(86, lb.implicitWidth + 28); height: 32; radius: Couleurs.rayon(16, width, height)
         color: principal ? (zb.containsMouse ? Qt.lighter(teinte, 1.12) : teinte)
                          : (zb.containsMouse ? Couleurs.gris4 : Couleurs.gris2)
         scale: zb.pressed ? 0.94 : 1
@@ -40,7 +40,7 @@ Item {
     }
     Rectangle {
         anchors.right: parent.right; anchors.rightMargin: 16; y: 10
-        width: rt.implicitWidth + 30; height: 24; radius: 12
+        width: rt.implicitWidth + 30; height: 24; radius: Couleurs.rayon(12, width, height)
         color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
         Row {
             id: rt; anchors.centerIn: parent; spacing: 4
@@ -58,7 +58,7 @@ Item {
         // Commande ou fichier concerné, en police de terminal
         Rectangle {
             visible: !d.question && d.vue !== null && (d.vue.detail || "") !== ""
-            width: parent.width; height: det.implicitHeight + 12; radius: 9; color: Couleurs.gris2
+            width: parent.width; height: det.implicitHeight + 12; radius: Couleurs.rayon(9, width, height); color: Couleurs.gris2
             Text {
                 id: det
                 x: 10; y: 6; width: parent.width - 20

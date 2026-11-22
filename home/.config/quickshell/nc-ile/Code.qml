@@ -469,7 +469,7 @@ PanelWindow {
                 id: nouveauLigne
                 objectName: "nc-code-nouveau"
                 z: 2                                                              // au-dessus de la liste : rien ne lui passe devant
-                x: 8; y: 8; width: Math.round(parent.width * 0.46); height: 34; radius: 12
+                x: 8; y: 8; width: Math.round(parent.width * 0.46); height: 34; radius: Couleurs.rayon(12, width, height)
                 // Choisie comme une ligne de la liste : Haut depuis le premier projet (sel = -1), le survol, ou son petit choix ouvert
                 readonly property bool choisie: code.sel < 0 || code.mode === "choix" || code.mode === "nouveau" || code.mode === "github"
                 color: zoneNouveau.containsMouse || choisie ? Qt.alpha(Couleurs.accent, 0.22) : Qt.alpha(Couleurs.carte, 0.45)
@@ -509,7 +509,7 @@ PanelWindow {
                     visible: liste.currentItem !== null
                     width: liste.width; height: liste.currentItem ? liste.currentItem.height : 0
                     y: liste.currentItem ? liste.currentItem.y : 0
-                    radius: 12
+                    radius: Couleurs.rayon(12, width, height)
                     color: Qt.alpha(Couleurs.accent, 0.22)
                     Behavior on y { enabled: !Reglages.sobre; SpringAnimation { spring: 5; damping: 0.4; epsilon: 0.5 } }
                 }

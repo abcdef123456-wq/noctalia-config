@@ -31,7 +31,7 @@ Module {
     readonly property bool permis: Reglages.val("IA_CHALEUR", "oui") !== "non" && !Reglages.iaCoupee && !Partage.silence
     readonly property bool montre: permis && actif && prete.prete
     visible: montre
-    radius: 18
+    radius: Couleurs.rayon(18, width, height)
     height: col.implicitHeight + 24
     clip: true
 
@@ -127,7 +127,7 @@ Module {
             spacing: 10
             Rectangle {
                 objectName: "pourquoiChaleurBouton"
-                width: lbp.implicitWidth + 28; height: 30; radius: 15
+                width: lbp.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
                 opacity: p.etape !== "" || dem.enCours ? 0.5 : 1
                 color: zbp.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lbp; anchors.centerIn: parent; text: Reglages.t("Pourquoi ça chauffe ?", "Why is it hot?"); font.pixelSize: 13; font.weight: Font.DemiBold; color: Couleurs.accent }
@@ -138,7 +138,7 @@ Module {
             Rectangle {
                 objectName: "pourquoiChaleurArreter"
                 visible: p.etape !== "" || dem.enCours
-                width: lar.implicitWidth + 24; height: 30; radius: 15
+                width: lar.implicitWidth + 24; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: zar.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                 Texte { id: lar; anchors.centerIn: parent; text: Reglages.t("Arrêter", "Stop"); font.pixelSize: 13; font.weight: Font.DemiBold }
                 MouseArea { id: zar; anchors.fill: parent; hoverEnabled: true; onClicked: p.arreter(false) }

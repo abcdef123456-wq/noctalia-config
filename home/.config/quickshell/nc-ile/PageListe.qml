@@ -90,7 +90,7 @@ Item {
         Texte { x: 44; anchors.verticalCenter: parent.verticalCenter; text: p.wifi ? "Wi-Fi" : "Bluetooth"; font.pixelSize: 20; font.weight: Font.Bold }
         Rectangle {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            width: 46; height: 28; radius: 14; color: p.allume ? Couleurs.vert : Couleurs.gris3
+            width: 46; height: 28; radius: Couleurs.rayon(14, width, height); color: p.allume ? Couleurs.vert : Couleurs.gris3
             Behavior on color { ColorAnimation { duration: 180 } }
             Rectangle {
                 width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2
@@ -136,7 +136,7 @@ Item {
                 width: p.width; spacing: 6
                 Titre { text: Reglages.t("Mot de passe de « " + p.saisie + " »", "Password for “" + p.saisie + "”") }
                 Rectangle {
-                    width: parent.width; height: 40; radius: 12; color: Couleurs.gris2
+                    width: parent.width; height: 40; radius: Couleurs.rayon(12, width, height); color: Couleurs.gris2
                     border.color: Couleurs.accent; border.width: 1.5
                     TextInput {
                         id: mdp

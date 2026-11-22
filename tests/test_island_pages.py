@@ -36,7 +36,7 @@ class NavigationPages(unittest.TestCase):
             (root / "runtime").mkdir(mode=0o700)
             for name in ("NavigationIle", "Reglages", "Agents"):
                 shutil.copy2(QML / (name + ".qml"), root)
-            (root / "Couleurs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property color texte:"white"}')
+            (root / "Couleurs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property color texte:"white"; function rayon(b,w,h){return Math.min(b,Math.min(w,h)/2)}}')
             # Activités Appel et Terminal (Appel.qml, Terminal.qml) : lues par Etat.activites, ici sans appel ni commande
             for name in ("Appel", "Terminal"):
                 (root / (name + ".qml")).write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false}')

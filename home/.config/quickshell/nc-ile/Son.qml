@@ -53,7 +53,7 @@ Item {
         default property alias contenu: col.data
         width: parent ? parent.width : 300
         height: col.implicitHeight
-        radius: 16; color: Couleurs.carte
+        radius: Couleurs.rayon(16, width, height); color: Couleurs.carte
         Column { id: col; width: parent.width }
     }
     // Ligne d'une carte : icône simple, nom, coche ; trait de séparation sauf pour la dernière
@@ -81,8 +81,8 @@ Item {
         property real valeur: 0
         signal change(real v)
         height: 18
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Couleurs.gris3 }
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: 2; color: Couleurs.texte }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: Couleurs.rayon(2, width, height); color: Couleurs.gris3 }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: Couleurs.rayon(2, width, height); color: Couleurs.texte }
         Rectangle {
             id: bouton
             width: 16; height: 16; radius: 8; color: Couleurs.texte
@@ -102,7 +102,7 @@ Item {
         id: it
         property bool allume: false
         signal bascule()
-        width: 46; height: 28; radius: 14; color: allume ? Couleurs.vert : Couleurs.gris3
+        width: 46; height: 28; radius: Couleurs.rayon(14, width, height); color: allume ? Couleurs.vert : Couleurs.gris3
         Behavior on color { ColorAnimation { duration: 180 } }
         Rectangle {
             width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2; x: it.allume ? 20 : 2
@@ -134,7 +134,7 @@ Item {
             }
             Item { width: 1; height: 8 }
             Curseur {
-                width: son.width; height: 44; radius: 22
+                width: son.width; height: 44; radius: Couleurs.rayon(22, width, height)
                 icone: Etat.muet ? "volume_off" : (Etat.volume < 0.34 ? "volume_mute" : (Etat.volume < 0.67 ? "volume_down" : "volume_up"))
                 valeur: Etat.muet ? 0 : Etat.volume
                 onChange: v => Etat.reglerVolume(v)

@@ -63,7 +63,7 @@ Item {
         // Ce qui sera exécuté ou écrit, tel quel (jamais interprété : texte brut)
         Rectangle {
             visible: c.texte !== ""
-            width: parent.width; height: defile.height + 14; radius: 10; color: Couleurs.gris2
+            width: parent.width; height: defile.height + 14; radius: Couleurs.rayon(10, width, height); color: Couleurs.gris2
             Flickable {
                 id: defile
                 x: 10; y: 7; width: parent.width - 20
@@ -84,7 +84,7 @@ Item {
             Rectangle {
                 objectName: "nc-noeud-barre"
                 visible: defile.contentHeight > defile.height + 1
-                x: parent.width - 6; width: 3; radius: 1.5; color: Couleurs.texteSec
+                x: parent.width - 6; width: 3; radius: Couleurs.rayon(1.5, width, height); color: Couleurs.texteSec
                 y: 7 + defile.visibleArea.yPosition * defile.height
                 height: Math.max(12, defile.visibleArea.heightRatio * defile.height)
             }
@@ -106,7 +106,7 @@ Item {
                 objectName: "nc-noeud-voir-tout"
                 visible: c.coupe
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                width: lv.implicitWidth + 24; height: 28; radius: 14
+                width: lv.implicitWidth + 24; height: 28; radius: Couleurs.rayon(14, width, height)
                 color: zv.containsMouse ? Couleurs.gris4 : "transparent"
                 Texte {
                     id: lv; anchors.centerIn: parent; font.pixelSize: 12; color: Couleurs.texteSec
@@ -134,7 +134,7 @@ Item {
                         id: b
                         required property var modelData
                         objectName: modelData.nom
-                        width: Math.max(96, lb.implicitWidth + 30); height: 34; radius: 17
+                        width: Math.max(96, lb.implicitWidth + 30); height: 34; radius: Couleurs.rayon(17, width, height)
                         color: modelData.principal ? (zb.containsMouse ? Couleurs.texteDoux : Couleurs.texte)
                                                    : (zb.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         scale: zb.pressed ? 0.95 : 1

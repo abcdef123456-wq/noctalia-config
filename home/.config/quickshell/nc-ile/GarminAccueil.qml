@@ -3,7 +3,7 @@ import QtQuick
 
 Rectangle {
     id: a
-    radius: 22
+    radius: Couleurs.rayon(22, width, height)
     color: Qt.alpha(Couleurs.carte, 0.7)
     implicitHeight: col.implicitHeight + 36
     Column {
@@ -31,7 +31,7 @@ Rectangle {
                     required property var modelData
                     visible: modelData.v
                     objectName: "nc-garmin-bouton-" + modelData.n
-                    height: 34; width: etiq.implicitWidth + 28; radius: 17
+                    height: 34; width: etiq.implicitWidth + 28; radius: Couleurs.rayon(17, width, height)
                     color: modelData.n === "demo" ? Couleurs.carteSurvol : Couleurs.accent
                     Texte {
                         id: etiq; anchors.centerIn: parent; text: parent.modelData.t

@@ -10,7 +10,7 @@ import Quickshell.Io
 Module {
     id: ep
     objectName: "blocEnergie"
-    radius: 18
+    radius: Couleurs.rayon(18, width, height)
     visible: etat.disponible === true && !Etat.profilsAbsents   // sans service de profils : rien à pousser
     height: col.implicitHeight + 24
 
@@ -140,7 +140,7 @@ Module {
                 objectName: "profilPousse"
                 readonly property bool ouvert: ep.choisi === modelData.id
                 readonly property bool actif: ep.etat.actif === modelData.id
-                width: col.width; height: ligneProfil.implicitHeight + 16; radius: 14
+                width: col.width; height: ligneProfil.implicitHeight + 16; radius: Couleurs.rayon(14, width, height)
                 color: ouvert ? Couleurs.gris3 : (zoneProfil.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                 opacity: modelData.valide ? 1 : 0.5
                 Behavior on color { ColorAnimation { duration: 160 } }

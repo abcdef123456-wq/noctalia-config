@@ -18,7 +18,7 @@ Row {
             spacing: 5
             Texte { visible: touche.index > 0; text: "+"; secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
-                height: 24; width: libTouche.implicitWidth + 16; radius: 7
+                height: 24; width: libTouche.implicitWidth + 16; radius: Couleurs.rayon(7, width, height)
                 color: Qt.alpha(Couleurs.carte, 0.6)
                 border.width: groupe.edite ? 1.5 : 1
                 border.color: groupe.edite ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)

@@ -37,7 +37,7 @@ Item {
             // Demande en cours
             Rectangle {
                 visible: Agents.demande !== null
-                width: parent.width; height: visible ? dem.implicitHeight : 0; radius: 20; color: Couleurs.carte
+                width: parent.width; height: visible ? dem.implicitHeight : 0; radius: Couleurs.rayon(20, width, height); color: Couleurs.carte
                 border.width: 1; border.color: Qt.alpha(Agents.couleur, 0.5)
                 DemandeClaude { id: dem; anchors.fill: parent }
             }
@@ -49,7 +49,7 @@ Item {
                     required property var modelData
                     readonly property var s: modelData
                     readonly property bool enCours: s.etat === "travail" || s.etat === "demande" || s.etat === "terminal"
-                    width: liste.width; height: col.implicitHeight + 24; radius: 18; color: Couleurs.carte
+                    width: liste.width; height: col.implicitHeight + 24; radius: Couleurs.rayon(18, width, height); color: Couleurs.carte
 
                     Column {
                         id: col
@@ -73,7 +73,7 @@ Item {
                             Rectangle {
                                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                 visible: (carte.s.terminal || 0) > 0
-                                width: 30; height: 24; radius: 12; color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
+                                width: 30; height: 24; radius: Couleurs.rayon(12, width, height); color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
                                 Ico { anchors.centerIn: parent; nom: /kitty|term|foot|alacritty|ghostty|konsole|wezterm|tilix|ptyxis/i.test(carte.s.classe || "kitty") ? "terminal" : "code"; taille: 15 }
                                 MouseArea { id: zt; anchors.fill: parent; hoverEnabled: true; onClicked: {
                                     Agents.allerTerminal(carte.s.terminal, carte.s.shell)
@@ -88,7 +88,7 @@ Item {
                             readonly property var q: carte.s.question || null
                             objectName: "nc-question-" + carte.s.id
                             visible: q !== null && (carte.s.etat === "terminal" || carte.s.etat === "attente" || carte.s.etat === "demande")
-                            width: parent.width; height: visible ? colQ.implicitHeight + 20 : 0; radius: 14; color: Couleurs.gris2
+                            width: parent.width; height: visible ? colQ.implicitHeight + 20 : 0; radius: Couleurs.rayon(14, width, height); color: Couleurs.gris2
                             border.width: 1; border.color: Qt.alpha(Couleurs.orange, 0.45)
                             Column {
                                 id: colQ
@@ -108,7 +108,7 @@ Item {
                                 Rectangle {
                                     visible: (carte.s.terminal || 0) > 0
                                     anchors.right: parent.right
-                                    width: rq.implicitWidth + 28; height: 30; radius: 15
+                                    width: rq.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
                                     color: zq.containsMouse ? Qt.lighter(Agents.couleurDe(carte.s), 1.12) : Agents.couleurDe(carte.s)
                                     scale: zq.pressed ? 0.94 : 1
                                     Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
@@ -161,7 +161,7 @@ Item {
                         // Lui écrire (agent lancé dans kitty) : Entrée envoie, comme dans son terminal
                         Rectangle {
                             visible: carte.s.ecrire === true
-                            width: parent.width; height: 36; radius: 18; color: Couleurs.gris2
+                            width: parent.width; height: 36; radius: Couleurs.rayon(18, width, height); color: Couleurs.gris2
                             border.width: msg.activeFocus ? 1.5 : 0; border.color: Agents.couleurDe(carte.s)
                             TextInput {
                                 id: msg

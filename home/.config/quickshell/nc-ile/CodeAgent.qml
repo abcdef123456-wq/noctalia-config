@@ -13,7 +13,7 @@ Item {
     readonly property bool sansAgent: !agent || !agent.prog
 
     Rectangle {
-        anchors.fill: parent; radius: 12
+        anchors.fill: parent; radius: Couleurs.rayon(12, width, height)
         color: ligne.actif ? Qt.alpha(Couleurs.accent, 0.22) : "transparent"
         Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
     }
@@ -39,7 +39,7 @@ Item {
         id: pastille
         visible: ligne.defaut
         anchors.right: parent.right; anchors.rightMargin: 12; y: 8
-        width: libDefaut.implicitWidth + 16; height: 18; radius: 9
+        width: libDefaut.implicitWidth + 16; height: 18; radius: Couleurs.rayon(9, width, height)
         color: Qt.alpha(Couleurs.accent, 0.18)
         Texte { id: libDefaut; anchors.centerIn: parent; text: Reglages.t("par défaut", "default"); font.pixelSize: 10; color: Couleurs.accent }
     }

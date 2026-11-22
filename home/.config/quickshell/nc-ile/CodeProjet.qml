@@ -40,7 +40,7 @@ Item {
         objectName: "nc-code-badge"
         visible: ligne.badge !== ""
         anchors.right: parent.right; anchors.rightMargin: 14; y: 28
-        width: texteBadge.implicitWidth + 16; height: 18; radius: 9
+        width: texteBadge.implicitWidth + 16; height: 18; radius: Couleurs.rayon(9, width, height)
         color: Qt.alpha(ligne.badgeCouleur, 0.2); border.width: 1; border.color: Qt.alpha(ligne.badgeCouleur, 0.5)
         Texte { id: texteBadge; anchors.centerIn: parent; text: ligne.badge; font.pixelSize: 10; color: ligne.badgeCouleur }
     }

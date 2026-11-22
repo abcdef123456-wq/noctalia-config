@@ -15,7 +15,7 @@ Item {
     ClippingRectangle {
         id: image
         anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter
-        width: 42; height: 42; radius: 11
+        width: 42; height: 42; radius: Couleurs.rayon(11, width, height)
         color: img.status === Image.Ready ? "transparent" : Couleurs.gris2
         Image {
             id: img
@@ -60,7 +60,7 @@ Item {
                 model: Notifs.boutons(b.vue)
                 Rectangle {
                     required property var modelData
-                    width: lb.implicitWidth + 24; height: 28; radius: 14
+                    width: lb.implicitWidth + 24; height: 28; radius: Couleurs.rayon(14, width, height)
                     color: zb.pressed ? Couleurs.gris4 : Couleurs.gris2
                     Texte { id: lb; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
                     MouseArea { id: zb; anchors.fill: parent; onClicked: Notifs.agir(b.vue, parent.modelData) }

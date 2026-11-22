@@ -130,7 +130,7 @@ FloatingWindow {
         width: parent.width; spacing: 6
         Texte { text: ch.titre; font.pixelSize: 13; font.weight: Font.DemiBold; leftPadding: 4 }
         Rectangle {
-            width: parent.width; height: 42; radius: 21; color: Couleurs.gris2
+            width: parent.width; height: 42; radius: Couleurs.rayon(21, width, height); color: Couleurs.gris2
             border.width: 1.5; border.color: saisie.activeFocus ? Couleurs.accent : "transparent"
             TextInput {
                 id: saisie
@@ -213,7 +213,7 @@ FloatingWindow {
                 Rectangle {
                     objectName: "nc-connexion-resultat"
                     visible: fen.resultat !== null
-                    width: parent.width; height: visible ? res.implicitHeight + 24 : 0; radius: 16
+                    width: parent.width; height: visible ? res.implicitHeight + 24 : 0; radius: Couleurs.rayon(16, width, height)
                     color: fen.resultat && fen.resultat.online ? Qt.rgba(0.2, 0.7, 0.4, 0.14) : Qt.rgba(0.9, 0.3, 0.3, 0.14)
                     Column {
                         id: res

@@ -51,7 +51,7 @@ Item {
                     id: b
                     required property var modelData
                     objectName: modelData.nom
-                    width: Math.max(96, lb.implicitWidth + 30); height: 34; radius: 17
+                    width: Math.max(96, lb.implicitWidth + 30); height: 34; radius: Couleurs.rayon(17, width, height)
                     color: modelData.principal ? (zb.containsMouse ? Couleurs.texteDoux : Couleurs.texte)
                                                : (zb.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                     scale: zb.pressed ? 0.95 : 1

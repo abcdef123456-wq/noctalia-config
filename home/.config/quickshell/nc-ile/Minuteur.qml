@@ -61,7 +61,7 @@ Item {
                 model: [1, 3, 5, 10, 15, 25, 30, 45, 60]
                 Module {
                     required property int modelData
-                    width: (m.width - 20) / 3; height: 52; radius: 16; cliquable: true
+                    width: (m.width - 20) / 3; height: 52; radius: Couleurs.rayon(16, width, height); cliquable: true
                     onClic: Etat.lancerMinuteur(modelData)
                     Texte {
                         anchors.centerIn: parent; font.pixelSize: 16; font.weight: Font.DemiBold
@@ -72,7 +72,7 @@ Item {
         }
         // Pomodoro : travail et pauses qui s'enchaînent
         Module {
-            width: m.width; height: 52; radius: 16; cliquable: true
+            width: m.width; height: 52; radius: Couleurs.rayon(16, width, height); cliquable: true
             onClic: Etat.lancerPomodoro()
             Row {
                 anchors.centerIn: parent; spacing: 10

@@ -24,7 +24,7 @@ Column {
     Rectangle {
         objectName: "nc-vpn-ks-bascule"
         visible: !p.pasInstalle
-        width: parent.width; height: 34; radius: 17
+        width: parent.width; height: 34; radius: Couleurs.rayon(17, width, height)
         color: zoneKs.containsMouse ? Qt.alpha(p.actif ? Couleurs.rouge : Couleurs.accent, 0.3) : Qt.alpha(Couleurs.gris3, 0.55)
         opacity: p.libre && (p.coupable || p.activable) ? 1 : 0.5
         Texte { anchors.centerIn: parent; font.pixelSize: 13; font.weight: Font.DemiBold
@@ -57,7 +57,7 @@ Column {
     Rectangle {
         objectName: "nc-vpn-ks-installer"
         visible: p.pasInstalle
-        width: libelleInstaller.implicitWidth + 28; height: 30; radius: 15
+        width: libelleInstaller.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
         opacity: VpnEtat.installationEnCours ? 0.5 : 1
         color: zoneInstaller.containsMouse ? Qt.alpha(Couleurs.accent, 0.3) : Qt.alpha(Couleurs.gris3, 0.7)
         Texte { id: libelleInstaller; anchors.centerIn: parent; font.pixelSize: 12; font.weight: Font.DemiBold
@@ -86,7 +86,7 @@ Column {
             spacing: 8
             Rectangle {
                 objectName: "nc-vpn-ks-confirmer"
-                width: libelleOui.implicitWidth + 28; height: 30; radius: 15
+                width: libelleOui.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: zoneOui.containsMouse ? Qt.alpha(Couleurs.rouge, 0.35) : Qt.alpha(Couleurs.gris3, 0.7)
                 Texte { id: libelleOui; anchors.centerIn: parent; font.pixelSize: 12; text: Reglages.t("Oui, bloquer", "Yes, block") }
                 MouseArea { id: zoneOui; anchors.fill: parent; hoverEnabled: true; enabled: p.libre
@@ -94,7 +94,7 @@ Column {
             }
             Rectangle {
                 objectName: "nc-vpn-ks-annuler"
-                width: libelleNon.implicitWidth + 28; height: 30; radius: 15
+                width: libelleNon.implicitWidth + 28; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: zoneNon.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
                 Texte { id: libelleNon; anchors.centerIn: parent; font.pixelSize: 12; text: Reglages.t("Annuler", "Cancel") }
                 MouseArea { id: zoneNon; anchors.fill: parent; hoverEnabled: true; onClicked: p.confirmation = false }

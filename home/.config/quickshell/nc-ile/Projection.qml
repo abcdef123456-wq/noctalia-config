@@ -100,12 +100,12 @@ PanelWindow {
         width: 64; height: 52
         Rectangle {
             id: dalle
-            width: parent.width; height: 40; radius: 6
+            width: parent.width; height: 40; radius: Couleurs.rayon(6, width, height)
             color: Couleurs.fond
             border.width: 1.5
             border.color: allume ? Couleurs.accent : Couleurs.gris4
             Rectangle {
-                anchors.fill: parent; anchors.margins: 3; radius: 3.5
+                anchors.fill: parent; anchors.margins: 3; radius: Couleurs.rayon(3.5, width, height)
                 visible: allume
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
@@ -128,7 +128,7 @@ PanelWindow {
         Rectangle {
             visible: enPortable
             anchors { top: dalle.bottom; topMargin: 2; horizontalCenter: dalle.horizontalCenter }
-            width: dalle.width + 14; height: 5; radius: 2.5
+            width: dalle.width + 14; height: 5; radius: Couleurs.rayon(2.5, width, height)
             color: allume ? Couleurs.gris5 : Couleurs.gris3
         }
         // Pied de l'écran
@@ -142,7 +142,7 @@ PanelWindow {
         Rectangle {
             visible: !enPortable
             anchors { top: pied.bottom; horizontalCenter: dalle.horizontalCenter }
-            width: 24; height: 3; radius: 1.5
+            width: 24; height: 3; radius: Couleurs.rayon(1.5, width, height)
             color: allume ? Couleurs.gris5 : Couleurs.gris3
         }
     }
@@ -176,7 +176,7 @@ PanelWindow {
         anchors.verticalCenterOffset: (1 - w.entree) * 16
         width: contenu.implicitWidth + 56
         height: contenu.implicitHeight + 52
-        radius: 30
+        radius: Couleurs.rayon(30, width, height)
         color: Couleurs.fond
         border.width: 1
         border.color: Couleurs.gris3
@@ -227,7 +227,7 @@ PanelWindow {
                         required property int index
                         readonly property bool choisi: w.choix === index && !(w.surCotes && modelData.id !== "etendre")
                         readonly property bool actuel: w.aExterne && w.etat && w.etat.mode === modelData.id
-                        width: 172; height: 164; radius: 20
+                        width: 172; height: 164; radius: Couleurs.rayon(20, width, height)
                         color: zt.containsMouse && w.aExterne ? Couleurs.carteSurvol : Couleurs.carte
                         border.width: choisi ? 2 : 0
                         border.color: Couleurs.accent
@@ -301,7 +301,7 @@ PanelWindow {
                         id: puce
                         required property var modelData
                         readonly property bool pris: w.cote === modelData.id
-                        width: etiq.implicitWidth + 28; height: 34; radius: 17
+                        width: etiq.implicitWidth + 28; height: 34; radius: Couleurs.rayon(17, width, height)
                         color: pris ? Couleurs.accent : (zc.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         border.width: w.surCotes && pris ? 2 : 0
                         border.color: Couleurs.texte
@@ -366,7 +366,7 @@ PanelWindow {
                 Rectangle {
                     visible: w.etat !== null && w.etat.sansfil === true
                     anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                    width: sf.implicitWidth + 28; height: 34; radius: 17
+                    width: sf.implicitWidth + 28; height: 34; radius: Couleurs.rayon(17, width, height)
                     color: zs.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                     Texte { id: sf; anchors.centerIn: parent; text: Reglages.t("Projeter sans fil…", "Wireless display…"); font.weight: Font.Medium }
                     MouseArea {

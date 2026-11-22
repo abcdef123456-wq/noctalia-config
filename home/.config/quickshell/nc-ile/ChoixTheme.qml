@@ -132,7 +132,7 @@ FloatingWindow {
                 Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
                 Rectangle {
-                    anchors.fill: parent; radius: 16
+                    anchors.fill: parent; radius: Couleurs.rayon(16, width, height)
                     color: Qt.alpha(Couleurs.carte, 0.9)
                     border.width: c.d === 0 ? 2 : 1
                     border.color: c.d === 0 ? c.primaire : Couleurs.gris3
@@ -140,7 +140,7 @@ FloatingWindow {
                 // Le mini bureau
                 Rectangle {
                     id: bureau
-                    x: 10; y: 10; width: parent.width - 20; height: 150; radius: 10
+                    x: 10; y: 10; width: parent.width - 20; height: 150; radius: Couleurs.rayon(10, width, height)
                     color: c.surface; clip: true
                     Image {
                         anchors.fill: parent

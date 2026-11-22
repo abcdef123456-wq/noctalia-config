@@ -91,21 +91,21 @@ FloatingWindow {
                     Rectangle {
                         visible: GarminEtat.actif && GarminEtat.pret
                         objectName: "nc-garmin-actualiser"
-                        height: 30; width: tAct.implicitWidth + 24; radius: 15; color: Couleurs.carteSurvol
+                        height: 30; width: tAct.implicitWidth + 24; radius: Couleurs.rayon(15, width, height); color: Couleurs.carteSurvol
                         Texte { id: tAct; anchors.centerIn: parent; text: Reglages.t("Actualiser", "Refresh") }
                         MouseArea { anchors.fill: parent; onClicked: GarminEtat.actualiser() }
                     }
                     Rectangle {
                         visible: GarminEtat.actif
                         objectName: "nc-garmin-perso"
-                        height: 30; width: tPer.implicitWidth + 24; radius: 15
+                        height: 30; width: tPer.implicitWidth + 24; radius: Couleurs.rayon(15, width, height)
                         color: garmin.tiroir ? Couleurs.accent : Couleurs.carteSurvol
                         Texte { id: tPer; anchors.centerIn: parent; text: Reglages.t("Personnaliser", "Customize"); color: garmin.tiroir ? Couleurs.surAccent : Couleurs.texte }
                         MouseArea { anchors.fill: parent; onClicked: garmin.tiroir = !garmin.tiroir }
                     }
                     BoutonReglages { section: "Santé Garmin" }
                     Rectangle {
-                        height: 30; width: tFer.implicitWidth + 24; radius: 15; color: Couleurs.carteSurvol
+                        height: 30; width: tFer.implicitWidth + 24; radius: Couleurs.rayon(15, width, height); color: Couleurs.carteSurvol
                         Texte { id: tFer; anchors.centerIn: parent; text: Reglages.t("Fermer", "Close") }
                         MouseArea { anchors.fill: parent; onClicked: garmin.quitter() }
                     }
@@ -148,13 +148,13 @@ FloatingWindow {
                         titre: f.titre; valeur: f.valeur; sous: f.sous; jauge: f.jauge; couleur: f.couleur
                         Rectangle {
                             visible: cc.modelData === "hydratation"
-                            height: 28; width: 64; radius: 14; color: Couleurs.carteSurvol
+                            height: 28; width: 64; radius: Couleurs.rayon(14, width, height); color: Couleurs.carteSurvol
                             Texte { anchors.centerIn: parent; text: "+250" }
                             MouseArea { anchors.fill: parent; onClicked: GarminEtat.hydrater("+250") }
                         }
                         Rectangle {
                             visible: cc.modelData === "hydratation"
-                            height: 28; width: 64; radius: 14; color: Couleurs.carteSurvol
+                            height: 28; width: 64; radius: Couleurs.rayon(14, width, height); color: Couleurs.carteSurvol
                             Texte { anchors.centerIn: parent; text: "+500" }
                             MouseArea { anchors.fill: parent; onClicked: GarminEtat.hydrater("+500") }
                         }

@@ -27,7 +27,7 @@ Item {
             objectName: "nc-vpn-un-indicateur"
             visible: !e.unSeul
             anchors.verticalCenter: parent.verticalCenter
-            width: libelleUn.implicitWidth + 32; height: 30; radius: 15
+            width: libelleUn.implicitWidth + 32; height: 30; radius: Couleurs.rayon(15, width, height)
             color: zoneUn.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
             border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
             Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
@@ -48,7 +48,7 @@ Item {
         Rectangle {
             objectName: "nc-vpn-fermer"
             anchors.verticalCenter: parent.verticalCenter
-            width: libelleFermer.implicitWidth + 32; height: 30; radius: 15
+            width: libelleFermer.implicitWidth + 32; height: 30; radius: Couleurs.rayon(15, width, height)
             color: zoneFermer.containsMouse ? Qt.alpha(Couleurs.accent, 0.25) : Qt.alpha(Couleurs.carte, 0.6)
             border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
             Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
