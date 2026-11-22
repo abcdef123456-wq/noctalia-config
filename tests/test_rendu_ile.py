@@ -1,5 +1,5 @@
 """outils/rendu-ile.py : les PNG hors écran de l'île (sauté si Quickshell est absent)."""
-import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
+from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
 import os
 import shutil
 import struct
