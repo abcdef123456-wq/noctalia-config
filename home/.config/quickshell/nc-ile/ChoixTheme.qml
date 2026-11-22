@@ -1,7 +1,7 @@
 // Carrousel des thèmes (Super + Alt + T, `qs -c nc-ile ipc call ile themes`, ou « Thèmes » dans la recherche). Une VRAIE fenêtre
 // (FloatingWindow), titre « Thèmes ». Chaque carte est un mini bureau dessiné en direct avec les vraies valeurs du thème :
 // fond de départ (miniature si elle existe, sinon la couleur de fond de la palette), mini-pilule (rayon, police, majuscules,
-// contour), deux fenêtres (arrondi et bordure FENETRES_*), pastilles de la palette, nom. Rien n'est généré dans un fichier.
+// contour), disposition (MiniDisposition : barre, fenêtres, dock selon le thème), pastilles de la palette, nom. Rien n'est généré dans un fichier.
 // Les thèmes viennent de `nc-reglages themes --json` (lecture seule). Gauche/droite ou molette : changer de carte ;
 // Entrée (ou clic sur la carte du milieu) : `nc-reglages set STYLE <nom>` ; Échap : fermer sans rien changer.
 // Rien ne tourne fermé (la fenêtre n'existe qu'ouverte).
@@ -123,7 +123,7 @@ FloatingWindow {
                 readonly property color primaire: col.primary || "#8ab4f8"
                 visible: t !== null
                 objectName: "nc-themes-" + (d === 0 ? "centre" : "autre") + "-" + index
-                width: 200; height: 240
+                width: 200; height: 202
                 x: (carte.width - width) / 2 + d * 190
                 y: (carte.height - height) / 2
                 scale: d === 0 ? 1.0 : 0.8
@@ -140,7 +140,7 @@ FloatingWindow {
                 // Le mini bureau
                 Rectangle {
                     id: bureau
-                    x: 10; y: 10; width: parent.width - 20; height: 150; radius: Couleurs.rayon(10, width, height)
+                    x: 10; y: 10; width: parent.width - 20; height: 112; radius: Couleurs.rayon(10, width, height)
                     color: c.surface; clip: true
                     Image {
                         anchors.fill: parent
@@ -149,6 +149,15 @@ FloatingWindow {
                         fillMode: Image.PreserveAspectCrop; asynchronous: true
                         sourceSize.width: 360                // un fond de 3840 px décodé en petit
                         visible: status === Image.Ready
+                    }
+                    // La disposition du thème (barre, île, fenêtres, dock), à l'échelle
+                    MiniDisposition {
+                        anchors.fill: parent
+                        objectName: "nc-themes-disposition"
+                        disp: c.t ? c.t.disposition : null
+                        surface: c.surface; primaire: c.primaire; secondaire: c.col.secondary || c.primaire
+                        couleurBarre: Qt.darker(c.surface, 1.5)
+                        avecIle: false          // la mini-pilule ci-dessous la remplace
                     }
                     // La mini-pilule, avec les vraies valeurs du thème
                     Rectangle {
@@ -171,22 +180,10 @@ FloatingWindow {
                             font.family: ct.police(c.t)
                         }
                     }
-                    // Deux petites fenêtres : arrondi et bordure du thème
-                    Repeater {
-                        model: 2
-                        delegate: Rectangle {
-                            x: 12 + index * 58; y: 44 + index * 22
-                            width: 64; height: 52
-                            radius: Math.min(height / 2, ct.nombre(c.t, "FENETRES_ARRONDI", 14, 20) * 0.6)
-                            color: Qt.alpha(c.surface, 0.88)
-                            border.width: ct.nombre(c.t, "FENETRES_BORDURE", 2, 4) > 0 ? 1 : 0
-                            border.color: index === 0 ? c.primaire : (c.col.secondary || c.primaire)
-                        }
-                    }
                 }
                 // Les pastilles de la palette
                 Row {
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 170; spacing: 6
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 132; spacing: 6
                     Repeater {
                         model: [c.col.primary, c.col.secondary, c.col.tertiary, c.col.onSurface]
                         delegate: Rectangle { width: 14; height: 14; radius: 7; color: modelData || "#808080"; border.width: 1; border.color: Qt.alpha("#ffffff", 0.25) }
@@ -195,7 +192,7 @@ FloatingWindow {
                 Text {
                     objectName: "nc-themes-nom"
                     textFormat: Text.PlainText
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 186; width: parent.width - 16
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 148; width: parent.width - 16
                     // jamais de points de suspension sur le nom : il rapetisse plutôt pour tenir
                     horizontalAlignment: Text.AlignHCenter; elide: Text.ElideNone
                     fontSizeMode: Text.HorizontalFit; minimumPixelSize: 9
@@ -205,14 +202,14 @@ FloatingWindow {
                 Text {
                     objectName: "nc-themes-precision"
                     textFormat: Text.PlainText
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 204; width: parent.width - 16
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 166; width: parent.width - 16
                     horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     text: c.t ? ct.precision(c.t.libelle) : ""
                     color: Couleurs.texteSec; font.pixelSize: 10; font.family: Couleurs.police
                 }
                 Text {
                     textFormat: Text.PlainText
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 220
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 182
                     visible: c.t !== null && c.t.actif === true
                     text: Reglages.t("Actif", "Active")
                     color: c.primaire; font.pixelSize: 11; font.family: Couleurs.police

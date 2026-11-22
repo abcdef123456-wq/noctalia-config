@@ -77,25 +77,9 @@ def lire_noctalia_defaut():
     return tomllib.loads(txt)
 
 
-def fusion_noctalia(base, table):
-    """La table « noctalia » d'un thème : clés pointées (« bar.default ») appliquées par-dessus config.toml."""
-    for cle, val in table.items():
-        cur = base
-        chemin = cle.split(".")
-        for p in chemin[:-1]:
-            cur = cur.setdefault(p, {})
-        if isinstance(val, dict) and isinstance(cur.get(chemin[-1]), dict):
-            cur[chemin[-1]].update(val)
-        else:
-            cur[chemin[-1]] = val
-    return base
-
-
 def valeurs_effectives(mod, theme, noct_defaut):
-    """(réglages effectifs {CLE: valeur}, noctalia effectif {bar, widget, dock}) d'un thème chargé."""
-    reg = {k: r.defaut for k, r in mod.PAR_CLE.items()}
-    reg.update({k: str(v) for k, v in theme.get("reglages", {}).items()})
-    noct = fusion_noctalia(json.loads(json.dumps(noct_defaut)), theme.get("noctalia", {}))
+    """(réglages effectifs {CLE: valeur}, noctalia effectif {bar, widget, dock}) d'un thème chargé : règle de nc-reglages."""
+    reg, noct = mod.valeurs_theme(theme, noct_defaut)
     return reg, {"bar": noct.get("bar", {}).get("default", {}), "bs": noct.get("widget", {}).get("workspaces", {}),
                  "dock": noct.get("dock", {})}
 

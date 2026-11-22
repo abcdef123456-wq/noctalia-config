@@ -2738,12 +2738,88 @@ def lire_palette(fichier):
     return json.loads(brut.decode("utf-8"))["dark"]
 
 
+# Disposition effective d'un thème (vignette du carrousel ET schéma de outils/schema-theme.py : une seule règle ici).
+# Défauts de la barre et du dock : ceux de config.toml, repli en dur sans tomllib (Python < 3.11 sans tomli).
+NOCT_DEFAUT = {"bar": {"default": {"position": "top", "thickness": 36, "margin_edge": 6, "capsule": True}},
+               "widget": {"workspaces": {"style": "regular", "show_labels": True}},
+               "dock": {"radius": 26, "margin_edge": 10}}
+
+
+def noctalia_defaut(chemin=None):
+    """config.toml (celui du dossier Noctalia, ou `chemin`) sans ses @MARQUEURS@ (valeur nue : false ; ailleurs : vide)."""
+    if tomllib:
+        try:
+            with open(chemin or os.path.join(NOCTALIA_DIR, "config.toml"), encoding="utf-8") as f:
+                txt = f.read(1024 ** 2)
+            txt = re.sub(r"@\w+@", "", re.sub(r"(=\s*)@\w+@", r"\1false", txt))
+            return tomllib.loads(txt)
+        except (OSError, ValueError):
+            pass
+    return json.loads(json.dumps(NOCT_DEFAUT))
+
+
+def fusion_noctalia(base, table):
+    """La table « noctalia » d'un thème : clés pointées (« bar.default ») appliquées par-dessus config.toml."""
+    for cle, val in table.items():
+        cur = base
+        chemin = cle.split(".")
+        for p in chemin[:-1]:
+            if not isinstance(cur.get(p), dict):
+                cur[p] = {}
+            cur = cur[p]
+        if isinstance(val, dict) and isinstance(cur.get(chemin[-1]), dict):
+            cur[chemin[-1]].update(val)
+        else:
+            cur[chemin[-1]] = val
+    return base
+
+
+def valeurs_theme(theme, noct_defaut):
+    """(réglages effectifs {CLE: texte}, noctalia effectif) d'un thème validé : défauts de PAR_CLE puis thème ;
+    config.toml puis la table « noctalia » du thème."""
+    reg = {k: r.defaut for k, r in PAR_CLE.items()}
+    reg.update({k: str(v) for k, v in theme.get("reglages", {}).items()})
+    return reg, fusion_noctalia(json.loads(json.dumps(noct_defaut)), theme.get("noctalia", {}))
+
+
+def disposition_theme(theme, noct_defaut=None):
+    """Ce que la vignette dessine : valeurs effectives, bornées, positions dans une liste fermée."""
+    reg, noct = valeurs_theme(theme, noct_defaut or noctalia_defaut())
+    barre = noct.get("bar", {}).get("default", {})
+
+    def n(v, defaut, mini, maxi):
+        try:
+            return max(mini, min(maxi, int(float(v))))
+        except (TypeError, ValueError, OverflowError):
+            return defaut
+
+    def liste(v, permis, defaut):
+        return v if v in permis else defaut
+
+    rayon = {"auto": 100, "normal": 100, "carre": 0, "doux": 50, "rond": 200}.get(reg.get("ILE_RAYON"))
+    if rayon is None:
+        rayon = n(reg.get("ILE_RAYON"), 100, 0, 200) if re.fullmatch(r"[0-9]{1,3}", str(reg.get("ILE_RAYON"))) else 100
+    return {
+        "barre": {"position": liste(barre.get("position"), ("top", "bottom", "left", "right"), "top"),
+                  "epaisseur": n(barre.get("thickness"), 36, 16, 120), "marge": n(barre.get("margin_edge"), 0, 0, 60),
+                  "capsules": barre.get("capsule", True) is not False},
+        "fenetres": {"disposition": liste(reg.get("FENETRES_DISPOSITION"), ("dwindle", "master", "scrolling"), "dwindle"),
+                     "orientation": liste(reg.get("FENETRES_MAITRE_ORIENTATION"), ("auto", "gauche", "droite", "haut", "bas", "centre"), "auto"),
+                     "espace": n(reg.get("FENETRES_ESPACE"), 4, 0, 60), "marge": n(reg.get("FENETRES_MARGE"), 10, 0, 100),
+                     "bordure": n(reg.get("FENETRES_BORDURE"), 2, 0, 10), "arrondi": n(reg.get("FENETRES_ARRONDI"), 14, 0, 40)},
+        "dock": {"actif": reg.get("DOCK") != "non", "position": liste(reg.get("DOCK_POSITION"), ("bottom", "top", "left", "right"), "bottom"),
+                 "cache": reg.get("DOCK_AUTO") != "non"},
+        "ile": {"rayon": rayon},
+    }
+
+
 def themes_json(vals):
     """Liste des thèmes valides (lecture seule, aucun réseau) pour le carrousel de l'île : palette résolue en couleurs.
     Palette custom ou builtin : lue dans son fichier ; introuvable, illisible ou fond : couleurs neutres, « approximative »."""
     actif = valeur(vals, "STYLE")
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache")
     ok = charger_themes()[0]
+    noct = noctalia_defaut()
     sortie_ = []
     for nom in [n for n, _ in choix_styles() if n in ok]:
         t = ok[nom]
@@ -2766,7 +2842,7 @@ def themes_json(vals):
             miniature = f if os.path.isfile(f) else (fond if os.path.isfile(fond) else "")
         sortie_.append({"nom": nom, "libelle": str(t["libelle"]), "actif": nom == actif, "palette": {"source": src, "nom": pnom},
                         "couleurs": couleurs, "palette_approximative": approx, "reglages": t["reglages"],
-                        "miniature": miniature})
+                        "miniature": miniature, "disposition": disposition_theme(t, noct)})
     return sortie_
 
 

@@ -68,7 +68,7 @@ class Sources(unittest.TestCase):
 class HorsEcran(unittest.TestCase):
     def lancer(self, corps, themes=THEMES, largeur=1600, faux=FAUX):
         with tempfile.TemporaryDirectory(prefix="nc-choixtheme-") as d:
-            root = H.preparer(d, ("Couleurs", "Texte", "Ico"), extra={"ChoixTheme.qml": fenetre_hors_ecran(largeur)})
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "MiniDisposition"), extra={"ChoixTheme.qml": fenetre_hors_ecran(largeur)})
             bin_ = root / "home/.local/bin"
             bin_.mkdir(parents=True)
             H.faux(root, "nc-reglages", faux.replace("@ROOT@", str(root)))

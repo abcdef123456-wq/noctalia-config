@@ -46,7 +46,7 @@ class ThemesJson(unittest.TestCase):
         self.assertEqual(set(t), {p.stem for p in THEMES.glob("*.json")})
         for nom, x in t.items():
             self.assertEqual(set(x), {"nom", "libelle", "actif", "palette", "couleurs", "palette_approximative",
-                                      "reglages", "miniature"}, nom)
+                                      "reglages", "miniature", "disposition"}, nom)
             self.assertIsInstance(x["libelle"], str)
         self.assertEqual([n for n in t if t[n]["actif"]], ["noctalia"])  # sans réglage : le défaut est actif
         self.assertTrue(t["tokyo"]["palette_approximative"])  # builtin : couleurs neutres, dites approximatives
