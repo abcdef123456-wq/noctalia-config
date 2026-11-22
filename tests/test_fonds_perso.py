@@ -4,8 +4,10 @@ F1 : ~/Pictures/Wallpapers/<thème>/mes-fonds/ (et mes-fonds/ à la racine pour 
 jamais touché par install.sh (boucle de copie rejouée) ni par nc-maj (vrais dépôts git, faux install.sh en sh).
 F3 : nc-fonds ajoute (copie), ouvre, met à la corbeille un fond à toi (jamais un fond livré) ; faux magick, zenity,
 gio, systemctl et xdg-open en sh qui notent leurs arguments.
-F4 : un fond livré se masque (liste fonds-masques.conf, le fichier reste) ; le carrousel ne le montre plus ;
-« reafficher » vide la liste. Contrôle : l'ancien carrousel (9dc038d) montre le fond masqué.
+F4 : un fond livré se masque (liste fonds-masques.conf, puis corbeille) ; ni le carrousel ni une installation rejouée
+ne le ramènent ; « reafficher » vide la liste et le recopie depuis le dépôt. Contrôles : l'ancien carrousel (9dc038d)
+montre le fond masqué, l'ancienne boucle d'install.sh (719f872) le recopie. Le fond affiché masqué ou rangé est reposé
+(faux noctalia qui note ses arguments).
 F5 : les fonds posés par toi à la racine ne bougent pas tout seuls ; nc-fonds a-ranger les compte (les fonds livrés de
 la base, absents de CREDITS.tsv, ne comptent pas), ranger / garder répondent une fois pour toutes.
 Tout se passe dans un dossier temporaire : HOME et XDG_* y pointent."""
@@ -27,8 +29,12 @@ PANEL = REPO / "home/.local/share/noctalia/plugins/nc-carousel/panel.luau"
 REGLAGES = REPO / "home/.local/bin/nc-reglages"
 LUA = shutil.which("lua") or shutil.which("lua5.4")
 # La boucle de copie d'install.sh, telle quelle
-BOUCLE = INSTALL[INSTALL.index("while IFS= read -r -d '' src; do\n  rel=\"${src#\"$root/\"}\""):
-                 INSTALL.index('done < <(find "$root" -type f -print0)') + len('done < <(find "$root" -type f -print0)')]
+def boucle(texte):
+    return texte[texte.index("while IFS= read -r -d '' src; do\n  rel=\"${src#\"$root/\"}\""):
+                 texte.index('done < <(find "$root" -type f -print0)') + len('done < <(find "$root" -type f -print0)')]
+
+
+BOUCLE = boucle(INSTALL)
 
 
 class Base(unittest.TestCase):
@@ -44,6 +50,16 @@ class Base(unittest.TestCase):
                         XDG_DATA_HOME=str(self.home / ".local/share"), TMPDIR=str(self.r), NC_LANGUE="fr")
         for v in ("HYPRLAND_INSTANCE_SIGNATURE", "NOCTALIA_CONFIG_HOME", "GIT_SSH_COMMAND", "GIT_SSH"):
             self.env.pop(v, None)
+
+    def copie(self, depot, boucle=BOUCLE):
+        """La boucle de copie d'install.sh (ou une autre version de cette boucle) avec ce faux dépôt."""
+        prog = ("set -uo pipefail\n"
+                f'root="{depot}"; FAMILY=arch; MODE=full; NIXOS_TERM=n; NIXOS_NVIM=n\n'
+                f'SED_ARGS=(-e "s|@HOME@|$HOME|g"); tmp="$(mktemp)"; same=0; copied=0; hypr_changed=0; BK="{self.r}/bk"\n'
+                'mkdir -p "$BK"; backup() { :; }\n' + boucle + '\necho "copies=$copied"\n')
+        r = subprocess.run(["bash", "-c", prog], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
 
     def mes_fonds(self):
         """Fonds posés par la personne, dont un du même nom qu'un fond livré ; renvoie {chemin: (contenu, mtime)}."""
@@ -71,15 +87,6 @@ class F1Depot(unittest.TestCase):
 
 
 class F1Install(Base):
-    def copie(self, depot):
-        prog = ("set -uo pipefail\n"
-                f'root="{depot}"; FAMILY=arch; MODE=full; NIXOS_TERM=n; NIXOS_NVIM=n\n'
-                f'SED_ARGS=(-e "s|@HOME@|$HOME|g"); tmp="$(mktemp)"; same=0; copied=0; hypr_changed=0; BK="{self.r}/bk"\n'
-                'mkdir -p "$BK"; backup() { :; }\n' + BOUCLE + '\necho "copies=$copied"\n')
-        r = subprocess.run(["bash", "-c", prog], env=self.env, capture_output=True, text=True, timeout=60)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return r.stdout
-
     def test_installation_rejouee_laisse_mes_fonds_intacts(self):
         depot = self.r / "depot"
         for rel, texte in (("Pictures/Wallpapers/b.jpg", b"livre b"), ("Pictures/Wallpapers/nord/a.jpg", b"livre a"),
@@ -144,7 +151,7 @@ class EnvFonds(Base):
                   'grep -qx "[0-9]* [0-9]*" "$f" && cat "$f"\n')
         self.faux("gio", 'mkdir -p "$HOME/corbeille" && mv -- "$3" "$HOME/corbeille/"\n')
         self.faux("zenity", 'printf "%s" "$NC_CHOISI"\n')
-        for nom in ("systemctl", "xdg-open", "notify-send"):
+        for nom in ("systemctl", "xdg-open", "notify-send", "noctalia"):
             self.faux(nom, "")
         self.env.update(PATH=f"{self.bin}:{os.environ['PATH']}", J=str(self.journal))
         (self.fonds / "nord").mkdir(parents=True)
@@ -275,16 +282,76 @@ class F4Masquer(EnvFonds):
         f = self.home / ".config/nc/fonds-masques.conf"
         return f.read_text().splitlines() if f.exists() else None
 
-    def test_masquer_un_fond_livre_garde_le_fichier(self):
+    def test_masquer_met_a_la_corbeille_et_inscrit(self):
         r = self.lance("masquer", str(self.fonds / "nord/n.png"))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.lance("masquer", str(self.fonds / "nord/../nord/n.png"))     # deux fois : une seule ligne
         self.assertEqual(self.masques(), ["nord/n.png"])
-        self.assertTrue((self.fonds / "nord/n.png").exists())             # jamais supprimé (il reviendrait)
+        self.assertFalse((self.fonds / "nord/n.png").exists())
+        self.assertTrue((self.home / "corbeille/n.png").exists())          # à la corbeille, pas supprimé
+        self.assertEqual(self.journal_de("noctalia"), [])                   # pas le fond affiché : rien n'est posé
+
+    def test_masquer_le_fond_affiche_pose_le_suivant(self):
+        (self.fonds / "nord/o.png").write_text("3840 2160\n")
+        r = self.lance("masquer", str(self.fonds / "nord/n.png"), "--poser", str(self.fonds / "nord/o.png"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.journal_de("noctalia"), [f"noctalia msg wallpaper-set {self.fonds}/nord/o.png"])
+
+    def depot_installe(self):
+        depot = self.r / "depot"
+        (depot / "home/Pictures/Wallpapers/nord").mkdir(parents=True)
+        (depot / "home/Pictures/Wallpapers/nord/n.png").write_text("3840 2160\n")
+        (self.home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        (self.home / ".config/nc/depot").write_text(str(depot))
+        return depot
+
+    def test_installation_rejouee_ne_ramene_pas_un_fond_masque(self):
+        depot = self.depot_installe()
+        self.lance("masquer", str(self.fonds / "nord/n.png"))
+        self.copie(depot / "home")
+        self.assertFalse((self.fonds / "nord/n.png").exists())
+        # contrôle du contrôle : la boucle d'install.sh d'avant (719f872) le recopiait
+        r = subprocess.run(["git", "-C", str(REPO), "show", "719f872:install.sh"], capture_output=True, text=True)
+        if r.returncode != 0:
+            self.skipTest("719f872 absent (clone partiel)")
+        self.copie(depot / "home", boucle(r.stdout))
+        self.assertTrue((self.fonds / "nord/n.png").exists(), "contrôle : l'ancienne boucle ramenait le fond masqué")
+
+    def test_reafficher_recopie_depuis_le_depot(self):
+        self.depot_installe()
+        self.lance("masquer", str(self.fonds / "nord/n.png"))
         r = self.lance("reafficher")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("1 fond(s) réaffiché(s)", r.stdout)
+        self.assertIn("1 fond(s) réaffiché(s).", r.stdout)
+        self.assertEqual((self.fonds / "nord/n.png").read_text(), "3840 2160\n")
         self.assertIsNone(self.masques())
+
+    def test_reafficher_sans_depot_dit_de_mettre_a_jour(self):
+        self.lance("masquer", str(self.fonds / "nord/n.png"))
+        r = self.lance("reafficher")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nc-maj", r.stdout)
+        self.assertIsNone(self.masques())                                   # la mise à jour les remettra
+        self.assertFalse((self.fonds / "nord/n.png").exists())
+
+    def test_reafficher_jamais_hors_du_dossier(self):
+        self.depot_installe()
+        (self.home / ".config/nc/fonds-masques.conf").write_text("../../dehors.png\n/etc/passwd\n")
+        self.lance("reafficher")
+        self.assertFalse((self.home.parent / "dehors.png").exists())
+
+    @unittest.skipUnless(LUA, "lua absent")
+    def test_suivant_du_groupe(self):
+        bloc = PANEL.read_text(encoding="utf-8").split("-- DEBUT cle", 1)[1].split("-- FIN cle", 1)[0].split("\n", 1)[1]
+        prog = bloc + r"""
+local a, b, c, m = { g = 1, n = "a" }, { g = 1, n = "b" }, { g = 1, n = "c" }, { g = 2, n = "m" }
+local l = { a, b, c, m }
+local function n(x) return x and x.n or "nil" end
+io.write(n(suivantDuGroupe(l, a)), n(suivantDuGroupe(l, c)), n(suivantDuGroupe(l, m)), n(suivantDuGroupe({ a, m }, a)))
+"""
+        f = self.r / "suivant.lua"
+        f.write_text(prog, encoding="utf-8")
+        r = subprocess.run([LUA, str(f)], capture_output=True, text=True, check=False)
+        self.assertEqual(r.stdout, "banilnil", r.stderr)
 
     def test_un_fond_a_toi_ne_se_masque_pas(self):
         mes = self.theme()
@@ -334,7 +401,8 @@ io.write(table.concat(out, "\n"))
     def test_boutons_masquer_et_reafficher(self):
         panneau = PANEL.read_text(encoding="utf-8")
         i = panneau.index("elseif w then")
-        self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 400])     # seulement pour un fond livré
+        self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 900])     # seulement pour un fond livré
+        self.assertIn('"--poser", x.path', panneau[i:i + 900])               # le fond affiché : le suivant du groupe
         self.assertIn('["nc-fonds", "reafficher"]', REGLAGES.read_text(encoding="utf-8"))
 
 
@@ -373,6 +441,15 @@ class F5Ranger(EnvFonds):
         self.assertEqual((self.home / ".config/nc/fonds-rangement").read_text(), "oui\n")
         self.assertEqual(self.lance("a-ranger").stdout.strip(), "0")
 
+    def test_le_fond_affiche_range_est_repose(self):
+        r = self.lance("ranger", "--affiche", str(self.fonds / "moi.jpg"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.journal_de("noctalia"), [f"noctalia msg wallpaper-set {self.fonds}/mes-fonds/moi.jpg"])
+
+    def test_un_autre_fond_affiche_n_est_pas_repose(self):
+        self.lance("ranger", "--affiche", str(self.fonds / self.LIVRE))
+        self.assertEqual(self.journal_de("noctalia"), [])
+
     def test_non_ne_deplace_rien_et_ne_redemande_plus(self):
         r = self.lance("garder")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -384,9 +461,9 @@ class F5Ranger(EnvFonds):
         i = panneau.index("if not noctalia.fileExists(RANGEMENT) then")
         self.assertIn('NC_FONDS, "a-ranger"', panneau[i:i + 200])
         # « ranger » ne part que du bouton « Oui »
-        self.assertEqual(panneau.count('NC_FONDS, "ranger"'), 1)
+        self.assertEqual(panneau.count('NC_FONDS, "ranger"'), 2)
         j = panneau.index('bouton("ranger-oui"')
-        self.assertIn('NC_FONDS, "ranger"', panneau[j:j + 200])
+        self.assertEqual(panneau[j:j + 500].count('NC_FONDS, "ranger"'), 2)
 
 
 if __name__ == "__main__":

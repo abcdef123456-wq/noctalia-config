@@ -1697,7 +1697,12 @@ while IFS= read -r -d '' src; do
     # Jamais écrasés : tes images (fonds d'écran, photo de profil) et les fichiers régénérés automatiquement sur ce PC
     Pictures/Wallpapers/* | .face | .config/hypr/nc/couleurs.lua | .config/hypr/nc/profil.lua | .config/kdeglobals \
     | .config/noctalia/colors.json | .config/kitty/themes/noctalia-dynamic.conf)
-      [ -e "$dst" ] && { same=$((same + 1)); continue; } ;;
+      [ -e "$dst" ] && { same=$((same + 1)); continue; }
+      # Un fond que tu as masqué (« Masquer ce fond », nc-fonds) : jamais recopié ; « Réafficher » vide la liste
+      case "$rel" in
+        Pictures/Wallpapers/*) grep -qxF -- "${rel#Pictures/Wallpapers/}" "$HOME/.config/nc/fonds-masques.conf" 2>/dev/null &&
+          { same=$((same + 1)); continue; } ;;
+      esac ;;
   esac
   if [ -e "$dst" ] || [ -L "$dst" ]; then
     backup "$rel"

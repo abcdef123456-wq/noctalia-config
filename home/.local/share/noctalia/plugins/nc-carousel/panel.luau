@@ -114,6 +114,17 @@ local function listerFonds(groupes, racine, api, exts, masques, base)
   end
   return out
 end
+-- Le fond qui suit w dans SON groupe (en boucle), jamais w ; nil s'il est seul : il remplace un fond affiché qu'on masque
+local function suivantDuGroupe(liste, w)
+  local idx
+  for i, x in ipairs(liste) do if x == w then idx = i end end
+  if not idx then return nil end
+  for k = 1, #liste - 1 do
+    local x = liste[(idx - 1 + k) % #liste + 1]
+    if x.g == w.g then return x end
+  end
+  return nil
+end
 -- FIN cle
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
 local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940 }
@@ -137,6 +148,7 @@ local eco = false
 
 local all = {}        -- { path, file, title, thumbW, thumbN, g, perso, rang, total }
 local dansTheme = false
+local baseFonds = ""  -- ~/Pictures/Wallpapers sans « / » final
 local message = nil   -- dernière réponse de nc-fonds, sous la bande
 local ouvert = false  -- un rappel de nc-fonds peut arriver panneau fermé : rien n'est alors dessiné
 local aRanger = 0     -- fonds posés par toi à la racine : la question « les ranger dans Mes fonds ? » (une fois, mémorisée)
@@ -170,8 +182,8 @@ local function loadList()
   if not dir then return end
   -- Dans un thème : style.conf pose FONDS_DOSSIER
   dansTheme = (valeurConf(noctalia.readFile(noctalia.expandPath("~/.config/nc/style.conf")) or "", "FONDS_DOSSIER") or "") ~= ""
-  local base = noctalia.expandPath("~/Pictures/Wallpapers"):gsub("/+$", "")
-  all = listerFonds(groupesDuCarrousel(dir), THUMBS, noctalia, EXTS, lireMasques(noctalia.readFile(MASQUES)), base)
+  baseFonds = noctalia.expandPath("~/Pictures/Wallpapers"):gsub("/+$", "")
+  all = listerFonds(groupesDuCarrousel(dir), THUMBS, noctalia, EXTS, lireMasques(noctalia.readFile(MASQUES)), baseFonds)
   local total = {}
   for _, w in ipairs(all) do
     w.title = prettify(w.file)
@@ -346,6 +358,13 @@ local function relire(r)
   if ouvert then render() end
 end
 
+-- Le fond affiché va changer de chemin (rangé, masqué) : le panneau se ferme d'abord, nc-fonds part une fois la fermeture
+-- finie (poser un fond recharge les plugins, comme dans apply) et dit le résultat en notification
+local function apresFermeture(args)
+  panel.close()
+  noctalia.runAsync({ "sh", "-c", 'sleep 0.4; exec "$@"', "sh", table.unpack(args) })
+end
+
 local function bouton(cle, texte, glyphe, action)
   return ui.button({ key = cle, text = texte, glyph = glyphe, variant = "ghost", controlSize = "sm", onClick = action })
 end
@@ -361,7 +380,11 @@ local function boutons()
         color = "on_surface", maxLines = 1 }),
       bouton("ranger-oui", tr("Oui, les ranger", "Yes, move them"), "check", function()
         aRanger = 0
-        noctalia.runAsync({ NC_FONDS, "ranger" }, relire, 30000)
+        if current and current:match("^(.*)/[^/]*$") == baseFonds then
+          apresFermeture({ NC_FONDS, "ranger", "--notifier", "--affiche", current })    -- le fond affiché suit
+        else
+          noctalia.runAsync({ NC_FONDS, "ranger" }, relire, 30000)
+        end
       end),
       bouton("ranger-non", tr("Non", "No"), "x", function()
         aRanger = 0
@@ -388,7 +411,14 @@ local function boutons()
   elseif w then
     -- Un fond livré ne se supprime pas (la mise à jour le remettrait) : il se masque
     table.insert(kids, bouton("masquer", tr("Masquer ce fond", "Hide this wallpaper"), "eye-off", function()
-      noctalia.runAsync({ NC_FONDS, "masquer", w.path }, relire, 15000)
+      if w.path == current then
+        -- le fond affiché : le suivant du groupe le remplace
+        local x = suivantDuGroupe(all, w)
+        apresFermeture(x and { NC_FONDS, "masquer", "--notifier", w.path, "--poser", x.path }
+          or { NC_FONDS, "masquer", "--notifier", w.path })
+      else
+        noctalia.runAsync({ NC_FONDS, "masquer", w.path }, relire, 15000)
+      end
     end))
   end
   if message then table.insert(kids, ui.label({ text = message, fontSize = TEXTE, color = "on_surface", maxLines = 1 })) end

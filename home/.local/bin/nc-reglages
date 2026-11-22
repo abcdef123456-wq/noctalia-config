@@ -1082,9 +1082,10 @@ REGLAGES = [
     # Fonds d'écran
     R("FONDS_ROTATION", "Fonds d'écran", L("Changer de fond automatiquement", "Change wallpaper automatically"),
       "ouinon", "oui", L("Dans un thème, la rotation passe par les fonds du thème puis par « Mes fonds » ; dans la base, "
-                          "par les fonds de la base seulement.",
+                          "par les fonds de la base seulement : dans la base, tes fonds se choisissent à la main (Super + W).",
                           "In a theme, the rotation goes through the theme's wallpapers, then “My wallpapers”; in the "
-                          "base, through the base wallpapers only."), groupe="noctalia"),
+                          "base, through the base wallpapers only: in the base, you pick your own wallpapers by hand "
+                          "(Super + W)."), groupe="noctalia"),
     R("FONDS_INTERVALLE", "Fonds d'écran", L("Toutes les", "Every"), "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
     R("FOND_ANIME", "Fonds d'écran", L("Fond animé", "Animated wallpaper"), "choix", "non",
       L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. Vivant : l'aurore "
@@ -5058,10 +5059,12 @@ def catalogue(vals):
                    "Opens the current theme's mes-fonds folder (created if missing): your pictures there are safe from updates."),
                  ["nc-fonds", "ouvrir"], T("Ouvrir", "Open")),
                 ("action:fonds-reafficher", T("Réafficher les fonds masqués", "Show hidden wallpapers again"),
-                 T("Les fonds livrés que tu as masqués dans le carrousel (« Masquer ce fond ») reviennent. Rien n'a été "
-                   "supprimé : la liste est ~/.config/nc/fonds-masques.conf.",
-                   "The bundled wallpapers you hid in the carousel (“Hide this wallpaper”) come back. Nothing was "
-                   "deleted: the list is ~/.config/nc/fonds-masques.conf."), ["nc-fonds", "reafficher"], T("Réafficher", "Show")))):
+                 T("Les fonds livrés que tu as masqués dans le carrousel (« Masquer ce fond », mis à la corbeille et jamais "
+                   "recopiés par une mise à jour) reviennent : la liste ~/.config/nc/fonds-masques.conf est vidée et ils "
+                   "sont recopiés depuis le dépôt installé (sinon, la prochaine mise à jour les remet).",
+                   "The bundled wallpapers you hid in the carousel (“Hide this wallpaper”: moved to the trash, never "
+                   "copied back by an update) come back: the list ~/.config/nc/fonds-masques.conf is emptied and they are "
+                   "copied again from the installed repository (otherwise the next update puts them back)."), ["nc-fonds", "reafficher"], T("Réafficher", "Show")))):
             res.insert(k + 2, dict(cle=cle_f, section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"), nom=nom_f,
                                    genre="action", defaut="", aide=aide_f, choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
                                    valeur="", affiche=aff_f, modifie=False, groupe="", commande=cmd_f, relire=True))
