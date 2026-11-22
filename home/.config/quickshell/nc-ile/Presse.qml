@@ -129,6 +129,8 @@ Item {
                     required property int index
                     readonly property bool image: modelData.genre === "image"
                     readonly property bool choisi: p.choix === index
+                    // Transformations proposées : seulement pour un texte de l'historique (jamais un secret : nc-presse-capture ne le garde pas)
+                    readonly property var transfos: image || p.masque ? [] : PressePapiers.transformations(modelData)
                     readonly property bool deplie: !!p.deplies[modelData.id]
                     objectName: "nc-presse-" + modelData.id
                     readonly property int hautTexte: image ? 86 : Math.min(deplie ? 320 : 64, txt.implicitHeight + 20)
@@ -169,6 +171,9 @@ Item {
                                 { id: "ia", icone: "auto_awesome", aide: el.image ? Reglages.t("Expliquer l'image avec l'IA", "Explain the image with AI") : Reglages.t("L'IA sur ce texte (résumer, traduire…)", "AI on this text (summarize, translate…)"),
                                   visible: !Reglages.iaCoupee && p.enLigne && Reglages.val(el.image ? "IA_CAPTURE" : "IA_TEXTE", "oui") !== "non", fixe: false },
                                 { id: "qr", icone: "qr_code_2", aide: Reglages.t("QR code de ce texte", "QR code of this text"), visible: !el.image && PresseAnalyse.qrDispo === 1, fixe: false },
+                                { id: "min", icone: "text_decrease", aide: Reglages.t("En minuscules (copié)", "To lowercase (copied)"), visible: el.transfos.indexOf("min") >= 0, fixe: false },
+                                { id: "maj", icone: "text_increase", aide: Reglages.t("EN MAJUSCULES (copié)", "TO UPPERCASE (copied)"), visible: el.transfos.indexOf("maj") >= 0, fixe: false },
+                                { id: "json", icone: "data_object", aide: Reglages.t("JSON mis en forme (copié)", "Formatted JSON (copied)"), visible: el.transfos.indexOf("json") >= 0, fixe: false },
                                 { id: "coller", icone: "keyboard_return", aide: Reglages.t("Coller en texte brut dans la fenêtre active", "Paste as plain text in the active window"), visible: !el.image, fixe: false },
                                 { id: "supprimer", icone: "close", aide: Reglages.t("Supprimer", "Delete"), visible: true, fixe: false }
                             ]
@@ -186,6 +191,7 @@ Item {
                                         if (action.modelData.id === "deplier") p.deplier(el.modelData)
                                         else if (action.modelData.id === "epingler") PressePapiers.epingler(el.modelData)
                                         else if (action.modelData.id === "coller") PressePapiers.coller(el.modelData)
+                                        else if (["min", "maj", "json"].indexOf(action.modelData.id) >= 0) { if (PressePapiers.transformer(el.modelData, action.modelData.id)) { el.copie = true; fin.restart() } }
                                         else if (action.modelData.id === "qr") p.qrTexte = el.modelData.texte
                                         else if (action.modelData.id === "ia") PressePapiers.demanderIA(el.modelData)
                                         else PressePapiers.supprimer(el.modelData)

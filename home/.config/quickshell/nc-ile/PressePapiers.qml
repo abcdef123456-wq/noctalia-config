@@ -6,6 +6,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "PresseTransforme.js" as Transforme
 
 Singleton {
     id: pp
@@ -84,6 +85,14 @@ Singleton {
     function recopier(e) {
         if (e.genre === "texte") Quickshell.execDetached(["wl-copy", "-t", "text/plain", "--", e.texte])
         else Quickshell.execDetached(["sh", "-c", "wl-copy -t image/png < \"$1\"", "sh", e.chemin])
+    }
+    // Transformer un texte (PresseTransforme.js) : seulement une entrée de l'historique ; le résultat est recopié par recopier() (même voie)
+    function transformations(e) { return e && e.genre === "texte" && entrees.some(x => x.id === e.id && x.genre === "texte") ? Transforme.proposees(e.texte) : [] }
+    function transformer(e, mode) {
+        var r = transformations(e).indexOf(mode) >= 0 ? Transforme.appliquer(mode, e.texte) : undefined
+        if (r === undefined) return false
+        recopier({ genre: "texte", texte: r })
+        return true
     }
     // Coller en texte brut dans la fenêtre active : recopie, ferme l'île, puis Ctrl + V (send_shortcut de Hyprland, en
     // Lua : depuis Hyprland 0.56, hyprctl dispatch évalue hl.dispatch(...), l'ancienne forme « sendshortcut CTRL,V, » échoue)

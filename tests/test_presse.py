@@ -122,7 +122,7 @@ class Page(unittest.TestCase):
                         e["chemin"] = str(images / (e["id"] + ".png"))
                         Path(e["chemin"]).write_bytes(PNG)
                 (images.parent / "presse.json").write_text(json.dumps(memo))
-            for nom in ("Presse.qml", "PressePapiers.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "PresseAction.qml", "PresseAnalyse.qml", "PresseQr.qml"):
+            for nom in ("Presse.qml", "PressePapiers.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "PresseAction.qml", "PresseAnalyse.qml", "PresseQr.qml", "PresseTransforme.js"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k] !== undefined ? valeurs[k] : d}}')
             (root / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool silence: false}')
@@ -270,6 +270,43 @@ verifier(PressePapiers.liste.length === 2, "Suppr dans le champ n'efface pas de 
 verifier(champ.text.length === 3, "Suppr dans le champ efface un caractère : " + champ.text)
 Qt.quit()
 ''', memo=memo)
+
+    def test_coller_transforme_boutons_et_copie(self):
+        # t1 : min et maj ; t2 : JSON (rien d'autre, les lettres ne changent pas) ; t3 : JSON scalaire, rien ; t4 : min seulement
+        memo = {"entrees": [
+            {"id": "t1", "genre": "texte", "texte": "Bonjour Été", "t": 4000, "epingle": False},
+            {"id": "t2", "genre": "texte", "texte": '{"1":[1,2]}', "t": 3000, "epingle": False},
+            {"id": "t3", "genre": "texte", "texte": "42", "t": 2000, "epingle": False},
+            {"id": "t4", "genre": "texte", "texte": "ABC", "t": 1000, "epingle": False},
+            {"id": "i1", "genre": "image", "chemin": "", "octets": 1208, "t": 500, "epingle": False},
+        ]}
+        r = self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+function boutons(i, id) {
+    page.choix = i
+    return ["min", "maj", "json"].filter(m => { var b = trouver(page, "nc-presse-" + id + "-" + m); return b !== null && b.visible }).join()
+}
+if (etape === 1) {
+verifier(PressePapiers.liste.map(e => e.id).join() === "t1,t2,t3,t4,i1", "ordre")
+verifier(boutons(0, "t1") === "min,maj", "t1 : " + boutons(0, "t1"))
+verifier(boutons(1, "t2") === "json", "t2 : " + boutons(1, "t2"))
+verifier(boutons(2, "t3") === "", "t3 (42) : " + boutons(2, "t3"))
+verifier(boutons(3, "t4") === "min", "t4 : " + boutons(3, "t4"))
+verifier(boutons(4, "i1") === "", "image : " + boutons(4, "i1"))
+// Une entrée hors de l'historique (comme un secret, jamais gardé) : aucune transformation, aucune copie
+var secret = { id: "x", genre: "texte", texte: "Mot De Passe" }
+verifier(PressePapiers.transformations(secret).length === 0 && PressePapiers.transformer(secret, "min") === false, "entrée hors historique")
+// Un mode non proposé n'est pas appliqué
+verifier(PressePapiers.transformer(PressePapiers.liste[2], "json") === false && PressePapiers.transformer(PressePapiers.liste[1], "min") === false, "mode non proposé")
+cliquer("nc-presse-t1-min"); cliquer("nc-presse-t1-maj"); cliquer("nc-presse-t2-json")
+}
+etape++
+if (etape > 4) Qt.quit()
+''', memo=memo)
+        self.assertEqual(sorted(c["argv"] for c in r["copies"]), sorted([
+            ["-t", "text/plain", "--", "bonjour été"], ["-t", "text/plain", "--", "BONJOUR ÉTÉ"],
+            ["-t", "text/plain", "--", '{\n  "1": [\n    1,\n    2\n  ]\n}']]))
 
     def test_url_de_fichier_encodee(self):
         self.executer('''
