@@ -24,18 +24,9 @@ ENRICHIS = {"apple", "oled", "catppuccin", "gruvbox", "nord", "kanagawa", "dracu
 A7 = {"apple": {"FENETRES_ARRONDI": "20", "FENETRES_BORDURE": "0", "DOCK_TAILLE": "56"}, "nord": {"FENETRES_ARRONDI": "6"},
       "catppuccin": {"FENETRES_ARRONDI": "18"}, "dracula": {"FENETRES_ARRONDI": "10"},
       "gruvbox": {"FENETRES_ARRONDI": "0"}, "kanagawa": {"FENETRES_ARRONDI": "8"}}
-# Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
-AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n",
-          "catppuccin": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=rond\nILE_VERRE=97\nILE_ANIM=doux\nILE_ACCENTS=accent\n"
-                        "ILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=oui\nFENETRES_BORDURE=2\nFENETRES_OMBRE=30\n",
-          "gruvbox": "ILE_CONTOUR_EPAISSEUR=3\nILE_RAYON=doux\nILE_VERRE=100\nILE_LUEUR=non\nILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=non\n"
-                     "FENETRES_BORDURE=3\nFENETRES_OMBRE=12\n",
-          "nord": "ILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=auto\nILE_VERRE=94\nILE_LUEUR=non\nILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=non\n"
-                  "FENETRES_BORDURE=1\nFENETRES_OMBRE=16\n",
-          "kanagawa": "ILE_CONTOUR_EPAISSEUR=1\nILE_RAYON=doux\nILE_VERRE=100\nILE_LUEUR=non\nILE_ACCENTS=accent\nILE_CONTOUR_FERMEE=non\n"
-                      "WIDGETS_PLAQUE=oui\nFENETRES_BORDURE=1\nFENETRES_OMBRE=20\n",
-          "dracula": "ILE_CONTOUR=degrade\nILE_CONTOUR_EPAISSEUR=2\nILE_RAYON=carre\nILE_VERRE=100\nILE_LUEUR=oui\nILE_ACCENTS=accent\n"
-                     "ILE_CONTOUR_FERMEE=oui\nWIDGETS_PLAQUE=oui\nFENETRES_BORDURE=2\nFENETRES_OMBRE=32\n"}          # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
+# Lignes ajoutées après l'ancien style.conf à la réapplication, EXACTES et dans l'ordre, thème par thème (relevées
+# sur la tranche B ; un thème qui change ses réglages met ce fichier à jour, sinon le test le signale)
+AJOUTS = json.loads((REPO / "tests/donnees/style-conf-reapplique.json").read_text(encoding="utf-8"))
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
 
 
@@ -155,7 +146,7 @@ class Equivalence(Base):
 
 class Reapplication(Base):
     """Un utilisateur déjà sur un ancien style : « nc-reglages appliquer » (mise à jour, installation) réécrit son
-    style.conf à l'octet près, aux seuls ajouts AJOUTS près ; jamais de dossier de fonds ajouté."""
+    style.conf à l'octet près, aux seuls ajouts AJOUTS près (exacts) ; jamais de dossier de fonds ajouté."""
     def setUp(self):
         super().setUp()
         fc = Path(self.env["PATH"].split(":")[0]) / "fc-list"          # aucune police : POLICE d'Apple jamais posée
@@ -172,10 +163,7 @@ class Reapplication(Base):
                 # l'ancien contenu (valeurs A7 au besoin) en tête, dans l'ordre ; les ajouts voulus ensuite
                 attendu = [l.split("=")[0] + "=" + A7.get(nom, {}).get(l.split("=")[0], l.split("=", 1)[1])
                            if "=" in l and not l.startswith("#") else l for l in avant.splitlines()]
-                lignes = self.style_conf().splitlines()
-                self.assertEqual(lignes[:len(attendu)], attendu)
-                cles = {l.split("=")[0] for l in lignes[len(attendu):]}
-                self.assertTrue({l.split("=")[0] for l in AJOUTS.get(nom, "").splitlines()} <= cles)
+                self.assertEqual(self.style_conf().splitlines(), attendu + AJOUTS[nom])     # égalité exacte, ligne à ligne
                 self.assertNotIn("FONDS_DOSSIER", self.style_conf())
 
     def test_noctalia_identique_a_main_a_l_octet(self):
@@ -263,6 +251,11 @@ class Validation(Base):
     def test_cle_de_reglage_inconnue(self):
         self.ecrire_theme("mauvais", reglages={"N_EXISTE_PAS": "1"})
         self.refuse("mauvais", "N_EXISTE_PAS")
+
+    def test_dossier_de_fonds_refuse_dans_les_reglages(self):
+        """Un thème est un fichier tiers : son dossier de fonds passe par le champ « fonds », jamais par FONDS_DOSSIER."""
+        self.ecrire_theme("mauvais", reglages={"FONDS_DOSSIER": "/home/user/ailleurs"})
+        self.refuse("mauvais", "FONDS_DOSSIER")
 
     def test_valeur_de_reglage_refusee(self):
         self.ecrire_theme("mauvais", reglages={"ILE_CONTOUR": "pas-un-choix"})

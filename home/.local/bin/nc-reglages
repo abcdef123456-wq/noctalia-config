@@ -903,6 +903,8 @@ REGLAGES = [
     R("NUIT_FIN", "Lumière nocturne", L("S'arrête à", "Ends at"), "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
     # Barre et dock
     R("BARRE_OPACITE", "Barre et dock", L("Opacité des pastilles de la barre", "Bar pill opacity"), "entier", "82",
+      L("Sans effet dans un thème dont la barre n'a pas de pastilles (Apple, Noir pur…).",
+        "No effect with a theme whose bar has no pills (Apple, Pure black…)."),
       mini=30, maxi=100, pas=2, unite="%", groupe="noctalia"),
     R("BARRE_SYSTEME", "Barre et dock", L("Processeur, température et mémoire", "CPU, temperature and memory"), "ouinon", "oui",
       L("La pastille d'infos système à droite de la barre.", "The system info pill on the right of the bar."), groupe="noctalia"),
@@ -2621,6 +2623,8 @@ def _verifier_theme(nom, d):
     for k, v in d["reglages"].items():
         if k not in PAR_CLE or k == "STYLE":
             refus(f"réglage inconnu « {k} »", f"unknown setting \"{k}\"")
+        if k == "FONDS_DOSSIER":       # un thème (fichier tiers) ne pointe pas un dossier au hasard : le champ « fonds » suffit
+            refus("« FONDS_DOSSIER » : passe par le champ « fonds » du thème", "\"FONDS_DOSSIER\": use the theme's \"fonds\" field")
         if not isinstance(v, str):
             refus(f"réglage « {k} » : une valeur en texte", f"setting \"{k}\": a text value")
         try:
