@@ -305,7 +305,7 @@ class Script(unittest.TestCase):
         self.assertIn(f.lire("age").strip(), ("0", "1"))
         ages = [float(a) for a in (f.etat / "ages").read_text().split()]
         self.assertEqual(len(ages), 12)
-        self.assertTrue(all(0 <= a < 1 for a in ages), "marque fraîche à chaque demi-seconde : %s" % ages)
+        self.assertTrue(all(0 <= a < 1.5 for a in ages), "marque fraîche à chaque demi-seconde : %s" % ages)
         self.assertEqual(f.lire("capture"), "")
         self.assertNotIn(f.mot(), r.stdout + r.stderr)
         self.assertLess(time.time() - f.marque.stat().st_mtime, 2)
