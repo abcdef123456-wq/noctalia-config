@@ -865,6 +865,828 @@ def nord_glacier():
     sauver(img, "nord-glacier", seed=81)
 
 
+# --------------------------------------------------------------------------
+# 12 thèmes de plus : rose-aube, everforest, solarized-clair, papier, clair-neutre, sakura, matrice,
+# cyberjaune, vaporwave, pluie-verte, brutaliste, ocean (deux fonds chacun)
+# --------------------------------------------------------------------------
+def _ys():
+    return np.arange(H, dtype=F32)[:, None]
+
+
+def _xs():
+    return np.arange(W, dtype=F32)[None, :]
+
+
+def _lueur(img, cx, cy, r, col, a, ry=None, mode="add"):
+    """Grande tache de lumière douce (gaussienne), calculée en petit puis agrandie."""
+    s = 8
+    yy, xx = np.mgrid[0:H // s, 0:W // s].astype(F32) * s
+    g = np.exp(-(((xx - cx) / r) ** 2 + ((yy - cy) / (ry or r)) ** 2))
+    g = np.clip(resize(g, W, H), 0, 1) * a
+    (add if mode == "add" else mix)(img, col, g)
+
+
+def _couche(yc):
+    """Masque doux sous un profil yc (une valeur par colonne) et distance verticale à la crête."""
+    d = _ys() - yc[None, :]
+    return np.clip(d + 0.5, 0, 1), d
+
+
+def _grain_papier(rng, force=1.0):
+    """Grain de papier : taches larges, grain moyen et fibres fines (valeurs autour de 0)."""
+    g = (fbm(W, H, rng, 40, 5, 0.6) - 0.5) * 0.03 + (fbm(W, H, rng, 8, 3, 0.5) - 0.5) * 0.02
+    g += (resize(rng.random((H // 2, W // 2)).astype(F32), W, H) - 0.5) * 0.025
+    return g * force
+
+
+def _compose(img, ov, sigma=1.0):
+    """Pose une couche RGBA (PIL) sur img, bords adoucis sans frange sombre."""
+    a = np.asarray(ov, F32) / 255
+    al = blur(a[..., 3], sigma)
+    pre = np.stack([blur(a[..., k] * a[..., 3], sigma) for k in range(3)], -1)
+    mix(img, pre / np.maximum(al, 1e-4)[..., None], al)
+
+
+# 1-2. rose-aube
+def rose_aube_collines():
+    rng = np.random.default_rng(91)
+    crème = hexc("#faf4ed")
+    img = vgrad([(0, "#f1d9d3"), (0.35, "#f6e3da"), (0.6, "#fbeee4"), (1, "#faf4ed")])
+    _lueur(img, W * 0.68, H * 0.5, 900, hexc("#ea9d34"), 0.30, ry=420)
+    _lueur(img, W * 0.22, H * 0.22, 1200, hexc("#d7827e"), 0.14, ry=700, mode="mix")
+    couches = [
+        (0.50, 70, [0.7, 1.6], "#e9c9c3", 0.55), (0.58, 100, [0.6, 1.4, 2.3], "#dfb4ae", 0.45),
+        (0.67, 130, [0.5, 1.2, 2.0], "#cb9ea4", 0.35), (0.77, 160, [0.5, 1.0, 1.8], "#b3a0b9", 0.25),
+        (0.88, 190, [0.4, 0.9, 1.5], "#6f93a2", 0.10),
+    ]
+    ys = _ys()
+    for base, amp, fr, col, brume in couches:
+        yc = _dune(rng, H * base, amp, fr)
+        m, d = _couche(yc)
+        c = hexc(col)[None, None, :] * (1 - 0.18 * np.clip(d / 600, 0, 1))[..., None]
+        c = c + hexc("#fff1e2") * (np.clip(1 - d / 110, 0, 1) * 0.22)[..., None]
+        mix(img, np.broadcast_to(c, (H, W, 3)), m)
+        mix(img, crème, (np.exp(-((ys - H * (base + 0.07)) / 190) ** 2) * brume) * np.ones((1, W), F32))
+    vignette(img, 0.10, 2.0)
+    sauver(img, "rose-aube-collines", bruit=0.75, seed=91)
+
+
+def rose_aube_papier():
+    rng = np.random.default_rng(92)
+    img = vgrad([(0, "#f8efe6"), (1, "#faf4ed")])
+    for cx, cy, r, ry, col, a in [
+        (0.12, 0.30, 1100, 800, "#d7827e", 0.42), (0.86, 0.72, 1200, 700, "#ea9d34", 0.34),
+        (0.60, 0.95, 1300, 520, "#907aa9", 0.30), (0.95, 0.10, 800, 600, "#286983", 0.16),
+        (0.30, 0.85, 900, 500, "#d7827e", 0.28),
+    ]:
+        _lueur(img, W * cx, H * cy, r, hexc(col), a, ry=ry, mode="mix")
+    img += _grain_papier(rng, 1.3)[..., None]
+    vignette(img, 0.08, 2.0)
+    sauver(img, "rose-aube-papier", bruit=0.8, seed=92)
+
+
+# 3-4. everforest
+def everforest_sapins():
+    rng = np.random.default_rng(93)
+    img = vgrad([(0, "#1f2629"), (0.4, "#2d353b"), (0.62, "#3d4b4a"), (1, "#3d4b4a")])
+    _lueur(img, W * 0.5, H * 0.56, 1400, hexc("#83c092"), 0.22, ry=520)
+    _lueur(img, W * 0.8, H * 0.30, 800, hexc("#dbbc7f"), 0.06)
+    etoiles(img, rng, 220, H * 0.35, hexc("#d3c6aa"), 0.35)
+    brume = hexc("#5e7d72")
+    plans = [("#55706a", 0.57, 70, 240, 90, 0.55), ("#46605c", 0.62, 56, 330, 110, 0.45),
+             ("#364a48", 0.67, 40, 440, 140, 0.35), ("#27363a", 0.73, 30, 560, 180, 0.25),
+             ("#1c262a", 0.80, 24, 700, 230, 0.15), ("#12181b", 0.90, 18, 840, 300, 0.0)]
+    for col, yb, n, haut, larg, b in plans:
+        y_sol = H * yb + fbm1d(W, rng, 3, 4, 0.5) * 40
+        yc = _sapins(rng, n, haut, larg, y_sol)
+        m, d = _couche(yc)
+        mix(img, hexc(col), m)
+        mix(img, brume, m * np.clip(1 - d / 420, 0, 1) * b)
+    vignette(img, 0.32, 2.0)
+    sauver(img, "everforest-sapins", seed=93)
+
+
+def everforest_sousbois():
+    rng = np.random.default_rng(94)
+    img = vgrad([(0, "#14191c"), (0.5, "#2d353b"), (1, "#1b2124")])
+    s = 4
+    yy, xx = np.mgrid[0:H // s, 0:W // s].astype(F32) * s
+    th = np.arctan2(xx - W * 0.78, yy + H * 0.2)
+    prof = fbm1d(1024, rng, 14, 4, 0.6) * 0.5 + 0.5
+    u = np.clip((th + 0.9) / 1.2 * 1023, 0, 1023)
+    ray = _lisse(0.42, 0.9, np.interp(u, np.arange(1024), prof)) ** 1.3
+    ray *= np.exp(-np.hypot(xx - W * 0.78, yy + H * 0.2) / 2300)
+    ray = np.clip(resize(ray.astype(F32), W, H), 0, 1)
+    add(img, hexc("#a7c080"), ray * 0.20)
+    _lueur(img, W * 0.7, H * 0.25, 1000, hexc("#83c092"), 0.12)
+    ys, xs = _ys(), _xs()
+    fog = hexc("#3b5a4d")
+    for n, larg, col, soft, lean, fogk in [(26, 16, "#41564d", 18, 0.02, 0.30), (16, 30, "#2c3d38", 10, 0.03, 0.22),
+                                          (9, 54, "#1b2625", 5, 0.04, 0.12), (5, 100, "#0e1314", 3, 0.05, 0.0)]:
+        for _ in range(n):
+            cx = rng.uniform(-50, W + 50)
+            w = larg * rng.uniform(0.6, 1.5)
+            m = np.clip(1 - (np.abs(xs - cx - (rng.normal() * lean) * (ys - H / 2)) - w / 2) / soft, 0, 1)
+            mix(img, hexc(col), m * np.clip(0.4 + ys / (H * 0.3), 0, 1))
+        mix(img, fog, np.exp(-((ys - H * 0.80) / 260) ** 2) * fogk * np.ones((1, W), F32))
+    vignette(img, 0.35, 2.0)
+    sauver(img, "everforest-sousbois", seed=94)
+
+
+# 5-6. solarized-clair
+def solarized_clair_cercles():
+    rng = np.random.default_rng(95)
+    img = vgrad([(0, "#fdf6e3"), (1, "#f6efd8")])
+    img += ((fbm(W, H, rng, 6, 4, 0.5) - 0.5) * 0.03)[..., None]
+    ys, xs = _ys(), _xs()
+    cols = [hexc(c) for c in ("#268bd2", "#2aa198", "#b58900", "#cb4b16")]
+    for cx, cy, pas, k, haut in [(0.74, 0.92, 70, 1900, 0.8), (0.10, 0.18, 90, 900, 0.5)]:
+        r = np.hypot(xs - W * cx, ys - H * cy)
+        disc = np.clip((k * 0.8 - r) / 2, 0, 1) * 0.55
+        mix(img, hexc("#eee8d5"), disc)
+        a = ligne_aa(r / pas, 1.0 / pas, 2.4) * np.exp(-r / k) * haut
+        idx = (r // 450).astype(int) % 4
+        for i in range(4):
+            mix(img, cols[i], a * (idx == i))
+        for R, c in [(600, 0), (1200, 1), (1800, 2)]:
+            mix(img, cols[c], np.clip(3.5 - np.abs(r - R * pas / 70), 0, 1) * 0.5 * np.exp(-r / (k * 1.2)))
+    vignette(img, 0.06, 2.0)
+    sauver(img, "solarized-clair-cercles", bruit=0.75, seed=95)
+
+
+def solarized_clair_dunes():
+    rng = np.random.default_rng(96)
+    img = vgrad([(0, "#f4ecd4"), (0.5, "#fdf6e3"), (1, "#fdf6e3")])
+    ys, xs = _ys(), _xs()
+    _lueur(img, W * 0.70, H * 0.46, 600, hexc("#fff3c6"), 0.55, mode="mix")
+    r = np.hypot(xs - W * 0.70, ys - H * 0.46)
+    mix(img, hexc("#268bd2"), ligne_aa(r / 110, 1 / 110, 2.2) * np.exp(-r / 520) * 0.45)
+    couches = [(0.55, 100, [0.8, 1.7], "#f1e9cf", "#d8cfb4", 0.5, 0.0), (0.64, 140, [0.7, 1.5, 2.4], "#ebdfbf", "#cdc1a0", 0.35, 0.16),
+               (0.74, 180, [0.6, 1.3, 2.2], "#e4d3aa", "#bdb08a", 0.2, 0.2), (0.86, 220, [0.5, 1.1, 1.9], "#ddc894", "#a99b72", 0.0, 0.18)]
+    for i, (base, amp, fr, clair, ombre, brume, ln) in enumerate(couches):
+        yc = _dune(rng, H * base, amp, fr)
+        lum = 0.5 - 0.5 * np.tanh(np.gradient(yc) / 0.55)
+        lum = np.convolve(np.pad(lum, 60, mode="edge"), np.ones(121) / 121, "valid")
+        m, d = _couche(yc)
+        col = hexc(ombre)[None, None, :] + (hexc(clair) - hexc(ombre))[None, None, :] * lum[None, :, None]
+        col = col * (1 - 0.22 * np.clip(d / 700, 0, 1))[..., None]
+        col = np.broadcast_to(col, (H, W, 3))
+        mix(img, col, m)
+        if ln:
+            lc = hexc("#cb4b16" if i == 3 else "#b58900")
+            mix(img, lc, ligne_aa(d / 38, 1 / 38, 1.7) * np.clip(1 - d / 900, 0, 1) * (d > 0) * ln)
+        if brume:
+            mix(img, hexc("#fdf6e3"), m * np.clip(1 - d / 450, 0, 1) * brume)
+    vignette(img, 0.08, 2.0)
+    sauver(img, "solarized-clair-dunes", bruit=0.75, seed=96)
+
+
+# 7-8. papier
+def papier_estampe():
+    rng = np.random.default_rng(97)
+    papier, encre, gris = hexc("#f4f1ea"), hexc("#1a1a1a"), hexc("#666666")
+    img = vgrad([(0, "#f6f3ec"), (1, "#f1ede4")])
+    ys, xs = _ys(), _xs()
+    d0 = np.hypot(xs - W * 0.72, ys - H * 0.28)
+    mix(img, hexc("#b3261e"), np.clip(170 - d0, 0, 1) * 0.92)
+    for i, (base, amp) in enumerate([(0.54, 360), (0.64, 320), (0.75, 270), (0.87, 210)]):
+        yc = _crete(rng, H * base, amp, 6, 0.0, 3 + i)
+        g = np.gradient(yc)[None, :]
+        m, d = _couche(yc)
+        mix(img, papier * (1 - 0.04 * (i + 1)) + gris * 0.04 * (i + 1) * 0.5, m)
+        hach = ligne_aa(d / 15, 1 / 15, 1.2) * np.clip(1 - d / 190, 0, 1) * (d > 0) * (0.18 + 0.07 * i)
+        mix(img, gris, hach)
+        lw = 2.2 + 0.7 * i
+        mix(img, encre, np.clip(lw * np.sqrt(1 + g ** 2) / 2 + 0.5 - np.abs(d), 0, 1) * (0.35 + 0.2 * i))
+    img *= 1 + _grain_papier(rng, 1.6)[..., None]
+    vignette(img, 0.10, 2.0)
+    sauver(img, "papier-estampe", bruit=0.8, seed=97)
+
+
+def papier_vide():
+    rng = np.random.default_rng(98)
+    img = vgrad([(0, "#f6f3ec"), (1, "#f2eee6")])
+    ys, xs = _ys(), _xs()
+    cx, cy = W * 0.5, H * 0.62
+    d = np.hypot(xs - cx, ys - cy)
+    ombre = np.exp(-(np.hypot(xs - cx - 22, ys - cy - 30) / 330) ** 2)
+    img *= (1 - 0.07 * ombre)[..., None]
+    mix(img, hexc("#b3261e"), np.clip(230 - d, 0, 1) * 0.94)
+    mix(img, hexc("#666666"), np.clip(1.5 - np.abs(ys - H * 0.80), 0, 1) * ((xs > W * 0.34) & (xs < W * 0.66)) * 0.35)
+    for k in range(9):
+        mix(img, hexc("#666666"), np.clip(1.2 - np.abs(xs - (W * 0.34 + k * W * 0.04)), 0, 1) * ((ys > H * 0.795) & (ys < H * 0.815)) * 0.35)
+    img *= 1 + _grain_papier(rng, 1.7)[..., None]
+    vignette(img, 0.10, 2.0)
+    sauver(img, "papier-vide", bruit=0.8, seed=98)
+
+
+# 9-10. clair-neutre
+def _forme(img, dist, cx, cy, r, ca, cb, ang, a, ombre=0.12, dec=(0, 46)):
+    """Forme à dégradé et ombre portée douce. dist(xx, yy) = distance signée (négatif dedans)."""
+    s = 4
+    yy, xx = np.mgrid[0:H // s, 0:W // s].astype(F32) * s
+    sh = blur(np.clip(0.5 - dist(xx - dec[0], yy - dec[1]), 0, 1), 18)
+    sh = np.clip(resize(sh, W, H), 0, 1)
+    img *= (1 - ombre * sh)[..., None]
+    y, x = np.mgrid[0:H, 0:W].astype(F32)
+    t = np.clip(((x - cx) * np.cos(ang) + (y - cy) * np.sin(ang)) / (2 * r) + 0.5, 0, 1)
+    col = hexc(ca)[None, None, :] + (hexc(cb) - hexc(ca))[None, None, :] * t[..., None]
+    mix(img, np.broadcast_to(col, (H, W, 3)), np.clip(0.5 - dist(x, y), 0, 1) * a)
+
+
+def clair_neutre_formes():
+    rng = np.random.default_rng(99)
+    img = vgrad([(0, "#fafafa"), (1, "#eef1f6")])
+    _lueur(img, W * 0.92, H * 0.92, 1500, hexc("#3584e4"), 0.20, mode="mix")
+    _lueur(img, W * 0.06, H * 0.12, 1000, hexc("#deddda"), 0.45, mode="mix")
+    c1 = (W * 0.17, H * 0.80, 700)
+    _forme(img, lambda x, y: np.hypot(x - c1[0], y - c1[1]) - c1[2], c1[0], c1[1], c1[2], "#9ec5f2", "#3584e4", 0.9, 0.92)
+    c2 = (W * 0.84, H * 0.30, 400)
+    _forme(img, lambda x, y: np.hypot(x - c2[0], y - c2[1]) - c2[2], c2[0], c2[1], c2[2], "#fafafa", "#cfe0f7", 1.2, 0.95, 0.10)
+    q = (W * 0.70, H * 0.84, 380, 130)
+
+    def rr(x, y):
+        dx, dy = np.abs(x - q[0]) - q[2] + q[3], np.abs(y - q[1]) - q[2] + q[3]
+        return np.hypot(np.maximum(dx, 0), np.maximum(dy, 0)) + np.minimum(np.maximum(dx, dy), 0) - q[3]
+    _forme(img, rr, q[0], q[1], q[2], "#bcd6f6", "#4a93e8", 0.8, 0.9)
+    c3 = (W * 0.42, H * 0.95, 330)
+    _forme(img, lambda x, y: np.hypot(x - c3[0], y - c3[1]) - c3[2], c3[0], c3[1], c3[2], "#deddda", "#fafafa", 1.5, 1.0, 0.09)
+    img += ((fbm(W, H, rng, 6, 3) - 0.5) * 0.012)[..., None]
+    sauver(img, "clair-neutre-formes", bruit=0.7, seed=99)
+
+
+def clair_neutre_vagues():
+    rng = np.random.default_rng(100)
+    img = vgrad([(0, "#fafafa"), (0.5, "#eef3fa"), (1, "#e4edf9")])
+    _lueur(img, W * 0.5, H * 0.1, 1800, hexc("#3584e4"), 0.07, ry=500, mode="mix")
+    x = np.linspace(0, 1, W, dtype=F32)
+    cols = ["#f3f6fb", "#e0ebf9", "#c4daf4", "#9bc2ef", "#6ba5ea", "#3584e4", "#2b6fc3"]
+    for k, c in enumerate(cols):
+        base = 0.42 + 0.085 * k
+        yc = np.full(W, H * base, F32)
+        for f in (0.6 + 0.3 * k, 1.4 + 0.5 * k, 2.6):
+            yc += np.sin(2 * np.pi * (f * x + rng.random())) * (46 - 3 * k) * (1.1 - 0.15 * f / 3)
+        yc += fbm1d(W, rng, 3, 3, 0.5) * 30
+        m, d = _couche(yc)
+        img *= (1 - 0.17 * (np.exp(np.clip(d, -500, 0) / 55) * (d < 0)))[..., None]
+        cc = hexc(c)[None, None, :] * (1 - 0.10 * np.clip(d / 800, 0, 1))[..., None]
+        mix(img, np.broadcast_to(cc, (H, W, 3)), m)
+        mix(img, hexc("#ffffff"), np.clip(1 - np.abs(d - 1.5) / 2.5, 0, 1) * 0.35)
+    sauver(img, "clair-neutre-vagues", bruit=0.7, seed=100)
+
+
+# 11-12. sakura
+def _branche(rng, dr, tips, x, y, ang, L, wid, prof):
+    pas = 16
+    steps = max(2, int(L // pas))
+    courbe = rng.normal(0, 0.012)
+    px, py = x, y
+    for s in range(steps):
+        ang += courbe + rng.normal(0, 0.07)
+        x += np.cos(ang) * pas
+        y += np.sin(ang) * pas
+        if 0.28 * W < x < 0.72 * W and y < 0.17 * H:
+            return
+        w = max(2, int(wid * (1 - 0.65 * s / steps)))
+        dr.line([(px, py), (x, y)], fill=(59, 47, 51, 255), width=w)
+        if w > 6:
+            dr.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=(59, 47, 51, 255))
+        px, py = x, y
+        if prof < 3 and s > 3 and L > 200 and rng.random() < 0.10:
+            _branche(rng, dr, tips, x, y, ang + rng.choice([-1, 1]) * rng.uniform(0.5, 1.0), L * rng.uniform(0.3, 0.5), wid * 0.55, prof + 1)
+        if prof >= 1 and rng.random() < 0.22:
+            tips.append((x, y))
+    tips.append((x, y))
+
+
+def _fleur(dr, rng, x, y, r):
+    col = [(229, 163, 180, 255), (239, 188, 203, 255), (247, 212, 222, 255)][int(rng.integers(0, 3))]
+    a0 = rng.random() * 6.283
+    for k in range(5):
+        a = a0 + k * 6.283 / 5
+        cx, cy = x + np.cos(a) * r * 0.55, y + np.sin(a) * r * 0.55
+        dr.ellipse([cx - r * 0.55, cy - r * 0.55, cx + r * 0.55, cy + r * 0.55], fill=col)
+    dr.ellipse([x - r * 0.2, y - r * 0.2, x + r * 0.2, y + r * 0.2], fill=(201, 123, 146, 255))
+
+
+def _petales(img, rng, n, rmin, rmax, y0, y1, sigma, alpha=1.0):
+    ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(ov)
+    t = np.linspace(0, 2 * np.pi, 16)
+    for _ in range(n):
+        r = rng.uniform(rmin, rmax)
+        x, y, th = rng.uniform(0, W), rng.uniform(y0, y1) * H, rng.uniform(0, 6.283)
+        pts = [(x + r * np.cos(u) * np.cos(th) - r * 0.55 * np.sin(u) * np.sin(th),
+                y + r * np.cos(u) * np.sin(th) + r * 0.55 * np.sin(u) * np.cos(th)) for u in t]
+        c = [(229, 163, 180), (239, 188, 203), (247, 212, 222)][int(rng.integers(0, 3))]
+        dr.polygon(pts, fill=c + (int(255 * alpha),))
+    _compose(img, ov, sigma)
+
+
+def sakura_branche():
+    rng = np.random.default_rng(101)
+    img = vgrad([(0, "#fff5f7"), (0.6, "#fdeef1"), (1, "#f9e3e8")])
+    _lueur(img, W * 0.18, H * 0.22, 700, hexc("#fffafb"), 0.7, mode="mix")
+    ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(ov)
+    tips = []
+    _branche(rng, dr, tips, W + 80, H * 0.40, np.pi + 0.12, 2500, 36, 0)
+    _branche(rng, dr, tips, -60, H * 0.86, -0.22, 1500, 26, 0)
+    for x, y in tips:
+        if rng.random() < 0.5:
+            dr.ellipse([x + 10, y - 6, x + 62, y + 12], fill=(154, 184, 154, 255))
+    for x, y in tips:
+        for _ in range(int(rng.integers(1, 4))):
+            _fleur(dr, rng, x + rng.normal(0, 28), y + rng.normal(0, 28), rng.uniform(24, 46))
+    _compose(img, ov, 1.1)
+    _petales(img, rng, 70, 14, 26, 0.18, 1.0, 1.2)
+    _petales(img, rng, 14, 40, 70, 0.1, 1.0, 7.0, 0.8)
+    img += ((fbm(W, H, rng, 6, 3) - 0.5) * 0.012)[..., None]
+    vignette(img, 0.06, 2.0)
+    sauver(img, "sakura-branche", bruit=0.75, seed=101)
+
+
+def sakura_lune():
+    rng = np.random.default_rng(102)
+    img = vgrad([(0, "#fcecf0"), (0.5, "#fff5f7"), (1, "#f7e4e9")])
+    ys, xs = _ys(), _xs()
+    cx, cy = W * 0.70, H * 0.30
+    _lueur(img, cx, cy, 900, hexc("#e5a3b4"), 0.30, mode="mix")
+    r = np.hypot(xs - cx, ys - cy)
+    mix(img, hexc("#fff9fa"), np.clip(330 - r, 0, 1) * 0.96)
+    mar = fbm(W, H, rng, 6, 4, 0.55)
+    mix(img, hexc("#ecd2d9"), np.clip(330 - r, 0, 1) * _lisse(0.5, 0.8, mar) * 0.35)
+    mix(img, hexc("#e5a3b4"), ligne_aa(r / 620, 1 / 620, 2.0) * (r < 640) * 0.35)
+    for base, amp, col, b in [(0.80, 90, "#e4eee1", 0.5), (0.88, 110, "#cfe1cd", 0.3), (0.96, 130, "#b6cfb5", 0.0)]:
+        yc = _dune(rng, H * base, amp, [0.6, 1.3, 2.2])
+        m, d = _couche(yc)
+        mix(img, hexc(col), m)
+        mix(img, hexc("#fff5f7"), m * np.clip(1 - d / 300, 0, 1) * b)
+    _petales(img, rng, 90, 14, 26, 0.12, 0.95, 1.2)
+    _petales(img, rng, 16, 40, 76, 0.05, 1.0, 7.0, 0.8)
+    img += ((fbm(W, H, rng, 6, 3) - 0.5) * 0.012)[..., None]
+    sauver(img, "sakura-lune", bruit=0.75, seed=102)
+
+
+# 7-8. matrice
+def _points(p, I, rmin, rmax):
+    """Grille de points de pas p dont le rayon suit I (une valeur par cellule). Renvoie (alpha, I plein cadre)."""
+    Ir = np.repeat(np.repeat(I.astype(F32), p, 0), p, 1)[:H, :W]
+    dy = (np.arange(H) % p - p / 2 + 0.5).astype(F32)[:, None]
+    dx = (np.arange(W) % p - p / 2 + 0.5).astype(F32)[None, :]
+    r = rmin + (rmax - rmin) * Ir
+    return np.clip(r - np.hypot(dx, dy) + 0.5, 0, 1), Ir
+
+
+def _point_rouge(img, x, y, r):
+    yy, xx = np.ogrid[max(0, int(y - 300)):min(H, int(y + 300)), max(0, int(x - 300)):min(W, int(x + 300))]
+    sub = img[max(0, int(y - 300)):min(H, int(y + 300)), max(0, int(x - 300)):min(W, int(x + 300))]
+    d = np.hypot(xx - x, yy - y).astype(F32)
+    rouge = hexc("#d71920")
+    add(sub, rouge, np.exp(-(d / (r * 4.5)) ** 2) * 0.55)
+    mix(sub, rouge, np.clip(r - d + 0.5, 0, 1))
+
+
+def matrice_relief():
+    rng = np.random.default_rng(103)
+    p = 40
+    ny, nx = H // p, W // p
+    gy, gx = np.mgrid[0:ny, 0:nx].astype(F32)
+    gx = (gx + 0.5) / nx
+    gy = (gy + 0.5) / ny
+    rel = 1 - np.abs(2 * fbm(nx, ny, rng, 3, 4, 0.5) - 1)
+    rel = rel ** 2.0 * (0.35 + 0.65 * _lisse(0.2, 0.8, gy))
+    rel += 0.45 * np.exp(-(((gx - 0.2) / 0.16) ** 2 + ((gy - 0.75) / 0.2) ** 2))
+    I = np.clip(0.10 + 0.9 * rel, 0, 1)
+    I *= 1 - 0.88 * np.exp(-(((gx - 0.5) / 0.26) ** 2 + ((gy - 0.10) / 0.2) ** 2))
+    a, Ir = _points(p, I, 1.6, 10.5)
+    img = np.zeros((H, W, 3), F32)
+    add(img, np.array([1, 1, 1], F32), a * (0.22 + 0.78 * Ir))
+    ix, iy = int(0.66 * nx), int(0.60 * ny)
+    _point_rouge(img, (ix + 0.5) * p, (iy + 0.5) * p, 15)
+    vignette(img, 0.30, 2.0)
+    sauver(img, "matrice-relief", bruit=0.35, seed=103)
+
+
+def matrice_cercle():
+    rng = np.random.default_rng(104)
+    p = 36
+    ny, nx = -(-H // p), -(-W // p)
+    gy, gx = np.mgrid[0:ny, 0:nx].astype(F32)
+    cxr, cyr, R = W * 0.5, H * 0.65, 800
+    X, Y = (gx + 0.5) * p, (gy + 0.5) * p
+    dist = np.hypot(X - cxr, Y - cyr)
+    th = np.arctan2(Y - cyr, X - cxr)
+    Rv = R + 45 * np.sin(3 * th + 0.8)
+    ring = np.exp(-((dist - Rv) / 75) ** 2) * (0.65 + 0.35 * np.cos(2 * th - 0.6))
+    inner = 0.30 * np.exp(-((dist - R * 0.55) / 40) ** 2) + 0.14 * np.exp(-((dist - R * 1.35) / 50) ** 2)
+    I = np.clip(0.07 + ring + inner, 0, 1)
+    I *= 1 - 0.85 * np.exp(-((((X - W / 2) / 1000) ** 2) + ((Y - H * 0.10) / 380) ** 2))
+    a, Ir = _points(p, I, 1.4, 8.5)
+    img = np.zeros((H, W, 3), F32)
+    add(img, np.array([1, 1, 1], F32), a * (0.20 + 0.80 * Ir))
+    t = -0.62
+    ix, iy = int((cxr + R * np.cos(t)) // p), int((cyr + R * np.sin(t)) // p)
+    _point_rouge(img, (ix + 0.5) * p, (iy + 0.5) * p, 14)
+    vignette(img, 0.30, 2.0)
+    sauver(img, "matrice-cercle", bruit=0.35, seed=104)
+
+
+# 9-10. cyberjaune
+_NEONS = [(252, 238, 10), (0, 240, 255), (255, 0, 60)]
+
+
+def _ville_plan(rng, yg, hmin, hmax, wmin, wmax, col, p_lit, pas, p_neon):
+    """Une rangée d'immeubles : renvoie (couche RGBA des masses, image RGB des lumières)."""
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    lu = Image.new("RGB", (W, H), (0, 0, 0))
+    d, dl = ImageDraw.Draw(im), ImageDraw.Draw(lu)
+    x = -int(rng.integers(0, 120))
+    while x < W:
+        w = int(rng.integers(wmin, wmax))
+        h = int(rng.uniform(hmin, hmax))
+        if abs(x + w / 2 - W / 2) < 900:
+            h = min(h, int(yg - H * 0.36))
+        y1 = yg - h
+        d.rectangle([x, y1, x + w, yg + 4], fill=col + (255,))
+        if rng.random() < 0.3:  # antenne ou étage en retrait
+            d.rectangle([x + w // 4, y1 - int(h * 0.12), x + 3 * w // 4, y1], fill=col + (255,))
+        ny, nx = max(1, (h - 60) // pas), max(1, (w - 24) // pas)
+        lit = rng.random((ny, nx))
+        for j in range(ny):
+            for i in range(nx):
+                if lit[j, i] < p_lit:
+                    u = rng.random()
+                    c = (252, 238, 10) if u < 0.6 else (0, 240, 255) if u < 0.9 else (255, 245, 200)
+                    k = rng.uniform(0.45, 1.0)
+                    wx, wy = x + 14 + i * pas, y1 + 36 + j * pas
+                    dl.rectangle([wx, wy, wx + pas * 0.45, wy + pas * 0.55], fill=tuple(int(v * k) for v in c))
+        if rng.random() < p_neon:  # néon vertical sur l'arête ou enseigne
+            c = _NEONS[int(rng.choice(3, p=[0.45, 0.4, 0.15]))]
+            if rng.random() < 0.55:
+                ln = int(rng.uniform(0.3, 0.8) * h)
+                dl.rectangle([x + w - 9, y1 + 20, x + w - 3, y1 + 20 + ln], fill=c)
+            else:
+                sw, sh = int(w * rng.uniform(0.4, 0.8)), int(rng.uniform(26, 50))
+                sy = y1 + int(rng.uniform(0.1, 0.6) * h)
+                dl.rectangle([x + 10, sy, x + 10 + sw, sy + sh], outline=c, width=5)
+        x += w + int(rng.integers(0, 12))
+    return im, lu
+
+
+def cyberjaune_ville():
+    rng = np.random.default_rng(105)
+    yg = int(H * 0.80)
+    img = vgrad([(0, "#0d0d0d"), (0.5, "#14111a"), (0.8, "#2a2308"), (1, "#0d0d0d")])
+    _lueur(img, W * 0.5, H * 0.80, 2300, hexc("#fcee0a"), 0.20, ry=420)
+    _lueur(img, W * 0.18, H * 0.70, 900, hexc("#00f0ff"), 0.12, ry=500)
+    _lueur(img, W * 0.88, H * 0.62, 800, hexc("#ff003c"), 0.08, ry=500)
+    etoiles(img, rng, 120, H * 0.3, hexc("#e8e0c0"), 0.25)
+    plans = [(480, 1150, 120, 280, (18, 17, 24), 0.18, 34, 0.5, 0.45),
+             (340, 900, 150, 340, (11, 11, 15), 0.22, 40, 0.6, 0.6),
+             (220, 620, 200, 420, (6, 6, 8), 0.16, 48, 0.7, 0.8)]
+    for hmin, hmax, wmin, wmax, col, p_lit, pas, p_neon, glow in plans:
+        im, lu = _ville_plan(rng, yg, hmin, hmax, wmin, wmax, col, p_lit, pas, p_neon)
+        _compose(img, im, 1.0)
+        lum = np.asarray(lu, F32) / 255
+        halo = np.stack([blur(lum[..., k], 16) for k in range(3)], -1)
+        img += lum * 0.9 + halo * (1.6 * glow)
+        mix(img, hexc("#1b1708"), 0.14)
+    hh = H - yg
+    refl = img[yg - hh:yg][::-1].copy()
+    xi = (np.arange(W)[None, :] + (12 * np.sin(np.arange(hh)[:, None] / 8.0)).astype(int)) % W
+    refl = refl[np.arange(hh)[:, None], xi]
+    fade = ((1 - np.arange(hh) / hh) ** 1.4)[:, None, None].astype(F32)
+    img[yg:] = hexc("#0b0b0f") * (1 - 0.4 * fade) + refl * 0.65 * fade
+    ys = _ys()
+    mix(img, hexc("#00f0ff"), np.clip(1 - np.abs(ys - (yg + 3)) / 2.5, 0, 1) * 0.5 * np.ones((1, W), F32))
+    add(img, hexc("#fcee0a"), np.exp(-((ys - yg) / 40) ** 2) * 0.10 * np.ones((1, W), F32))
+    vignette(img, 0.38, 2.0)
+    sauver(img, "cyberjaune-ville", bruit=0.45, seed=105)
+
+
+def cyberjaune_circuits():
+    rng = np.random.default_rng(106)
+    img = vgrad([(0, "#0d0d0d"), (1, "#111114")])
+    ys, xs = _ys(), _xs()
+    u = (xs * 0.82 + ys * 0.57) / 260
+    v = u % 1
+    add(img, np.array([1, 1, 1], F32), (_lisse(0.0, 0.01, v) * (1 - _lisse(0.5, 0.51, v))) * 0.022)
+    mix(img, hexc("#fcee0a"), ligne_aa(u, 1 / 260, 2.0) * ((np.floor(u) % 4) == 0) * 0.12)
+    _lueur(img, W * 0.85, H * 0.9, 1000, hexc("#00f0ff"), 0.10, ry=700)
+    _lueur(img, W * 0.1, H * 0.85, 900, hexc("#fcee0a"), 0.08, ry=600)
+    tr = Image.new("RGB", (W, H), (0, 0, 0))
+    d = ImageDraw.Draw(tr)
+    dirs = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+    pas = 60
+    for _ in range(190):
+        x, y = int(rng.integers(0, W // pas)) * pas, int(rng.integers(0, H // pas)) * pas
+        u_ = rng.random()
+        c = _NEONS[0] if u_ < 0.68 else _NEONS[1] if u_ < 0.93 else _NEONS[2]
+        pts, k = [(x, y)], int(rng.integers(8))
+        for _s in range(int(rng.integers(3, 8))):
+            k = (k + int(rng.choice([-1, 0, 1]))) % 8
+            L = int(rng.integers(2, 8)) * pas
+            x, y = x + dirs[k][0] * L, y + dirs[k][1] * L
+            pts.append((x, y))
+        if any(1000 < px < 2840 and py < 700 for px, py in pts):
+            continue
+        dim = rng.uniform(0.35, 0.75)
+        d.line(pts, fill=tuple(int(q * dim) for q in c), width=4, joint="curve")
+        for px, py in pts[1:-1]:
+            d.ellipse([px - 5, py - 5, px + 5, py + 5], fill=tuple(int(q * dim) for q in c))
+        px, py = pts[-1]
+        d.ellipse([px - 11, py - 11, px + 11, py + 11], fill=c)
+        px, py = pts[0]
+        d.ellipse([px - 15, py - 15, px + 15, py + 15], outline=c, width=4)
+    t = np.asarray(tr, F32) / 255
+    t = np.stack([blur(t[..., k], 1.0) for k in range(3)], -1)
+    halo = np.stack([blur(t[..., k], 14) for k in range(3)], -1)
+    img += t + halo * 1.1
+    vignette(img, 0.35, 2.0)
+    sauver(img, "cyberjaune-circuits", bruit=0.45, seed=106)
+
+
+# 11-12. vaporwave
+def vaporwave_mer():
+    rng = np.random.default_rng(107)
+    y0 = int(H * 0.60)
+    img = vgrad([(0, "#2b1055"), (0.28, "#6a2f94"), (0.46, "#ff71ce"), (0.60, "#ffd1c9"),
+                 (0.6003, "#9b3fb8"), (1, "#2b1055")])
+    ys, xs = _ys(), _xs()
+    etoiles(img, rng, 260, H * 0.2, hexc("#fffb96"), 0.45)
+    cl = np.zeros((H, W), F32)
+    for nh, nw, am in [(10, 3, 1.0), (22, 7, 0.5), (46, 14, 0.25)]:
+        cl += resize(rng.random((nh, nw)).astype(F32), W, H) * am
+    cl = (cl - cl.min()) / (cl.max() - cl.min())
+    bande = _lisse(0.15 * H, 0.27 * H, ys) * (1 - _lisse(0.50 * H, 0.58 * H, ys))
+    t = np.clip((ys - 0.15 * H) / (0.43 * H), 0, 1)
+    ccol = (hexc("#01cdfe") * (1 - t) + hexc("#ff9ee0") * t).reshape(H, 1, 3)
+    mix(img, np.broadcast_to(ccol, (H, W, 3)), _lisse(0.55, 0.72, cl) * bande * 0.55)
+    cx, cy, r = W * 0.5, H * 0.50, 340
+    dist = np.hypot(xs - cx, ys - cy)
+    disc = np.clip((r - dist) / 2 + 0.5, 0, 1) * np.clip(y0 - ys, 0, 1)
+    f = ((ys - cy) / 36.0) % 1
+    thr = np.clip((ys - cy) / r, 0, 1) * 0.62
+    disc = disc * (1 - np.clip((thr - f) * 40, 0, 1))
+    ts = np.clip((ys - (cy - r)) / (2 * r), 0, 1)
+    scol = np.broadcast_to((hexc("#fffb96") * (1 - ts) + hexc("#ff71ce") * ts).reshape(H, 1, 3), (H, W, 3))
+    _lueur(img, cx, cy, 800, hexc("#ff71ce"), 0.25, ry=600)
+    mix(img, scol, disc)
+    tm = np.maximum(ys - y0, 0)
+    prof = np.clip(tm / (H - y0), 0, 1)
+    wob = 22 * np.sin(ys / 21.0) * prof
+    colonne = np.exp(-((xs - cx - wob) / (50 + tm * 0.33)) ** 2)
+    dash = _lisse(0.30, 0.62, 0.5 + 0.5 * np.sin(2 * np.pi * 6500 / np.maximum(tm, 8)))
+    refl = colonne * dash * np.clip(tm / 60, 0, 1) * (tm > 0) * (1 - 0.45 * prof)
+    mix(img, hexc("#fffb96"), refl * 0.75)
+    ah, _av, pr = sol_perspective(y0, k_h=5200.0)
+    mix(img, hexc("#01cdfe"), ah * 0.12 * (1 - pr))
+    _lueur(img, W / 2, y0, 2300, hexc("#fffb96"), 0.35, ry=60)
+    vignette(img, 0.22, 2.0)
+    sauver(img, "vaporwave-mer", bruit=0.5, seed=107)
+
+
+def vaporwave_damier():
+    rng = np.random.default_rng(108)
+    y0 = int(H * 0.56)
+    img = vgrad([(0, "#2b1055"), (0.22, "#6a2f94"), (0.38, "#ff71ce"), (0.56, "#ffd9ef"), (1, "#ffd9ef")])
+    _lueur(img, W * 0.18, H * 0.40, 1100, hexc("#01cdfe"), 0.32, ry=380, mode="mix")
+    _lueur(img, W * 0.86, H * 0.46, 1000, hexc("#01cdfe"), 0.26, ry=300, mode="mix")
+    _lueur(img, W * 0.5, y0, 1500, hexc("#fffb96"), 0.30, ry=300)
+    etoiles(img, rng, 200, H * 0.2, hexc("#fffb96"), 0.4)
+    y, x = np.mgrid[0:H, 0:W].astype(F32)
+    t = np.maximum(y - y0, 0.5)
+    k, c, cx = 9000.0, 4.2, W / 2
+    u, v = (x - cx) * c / t, k / t
+    du, dv = np.hypot(c / t, (x - cx) * c / t ** 2), k / t ** 2
+    s = np.clip(np.sin(np.pi * u) * np.sin(np.pi * v) / (0.5 * np.pi * (du + dv) + 1e-6), -1, 1)
+    m = 0.5 + 0.5 * s
+    sol = hexc("#3d1a78") * (1 - m)[..., None] + hexc("#ff71ce") * 0.9 * m[..., None]
+    lines = np.maximum(ligne_aa(u, du, 2.4), ligne_aa(v, dv, 2.4))
+    prof = np.clip(t / (H - y0), 0, 1)
+    mix(sol, hexc("#01cdfe"), lines * 0.45 * (0.3 + 0.7 * prof))
+    mix(sol, hexc("#ffd9ef"), (1 - prof) ** 2.2 * 0.9)
+    img = np.where((y > y0)[..., None], sol, img).astype(F32)
+    _lueur(img, W / 2, y0, 2400, hexc("#01cdfe"), 0.30, ry=70)
+    vignette(img, 0.25, 2.0)
+    sauver(img, "vaporwave-damier", bruit=0.5, seed=108)
+
+
+# 13-14. pluie-verte
+def _colonnes(rng, pas, bh, lw, lmin, lmax, nseg, ymin, ymax, pw=1.0, vmin=0.5):
+    """Colonnes verticales de petits blocs (tête vive en bas, queue qui s'éteint)."""
+    im = Image.new("RGB", (W, H), (0, 0, 0))
+    d = ImageDraw.Draw(im)
+    tete, queue = np.array([0, 255, 65], F32), np.array([0, 143, 17], F32)
+    for x0 in range(int(rng.integers(0, pas)), W, pas):
+        for _ in range(int(rng.integers(1, nseg + 1))):
+            n = int(rng.integers(lmin, lmax + 1))
+            yh = ymax - rng.random() ** pw * (ymax - ymin)
+            for kk in range(n):
+                y1 = yh - kk * bh * 1.3
+                if y1 < ymin or y1 - bh > ymax:
+                    continue
+                tt = kk / n
+                vv = (1 - tt) ** 1.5 * rng.uniform(vmin, 1)
+                col = (tete * (1 - tt) + queue * tt) * vv
+                if kk == 0:
+                    col = tete * 0.75 + 64
+                d.rectangle([x0, y1 - bh, x0 + lw, y1], fill=tuple(int(q) for q in col))
+    return np.asarray(im, F32) / 255
+
+
+def _poser_colonnes(img, lay, att=None, glow=0.8):
+    if att is not None:
+        lay = lay * att[..., None]
+    img += lay
+    add(img, hexc("#00ff41"), blur(lay[..., 1], 12) * glow)
+
+
+def pluie_verte_colonnes():
+    rng = np.random.default_rng(109)
+    img = np.zeros((H, W, 3), F32) + hexc("#000d00")
+    add(img, hexc("#008f11"), (fbm(W, H, rng, 6, 5, 0.55) ** 2) * 0.07)
+    ys, xs = _ys(), _xs()
+    att = 1 - 0.88 * np.exp(-((((xs - W / 2) / 1250) ** 2) + ((ys - H * 0.12) / 520) ** 2))
+    att = att.astype(F32)
+    _poser_colonnes(img, _colonnes(rng, 26, 9, 11, 14, 60, 2, -50, H + 50, 0.8, 0.35) * 0.55, att, 0.5)
+    _poser_colonnes(img, _colonnes(rng, 96, 30, 44, 8, 26, 2, -100, H + 100, 0.9, 0.55), att, 0.9)
+    vignette(img, 0.35, 2.0)
+    sauver(img, "pluie-verte-colonnes", bruit=0.4, seed=109)
+
+
+def pluie_verte_horizon():
+    rng = np.random.default_rng(110)
+    y0 = int(H * 0.60)
+    img = np.zeros((H, W, 3), F32) + hexc("#000d00")
+    add(img, hexc("#008f11"), (fbm(W, H, rng, 12, 5, 0.6) ** 2) * 0.10)
+    ys, xs = _ys(), _xs()
+    _lueur(img, W / 2, y0, 2600, hexc("#00ff41"), 0.40, ry=200)
+    att = 1 - 0.85 * np.exp(-((((xs - W / 2) / 1300) ** 2) + ((ys - H * 0.12) / 500) ** 2))
+    att = att.astype(F32)
+    _poser_colonnes(img, _colonnes(rng, 34, 12, 14, 10, 50, 2, 0, y0, 2.2, 0.35) * 0.65, att, 0.5)
+    _poser_colonnes(img, _colonnes(rng, 110, 34, 50, 6, 20, 1, 0, y0, 2.0, 0.55), att, 0.9)
+    hh = H - y0
+    refl = img[y0 - hh:y0][::-1].copy()
+    xi = (np.arange(W)[None, :] + (16 * np.sin(np.arange(hh)[:, None] / 7.0 + np.arange(hh)[:, None] ** 0.5)).astype(int)) % W
+    refl = refl[np.arange(hh)[:, None], xi]
+    fade = ((1 - np.arange(hh) / hh) ** 1.3)[:, None, None].astype(F32)
+    img[y0:] = img[y0:] * 0.25 + refl * 0.55 * fade
+    mix(img, hexc("#00ff41"), np.clip(1 - np.abs(ys - y0) / 2.2, 0, 1) * 0.85 * np.ones((1, W), F32))
+    vignette(img, 0.38, 2.0)
+    sauver(img, "pluie-verte-horizon", bruit=0.4, seed=110)
+
+
+# 15-16. brutaliste
+def _beton(rng, grain=1.0):
+    """Béton clair : grain fin, taches larges, joints de coffrage et trous de banche."""
+    img = np.zeros((H, W, 3), F32) + hexc("#f0f0ef")
+    g = (fbm(W, H, rng, 4, 4, 0.55) - 0.5) * 0.05 + (fbm(W, H, rng, 90, 2, 0.5) - 0.5) * 0.03
+    g += (resize(rng.random((H // 2, W // 2)).astype(F32), W, H) - 0.5) * 0.03
+    img += (g * grain)[..., None]
+    ys, xs = _ys(), _xs()
+    pw, ph = 960, 600
+    for f, per in ((xs, pw), (ys, ph)):
+        e = np.minimum(f % per, per - f % per)
+        mix(img, hexc("#8a8a88"), np.clip(1.6 - e / 1.2, 0, 1) * 0.35 * np.ones((H, W), F32))
+    for hx in (200, 760):
+        for hy in (150, 450):
+            dd = np.hypot((xs % pw) - hx, (ys % ph) - hy)
+            mix(img, hexc("#a2a2a0"), np.clip(10 - dd, 0, 1) * 0.9)
+            mix(img, hexc("#fafafa"), np.clip(1 - np.abs(dd - 11), 0, 1) * 0.5)
+    return img
+
+
+def brutaliste_beton():
+    rng = np.random.default_rng(111)
+    img = _beton(rng)
+    ys, xs = _ys(), _xs()
+    x0 = int(W * 0.74)
+    ombre = np.clip(1 - (x0 - xs) / 150, 0, 1) * (xs < x0) * (ys < H * 0.78)
+    mix(img, np.zeros(3, F32), ombre * 0.22)
+    dalle = hexc("#0a0a0a") + (fbm(W, H, rng, 30, 3, 0.5) - 0.5)[..., None] * 0.03
+    img[:int(H * 0.78), x0:] = dalle[:int(H * 0.78), x0:]
+    yb, xb = int(H * 0.80), int(W * 0.08)
+    img[yb:yb + 130, xb:int(W * 0.62)] = hexc("#000000")
+    mix(img, np.zeros(3, F32), np.clip(1 - (ys - (yb + 130)) / 120, 0, 1) * ((ys > yb + 130) * (xs > xb + 90) * (xs < W * 0.62 + 90)) * 0.2)
+    sx = int(W * 0.46)
+    img[yb - 420:yb, sx:sx + 420] = hexc("#ffe600")
+    vignette(img, 0.06, 2.0)
+    sauver(img, "brutaliste-beton", bruit=0.7, seed=111)
+
+
+def _bloc(d, x, yb, w, h, dep, cf, cs, ct):
+    dx, dy = int(dep * 0.85), int(dep * 0.45)
+    d.polygon([(x + w, yb - h), (x + w + dx, yb - h - dy), (x + w + dx, yb - dy), (x + w, yb)], fill=cs)
+    d.polygon([(x, yb - h), (x + dx, yb - h - dy), (x + w + dx, yb - h - dy), (x + w, yb - h)], fill=ct)
+    d.rectangle([x, yb - h, x + w, yb], fill=cf)
+
+
+def brutaliste_blocs():
+    rng = np.random.default_rng(112)
+    img = _beton(rng, 0.9)
+    ys = _ys()
+    sol = int(H * 0.82)
+    mix(img, hexc("#c8c8c6"), np.clip((ys - sol) / 3, 0, 1) * 0.6 * np.ones((1, W), F32))
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    blocs = [(2780, 1930, 520, 1250, 200), (3180, 1990, 540, 800, 220), (110, 1950, 560, 1000, 240),
+             (560, 2060, 420, 520, 180), (2480, 2100, 300, 380, 130)]
+    for x, yb, w, h, dep in blocs:
+        dx = int(dep * 0.85)
+        d.polygon([(x + w, yb), (x + w + dx, yb - int(dep * 0.45)), (x + w + dx + int(h * 0.55), yb - int(dep * 0.45)),
+                   (x + w + int(h * 0.55), yb)], fill=(0, 0, 0, 70))
+    gris = [("#d4d4d2", "#9c9c9a", "#ebebea"), ("#0b0b0b", "#050505", "#202020"), ("#c2c2c0", "#868684", "#dededc"),
+            ("#a9a9a7", "#6f6f6d", "#c8c8c6"), ("#dcdcda", "#a4a4a2", "#f1f1f0")]
+    for (x, yb, w, h, dep), (cf, cs, ct) in zip(blocs, gris):
+        rgb = lambda s: tuple(int(s[i:i + 2], 16) for i in (1, 3, 5)) + (255,)
+        _bloc(d, x, yb, w, h, dep, rgb(cf), rgb(cs), rgb(ct))
+    x, yb, w, h, _ = blocs[2]
+    d.rectangle([x + 60, yb - h + 140, x + w - 60, yb - h + 205], fill=(0, 0, 0, 255))
+    d.rectangle([x + 60, yb - h + 330, x + w - 60, yb - h + 395], fill=(0, 0, 0, 255))
+    x, yb, w, h, _ = blocs[0]
+    d.rectangle([x + 40, yb - h + 90, x + w - 40, yb - h + 104], fill=(255, 59, 48, 255))
+    d.rectangle([x + 60, yb - 330, x + 150, yb - 20], fill=(0, 0, 0, 255))
+    x, yb, w, h, _ = blocs[1]
+    d.rectangle([x + 110, yb - h + 80, x + 110 + 300, yb - h + 380], fill=(255, 230, 0, 255))
+    x, yb, w, h, _ = blocs[4]
+    d.rectangle([x + 40, yb - h + 50, x + w - 40, yb - h + 130], fill=(0, 0, 0, 255))
+    _compose(img, im, 0.8)
+    img += ((resize(rng.random((H // 2, W // 2)).astype(F32), W, H) - 0.5) * 0.02)[..., None]
+    vignette(img, 0.06, 2.0)
+    sauver(img, "brutaliste-blocs", bruit=0.7, seed=112)
+
+
+# 17-18. ocean
+def ocean_rayons():
+    rng = np.random.default_rng(113)
+    img = vgrad([(0, "#1e88e5"), (0.22, "#126bb0"), (0.55, "#0a2a48"), (1, "#0a1929")])
+    _lueur(img, W * 0.35, -H * 0.05, 1600, hexc("#26c6da"), 0.25, ry=900)
+    s = 4
+    yy, xx = np.mgrid[0:H // s, 0:W // s].astype(F32) * s
+    ox, oy = W * 0.62, -H * 0.30
+    th = np.arctan2(xx - ox, yy - oy)
+    for seedk, n, a_, sp in [(1, 16, 0.20, 1.3), (2, 30, 0.10, 1.0)]:
+        prof = fbm1d(1024, rng, n, 4, 0.55) * 0.5 + 0.5
+        u = np.clip((th + 0.9) / 1.8 * 1023, 0, 1023)
+        ray = _lisse(0.45, 0.9, np.interp(u, np.arange(1024), prof)) ** sp
+        ray *= np.exp(-np.hypot(xx - ox, yy - oy) / 2900)
+        add(img, hexc("#26c6da"), np.clip(resize(ray.astype(F32), W, H), 0, 1) * a_)
+    ys, xs = _ys(), _xs()
+    yc = _dune(rng, H * 0.87, 60, [0.8, 1.6, 2.7])
+    m, d = _couche(yc)
+    sable = hexc("#ffe0b2") * 0.55 + hexc("#0a2a48") * 0.45
+    ca = fbm(W, H, rng, 36, 3, 0.5)
+    caus = np.clip(1 - np.abs(ca - 0.5) / 0.035, 0, 1) ** 2
+    rid = 0.5 + 0.5 * np.sin(ys / 9.0 + 40 * fbm(W, H, rng, 6, 2, 0.5))
+    col = sable * (1 - 0.35 * np.clip(d / 500, 0, 1))[..., None] * (0.92 + 0.08 * rid[..., None])
+    mix(img, col, m)
+    add(img, hexc("#e3f2fd"), caus * m * 0.10)
+    mix(img, hexc("#0a2a48"), m * np.clip(1 - d / 500, 0, 1) * 0.0 + np.exp(-(d / 70) ** 2) * m * 0.0)
+    etoiles(img, rng, 700, H * 0.85, hexc("#e3f2fd"), 0.30)
+    vignette(img, 0.30, 2.0)
+    sauver(img, "ocean-rayons", bruit=0.5, seed=113)
+
+
+def ocean_lune():
+    rng = np.random.default_rng(114)
+    y0 = int(H * 0.46)
+    img = vgrad([(0, "#0a1929"), (0.3, "#0f2744"), (0.46, "#12324f"), (1, "#12324f")])
+    ys, xs = _ys(), _xs()
+    etoiles(img, rng, 520, H * 0.40, hexc("#e3f2fd"), 0.55)
+    cx, cy, r = W * 0.66, H * 0.26, 150
+    _lueur(img, cx, cy, 900, hexc("#1e88e5"), 0.20)
+    _lueur(img, cx, cy, 380, hexc("#e3f2fd"), 0.30)
+    dist = np.hypot(xs - cx, ys - cy)
+    cr = fbm(W, H, rng, 14, 4, 0.5)
+    disque = np.clip((r - dist) / 1.6 + 0.5, 0, 1)
+    mix(img, hexc("#e3f2fd") * (0.9 + 0.1 * cr[..., None]) * (1 - 0.10 * np.clip((xs - cx) / r, 0, 1))[..., None], disque)
+    mix(img, hexc("#12324f"), np.clip(y0 - ys + 0.5, -1, 0) * 0 + (ys > y0) * 1.0)
+    n = 7
+    for i in range(n):
+        f = i / (n - 1)
+        base = y0 + (H - y0) * (0.015 + 0.80 * f ** 1.5)
+        yc = _dune(rng, base, 8 + 46 * f, [4 + 9 * (1 - f), 9 + 14 * (1 - f)])
+        m, dd = _couche(yc)
+        c0 = hexc("#1a4f7e") * (1 - f) + hexc("#071322") * f
+        col = c0 * (1 - 0.35 * np.clip(dd / 280, 0, 1))[..., None]
+        mix(img, col, m)
+        mix(img, hexc("#1e88e5"), np.clip(1 - np.abs(dd) / (2.0 + 2.5 * f), 0, 1) * (0.30 + 0.25 * (1 - f)))
+    tm = np.maximum(ys - y0, 0)
+    prof = np.clip(tm / (H - y0), 0, 1)
+    rowr = (fbm1d(H, rng, 120, 2, 0.5) * 0.5 + 0.5).astype(F32)[:, None]
+    wob = 25 * np.sin(ys / 17.0) * prof
+    colonne = np.exp(-((xs - cx - wob) / (24 + tm * 0.16)) ** 2)
+    refl = colonne * _lisse(0.40, 0.65, rowr) * np.clip(tm / 40, 0, 1) * (tm > 0) * (1 - 0.6 * prof)
+    add(img, hexc("#e3f2fd"), refl * 0.55)
+    mix(img, hexc("#1e88e5"), np.clip(1 - np.abs(ys - y0) / 2.0, 0, 1) * 0.6 * np.ones((1, W), F32))
+    vignette(img, 0.30, 2.0)
+    sauver(img, "ocean-lune", bruit=0.5, seed=114)
+
+
+
+
 IMAGES = {
     "retro-grille": retro_grille, "retro-ambre": retro_ambre,
     "synthwave-soleil": synthwave_soleil, "synthwave-montagnes": synthwave_montagnes,
@@ -872,6 +1694,30 @@ IMAGES = {
     "apple-dunes": apple_dunes, "apple-ondes": apple_ondes,
     "catppuccin-brume": catppuccin_brume, "nord-fjord": nord_fjord,
     "dracula-nuit": dracula_nuit, "dracula-ondes": dracula_ondes, "nord-glacier": nord_glacier,
+    "rose-aube-collines": rose_aube_collines,
+    "rose-aube-papier": rose_aube_papier,
+    "everforest-sapins": everforest_sapins,
+    "everforest-sousbois": everforest_sousbois,
+    "solarized-clair-cercles": solarized_clair_cercles,
+    "solarized-clair-dunes": solarized_clair_dunes,
+    "papier-estampe": papier_estampe,
+    "papier-vide": papier_vide,
+    "clair-neutre-formes": clair_neutre_formes,
+    "clair-neutre-vagues": clair_neutre_vagues,
+    "sakura-branche": sakura_branche,
+    "sakura-lune": sakura_lune,
+    "matrice-relief": matrice_relief,
+    "matrice-cercle": matrice_cercle,
+    "cyberjaune-ville": cyberjaune_ville,
+    "cyberjaune-circuits": cyberjaune_circuits,
+    "vaporwave-mer": vaporwave_mer,
+    "vaporwave-damier": vaporwave_damier,
+    "pluie-verte-colonnes": pluie_verte_colonnes,
+    "pluie-verte-horizon": pluie_verte_horizon,
+    "brutaliste-beton": brutaliste_beton,
+    "brutaliste-blocs": brutaliste_blocs,
+    "ocean-rayons": ocean_rayons,
+    "ocean-lune": ocean_lune,
 }
 
 if __name__ == "__main__":
