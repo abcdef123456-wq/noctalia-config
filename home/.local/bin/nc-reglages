@@ -56,7 +56,7 @@ import unicodedata
 
 try:
     import tomllib
-except ImportError:          # Python < 3.11 : le paquet tomli (même interface), sinon un repli simple (voir fin_barre)
+except ImportError:          # Python < 3.11 : le paquet tomli (même interface), sinon un repli simple (voir barre_config)
     try:
         import tomli as tomllib
     except ImportError:
@@ -2384,19 +2384,42 @@ def _bool(v):
     return isinstance(v, bool)
 
 
-def _couleur(v):    # rôle en snake_case ou #RGB, #RGBA, #RRGGBB, #RRGGBBAA (docs.noctalia.dev/noctalia/bar/)
-    return isinstance(v, str) and re.fullmatch(r"[a-z][a-z_]{0,31}|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", v) is not None
+# Rôles de couleur que Noctalia v5.3.0 connaît : un rôle inconnu rend TOUTE la config invalide (« noctalia config validate »
+# refuse surface_container, outline_variant, background… pourtant dans la doc)
+_ROLES = {"primary", "on_primary", "secondary", "on_secondary", "tertiary", "on_tertiary", "error", "on_error", "surface",
+          "on_surface", "surface_variant", "on_surface_variant", "outline", "shadow", "hover", "on_hover"}
 
 
-# Widgets de la barre : ceux de config.toml (+ les pilules nc/vpn et nc/garmin que nc-reglages ajoute lui-même)
+def _couleur(v):    # rôle connu ou #RGB, #RGBA, #RRGGBB, #RRGGBBAA (docs.noctalia.dev/noctalia/bar/)
+    return isinstance(v, str) and (v in _ROLES or re.fullmatch(r"#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", v) is not None)
+
+
+# Widgets de config.toml quand le config.toml installé est illisible (essais, avant l'installation) : ceux du config.toml
+# du dépôt (vérifié par tests/test_barre_composition.py)
 _WIDGETS_BARRE = {"logo", "workspaces", "nc/fenetres:titre", "nc/ile:pilule", "group:sys", "group:status", "tray",
                   "power_profile", "notifications", "cpu", "temp", "ram", "network",
-                  "bluetooth", "volume", "nc/batterie:batterie"}
+                  "bluetooth", "volume", "nc/batterie:batterie", "clock", "media", "active_window"}
+_LISTES = ("start", "center", "end")
+_RE_INSTANCE = re.compile(r"t-[a-z0-9_-]{1,22}")      # [widget.t-<nom>] : jamais le nom d'une instance de config.toml
+_RE_ID = re.compile(r"[a-z0-9_-]{1,16}")              # seconde barre [bar.<nom>] et id d'un groupe de pastilles
 
 
-def _widgets(v):
-    return (isinstance(v, list) and len(v) <= 24 and all(isinstance(w, str) for w in v)
-            and all(w in _WIDGETS_BARRE or w in (PILULE_VPN, PILULE_GARMIN) for w in v))
+def _texte_sur(v):
+    """1 à 32 caractères, sans contrôle ni sens d'écriture (catégories C*), sans séparateur de ligne ou de paragraphe (Zl,
+    Zp), sans « < » ni « & » : Noctalia importe pango_layout_set_markup (strings /usr/bin/noctalia) et rien ne prouve
+    que le widget text affiche du texte brut."""
+    return (isinstance(v, str) and 1 <= len(v) <= 32 and "<" not in v and "&" not in v
+            and not any(unicodedata.category(c)[0] == "C" or unicodedata.category(c) in ("Zl", "Zp") for c in v))
+
+
+# Format de clock (docs.noctalia.dev/noctalia/bar/widgets/clock/ : std::format, {:%H:%M}) : une spécification fausse
+# lèverait une erreur dans Noctalia, donc du texte sans accolade ni « % », et des {:…} qui commencent par une %<lettre>
+# connue (grammaire chrono-spec de C++), suivie d'autres %<lettre> et de texte
+_RE_HEURE = re.compile(r"(?:[^{}%]|\{:%[aAbBdeHIMSpyYmjuwRTDFxX%](?:%[aAbBdeHIMSpyYmjuwRTDFxX%]|[^{}%])*\})+")
+
+
+def _heure(v):
+    return _texte_sur(v) and _RE_HEURE.fullmatch(v) is not None
 
 
 # Liste blanche de la table « noctalia » d'un thème : rien d'autre (ni compositor_blur, ni flou, ni verrou, ni fond).
@@ -2407,8 +2430,7 @@ _NOCT_PERMIS = {
         "position": _ch("top", "bottom", "left", "right"), "thickness": _nb(16, 64), "margin_edge": _nb(0, 40),
         "margin_ends": _nb(0, 40), "concave_edge_corners": _bool, "background_opacity": _nb(0, 1), "shadow": _bool,
         "capsule": _bool, "capsule_fill": _couleur, "capsule_opacity": _nb(0, 1), "capsule_thickness": _nb(0.2, 1),
-        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000),
-        "start": _widgets, "center": _widgets, "end": _widgets},
+        "capsule_padding": _nb(0, 48), "widget_spacing": _nb(0, 40), "font_weight": _ent(100, 1000)},
     "widget.workspaces": {
         "style": _ch("regular", "minimal", "focus_hint"), "label_source": _ch("id", "name"), "show_labels": _bool,
         "labels_only_when_occupied": _bool, "max_label_chars": _ent(1, 8), "pill_scale": _nb(0.2, 4),
@@ -2421,6 +2443,136 @@ _NOCT_PERMIS = {
         "show_dots": _bool},
     "theme": {"pure_black_dark": _bool},
 }
+
+# Instances qu'un thème déclare ([widget.t-<nom>]) : types et clés fermés. Types : settings.widgets.types.* de
+# /usr/bin/noctalia, écrits comme Noctalia les reconnaît (« noctalia config validate » refuse active-window, power-profile
+# et keyboard-layout). Aucun type qui lance une commande ou une action système (custom_button, control-center, session,
+# screenshot, wallpaper, clipboard, settings), ni notifications (posé à l'installation). Clés : docs.noctalia.dev/noctalia/
+# bar/widgets/<type>/, gardées seulement si « noctalia config validate » (v5.3.0) les connaît, avec ses bornes ; jamais
+# de clé qui lit un fichier ou lance un programme (taskbar.pinned, sysmon.path, interface, custom_image, glyph), ni actions.
+_TYPES_THEME = {
+    "clock": {"format": _heure, "vertical_format": _heure},
+    "text": {"text": _texte_sur},
+    "spacer": {"length": _nb(0, 400)},
+    "taskbar": {
+        "show_running": _bool, "group_by_workspace": _bool, "show_all_outputs": _bool,
+        "only_active_workspace": _bool, "icon_scale": _nb(0.1, 2),
+        "item_spacing": _ent(0, 48), "show_window_title": _bool, "window_title_max_width": _ent(10, 200),
+        "show_workspace_label": _bool, "minimal": _bool,
+        "workspace_label_placement": _ch("corner", "centered", "inside"), "hide_empty_workspaces": _bool,
+        "workspace_group_capsule": _bool, "workspace_group_content": _ch("icons", "count", "dots"),
+        "group_single_icon_per_app": _bool, "show_active_indicator": _bool, "active_indicator_color": _couleur,
+        "focused_color": _couleur, "occupied_color": _couleur, "empty_color": _couleur, "urgent_color": _couleur},
+    "sysmon": {
+        "stat": _ch("cpu_usage", "cpu_temp", "ram_used", "disk_used_pct", "disk_used", "disk_free_pct", "disk_free",
+                    "net_rx", "net_tx"),
+        "visualization": _ch("gauge", "graph", "none"), "show_value": _bool, "label_show_units": _bool,
+        "show_glyph": _bool, "glyph_position": _ch("before", "after")},
+    "media": {
+        "album_art_only": _bool, "rotate_album_art": _bool, "hide_album_art": _bool, "hide_artist": _bool,
+        "artist_first": _bool, "min_length": _nb(0, 800), "max_length": _nb(40, 800), "art_size": _nb(8, 96),
+        "title_scroll": _ch("none", "always", "on_hover"), "hide_when_no_media": _bool, "hide_when_idle": _bool},
+    "active_window": {
+        "min_length": _nb(0, 800), "max_length": _nb(40, 800), "icon_size": _nb(8, 64),
+        "title_scroll": _ch("none", "always", "on_hover"), "display": _ch("icon_and_text", "icon_only", "text_only")},
+    "workspaces": _NOCT_PERMIS["widget.workspaces"],
+}
+_TYPES_THEME.update((t, {}) for t in ("tray", "network", "bluetooth", "volume", "battery", "brightness", "weather",
+                                      "power_profile", "launcher", "keyboard_layout", "nightlight", "caffeine", "privacy"))
+
+
+def _barre_installee():
+    """(noms des widgets, ids des groupes, position) de [bar.default] du config.toml installé ; ceux du dépôt s'il est illisible."""
+    try:
+        c = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))
+    except (OSError, KeyError, ValueError):
+        return ({w for w in _WIDGETS_BARRE if not w.startswith("group:")},
+                {w[6:] for w in _WIDGETS_BARRE if w.startswith("group:")}, "top")
+    noms = set(c["widgets"]) | {w for k in _LISTES for w in c[k]} | {m for g in c["groupes"] for m in g.get("members", [])}
+    return ({w for w in noms if isinstance(w, str) and not w.startswith("group:")},
+            {g["id"] for g in c["groupes"] if isinstance(g.get("id"), str)}, c["position"])
+
+
+def _verifier_noctalia(noct, refus):
+    """Table « noctalia » d'un thème vérifiée. Rend une copie où les widgets que nc-reglages place lui-même (_CONDITIONNELS)
+    sont retirés des listes et des groupes, et où la seconde barre a ses trois listes (sans elles, Noctalia y mettrait les
+    siennes : session, presse-papier…)."""
+    noms_cfg, groupes_cfg, pos_cfg = _barre_installee()
+    instances = set()
+    barres = []
+    res = {}
+
+    def non(t, k):
+        refus(f"« noctalia.{t}.{k} » : clé inconnue ou valeur refusée", f"\"noctalia.{t}.{k}\": unknown key or refused value")
+
+    for t, kv in noct.items():
+        if t in _NOCT_PERMIS and not t.startswith("bar."):
+            for k, v in kv.items():
+                if k not in _NOCT_PERMIS[t] or not _NOCT_PERMIS[t][k](v):
+                    non(t, k)
+            res[t] = dict(kv)
+        elif t.startswith("widget.") and _RE_INSTANCE.fullmatch(t[7:]) and t[7:] not in noms_cfg:
+            ty = kv.get("type")
+            if not isinstance(ty, str) or ty not in _TYPES_THEME:
+                refus(f"« noctalia.{t}.type » : type absent ou non permis ({', '.join(_TYPES_THEME)})",
+                      f"\"noctalia.{t}.type\": missing or not allowed type ({', '.join(_TYPES_THEME)})")
+            for k, v in kv.items():
+                if k != "type" and (k not in _TYPES_THEME[ty] or not _TYPES_THEME[ty][k](v)):
+                    non(t, k)
+            instances.add(t[7:])
+            res[t] = dict(kv)
+        elif t == "bar.default" or t.startswith("bar.") and _RE_ID.fullmatch(t[4:]):
+            barres.append(t)
+        else:
+            refus(f"« noctalia.{t} » : table non permise (bar.default, une seconde barre bar.<nom>, widget.t-<nom>, "
+                  f"{', '.join(x for x in _NOCT_PERMIS if x != 'bar.default')})",
+                  f"\"noctalia.{t}\": table not allowed (bar.default, one second bar bar.<name>, widget.t-<name>, "
+                  f"{', '.join(x for x in _NOCT_PERMIS if x != 'bar.default')})")
+    if len([b for b in barres if b != "bar.default"]) > 1:
+        refus("« noctalia » : une seule seconde barre", "\"noctalia\": only one second bar")
+    widgets = noms_cfg | instances
+    for t in barres:
+        kv = noct[t]
+        for k, v in kv.items():
+            if k not in _LISTES + ("capsule_group",) and (k not in _NOCT_PERMIS["bar.default"] or not _NOCT_PERMIS["bar.default"][k](v)):
+                non(t, k)
+        groupes = set(groupes_cfg) if t == "bar.default" else set()      # les groupes de Noctalia sont propres à chaque barre
+        b = {k: v for k, v in kv.items() if k not in _LISTES + ("capsule_group",)}
+        if "capsule_group" in kv:
+            cg = kv["capsule_group"]
+            if not isinstance(cg, list) or not 1 <= len(cg) <= 6:
+                non(t, "capsule_group")
+            b["capsule_group"] = []
+            for g in cg:
+                if (not isinstance(g, dict) or set(g) != {"id", "members"} or not isinstance(g["id"], str)
+                        or not _RE_ID.fullmatch(g["id"]) or g["id"] in groupes or not isinstance(g["members"], list)
+                        or not 1 <= len(g["members"]) <= 24
+                        or not all(isinstance(m, str) and (m in widgets or m in _CONDITIONNELS) for m in g["members"])):
+                    non(t, "capsule_group")
+                membres = [m for m in g["members"] if m not in _CONDITIONNELS]
+                if not membres:
+                    non(t, "capsule_group")
+                groupes.add(g["id"])
+                b["capsule_group"].append({"id": g["id"], "members": membres})
+        permis = widgets | {"group:" + g for g in groupes}
+        for k in _LISTES:
+            if k in kv:
+                v = kv[k]
+                if (not isinstance(v, list) or len(v) > 24
+                        or not all(isinstance(w, str) and (w in permis or w in _CONDITIONNELS) for w in v)):
+                    non(t, k)
+                b[k] = [w for w in v if w not in _CONDITIONNELS]
+            elif t != "bar.default":
+                b[k] = []
+        if t != "bar.default":
+            premiere = noct.get("bar.default", {}).get("position", pos_cfg)
+            if "position" not in kv or kv["position"] == premiere:
+                refus(f"« noctalia.{t}.position » : un autre bord que la première barre ({premiere})",
+                      f"\"noctalia.{t}.position\": another edge than the first bar ({premiere})")
+        res[t] = b
+    return {t: res[t] for t in noct}
+
+
 
 
 def _verifier_theme(nom, d):
@@ -2480,14 +2632,9 @@ def _verifier_theme(nom, d):
         refus("« noctalia » : une table par clé de table Noctalia", "\"noctalia\": one table per Noctalia table")
     for t, kv in noct.items():
         texte(t, "noctalia")
-        if t not in _NOCT_PERMIS:
-            refus(f"« noctalia.{t} » : table non permise ({', '.join(_NOCT_PERMIS)})",
-                  f"\"noctalia.{t}\": table not allowed ({', '.join(_NOCT_PERMIS)})")
-        for k, v in kv.items():
+        for k in kv:
             texte(k, f"noctalia.{t}")
-            if k not in _NOCT_PERMIS[t] or not _NOCT_PERMIS[t][k](v):
-                refus(f"« noctalia.{t}.{k} » : clé inconnue ou valeur refusée",
-                      f"\"noctalia.{t}.{k}\": unknown key or refused value")
+    noct = _verifier_noctalia(noct, refus)
     sync = d.get("theme_sync", {"bordure": "degrade", "ombre": "coloree"})
     objet(sync, "theme_sync", {"bordure", "ombre"}, ("bordure", "ombre"))
     if sync["bordure"] not in ("degrade", "gris") or sync["ombre"] not in ("coloree", "noire"):
@@ -2517,6 +2664,10 @@ def charger_themes():
         cle = (dossier, [(f, os.stat(os.path.join(dossier, f)).st_mtime_ns) for f in noms])
     except OSError:
         return {}, {}
+    try:            # les noms permis dans la barre d'un thème viennent de config.toml
+        cle += (os.stat(os.path.join(NOCTALIA_DIR, "config.toml")).st_mtime_ns,)
+    except OSError:
+        pass
     if _themes_cache[0] == cle:
         return _themes_cache[1]
     ok, mauvais = {}, {}
@@ -2929,24 +3080,77 @@ def appliquer_terminal(vals):
     subprocess.run(["pkill", "-USR1", "-x", "kitty"], capture_output=True)      # kitty relit sa config
 
 
-def fin_barre(chemin, cle="end"):
-    """La liste « end » (ou « start », « center » : cle) de [bar.default] dans config.toml. Avec tomllib (Python 3.11+)
-    ou tomli : lecture complète ; sans (Python < 3.11 sans tomli) : repli qui lit seulement cette liste de textes entre
-    guillemets (KeyError si absente)."""
+def barre_config(chemin):
+    """La barre de config.toml : listes start, center et end de [bar.default], sa position, ses groupes de pastilles
+    ([[bar.default.capsule_group]]) et les noms des tables [widget.<nom>]. Avec tomllib (Python 3.11+) ou tomli :
+    lecture complète ; sans (Python < 3.11 sans tomli) : repli qui lit ces listes de textes entre guillemets et, pour
+    les groupes, seulement id et members. KeyError si [bar.default] ou sa liste « end » manque."""
     if tomllib:
         with open(chemin, "rb") as f:
-            return tomllib.load(f)["bar"]["default"][cle]
+            d = tomllib.load(f)
+        b = d["bar"]["default"]
+        return {"start": b.get("start", []), "center": b.get("center", []), "end": b["end"],
+                "position": b.get("position", "top"), "groupes": b.get("capsule_group", []), "widgets": set(d.get("widget", {}))}
     with open(chemin, encoding="utf-8") as f:
         texte = f.read()
+
+    def liste(corps, cle):
+        m = re.search(r'^' + cle + r'\s*=\s*\[(.*?)\]\s*(?:#.*)?$', corps, re.M | re.S)
+        return m and re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
+
     sec = re.search(r'^\[bar\.default\][ \t]*\n(.*?)(?=^\[|\Z)', texte, re.M | re.S)
-    m = sec and re.search(r'^' + cle + r'\s*=\s*\[(.*?)\]\s*(?:#.*)?$', sec.group(1), re.M | re.S)
-    if not m:
-        raise KeyError(cle)
-    return re.findall(r'"([^"\n]*)"', re.sub(r'#[^\n]*', '', m.group(1)))
+    fin = sec and liste(sec.group(1), "end")
+    if fin is None:
+        raise KeyError("end")
+    pos = re.search(r'^position\s*=\s*"([^"\n]*)"', sec.group(1), re.M)
+    groupes = []
+    for g in re.findall(r'^\[\[bar\.default\.capsule_group\]\][ \t]*\n(.*?)(?=^\[|\Z)', texte, re.M | re.S):
+        i = re.search(r'^id\s*=\s*"([^"\n]*)"', g, re.M)
+        if i:
+            groupes.append({"id": i.group(1), "members": liste(g, "members") or []})
+    return {"start": liste(sec.group(1), "start") or [], "center": liste(sec.group(1), "center") or [], "end": fin,
+            "position": pos.group(1) if pos else "top", "groupes": groupes,
+            "widgets": {a or b for a, b in re.findall(r'^\[widget\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))', texte, re.M)}}
+
+
+def composer_barre(cfg, compo, vals):
+    """Fonction pure. Les listes start, center et end de [bar.default] : celles du thème (compo, déjà sans les widgets
+    conditionnels), sinon celles de config.toml (cfg) ; puis ce que l'installation a posé et les interrupteurs."""
+    l = {k: list(compo.get(k, cfg[k])) for k in _LISTES}
+
+    def ou(w):
+        return next((k for k in ("end", "start", "center") if w in l[k]), None)
+
+    installe = {w for k in _LISTES for w in cfg[k]}
+    # Posés à l'installation et absents de la liste du thème : remis à leur place de config.toml
+    if "nc/ile:pilule" in installe and not ou("nc/ile:pilule"):
+        l["center"].insert(0, "nc/ile:pilule")
+    if "group:sys" in installe and not ou("group:sys"):
+        l["end"].insert(0, "group:sys")
+    if "notifications" in installe and not ou("notifications"):
+        k = ou("group:status") or "end"
+        l[k].insert(l[k].index("group:status") + 1 if "group:status" in l[k] else len(l[k]), "notifications")
+    if vals.get("BARRE_SYSTEME", "oui") != "oui":
+        for k in _LISTES:
+            l[k] = [w for w in l[k] if w != "group:sys"]
+
+    def placer(w):      # juste avant le profil d'énergie, sinon avant la pastille d'état, sinon à la fin de « end »
+        k = ou("power_profile") or ou("group:status")
+        i = l[k].index("power_profile" if "power_profile" in l[k] else "group:status") if k else len(l["end"])
+        l[k or "end"].insert(i, w)
+
+    if vals.get("VPN_PILULE_BARRE") == "oui" and not ou(PILULE_VPN):
+        placer(PILULE_VPN)
+    # Pastille Garmin (plugin nc/garmin) : seulement si la santé Garmin ET sa pastille sont à oui, retirée sinon
+    for k in _LISTES:
+        l[k] = [w for w in l[k] if w != PILULE_GARMIN]
+    if vals.get("GARMIN_ACTIF") == "oui" and vals.get("GARMIN_PILULE_BARRE") == "oui":
+        placer(PILULE_GARMIN)
+    return l
 
 
 def plugins_actifs(chemin):
-    """La liste « enabled » de [plugins] dans config.toml (même motif que fin_barre) ; KeyError si absente."""
+    """La liste « enabled » de [plugins] dans config.toml (même motif que barre_config) ; KeyError si absente."""
     if tomllib:
         with open(chemin, "rb") as f:
             return tomllib.load(f)["plugins"]["enabled"]
@@ -2993,6 +3197,11 @@ def toml_val(v):
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return repr(v)
+    if isinstance(v, dict):         # table en ligne (groupes de pastilles : capsule_group = [{ id = "a", members = [...] }])
+        return "{ " + ", ".join(f"{k if re.fullmatch(r'[A-Za-z0-9_-]+', k) else json.dumps(k)} = {toml_val(x)}"
+                                for k, x in v.items()) + " }"
+    if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+        return "[" + ", ".join(toml_val(x) for x in v) + "]"
     return json.dumps(v, ensure_ascii=False)
 
 
@@ -3003,6 +3212,9 @@ def toml_val(v):
 # Noctalia : clic droit sur l'icône).
 PILULE_VPN = "nc/vpn:vpn"
 PILULE_GARMIN = "nc/garmin:garmin"
+# Widgets que nc-reglages place lui-même : interrupteurs de la personne (BARRE_SYSTEME, pilules VPN et Garmin) et ce que
+# l'installation a mis dans config.toml (notifications, île en plugin). Un thème ne les force ni ne les retire.
+_CONDITIONNELS = ("group:sys", PILULE_VPN, PILULE_GARMIN, "notifications", "nc/ile:pilule")
 TRAY_VPN = ("nordvpn-tray-white", "nordvpn-tray-black", "nordvpn-tray", "nordvpn", "nordvpn-gui",
             "protonvpn-app", "proton-vpn-app", "protonvpn", "Proton VPN", "ProtonVPN",
             "mullvad-vpn", "Mullvad VPN", "mullvad-gui")
@@ -3041,11 +3253,12 @@ def appliquer_noctalia(vals):
     # Retouches de Noctalia du thème (oled : fonds noirs purs ; apple : barre de menus façon Mac, une bande translucide
     # sur toute la largeur, sans pastilles, le dock étant déjà en verre dépoli) ; un thème refusé n'en donne aucune
     try:
-        for table, kv in theme_choisi(style_vals().get("STYLE", "noctalia"))["noctalia"].items():
-            for cle, v in kv.items():
-                tables.setdefault(table, {}).setdefault(cle, v)     # le thème complète : ce qui est déjà réglé gagne
+        noct_theme = theme_choisi(style_vals().get("STYLE", "noctalia"))["noctalia"]
     except ValueError:
-        pass
+        noct_theme = {}
+    for table, kv in noct_theme.items():
+        for cle, v in kv.items():
+            tables.setdefault(table, {}).setdefault(cle, v)     # le thème complète : ce qui est déjà réglé gagne
     TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
     for cle, table in (("ANIM_VERROU", "lockscreen"), ("ANIM_FOND", "wallpaper")):
         if cle in vals:
@@ -3055,24 +3268,27 @@ def appliquer_noctalia(vals):
             mettre(table, "transition_duration", nombre(vals, cle + "_DUREE", True))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", nombre(vals, "BARRE_OPACITE") / 100)
-    if "BARRE_SYSTEME" in vals or vals.get("VPN_PILULE_BARRE") == "oui" or "GARMIN_ACTIF" in vals or "GARMIN_PILULE_BARRE" in vals:
-        # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système, et avec la pilule VPN
-        # (plugin nc/vpn) juste avant le profil d'énergie si elle est demandée
+    barre_theme = noct_theme.get("bar.default", {})
+    compo = {k: barre_theme[k] for k in _LISTES if k in barre_theme}
+    interrupteurs = ("BARRE_SYSTEME" in vals or vals.get("VPN_PILULE_BARRE") == "oui" or "GARMIN_ACTIF" in vals
+                     or "GARMIN_PILULE_BARRE" in vals)
+    if interrupteurs or compo or "capsule_group" in barre_theme or any(t.startswith("bar.") for t in noct_theme):
         try:
-            fin = fin_barre(os.path.join(NOCTALIA_DIR, "config.toml"))
-            if "BARRE_SYSTEME" in vals and not oui("BARRE_SYSTEME"):
-                fin = [w for w in fin if w != "group:sys"]
-            if vals.get("VPN_PILULE_BARRE") == "oui" and PILULE_VPN not in fin:
-                i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
-                fin = fin[:i] + [PILULE_VPN] + fin[i:]
-            # Pastille Garmin (plugin nc/garmin) : seulement si la santé Garmin ET sa pastille sont à oui, retirée sinon
-            fin = [w for w in fin if w != PILULE_GARMIN]
-            if vals.get("GARMIN_ACTIF") == "oui" and vals.get("GARMIN_PILULE_BARRE") == "oui":
-                i = fin.index("power_profile") if "power_profile" in fin else (fin.index("group:status") if "group:status" in fin else len(fin))
-                fin = fin[:i] + [PILULE_GARMIN] + fin[i:]
-            mettre("bar.default", "end", fin)
+            cfg = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))
+            listes = composer_barre(cfg, compo, vals)
+            for k in _LISTES:       # sans thème qui compose : seulement « end », comme avant
+                if k in compo or listes[k] != cfg[k] or k == "end" and interrupteurs:
+                    mettre("bar.default", k, listes[k])
+            if "capsule_group" in barre_theme:
+                # Noctalia remplace la liste entière (noctalia config export) : les groupes de config.toml d'abord
+                mettre("bar.default", "capsule_group", list(cfg["groupes"]) + barre_theme["capsule_group"])
+            premiere = tables.get("bar.default", {}).get("position", cfg["position"])
+            for t in [t for t in tables if t.startswith("bar.") and t != "bar.default"]:
+                if tables[t].get("position") == premiere:       # jamais deux barres sur le même bord
+                    del tables[t]
         except (OSError, KeyError, ValueError):
-            pass
+            for k in _LISTES + ("capsule_group",):      # config.toml illisible : sa barre reste, sans la composition du thème
+                tables.get("bar.default", {}).pop(k, None)
     if vals.get("VPN_MASQUER_TRAY") == "oui":
         # Les icônes des clients VPN qui font doublon avec la pilule : liste « hidden » du widget tray (rien n'est désinstallé)
         mettre("widget.tray", "hidden", list(TRAY_VPN))
@@ -3114,7 +3330,7 @@ def appliquer_noctalia(vals):
     if barre.get("position") in ("left", "right"):
         for cote in ("start", "center", "end"):
             try:
-                liste = barre[cote] if cote in barre else fin_barre(os.path.join(NOCTALIA_DIR, "config.toml"), cote)
+                liste = barre[cote] if cote in barre else barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))[cote]
             except (OSError, KeyError, ValueError):
                 continue
             garde = [w for w in liste if w not in ("nc/fenetres:titre", "active_window", "group:sys", "cpu", "temp", "ram")]

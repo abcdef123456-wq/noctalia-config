@@ -78,10 +78,31 @@ class TableNoctalia(tt.Base):
                          {"bar.default": {"thickness": True}},
                          {"bar.default": {"position": "milieu"}},
                          {"bar.default": {"start": ["widget_inventé"]}},
-                         {"dock": {"position": "top"}}):
+                         {"dock": {"position": "top"}},
+                         {"widget.t-a": {"type": "custom_button"}},
+                         {"widget.t-a": {"type": "clock", "actions": {"left": "exec x"}}},
+                         {"bar.default.dead_zone.actions": {"right": "exec x"}},
+                         {"bar.bas": {"position": "top"}},
+                         {"bar.bas": {"position": "bottom"}, "bar.haut": {"position": "left"}}):
             with self.subTest(noctalia=noctalia):
                 r = self.avec_theme(noctalia)
                 self.assertNotEqual(r.returncode, 0, r.stdout)
+
+    # --- A9 : une barre composée par le thème, par la commande
+    def test_composition_par_la_commande(self):
+        from tests import test_barre_composition as tb
+        r = self.avec_theme(tb.COMPOSE)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        t = self.toml.read_text(encoding="utf-8")
+        self.assertNotIn("start =", t.split("[bar.default]")[1].split("\n\n")[0], "sans config.toml lisible : la barre de config.toml reste, sans la composition")
+        self.assertIn("[bar.bas]", t)
+        (self.home / ".config/noctalia/config.toml").write_text(tb.config_installee("plugin"), encoding="utf-8")
+        r = self.avec_theme(tb.COMPOSE)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        t = self.toml.read_text(encoding="utf-8")
+        self.assertIn('start = ["logo", "t-texte"]\ncenter = ["nc/ile:pilule", "t-heure"]\n'
+                      'end = ["group:sys", "tray", "group:t-etat", "notifications"]\n', t)
+        self.assertIn('[widget.t-heure]\ntype = "clock"\n', t)
 
     # --- apple et oled : mêmes octets qu'avant
     def test_apple_identique(self):

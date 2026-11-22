@@ -70,3 +70,28 @@ class Retour(tt.Base):
         self.assertIn("thickness = 40", toml)             # le thème fabriqué est bien appliqué
         self.assertIn("radius = 20", toml)
         self.aller_retour("zzz-essai")
+
+    def test_theme_fabrique_qui_compose_sa_barre(self):
+        """A9 : listes start, center et end, instances t-heure et t-texte, un groupe, une seconde barre bar.bas ; avec ou sans
+        BARRE_SYSTEME=non et la pilule VPN de la personne. Le retour à noctalia remet zy-reglages.toml à l'octet, sans bar.bas."""
+        from tests import test_barre_composition as tb
+        conf = self.home / ".config/noctalia/config.toml"
+        conf.write_text(tb.config_installee("plugin"), encoding="utf-8")
+        self.ecrire_theme("zzz-barre", noctalia=tb.COMPOSE)
+        toml = self.home / ".config/noctalia/zy-reglages.toml"
+        for reglages in ({}, {"BARRE_SYSTEME": "non", "VPN_PILULE_BARRE": "oui"}):
+            with self.subTest(reglages=reglages):
+                for k, v in reglages.items():
+                    self.assertEqual(self.nc("set", k, v).returncode, 0)
+                self.nc("set", "STYLE", "noctalia")
+                self.__dict__.pop("_reference", None)       # réglages changés : nouvelle référence « noctalia »
+                avant = toml.read_bytes() if toml.exists() else b""
+                r = self.nc("set", "STYLE", "zzz-barre")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                t = toml.read_text(encoding="utf-8")
+                self.assertIn("[bar.bas]", t)                     # le thème fabriqué est bien appliqué
+                self.assertIn('"t-heure"', t)
+                self.assertEqual("nc/vpn:vpn" in t, bool(reglages))
+                self.aller_retour("zzz-barre")
+                self.assertEqual(toml.read_bytes() if toml.exists() else b"", avant)
+                self.assertNotIn("[bar.bas]", toml.read_text(encoding="utf-8") if toml.exists() else "")

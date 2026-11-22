@@ -40,13 +40,20 @@
     "bar.default": {
       "position": "left",
       "margin_edge": 0,
-      "thickness": 44,
-      "background_opacity": 0.9
+      "thickness": 52,
+      "background_opacity": 0.9,
+      "capsule_fill": "surface_variant",
+      "start": ["logo", "workspaces"],
+      "center": [],
+      "end": ["tray", "group:status", "t-heure"]
     },
     "widget.workspaces": {
       "style": "regular",
-      "show_labels": true,
-      "label_source": "id"
+      "show_labels": false
+    },
+    "widget.t-heure": {
+      "type": "clock",
+      "format": "{:%H:%M}"
     }
   },
   "theme_sync": {

@@ -367,17 +367,19 @@ class EcrituresEtToml(unittest.TestCase):
         for nom in ("VEILLE_OUT", "VEILLE_UNITE", "KITTY_OUT", "NOCTALIA_OUT", "STYLE_FICHIER", "STYLE_AVANT"):
             self.assertNotIn(f'open({nom}, "w"', src, nom)
 
-    def test_fin_barre_sans_tomllib(self):
+    def test_barre_config_sans_tomllib(self):
         conf = self.home / "config.toml"
-        conf.write_text('[bar.default]\nstart = ["a", "b"]\nend = [\n  "tray",  # une note\n  "group:sys",\n  "clock",\n]\n'
-                        '[autre]\nend = ["x"]\n')
-        self.assertEqual(self.nc.fin_barre(str(conf)), ["tray", "group:sys", "clock"] if self.nc.tomllib is None
-                         else self.nc.fin_barre(str(conf)))
+        conf.write_text('[bar.default]\nposition = "left"\nstart = ["a", "b"]\nend = [\n  "tray",  # une note\n  "group:sys",\n'
+                        '  "clock",\n]\n[[bar.default.capsule_group]]\nid = "sys"\nmembers = ["cpu", "ram"]\n'
+                        '[widget.cpu]\ntype = "sysmon"\n[widget."nc/ile:pilule"]\ncapsule = false\n[autre]\nend = ["x"]\n')
+        attendu = {"start": ["a", "b"], "center": [], "end": ["tray", "group:sys", "clock"], "position": "left",
+                   "groupes": [{"id": "sys", "members": ["cpu", "ram"]}], "widgets": {"cpu", "nc/ile:pilule"}}
+        self.assertEqual(self.nc.barre_config(str(conf)), attendu)
         with patch.object(self.nc, "tomllib", None):
-            self.assertEqual(self.nc.fin_barre(str(conf)), ["tray", "group:sys", "clock"])
+            self.assertEqual(self.nc.barre_config(str(conf)), attendu)
             conf.write_text("[autre]\nend = []\n")
             with self.assertRaises(KeyError):
-                self.nc.fin_barre(str(conf))
+                self.nc.barre_config(str(conf))
 
     def test_repli_tomli_dans_le_source(self):
         src = NC_REGLAGES.read_text()
