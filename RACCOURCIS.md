@@ -53,7 +53,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `flèches` | Aller à la fenêtre voisine |
 | `Super` + `Maj` + `flèches` | Déplacer la fenêtre |
 | `Super` + `Ctrl` + `flèches` | Agrandir / rétrécir la fenêtre |
-| `Super` + `Ctrl` + `P` | Épingler sur tous les bureaux |
+| `Super` + `Ctrl` + `P` | Épingler : la fenêtre reste au-dessus, sur tous les bureaux |
 | `Super` + `Ctrl` + `S` | Taille : 50 %, 70 %, 90 % de l'écran |
 | `Super` + `Ctrl` + `C` | Recentrer la fenêtre flottante |
 | `Super` + `G` | Grouper les fenêtres en onglets |

@@ -262,7 +262,7 @@ touche(SUPER .. " + CTRL + code:33", function()
         hl.dispatch(hl.dsp.window.float({ action = "enable" }))
     end
     hl.dispatch(hl.dsp.window.pin({ action = "toggle" }))
-end, trad("Fenêtres|Épingler sur tous les bureaux", "Pin on all desktops"))
+end, trad("Fenêtres|Épingler : la fenêtre reste au-dessus, sur tous les bureaux", "Pin: the window stays on top, on all desktops"))
 
 -- Taille : flottante centrée à 50 %, puis 70 %, puis 90 % de l'écran
 touche(SUPER .. " + CTRL + code:39", function()
