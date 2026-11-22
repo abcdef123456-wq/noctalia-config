@@ -280,6 +280,9 @@ Item {
     property string heureZone: ""
     property string heureSortie: ""
     readonly property string heureVille: Saisies.villeHeure(q)
+    readonly property bool horloges: Saisies.demandeHorloges(q)
+    property string horlogesCle: ""
+    property var horlogesSorties: []
     property var resultats: []
     // Aide sur la config : l'index (nc-aide-config index, refait seulement si une source a changé), et la réponse affichée
     readonly property bool aideActive: Reglages.val("SPOTLIGHT_AIDE", "oui") !== "non"
@@ -712,6 +715,17 @@ Item {
         onLoaded: { r.liensWeb = Saisies.analyseLiens(text()); if (r.q !== "") r.chercher() }
     }
     Process {
+        id: lireHorloges
+        property string cle: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (lireHorloges.cle !== r.horlogesCle) return
+                r.horlogesSorties = text.split("\n")
+                r.chercher()
+            }
+        }
+    }
+    Process {
         id: lireHeure
         property string zone: ""
         stdout: StdioCollector {
@@ -813,6 +827,16 @@ Item {
                     lireHeure.zone = zone
                     lireHeure.command = ["env", "TZ=" + zone, "date", "+%H:%M|%u|%d|%m|%z"]
                     lireHeure.running = true
+                }
+            }
+            if (r.horloges) {       // une seule commande pour toutes les villes ; les zones (prises dans la liste lue) sont des arguments, pas du texte de script
+                r.zonesVoulues = true
+                let zs = Saisies.zonesHorloges(Saisies.villesHorloges(Reglages.val("HORLOGES_VILLES", "")), r.zonesHeure).map(x => x.zone)
+                if (zs.length) {
+                    r.horlogesCle = zs.join(","); r.horlogesSorties = []
+                    lireHorloges.cle = r.horlogesCle
+                    lireHorloges.command = ["sh", "-c", 'for z; do TZ="$z" date "+%H:%M|%u|%d|%m|%z"; done', "sh"].concat(zs)
+                    lireHorloges.running = true
                 }
             }
             let date = Saisies.dateQalc(q, Date.now())      // « jours jusqu'au 25/12 », « dans 45 jours » : réécrits pour qalc
@@ -1267,6 +1291,18 @@ Item {
         // « port 8080 » / « processus firefox » : leurs lignes en tête, les résultats ordinaires gardés dessous (3 au moins)
         let cartes = demandeProc ? lignesProc(demandeProc).slice(0, Math.max(2, nbResultats - 3)) : []
         if (cartes.length) out = cartes.concat(out.slice(0, Math.max(3, nbResultats - cartes.length)))
+        // « heure », « horloges » : une carte par ville du réglage HORLOGES_VILLES, devant les résultats ordinaires (« Horloges » l'appli reste)
+        if (horloges) {
+            let zh = Saisies.zonesHorloges(Saisies.villesHorloges(Reglages.val("HORLOGES_VILLES", "")), zonesHeure)
+            let cartesH = []
+            if (zh.length && zh.map(x => x.zone).join(",") === horlogesCle)
+                for (let i = 0; i < zh.length; i++) {
+                    let lh = Saisies.ligneHeure(horlogesSorties[i], zh[i].ville, Reglages.val("ILE_HEURE", "24") === "12", Reglages.t("fr", "en") === "en", -new Date().getTimezoneOffset())
+                    if (lh) cartesH.push({ titre: lh.texte, sous: Reglages.t("Heure · ", "Time · ") + lh.ecart + Reglages.t(" par rapport à ici · Entrée pour copier", " from here · Enter to copy"),
+                                           glyphe: "schedule", s: 1000, f: () => Quickshell.execDetached(["wl-copy", "--", lh.texte]) })
+                }
+            if (cartesH.length) out = cartesH.concat(out.slice(0, Math.max(3, nbResultats - cartesH.length)))
+        }
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
         if (q.startsWith(":") && emojiActif) {
             emojis.demander()

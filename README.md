@@ -156,6 +156,8 @@ capture, notifications, réglages, verrouillage, extinction. **Appui long (ou cl
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
 se referme dans la pilule.
 
+Horloges mondiales : le réglage `HORLOGES_VILLES` (8 villes au plus, sans réseau) fait afficher, par « heure » ou « horloges » dans la recherche, une carte par ville devant les résultats.
+
 **Super + R** ouvre le Spotlight : applis, fenêtres, fichiers, calculs, `> commande`, **`? question`** (et toute
 question comme « comment changer le fond d'écran » : réponses instantanées de la config, sans IA — réglages, raccourcis,
 commandes, documentation, `nc-aide-config` ; Entrée sur un réglage ouvre la fenêtre des réglages dessus, l'IA reste

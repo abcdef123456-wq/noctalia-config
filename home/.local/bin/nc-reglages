@@ -366,6 +366,15 @@ class R:
                     raise ValueError(T("codes de variante séparés par des virgules, dans l'ordre des dispositions (ex. bepo, intl, ,bepo), "
                                        "systeme ou aucune",
                                        "comma-separated variant codes, in layout order (e.g. bepo, intl, ,bepo), system or none"))
+            if self.cle == "HORLOGES_VILLES":
+                villes = [x.strip() for x in v.split(",")]
+                if len(villes) > 8:
+                    raise ValueError(T("8 villes au plus", "at most 8 cities"))
+                for x in villes:
+                    if not re.fullmatch(r"[^\d,]{2,40}", x) or any(unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") for ch in x):
+                        raise ValueError(T("des noms de ville de 2 à 40 caractères, sans chiffre ni caractère de contrôle, séparés par des virgules",
+                                           "city names of 2 to 40 characters, no digit or control character, separated by commas"))
+                v = ", ".join(villes)
             if not v:
                 raise ValueError(T("une valeur", "a value"))
             return v
@@ -565,6 +574,11 @@ REGLAGES = [
         "(seul le nom part vers Open-Meteo ; ville introuvable : message dans l'île).",
         "Automatic: position estimated by ipwho.is from your IP, weather by Open-Meteo. Otherwise, a city name "
         "(only the name goes to Open-Meteo; unknown city: a message in the island).")),
+    R("HORLOGES_VILLES", "Île", L("Horloges mondiales (recherche)", "World clocks (search)"), "texte", "",
+      L("Villes séparées par des virgules, 8 au plus (ex. Tokyo, New York, Paris). Dans la recherche de l'île, « heure », « horloges » "
+        "ou « clocks » montre une carte par ville. Vide : rien. Aucun réseau : l'heure vient du système.",
+        "Cities separated by commas, at most 8 (e.g. Tokyo, New York, Paris). In the island search, \"heure\", \"horloges\" "
+        "or \"clocks\" shows one card per city. Empty: nothing. No network: the time comes from the system.")),
     R("VPN_INDICATEUR", "Île", L("VPN : bouclier dans la pilule", "VPN: shield in the pill"), "ouinon", "oui",
       L("Un petit bouclier devant l'heure quand un tunnel VPN ou WireGuard de NetworkManager est monté (Super + Alt + V pour le panneau VPN). "
         "Mis à jour sur les événements de NetworkManager, jamais en boucle ; rien du tout sans NetworkManager.",
@@ -1864,7 +1878,7 @@ MATERIEL = {
     **{c: "ile" for c in ("SPOTLIGHT_ENTREE", "SPOTLIGHT_FICHIERS", "SPOTLIGHT_PAQUETS", "SPOTLIGHT_RESULTATS", "SPOTLIGHT_AIDE", "SPOTLIGHT_EMOJI",
                           "SPOTLIGHT_MOTEUR", "SPOTLIGHT_CALCULS", "SPOTLIGHT_FENETRES", "VUE_BUREAUX", "VUE_RECUL", "VUE_VOISINS",
                           "VUE_DUREE", "GOOGLE_INTEGRATION", "GOOGLE_CALENDRIER", "NPD_NUIT", "NPD_DEBUT", "NPD_FIN",
-                          "POMODORO_CONCENTRATION", "METEO_VILLE", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE", "VPN_PILULE_BARRE")},
+                          "POMODORO_CONCENTRATION", "METEO_VILLE", "HORLOGES_VILLES", "ECO_IMAGES", "VPN_INDICATEUR", "VPN_IP_PUBLIQUE", "VPN_IP_SERVICE", "VPN_PILULE_BARRE")},
     # Réglages d'un logiciel : cachés si ce logiciel n'est pas là (Firefox, kitty, Neovim)
     **{c: "firefox" for c in ("FIREFOX_STYLE", "FIREFOX_COULEURS", "FIREFOX_ONGLETS_VERTICAUX", "FIREFOX_SESSION", "FIREFOX_DEFILEMENT_DOUX")},
     **{c: "kitty" for c in ("TERMINAL_OPACITE", "TERMINAL_TAILLE", "TERMINAL_POLICE", "TERMINAL_CURSEUR", "TERMINAL_TRAINEE",

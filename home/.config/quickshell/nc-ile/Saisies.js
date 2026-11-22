@@ -60,6 +60,31 @@ var ZONES_FR = {
     "dubai": "Asia/Dubai", "singapour": "Asia/Singapore", "jerusalem": "Asia/Jerusalem", "le cap": "Africa/Johannesburg"
 }
 
+// « heure » seul, « horloge(s) », « clocks », « world clock » : la saisie demande les horloges mondiales (« heure tokyo » : non)
+function demandeHorloges(q) {
+    return /^(?:heure|horloges?|clocks?|world clocks?)$/i.test(String(q || "").trim().replace(/\s+/g, " "))
+}
+
+// Réglage HORLOGES_VILLES (« Tokyo, New York ») → villes valides, 8 au plus (même règle que nc-reglages : 2 à 40 caractères sans chiffre)
+function villesHorloges(texte) {
+    var out = [], l = String(texte || "").split(",")
+    for (var i = 0; i < l.length && out.length < 8; i++) {
+        var v = l[i].trim()
+        if (/^[^\d,]{2,40}$/.test(v)) out.push(v)
+    }
+    return out
+}
+
+// [{ ville, zone }] : seules les villes que la liste lue connaît (zone prise dans la liste, jamais dans la saisie) ; les autres sont ignorées
+function zonesHorloges(villes, zones) {
+    var out = []
+    for (var i = 0; i < villes.length; i++) {
+        var z = zoneVille(villes[i], zones)
+        if (z !== "") out.push({ ville: nomAffiche(villes[i]), zone: z })
+    }
+    return out
+}
+
 // Les zones lues dans zone1970.tab (3e colonne) ; seules les formes Région/Ville ou Région/Pays/Ville passent
 function listeZones(texte) {
     var out = []
