@@ -39,7 +39,7 @@ def png_uni(chemin, w, h):
                              + morceau(b"IDAT", data) + morceau(b"IEND", b""))
 
 
-FAUX_MAGICK = r"""echo "$*" >> "$JOURNAL"
+FAUX_MAGICK = r"""printf '%s\n' "$*" >> "$JOURNAL"   # pas echo : celui de dash (sh de Debian) change « \n » en retour à la ligne
 case "$*" in
   *info:*) python3 -c 'import struct,sys;d=sys.stdin.buffer.read(24);print(*struct.unpack(">II",d[16:24]))' ;;
   *) for a; do o="${a#png:}"; done; echo x > "$o"; [ -n "${LENT:-}" ] && sleep 20; exit 0 ;;
