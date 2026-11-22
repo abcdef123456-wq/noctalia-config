@@ -11,13 +11,17 @@
 #                                    chemin relatif à ~/Pictures/Wallpapers par ligne), le carrousel ne le montre plus ;
 #                                    le fichier reste (supprimé, la mise à jour suivante le remettrait)
 #   nc-fonds reafficher              vide cette liste : les fonds masqués reviennent
+#   nc-fonds a-ranger                combien de fonds TU as posés à la racine de ~/Pictures/Wallpapers (images qui ne sont
+#                                    pas des fonds livrés) ; 0 si la question « ranger » a déjà eu sa réponse
+#   nc-fonds ranger                  (réponse « oui ») les déplace dans ~/Pictures/Wallpapers/mes-fonds ; rien d'autre
+#   nc-fonds garder                  (réponse « non ») rien n'est déplacé, la question ne revient plus
 # --notifier (avec ajouter) : le message part aussi en notification (le carrousel s'est fermé pour le sélecteur).
 # Code 0 si c'est fait (ou annulé), 1 si refusé (message sur la sortie d'erreur), 2 pour un usage inconnu.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 IM=$(command -v magick >/dev/null && echo magick || echo convert)
 EXTS="jpg jpeg png webp bmp avif jxl"          # celles que nc-carousel-thumbs découpe
-usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE | masquer IMAGE | reafficher"; }
+usage() { echo "usage : nc-fonds dossier | ouvrir | ajouter [--notifier] [IMAGE…] | retirer IMAGE | masquer IMAGE | reafficher | a-ranger | ranger | garder"; }
 refus() { echo "$1" >&2; exit 1; }
 
 # Le dossier des fonds lu comme Noctalia : une seule règle, celle de nc-carousel-thumbs
@@ -26,6 +30,34 @@ src=$("${0%/*}/nc-carousel-thumbs" --dossier 2>/dev/null) || src=""
 mes="$src/mes-fonds"
 FONDS="$HOME/Pictures/Wallpapers"
 MASQUES="$HOME/.config/nc/fonds-masques.conf"     # même chemin et même règle dans panel.luau (cheminMasque)
+RANGEMENT="$HOME/.config/nc/fonds-rangement"      # oui / non : la question « ranger » a eu sa réponse (lu par panel.luau)
+# Les fonds de la base livrés par le dépôt (racine de home/Pictures/Wallpapers ; test_fonds_perso vérifie la liste).
+# CREDITS.tsv ne suffit pas : il ne liste pas ces fonds-là
+LIVRES_BASE="astronaut-dark-5120x2880-22768.jpg
+bmw-m4-coupe-8k-7680x4320-24121.jpg
+ctr-ferrari-458-7680x4320-27340.jpg
+desert-doom-sand-dunes-dark-background-monochrome-landscape-3840x2160-6409.jpg
+macos-mojave-sand-dunes-mojave-desert-california-night-dark-5120x2880-4051.jpg
+mclaren-788hs-coupe-11520x6480-26955.jpg
+mountain-landscape-5120x2880-24317.jpg
+porsche-911-gt3-rs-3840x2160-25139.jpg
+porsche-911-turbo-s-black-background-amoled-pitch-black-3840x2160-7730.jpg
+porsche-taycan-3840x2160-26875.jpg
+snow-mountains-5120x2880-25876.jpg
+spider-man-dark-cyan-minimal-3840x2160-170.jpg
+thorfinn-vinland-saga-5k-3840x2160-14948.jpg
+tiger-dope-amoled-3840x2160-18370.jpg"
+
+# Fonds posés par toi à la racine : images de ~/Pictures/Wallpapers qui ne sont pas des fonds livrés (A_RANGER)
+a_ranger() {
+  local f
+  A_RANGER=()
+  shopt -s nullglob nocaseglob
+  for f in "$FONDS"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
+    [ -f "$f" ] && ! grep -qxF -- "${f##*/}" <<<"$LIVRES_BASE" && A_RANGER+=("$f")
+  done
+  shopt -u nullglob nocaseglob
+}
 
 notifier=0
 ajouter() {
@@ -117,6 +149,25 @@ case "${1:-}" in
     n=$(grep -c . "$MASQUES" 2>/dev/null) || n=0
     rm -f -- "$MASQUES"
     echo "$(t "$n fond(s) réaffiché(s)." "$n wallpaper(s) shown again.")" ;;
+  a-ranger)
+    if [ -e "$RANGEMENT" ]; then echo 0; else a_ranger; echo "${#A_RANGER[@]}"; fi ;;
+  ranger)
+    a_ranger
+    n=0
+    if [ ${#A_RANGER[@]} -gt 0 ]; then
+      mkdir -p -- "$FONDS/mes-fonds" || refus "$(t "Impossible de créer $FONDS/mes-fonds." "Cannot create $FONDS/mes-fonds.")"
+      for f in "${A_RANGER[@]}"; do
+        b="${f##*/}"; dest="$FONDS/mes-fonds/$b"; i=2
+        while [ -e "$dest" ]; do dest="$FONDS/mes-fonds/${b%.*}-$i.${b##*.}"; i=$((i + 1)); done
+        mv -n -- "$f" "$dest" && n=$((n + 1))
+      done
+      systemctl --user restart --no-block nc-carousel-thumbs.service >/dev/null 2>&1 || true
+    fi
+    mkdir -p -- "${RANGEMENT%/*}" && echo oui > "$RANGEMENT"
+    echo "$(t "$n fond(s) rangé(s) dans Mes fonds." "$n wallpaper(s) moved to My wallpapers.")" ;;
+  garder)
+    mkdir -p -- "${RANGEMENT%/*}" && echo non > "$RANGEMENT"
+    echo "$(t "Rien n'est déplacé ; la question ne reviendra plus." "Nothing moved; you will not be asked again.")" ;;
   -h|--help|aide) usage ;;
   *) usage >&2; exit 2 ;;
 esac

@@ -6,6 +6,8 @@ F3 : nc-fonds ajoute (copie), ouvre, met à la corbeille un fond à toi (jamais 
 gio, systemctl et xdg-open en sh qui notent leurs arguments.
 F4 : un fond livré se masque (liste fonds-masques.conf, le fichier reste) ; le carrousel ne le montre plus ;
 « reafficher » vide la liste. Contrôle : l'ancien carrousel (9dc038d) montre le fond masqué.
+F5 : les fonds posés par toi à la racine ne bougent pas tout seuls ; nc-fonds a-ranger les compte (les fonds livrés de
+la base, absents de CREDITS.tsv, ne comptent pas), ranger / garder répondent une fois pour toutes.
 Tout se passe dans un dossier temporaire : HOME et XDG_* y pointent."""
 import os
 import shutil
@@ -334,6 +336,57 @@ io.write(table.concat(out, "\n"))
         i = panneau.index("elseif w then")
         self.assertIn('NC_FONDS, "masquer", w.path', panneau[i:i + 400])     # seulement pour un fond livré
         self.assertIn('["nc-fonds", "reafficher"]', REGLAGES.read_text(encoding="utf-8"))
+
+
+class F5Ranger(EnvFonds):
+    LIVRE = "astronaut-dark-5120x2880-22768.jpg"
+
+    def setUp(self):
+        super().setUp()
+        (self.fonds / self.LIVRE).write_text("5120 2880\n")
+        (self.fonds / "moi.jpg").write_text("3840 2160\n")
+        (self.fonds / "CREDITS.tsv").write_text("fichier\tsource\n")
+
+    def test_liste_des_fonds_livres_a_jour(self):
+        src = NC_FONDS.read_text(encoding="utf-8")
+        liste = src.split('LIVRES_BASE="', 1)[1].split('"', 1)[0].split("\n")
+        livres = sorted(p.name for p in (REPO / "home/Pictures/Wallpapers").iterdir()
+                        if p.is_file() and p.name != "CREDITS.tsv")
+        self.assertEqual(liste, livres)
+        # contrôle : CREDITS.tsv ne liste pas ces fonds (le critère du contrat les aurait pris pour les tiens)
+        credits = (REPO / "home/Pictures/Wallpapers/CREDITS.tsv").read_text(encoding="utf-8")
+        self.assertNotIn(self.LIVRE, credits)
+
+    def test_compter_ne_deplace_rien(self):
+        r = self.lance("a-ranger")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "1"), r.stderr)
+        self.assertTrue((self.fonds / "moi.jpg").exists())
+        self.assertFalse((self.fonds / "mes-fonds").exists())
+
+    def test_oui_range_les_tiens_seulement_et_ne_redemande_plus(self):
+        r = self.lance("ranger")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.fonds / "mes-fonds/moi.jpg").read_text(), "3840 2160\n")
+        self.assertFalse((self.fonds / "moi.jpg").exists())
+        self.assertTrue((self.fonds / self.LIVRE).exists())                # un fond livré reste à sa place
+        self.assertTrue((self.fonds / "nord/n.png").exists())
+        self.assertEqual((self.home / ".config/nc/fonds-rangement").read_text(), "oui\n")
+        self.assertEqual(self.lance("a-ranger").stdout.strip(), "0")
+
+    def test_non_ne_deplace_rien_et_ne_redemande_plus(self):
+        r = self.lance("garder")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.fonds / "moi.jpg").exists())
+        self.assertEqual(self.lance("a-ranger").stdout.strip(), "0")
+
+    def test_carrousel_demande_seulement_sans_reponse(self):
+        panneau = PANEL.read_text(encoding="utf-8")
+        i = panneau.index("if not noctalia.fileExists(RANGEMENT) then")
+        self.assertIn('NC_FONDS, "a-ranger"', panneau[i:i + 200])
+        # « ranger » ne part que du bouton « Oui »
+        self.assertEqual(panneau.count('NC_FONDS, "ranger"'), 1)
+        j = panneau.index('bouton("ranger-oui"')
+        self.assertIn('NC_FONDS, "ranger"', panneau[j:j + 200])
 
 
 if __name__ == "__main__":

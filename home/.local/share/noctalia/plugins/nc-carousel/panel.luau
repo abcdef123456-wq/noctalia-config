@@ -11,7 +11,8 @@
 -- Deux groupes, jamais d'autres fonds : ceux du dossier de Noctalia (le thème, ou la racine dans la base), puis « Mes fonds »
 -- (son sous-dossier mes-fonds, à toi, qu'aucune mise à jour ne touche). Un titre au-dessus de la bande dit le groupe.
 -- Sous la bande : « Ajouter un fond… » (copie dans Mes fonds), « Ouvrir le dossier », et pour un de TES fonds au centre,
--- « Mettre à la corbeille », pour un fond livré « Masquer ce fond ». Tout passe par ~/.local/bin/nc-fonds (les mêmes boutons sont dans nc-reglages → Fonds d'écran).
+-- « Mettre à la corbeille », pour un fond livré « Masquer ce fond ». Des fonds posés par toi à la racine (avant « Mes
+-- fonds ») : la question, une fois, de les y ranger (rien n'est déplacé tout seul). Tout passe par ~/.local/bin/nc-fonds (les mêmes boutons sont dans nc-reglages → Fonds d'écran).
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
 local function env(nom)
@@ -39,6 +40,7 @@ local function tr(fr, en) return EN and en or fr end
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")
 local NC_FONDS = noctalia.expandPath("~/.local/bin/nc-fonds")
 local MASQUES = noctalia.expandPath("~/.config/nc/fonds-masques.conf")
+local RANGEMENT = noctalia.expandPath("~/.config/nc/fonds-rangement")   -- la question « ranger » a eu sa réponse
 
 -- DEBUT cle
 -- Cache PAR DOSSIER : THUMBS/<clé>/. Clé : chemin du dossier sans « / » final, chaque octet hors [A-Za-z0-9._-] écrit %XX.
@@ -136,6 +138,8 @@ local eco = false
 local all = {}        -- { path, file, title, thumbW, thumbN, g, perso, rang, total }
 local dansTheme = false
 local message = nil   -- dernière réponse de nc-fonds, sous la bande
+local ouvert = false  -- un rappel de nc-fonds peut arriver panneau fermé : rien n'est alors dessiné
+local aRanger = 0     -- fonds posés par toi à la racine : la question « les ranger dans Mes fonds ? » (une fois, mémorisée)
 local shown = {}      -- liste filtrée par la recherche
 local target = 1      -- index cible, non replié (peut dépasser n : carrousel infini)
 local pos = 1         -- position affichée (réelle), tend vers target
@@ -339,7 +343,7 @@ local function relire(r)
   if message == "" then message = nil end
   loadList()
   filter()
-  render()
+  if ouvert then render() end
 end
 
 local function bouton(cle, texte, glyphe, action)
@@ -349,6 +353,23 @@ end
 -- Sous la bande : ajouter (le panneau se ferme : le sélecteur de fichiers passerait dessous), ouvrir le dossier, et la
 -- corbeille pour un fond à toi (jamais pour un fond livré)
 local function boutons()
+  if aRanger > 0 then
+    -- Rien n'est déplacé tout seul : oui → nc-fonds ranger, non → nc-fonds garder ; la réponse est gardée par nc-fonds
+    return {
+      ui.label({ text = tr("Tes " .. aRanger .. " fond(s) posé(s) à la racine : les ranger dans « Mes fonds » ?",
+        "Your " .. aRanger .. " wallpaper(s) at the top level: move them to “My wallpapers”?"), fontSize = TEXTE,
+        color = "on_surface", maxLines = 1 }),
+      bouton("ranger-oui", tr("Oui, les ranger", "Yes, move them"), "check", function()
+        aRanger = 0
+        noctalia.runAsync({ NC_FONDS, "ranger" }, relire, 30000)
+      end),
+      bouton("ranger-non", tr("Non", "No"), "x", function()
+        aRanger = 0
+        noctalia.runAsync({ NC_FONDS, "garder" }, function() end, 15000)
+        if ouvert then render() end
+      end),
+    }
+  end
   local kids = {
     bouton("ajouter", tr("Ajouter un fond…", "Add a wallpaper…"), "photo-plus", function()
       panel.close()
@@ -452,6 +473,14 @@ function onOpen(context)
   inputKey = inputKey + 1
   current = noctalia.wallpaperPath(outputName())
   message = nil
+  aRanger = 0
+  ouvert = true
+  if not noctalia.fileExists(RANGEMENT) then
+    noctalia.runAsync({ NC_FONDS, "a-ranger" }, function(r)
+      aRanger = tonumber(noctalia.string.trim(r and r.stdout or "")) or 0
+      if aRanger > 0 and ouvert then render() end
+    end, 15000)
+  end
   bg = nil
   if current then
     local b = THUMBS .. cleDossier(current:match("^(.*)/[^/]*$") or "") .. "/" .. (current:match("([^/]+)$") or "") .. ".B.webp"
@@ -467,6 +496,7 @@ function onOpen(context)
 end
 
 function onClose()
+  ouvert = false
   holdDir = 0
   setTicking(false)
 end
