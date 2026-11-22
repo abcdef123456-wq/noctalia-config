@@ -3530,6 +3530,21 @@ def appliquer_curseur(vals):
 _style_choisi = [""]       # thème que la personne vient de choisir (regler STYLE), pas une simple réapplication
 
 
+def ile_y(theme):
+    """Hauteur de l'île fermée (30 px) depuis le haut de l'écran, centrée dans la barre du haut du thème ; la barre de
+    config.toml (6 du bord, 36 de haut) donne 9. Sans barre en haut, l'île garde 9 (la bande ILE_BANDE, elle, est
+    traitée par l'île : centrée dans ses 42 px)."""
+    try:
+        cfg = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))
+        pos = cfg["position"]
+    except (OSError, KeyError, ValueError):
+        pos = "top"
+    b = theme.get("noctalia", {}).get("bar.default", {})
+    if b.get("position", pos) != "top":
+        return 9
+    return int(b.get("margin_edge", 6) + (b.get("thickness", 36) - 30) // 2)
+
+
 def appliquer_style(vals):
     """Écrit les valeurs du style choisi dans style.conf (lues par Hyprland, l'île et nc-reglages) et change la palette
     de Noctalia (Apple), en gardant celle d'avant pour la remettre."""
@@ -3548,6 +3563,9 @@ def appliquer_style(vals):
         p = police_apple()
         if p:
             prereglage["POLICE"] = p
+    y = ile_y(theme)
+    if y != 9:                                     # 9 : barre de base (6 du bord, 36 de haut), rien d'écrit
+        prereglage["ILE_Y"] = str(y)
     texte += "".join(f"{k}={v}\n" for k, v in prereglage.items())
     if texte != ancien:
         os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)

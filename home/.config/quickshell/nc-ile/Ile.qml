@@ -150,7 +150,7 @@ PanelWindow {
         readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && (Etat.microActif || Etat.cameraActive)
                                        && !retour.running && !retourRecherche.running      // pas avant que l'île ait fini de rétrécir
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
-        y: 9 + 15 - height / 2
+        y: ile.y + 15 - height / 2
         width: 8; height: 8; radius: 4
         color: Etat.cameraActive ? Couleurs.vert : Couleurs.orange
         opacity: montre ? 1 : 0
@@ -170,7 +170,7 @@ PanelWindow {
                                        && (minuteur || Agents.travaille || Terminal.enCours) && Etat.activiteType === ""
                                        && !retour.running && !retourRecherche.running
         x: ile.x + ile.width + (montre ? 7 : -30)
-        y: 9; width: 30; height: 30; radius: 15
+        y: ile.y; width: 30; height: 30; radius: 15
         color: Couleurs.fond
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
@@ -231,7 +231,9 @@ PanelWindow {
     Rectangle {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
+        // Centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 = barre de base : 6 du bord, 36 de
+        // haut), ou dans la bande réservée de 42 px quand ILE_BANDE=oui (barre en bas ou sur un côté)
+        y: Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9)
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud

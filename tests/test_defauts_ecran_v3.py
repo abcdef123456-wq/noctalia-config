@@ -3,6 +3,7 @@ ILE_BANDE), (2) barre verticale non adaptée, (3) dock visible par-dessus les fe
 haute que la barre en haut (gruvbox, apple), (5) texte de la pilule rogné pendant que l'île grandit (nord).
 Faux HOME, faux noctalia ; les rendus hors écran se font dans une copie de l'île (outils/rendu-ile.py), jamais à l'écran."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
+import importlib.machinery
 import importlib.util
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ THEMES = DEPOT / "home/.local/share/nc/themes"
 QML = DEPOT / "home/.config/quickshell/nc-ile"
 CONFIG = DEPOT / "home/.config/noctalia/config.toml"
 TITRES = ("nc/fenetres:titre", "active_window")
-ILE_Y, ILE_FERMEE = 9, 30            # Ile.qml : y de l'île, hauteur de la pilule fermée
+ILE_Y, ILE_FERMEE = 9, 30            # Ile.qml : y de l'île sur la barre de base, hauteur de la pilule fermée
 
 
 def themes():
@@ -42,17 +43,27 @@ def barre(d):
     return dict(barre_de_base(), **d.get("noctalia", {}).get("bar.default", {}))
 
 
-def hauteur_ile(reglages):
+def y_ile(d):
+    """y de l'île fermée (Ile.qml) : 6 dans la bande de 42 px, sinon centrée dans la barre du haut (ILE_Y de nc-reglages),
+    9 sans barre en haut."""
+    b = barre(d)
+    if d.get("reglages", {}).get("ILE_BANDE") == "oui":
+        return 6
+    return b["margin_edge"] + (b["thickness"] - ILE_FERMEE) // 2 if b["position"] == "top" else ILE_Y
+
+
+def hauteur_ile(d):
     """Bas de l'île fermée : y + hauteur, plus le contour quand il entoure aussi la pilule fermée (Couleurs.qml)."""
+    reglages = d.get("reglages", {})
     e = int(reglages.get("ILE_CONTOUR_EPAISSEUR", "2"))
     contour = reglages.get("ILE_CONTOUR_FERMEE") == "oui" and reglages.get("ILE_CONTOUR", "degrade") != "aucun"
-    return ILE_Y + ILE_FERMEE + (e if contour else 0)
+    return y_ile(d) + ILE_FERMEE + (e if contour else 0)
 
 
 def regle_hauteur(d):
     """Vrai si l'île fermée tient dans la barre du haut, ou si la bande lui garde sa place."""
     b = barre(d)
-    return d["reglages"].get("ILE_BANDE") == "oui" or b["thickness"] + b["margin_edge"] >= hauteur_ile(d["reglages"])
+    return d["reglages"].get("ILE_BANDE") == "oui" or b["thickness"] + b["margin_edge"] >= hauteur_ile(d)
 
 
 def lire_toml(texte):
@@ -99,7 +110,7 @@ class ReglesDesThemes(unittest.TestCase):
             with self.subTest(theme=nom):
                 if barre(d)["position"] == "top":
                     self.assertTrue(regle_hauteur(d), "%s : barre %s + %s, île %s" % (
-                        nom, barre(d)["thickness"], barre(d)["margin_edge"], hauteur_ile(d["reglages"])))
+                        nom, barre(d)["thickness"], barre(d)["margin_edge"], hauteur_ile(d)))
 
     def test_apple_et_gruvbox_explicites(self):
         """Vus à l'écran : l'île pendait sous la barre. Contrôle du contrôle : leurs barres de 7378cd3 échouent."""
@@ -115,6 +126,26 @@ class ReglesDesThemes(unittest.TestCase):
 
     def test_base_tient_deja(self):
         self.assertTrue(regle_hauteur(themes()["noctalia"]))
+
+
+# --- L'île centrée en hauteur dans la barre du haut de chaque thème (vu sur pluie-verte : 4 px trop bas)
+class Centrage(unittest.TestCase):
+    def test_ile_centree_dans_la_barre_du_haut(self):
+        spec = importlib.util.spec_from_loader("nc_reglages_y", importlib.machinery.SourceFileLoader(
+            "nc_reglages_y", str(DEPOT / "home/.local/bin/nc-reglages")))
+        nc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(nc)
+        for nom, d in themes().items():
+            b = barre(d)
+            with self.subTest(theme=nom):
+                self.assertEqual(nc.ile_y(d) if d["reglages"].get("ILE_BANDE") != "oui" else 6, y_ile(d))
+                if b["position"] == "top" and d["reglages"].get("ILE_BANDE") != "oui":
+                    haut = y_ile(d) - b["margin_edge"]
+                    bas = b["margin_edge"] + b["thickness"] - y_ile(d) - ILE_FERMEE
+                    self.assertLessEqual(abs(haut - bas), 1, f"{haut} px au-dessus, {bas} px dessous")
+        # contrôle : l'ancien y fixe (9) dans le bandeau de pluie-verte (collé, 40 px) n'est pas centré
+        b = barre(themes()["pluie-verte"])
+        self.assertGreater(abs((ILE_Y - b["margin_edge"]) - (b["margin_edge"] + b["thickness"] - ILE_Y - ILE_FERMEE)), 1)
 
 
 # --- (1) : la bande, dans la source de l'île
@@ -142,7 +173,9 @@ class BandeSource(unittest.TestCase):
         self.assertEqual(zone, b["thickness"] + b["margin_edge"])        # une bannière ne déborde pas plus qu'avant
         self.assertGreaterEqual(zone, ILE_Y + ILE_FERMEE + 3)
         ile = (QML / "Ile.qml").read_text(encoding="utf-8")
-        self.assertRegex(ile, r"\by: %d\s" % ILE_Y)
+        self.assertIn('y: Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "%d")) || %d)'
+                      % (ILE_Y, ILE_Y), ile)
+        self.assertGreaterEqual(zone, 6 + ILE_FERMEE + 6)                  # dans la bande : 6 au-dessus, 6 dessous
         self.assertRegex(ile, r"fen\.hauteurBanniere : %d\)" % ILE_FERMEE)
 
 
