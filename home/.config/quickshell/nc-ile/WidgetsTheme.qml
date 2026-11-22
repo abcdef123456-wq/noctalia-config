@@ -1,10 +1,14 @@
-// Widgets de bureau choisis par le thème (champ « widgets » du thème, écrit dans style.conf : WIDGETS_THEME=type:coin:taille,…).
-// Créé par shell.qml ; ne montre rien si WIDGETS_BUREAU n'est pas « oui » ou si le thème n'a pas de widgets (alors Bureau.qml
-// garde l'horloge et la date d'avant, à l'identique). Types : horloge-fine, horloge-mots, horloge-segments, calendrier,
-// citation, musique, jauges. Coins : haut-gauche, haut-droite, bas-gauche, bas-droite, centre. Tailles : petit, moyen, grand.
-// Énergie : aucune pendule à soi. Horloges, calendrier et citation suivent Etat.minute (une fois par minute) ; la citation
-// relit son fichier une fois par jour ; les jauges sont les seules à avoir un minuteur (2 s), allumé seulement quand un
-// widget « jauges » est vu (écran allumé, non verrouillé, widgets non cachés). Un seul échantillonnage pour tous les écrans.
+// Widgets de bureau choisis par le thème (champ « widgets » du thème, écrit dans style.conf :
+// WIDGETS_THEME=type:coin:taille[:style],…). Créé par shell.qml ; ne montre rien si WIDGETS_BUREAU n'est pas « oui » ou si le
+// thème n'a pas de widgets (alors Bureau.qml garde l'horloge et la date d'avant, à l'identique).
+// Types : horloge-fine, horloge-mots, horloge-segments, horloge-geante, calendrier, date, citation, musique, jauges, anneau,
+// meteo, accueil. Coins : haut-gauche, haut-droite, bas-gauche, bas-droite, centre. Tailles : petit, moyen, grand.
+// Styles (CarteWidget.qml) : texte (sans carte, le défaut), carte, carte-ronde, brutal. 8 widgets au plus : ceux d'un même
+// coin s'empilent (disposer), jamais l'un sur l'autre ni hors de l'écran.
+// Énergie : aucune pendule à soi. Horloges, date, accueil, calendrier et citation suivent Etat.minute ; météo et musique,
+// les signaux d'Etat (nc-meteo et MPRIS déjà lus par l'île) ; la citation relit son fichier une fois par jour. Jauges et
+// anneau partagent le seul minuteur (2 s), allumé seulement quand l'un d'eux est vu (écran allumé, non verrouillé, widgets
+// non cachés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -17,14 +21,15 @@ Scope {
         if (!actif) return []
         var r = []
         var parts = String(Reglages.val("WIDGETS_THEME", "")).split(",")
-        for (var i = 0; i < parts.length && r.length < 4; i++) {
+        for (var i = 0; i < parts.length && r.length < 8; i++) {
             var p = parts[i].trim().split(":")
-            if (p.length === 3) r.push({ type: p[0], coin: p[1], taille: p[2] })
+            if (p.length === 3 || p.length === 4)
+                r.push({ type: p[0], coin: p[1], taille: p[2], style: ["carte", "carte-ronde", "brutal"].indexOf(p[3]) >= 0 ? p[3] : "texte" })
         }
         return r
     }
     readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches
-    readonly property bool aJauges: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "jauges") return true; return false }
+    readonly property bool aJauges: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "jauges" || liste[i].type === "anneau") return true; return false }
     readonly property bool aCitation: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "citation") return true; return false }
     readonly property string dossier: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/nc"
 
@@ -127,14 +132,69 @@ Scope {
         if (type === "jauges") return ["CPU  " + barre(cpu) + " " + pct(cpu), "RAM  " + barre(ram) + " " + pct(ram), "DSK  " + barre(disque) + " " + pct(disque)]
         return []
     }
+    function heure(d) { return Qt.formatTime(d, Reglages.val("ILE_HEURE", "24") === "12" ? "h:mm" : "hh:mm") }
+    function accueil(d) {
+        var h = d.getHours()
+        if (Reglages.en) return h >= 5 && h < 12 ? "Good morning" : (h >= 12 && h < 18 ? "Good afternoon" : "Good evening")
+        return h >= 5 && h < 18 ? "Bonjour" : "Bonsoir"
+    }
     readonly property var base: ({ "horloge-fine": 96, "horloge-segments": 80, "horloge-mots": 34, "calendrier": 17, "citation": 22, "musique": 20, "jauges": 16 })
     readonly property var echelle: ({ "petit": 0.6, "moyen": 1, "grand": 1.5 })
+
+    // Place les widgets d'un écran (largeur l, hauteur h ; tailles[i] = [largeur, hauteur], 0 : rien à montrer). Par coin,
+    // une colonne (comme une colonne de cartes) ; seules les cartes rondes qui se suivent se rangent côte à côte, tant
+    // qu'elles tiennent dans la moitié de l'écran (tout l'écran au centre), à la taille de la plus grande. Les cartes seules
+    // sur leur rangée prennent la largeur de la colonne (une colonne nette). Puis, dans l'ordre de la liste, un widget qui
+    // sortirait de l'écran ou toucherait un widget déjà posé (un autre coin) n'est pas montré.
+    // Rend, par widget, { x, y, l, h, v } (v : montré) ou undefined.
+    function disposer(liste, tailles, l, h, ecart) {
+        var places = [], poses = [], coins = ["haut-gauche", "haut-droite", "bas-gauche", "bas-droite", "centre"]
+        for (var c = 0; c < coins.length; c++) {
+            var ids = []
+            for (var i = 0; i < liste.length; i++) if (liste[i].coin === coins[c] && tailles[i] && tailles[i][0] > 0) ids.push(i)
+            if (ids.length === 0) continue
+            var lignes = [], r = null, place = coins[c] === "centre" ? l : (l - ecart) / 2
+            for (var n = 0; n < ids.length; n++) {
+                var t = tailles[ids[n]], rond = liste[ids[n]].style === "carte-ronde"
+                if (r && r.rond && rond && (r.ids.length + 1) * Math.max(r.h, t[1]) + r.ids.length * ecart <= place) {
+                    r.ids.push(ids[n]); r.h = Math.max(r.h, t[1]); r.l = r.ids.length * r.h + (r.ids.length - 1) * ecart
+                } else { r = { ids: [ids[n]], l: t[0], h: t[1], rond: rond }; lignes.push(r) }
+            }
+            var col = Math.max.apply(null, lignes.map(x => x.l))
+            var total = lignes.reduce((s, x) => s + x.h, 0) + ecart * (lignes.length - 1)
+            var centre = coins[c] === "centre", x0 = centre ? (l - col) / 2 : (coins[c].indexOf("droite") >= 0 ? l - col : 0)
+            // trop haut : ce sont les derniers qui sortent (et ne sont pas montrés), jamais les premiers
+            var y = Math.max(0, centre ? (h - total) / 2 : (coins[c].indexOf("bas") === 0 ? h - total : 0))
+            for (var m = 0; m < lignes.length; m++) {
+                var x = centre ? (l - lignes[m].l) / 2 : x0
+                for (var q = 0; q < lignes[m].ids.length; q++) {
+                    var j = lignes[m].ids[q], st = liste[j].style
+                    var lj = lignes[m].rond ? lignes[m].h : (st === "carte" || st === "brutal" ? col : tailles[j][0])
+                    places[j] = { x: Math.round(x), y: Math.round(y), l: lj, h: lignes[m].rond ? lignes[m].h : tailles[j][1] }
+                    x += lj + ecart
+                }
+                y += lignes[m].h + ecart
+            }
+        }
+        for (var k = 0; k < liste.length; k++) {
+            var p = places[k]
+            if (!p) continue
+            p.v = p.x >= 0 && p.y >= 0 && p.x + p.l <= l && p.y + p.h <= h
+            for (var z = 0; p.v && z < poses.length; z++) {
+                var o = poses[z]
+                if (p.x < o.x + o.l && o.x < p.x + p.l && p.y < o.y + o.h && o.y < p.y + p.h) p.v = false
+            }
+            if (p.v) poses.push(p)
+        }
+        return places
+    }
 
     readonly property var fenetres: fenetresV.instances
     Variants {
         id: fenetresV
         model: w.liste.length > 0 ? Quickshell.screens : []
         PanelWindow {
+            id: fen
             required property var modelData
             screen: modelData
             anchors { top: true; bottom: true; left: true; right: true }
@@ -145,36 +205,31 @@ Scope {
             color: "transparent"
             mask: Region {}
             visible: w.vu
+            // Échelle de l'écran (1 : 1600 px de haut, marges comprises) et écart entre deux widgets
+            readonly property real k: Math.max(0.5, Math.min(2, (height + 144) / 1600))
+            readonly property int ecart: Math.round(24 * k)
+            property var tailles: []
+            function annoncer(i, l, h) { if (tailles[i] && tailles[i][0] === l && tailles[i][1] === h) return; var t = tailles.slice(); t[i] = [l, h]; tailles = t }
+            readonly property var places: w.disposer(w.liste, tailles, width, height, ecart)
             Repeater {
                 model: w.liste
-                Column {
+                CarteWidget {
                     required property var modelData
-                    readonly property var texte: w.lignes(modelData.type)
-                    readonly property bool droite: modelData.coin.indexOf("droite") >= 0
-                    readonly property bool bas: modelData.coin.indexOf("bas") >= 0
-                    readonly property bool milieu: modelData.coin === "centre"
-                    visible: texte.length > 0
-                    spacing: 2
-                    x: milieu ? (parent.width - width) / 2 : (droite ? parent.width - width : 0)
-                    y: milieu ? (parent.height - height) / 2 : (bas ? parent.height - height : 0)
-                    width: Math.min(implicitWidth, parent.width / 2)
-                    Repeater {
-                        model: parent.texte
-                        Texte {
-                            required property string modelData
-                            required property int index
-                            width: parent.width
-                            horizontalAlignment: parent.droite ? Text.AlignRight : (parent.milieu ? Text.AlignHCenter : Text.AlignLeft)
-                            text: modelData
-                            font.pixelSize: Math.round((w.base[parent.modelData.type] || 20) * (w.echelle[parent.modelData.taille] || 1) * (index === 0 || parent.modelData.type === "calendrier" || parent.modelData.type === "jauges" ? 1 : 0.6))
-                            font.weight: parent.modelData.type === "horloge-fine" ? Font.ExtraLight : (parent.modelData.type === "horloge-segments" ? Font.Bold : Font.Normal)
-                            font.family: parent.modelData.type === "calendrier" || parent.modelData.type === "jauges" || parent.modelData.type === "horloge-segments" ? "monospace" : Couleurs.police
-                            secondaire: index > 0 || parent.modelData.type === "citation"
-                            wrapMode: parent.modelData.type === "citation" ? Text.WordWrap : Text.NoWrap
-                            elide: parent.modelData.type === "citation" ? Text.ElideNone : Text.ElideRight
-                            style: Text.Raised; styleColor: Qt.rgba(0, 0, 0, 0.35)
-                        }
-                    }
+                    required property int index
+                    readonly property var place: fen.places[index]
+                    objectName: "nc-widget-" + modelData.type
+                    donnees: w
+                    widget: modelData
+                    k: fen.k
+                    hauteurEcran: fen.height + 144
+                    largeurMax: modelData.coin === "centre" ? fen.width : Math.floor((fen.width - fen.ecart) / 2)
+                    x: place ? place.x : 0
+                    y: place ? place.y : 0
+                    width: place ? place.l : implicitWidth; height: place ? place.h : implicitHeight
+                    visible: !!place && place.v
+                    onImplicitWidthChanged: fen.annoncer(index, implicitWidth, implicitHeight)
+                    onImplicitHeightChanged: fen.annoncer(index, implicitWidth, implicitHeight)
+                    Component.onCompleted: fen.annoncer(index, implicitWidth, implicitHeight)
                 }
             }
         }

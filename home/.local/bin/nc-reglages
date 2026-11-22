@@ -2364,9 +2364,12 @@ def _ecrire(vals):
 # appliquer_noctalia. Un thème mal écrit est refusé en entier (message clair), jamais appliqué à moitié.
 ORDRE_THEMES = ("noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa")
 # Widgets de bureau d'un thème (nc-ile/WidgetsTheme.qml) : listes fermées
-WIDGETS_TYPES = ("horloge-fine", "horloge-mots", "horloge-segments", "calendrier", "citation", "musique", "jauges")
+WIDGETS_TYPES = ("horloge-fine", "horloge-mots", "horloge-segments", "horloge-geante", "calendrier", "date", "citation", "musique",
+                 "jauges", "anneau", "meteo", "accueil")
 WIDGETS_COINS = ("haut-gauche", "haut-droite", "bas-gauche", "bas-droite", "centre")
 WIDGETS_TAILLES = ("petit", "moyen", "grand")
+WIDGETS_STYLES = ("texte", "carte", "carte-ronde", "brutal")    # facultatif ; texte : sans carte (le défaut)
+WIDGETS_MAX = 8                                                 # empilés par coin (WidgetsTheme.qml), jamais l'un sur l'autre
 _CLES_THEME = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits",
                "widgets"}
 _themes_cache = [None, ({}, {})]
@@ -2716,12 +2719,12 @@ def _verifier_theme(nom, d):
         for k in c:
             texte(c[k], f"credits.{k}")
     widgets = d.get("widgets", [])
-    if not isinstance(widgets, list) or len(widgets) > 4:
-        refus("« widgets » doit être une liste de 4 éléments au plus", "\"widgets\" must be a list of at most 4 items")
+    if not isinstance(widgets, list) or len(widgets) > WIDGETS_MAX:
+        refus(f"« widgets » doit être une liste de {WIDGETS_MAX} éléments au plus", f"\"widgets\" must be a list of at most {WIDGETS_MAX} items")
     for w in widgets:
-        objet(w, "widgets", {"type", "coin", "taille"}, ("type", "coin", "taille"))
-        for k, permis in (("type", WIDGETS_TYPES), ("coin", WIDGETS_COINS), ("taille", WIDGETS_TAILLES)):
-            if w[k] not in permis:
+        objet(w, "widgets", {"type", "coin", "taille", "style"}, ("type", "coin", "taille"))
+        for k, permis in (("type", WIDGETS_TYPES), ("coin", WIDGETS_COINS), ("taille", WIDGETS_TAILLES), ("style", WIDGETS_STYLES)):
+            if w.get(k, "texte") not in permis:
                 refus(f"« widgets.{k} » : {', '.join(permis)}", f"\"widgets.{k}\": {', '.join(permis)}")
     return {"nom": nom, "libelle": lib, "palette": [src, pnom], "reglages": reglages, "noctalia": noct,
             "theme_sync": sync, "fonds": fonds, "fond_de_depart": depart, "credits": credits,
@@ -3575,7 +3578,8 @@ def appliquer_style(vals):
     if theme["fonds"] and (_style_choisi[0] == style or deja):
         prereglage["FONDS_DOSSIER"] = os.path.join(HOME, "Pictures/Wallpapers", theme["fonds"])
     if theme["widgets"]:                           # sans widgets (thème noctalia) : style.conf reste identique à l'octet
-        prereglage["WIDGETS_THEME"] = ",".join(f"{w['type']}:{w['coin']}:{w['taille']}" for w in theme["widgets"])
+        prereglage["WIDGETS_THEME"] = ",".join(f"{w['type']}:{w['coin']}:{w['taille']}" + (f":{w['style']}" if "style" in w else "")
+                                             for w in theme["widgets"])
     if style == "apple":
         p = police_apple()
         if p:
