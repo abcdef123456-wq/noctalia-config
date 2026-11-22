@@ -5,6 +5,7 @@
 
 ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), page (la page Système ouverte),
 recherche (Spotlight avec un texte tapé). Un PNG par état : DOSSIER/ETAT.png.
+--polices : dossier de polices lu en plus, en lecture seule (défaut : $XDG_DATA_HOME/fonts ou ~/.local/share/fonts).
 --reglages / --palette : un reglages.conf (lignes CLE=valeur) et un palette-ile.json posés dans le HOME factice, là où
 l'île les lit : l'outil ne connaît aucune clé, il simule un thème tel quel.
 
@@ -104,8 +105,10 @@ def dans_le_depot(chemin):
 
 
 def preparer(root, etat, reglages, palette):
-    for sous in ("run", "home/.config/nc", "cache", "state", "data", "config", "tmp"):
+    for sous in ("run", "home/.config/nc", "home/.local", "cache", "state", "data", "config", "tmp"):
         (root / sous).mkdir(mode=0o700, parents=True, exist_ok=True)
+    # l'île lance $HOME/.local/bin/nc-apps (recherche) : lien vers ceux du dépôt, lus seulement
+    (root / "home/.local/bin").symlink_to(DEPOT / "home/.local/bin")
     ile = root / "ile"
     shutil.copytree(str(QML), str(ile))
     for f in ile.glob("*.qml"):
@@ -133,23 +136,40 @@ def preparer(root, etat, reglages, palette):
     return ile
 
 
-def environnement(root, png):
+def polices_par_defaut():
+    """Polices de l'utilisateur (Material Symbols y est d'ordinaire), lues seulement ; None si absent."""
+    d = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    d = os.path.join(d, "fonts")
+    return d if os.path.isdir(d) else None
+
+
+def config_polices(root, polices):
+    """fonts.conf temporaire : celui du système + le dossier de polices ; le cache va dans le dossier temporaire."""
+    f = root / "fonts.conf"
+    f.write_text('<?xml version="1.0"?>\n<fontconfig>\n<include ignore_missing="yes">/etc/fonts/fonts.conf</include>\n'
+                 "<dir>%s</dir>\n<cachedir>%s</cachedir>\n</fontconfig>\n" % (polices, root / "cache/fontconfig"))
+    return f
+
+
+def environnement(root, png, polices=None):
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL")}
     env.update(HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
                XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / "state"), XDG_RUNTIME_DIR=str(root / "run"),
                TMPDIR=str(root / "tmp"), QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", NCR_PNG=str(png),
                DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(root / "run/pas-de-bus"),
                DBUS_SYSTEM_BUS_ADDRESS="unix:path=" + str(root / "run/pas-de-bus-systeme"), NC_LANGUE="fr")
+    if polices:
+        env["FONTCONFIG_FILE"] = str(config_polices(root, polices))
     return env
 
 
-def rendre(etat, sortie, reglages, palette):
+def rendre(etat, sortie, reglages, palette, polices=None):
     """Un qs par état. Retourne (chemin du PNG ou None, journal)."""
     racine = Path(tempfile.mkdtemp(prefix="nci-", dir="/tmp"))
     png = Path(sortie) / (etat + ".png")
     try:
         ile = preparer(racine, etat, reglages, palette)
-        p = subprocess.Popen(["qs", "--no-color", "-p", str(ile / "shell.qml")], env=environnement(racine, png),
+        p = subprocess.Popen(["qs", "--no-color", "-p", str(ile / "shell.qml")], env=environnement(racine, png, polices),
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
         try:
             journal, _ = p.communicate(timeout=LIMITE)
@@ -170,11 +190,16 @@ def main(argv=None):
     a.add_argument("--sortie", required=True, help="dossier des PNG (hors du dépôt)")
     a.add_argument("--reglages", help="reglages.conf à simuler (CLE=valeur)")
     a.add_argument("--palette", help="palette-ile.json à simuler")
+    a.add_argument("--polices", help="dossier de polices lu en plus (défaut : le dossier fonts de l'utilisateur)")
     a.add_argument("etats", nargs="+", choices=ETATS, metavar="ETAT", help="un ou plusieurs de : " + ", ".join(ETATS))
     o = a.parse_args(argv)
     if dans_le_depot(o.sortie):
         print("rendu-ile : le dossier de sortie ne doit pas être dans le dépôt", file=sys.stderr)
         return 2
+    if o.polices and not os.path.isdir(o.polices):
+        print("rendu-ile : dossier de polices introuvable : " + o.polices, file=sys.stderr)
+        return 2
+    polices = o.polices or polices_par_defaut()
     for f in (o.reglages, o.palette):
         if f and not os.path.isfile(f):
             print("rendu-ile : fichier introuvable : " + f, file=sys.stderr)
@@ -185,7 +210,7 @@ def main(argv=None):
     os.makedirs(o.sortie, exist_ok=True)
     code = 0
     for etat in o.etats:
-        png, journal = rendre(etat, o.sortie, o.reglages, o.palette)
+        png, journal = rendre(etat, o.sortie, o.reglages, o.palette, polices)
         if png:
             print(png)
         else:

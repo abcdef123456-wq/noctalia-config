@@ -90,6 +90,39 @@ class Refus(unittest.TestCase):
             self.assertFalse((DEPOT / "rendu-essai").exists())
 
 
+class Polices(unittest.TestCase):
+    def test_dossier_de_polices_lu_sans_etre_modifie(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rendu_ile", OUTIL)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        with tempfile.TemporaryDirectory() as t:
+            polices = Path(t) / "polices"
+            polices.mkdir()
+            (polices / "x.ttf").write_bytes(b"pas une vraie police")
+            avant = (polices.stat().st_mtime_ns, (polices / "x.ttf").stat().st_mtime_ns)
+            root = Path(t) / "root"
+            root.mkdir()
+            env = m.environnement(root, root / "a.png", str(polices))
+            conf = Path(env["FONTCONFIG_FILE"])
+            self.assertTrue(conf.is_file())
+            self.assertEqual(conf.parent, root)
+            texte = conf.read_text()
+            self.assertIn("<dir>%s</dir>" % polices, texte)
+            self.assertIn("/etc/fonts/fonts.conf", texte)
+            self.assertIn("<cachedir>%s" % root, texte)
+            self.assertNotIn("FONTCONFIG_FILE", m.environnement(root, root / "a.png"))
+            apres = (polices.stat().st_mtime_ns, (polices / "x.ttf").stat().st_mtime_ns)
+            self.assertEqual(avant, apres)
+            self.assertEqual(sorted(p.name for p in polices.iterdir()), ["x.ttf"])
+
+    def test_dossier_de_polices_absent_refuse(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = subprocess.run([sys.executable, str(OUTIL), "--sortie", t, "--polices", t + "/nexiste-pas", "fermee"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2, r.stderr)
+
+
 @unittest.skipUnless(shutil.which("qs"), "Quickshell (qs) absent")
 class Rendu(unittest.TestCase):
     @classmethod
