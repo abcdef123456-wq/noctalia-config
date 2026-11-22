@@ -119,6 +119,18 @@ class BureauHorsEcran(unittest.TestCase):
     verifier(d.font.capitalization === Font.AllUppercase && d.font.family === "Serif", "majuscules et police suivent le thème"); Qt.quit() }
 """)
 
+    def test_sans_plaque_date_au_dessus_heure_fine_et_ombre(self):
+        self.executer("""
+  if (etape === 1) { var p = b.cible
+    verifier(p.color.a > 0.8 && p.color.a < 0.9, "plaque au verre du thème : " + p.color.a)
+    verifier(trouver(b.contentItem, "bureauDate").visible && !trouver(b.contentItem, "bureauDateHaut").visible, "date sous l'heure")
+    Reglages.valeurs = { WIDGETS_PLAQUE: "non" }; etape++; return }
+  if (etape === 2) { var h = trouver(b.contentItem, "bureauHeure"), haut = trouver(b.contentItem, "bureauDateHaut")
+    verifier(b.cible.color.a === 0 && b.cible.border.width === 0, "ni fond ni filet")
+    verifier(haut.visible && !trouver(b.contentItem, "bureauDate").visible && haut.y < h.y, "date au-dessus de l'heure")
+    verifier(h.font.pixelSize > 88 && h.font.weight === Font.Light && h.style === Text.Raised, "heure très grande, fine, ombrée"); Qt.quit() }
+""")
+
     @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
     def test_le_modele_de_shell_est_vide_a_non_et_un_ecran_a_oui(self):
         m = re.search(r'model:\s*(Reglages\.val\("WIDGETS_BUREAU".*?)\n\s*Bureau \{\}', lire("shell.qml"), re.S)

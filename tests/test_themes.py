@@ -21,7 +21,7 @@ ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox"
 FONDS = REPO / "home/Pictures/Wallpapers"
 ENRICHIS = {"apple"}
 # Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
-AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\n"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
+AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\nWIDGETS_PLAQUE=non\n"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
 
 

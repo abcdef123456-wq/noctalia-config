@@ -26,7 +26,8 @@
     "VERROU_FLOU": "35",
     "TERMINAL_LOGO": "macOS",
     "ILE_POLICE": "Inter",
-    "FENETRES_OMBRE": "30"
+    "FENETRES_OMBRE": "30",
+    "WIDGETS_PLAQUE": "non"
   },
   "noctalia": {
     "bar.default": {
