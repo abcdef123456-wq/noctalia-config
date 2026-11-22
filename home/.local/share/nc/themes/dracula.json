@@ -26,8 +26,8 @@
     "bordure": "degrade",
     "ombre": "coloree"
   },
-  "fonds": "",
-  "fond_de_depart": "",
+  "fonds": "dracula",
+  "fond_de_depart": "dracula-nuit.jpg",
   "credits": [],
   "widgets": []
 }

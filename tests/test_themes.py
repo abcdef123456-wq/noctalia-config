@@ -218,7 +218,7 @@ class Validation(Base):
                 else:
                     self.assertEqual(d["fond_de_depart"], "")
         sans = {f.stem for f in THEMES.glob("*.json") if not json.loads(f.read_text(encoding="utf-8"))["fonds"]}
-        self.assertEqual(sans, {"noctalia", "dracula"})
+        self.assertEqual(sans, {"noctalia"})
 
     def refuse(self, nom, attendu):
         self.nc("set", "STYLE", "nord")
@@ -303,7 +303,8 @@ class Fonds(Base):
         self.assertEqual(len(self.wallpaper_set()), 1)
 
     def test_theme_sans_fond_ne_pose_rien(self):
-        self.nc("set", "STYLE", "dracula")
+        self.ecrire_theme("nu", fonds="", fond_de_depart="")      # tous les thèmes livrés sauf noctalia ont des fonds
+        self.nc("set", "STYLE", "nu")
         self.assertEqual(self.wallpaper_set(), [])
         self.assertNotIn("FONDS_DOSSIER", self.lignes_style())
 

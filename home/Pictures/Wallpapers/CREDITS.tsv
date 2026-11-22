@@ -20,3 +20,6 @@ tokyo/shinjuku-pluie.jpg	https://commons.wikimedia.org/wiki/File:%E9%9B%A8%E3%81
 tokyo/shinjuku-nuit.jpg	https://commons.wikimedia.org/wiki/File:Shinjuku_Station_South_Entrance_area_at_night,_Tokyo,_Japan_(2015-01-24_by_calvision_@Pixabay_617590).jpg	calvision	CC0-1.0
 oled/lune.jpg	https://commons.wikimedia.org/wiki/File:A_New_View_of_the_Moon.jpg	NASA	Domaine public
 oled/aurore-iss.jpg	https://commons.wikimedia.org/wiki/File:Image_of_aurora_at_night_from_the_ISS_04.jpg	NASA	Domaine public
+dracula/dracula-nuit.jpg	outils/generer_fonds.py (dracula-nuit)	noctalia-config	généré par noctalia-config
+dracula/dracula-ondes.jpg	outils/generer_fonds.py (dracula-ondes)	noctalia-config	généré par noctalia-config
+nord/nord-glacier.jpg	outils/generer_fonds.py (nord-glacier)	noctalia-config	généré par noctalia-config

@@ -679,12 +679,199 @@ def nord_fjord():
     sauver(img, "nord-fjord", seed=61)
 
 
+# --------------------------------------------------------------------------
+# 7. Dracula
+# --------------------------------------------------------------------------
+def _lisse(a, b, t):
+    """Marche douce (smoothstep) entre a et b."""
+    t = np.clip((t - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def _sapins(rng, n, haut, larg, y_sol):
+    """Profil (hauteur y par colonne) d'une rangée de sapins : pointes en dents de scie, sur un sol y_sol."""
+    x = np.arange(W, dtype=F32)
+    yc = y_sol.astype(F32).copy()
+    for _ in range(n):
+        cx = rng.uniform(-50, W + 50)
+        h = haut * rng.uniform(0.55, 1.35)
+        pente = h / (larg * rng.uniform(0.7, 1.2))
+        dx = np.abs(x - cx)
+        # étages : la silhouette descend par paliers, comme des branches
+        etage = 0.10 * h * np.abs(np.sin(dx / (larg * 0.16) * np.pi)) * np.clip(1 - dx / larg, 0, 1)
+        sommet = y_sol - h + dx * pente + etage
+        yc = np.minimum(yc, sommet)
+    return yc
+
+
+def dracula_nuit():
+    rng = np.random.default_rng(71)
+    rose, cyan = hexc("#ff79c6"), hexc("#8be9fd")
+    y, x = np.mgrid[0:H, 0:W].astype(F32)
+    y0 = H * 0.74
+    img = vgrad([(0, "#0c0d14"), (0.30, "#171827"), (0.55, "#2a2350"), (0.74, "#4a3580"), (1, "#4a3580")])
+    etoiles(img, rng, 700, H * 0.5, hexc("#e9e4ff"), 0.75)
+    # lune pâle, décentrée à droite ; halo large puis disque légèrement texturé (mers)
+    cx, cy, R = W * 0.69, H * 0.30, 290.0
+    d = np.hypot(x - cx, y - cy)
+    add(img, hexc("#bd93f9"), np.exp(-(d / 800) ** 2) * 0.20)
+    add(img, hexc("#e3d9ff"), np.exp(-(d / 420) ** 2) * 0.10)
+    taches = fbm(W // 4, H // 4, rng, 5, 4)
+    taches = resize(taches, W, H)
+    lune = interp_stops(np.clip((y - (cy - R)) / (2 * R), 0, 1), [(0, "#f2eeff"), (1, "#d3c6f0")])
+    lune = lune * (0.84 + 0.16 * taches[..., None])
+    disque = np.clip((R - d) / 2.5 + 0.5, 0, 1)
+    # fines bandes de nuages : bruit étiré en largeur, découpé en traînées horizontales
+    h4, w4 = H // 4, W // 4
+    ondul = resize(fbm(w4, h4, rng, 3, 3), W, H)
+    fil = resize(fbm(w4 // 6, h4, rng, 2, 3), W, H)       # variation lente en largeur
+    bandes = np.sin((y + 160 * ondul) / 34.0 + 3 * fil) * 0.5 + 0.5
+    nuages = _lisse(0.25, 0.85, bandes ** 1.1) * _lisse(0.20, 0.55, fil)
+    nuages *= _lisse(H * 0.08, H * 0.30, y) * (1 - _lisse(H * 0.38, H * 0.56, y))
+    voile = np.clip(nuages * 0.95, 0, 0.9) * (0.6 + 0.4 * fil)
+    mix(img, lune, disque * (1 - voile * 0.5))
+    # les nuages sont sombres sur le ciel, lilas là où la lune les éclaire
+    mix(img, hexc("#20213a"), nuages * 0.45 * (1 - np.exp(-(d / 620) ** 2)))
+    add(img, hexc("#cdbdf5"), nuages * np.exp(-(d / 520) ** 2) * 0.16)
+    # plans de collines puis de sapins, du lointain (violet, clair) au proche (presque noir)
+    u = np.abs(x[0] / W - 0.5) * 2
+    plans = [  # type, base, amplitude, couleur haut, couleur pied, brume rose
+        ("col", 0.745, 120, "#4b3a86", "#2a2350", 0.0),
+        ("col", 0.795, 130, "#392e6c", "#1d1a3c", 0.34),
+        ("sap", 0.86, 70, "#272250", "#14122a", 0.30),
+        ("sap", 0.95, 105, "#15142b", "#0a0a14", 0.26),
+    ]
+    for i, (typ, b, a, haut, pied, brume) in enumerate(plans):
+        sol = H * b + 10 * fbm1d(W, rng, 2, 3, 0.5) * 3
+        if typ == "col":
+            n = fbm1d(W, rng, 2, 4, 0.45)
+            yc = sol - a * (0.5 + 0.5 * n)
+        else:
+            base = sol - a * 0.9 * (0.5 + 0.5 * fbm1d(W, rng, 2, 3, 0.5))
+            yc = _sapins(rng, 110 if i == 2 else 70, 170 + 170 * (i - 2), 40 + 30 * (i - 2), base)
+        # le centre reste bas et calme
+        yc = yc + (1 - u ** 1.5) * (60 + 20 * i)
+        dd = y - yc[None, :]
+        m = np.clip(dd + 0.6, 0, 1)
+        coul = hexc(haut) + (hexc(pied) - hexc(haut)) * np.clip(dd / 520, 0, 1)[..., None]
+        mix(img, coul, m)
+        if brume:
+            # brume rose légère, plus épaisse en bas du plan, modulée par un bruit lent
+            # (mesurée à une ligne lisse, pas à la crête : sinon des rayons verticaux)
+            ds = y - float(np.mean(yc))
+            vap = 0.55 + 0.45 * resize(fbm(w4 // 2, h4 // 2, rng, 3, 3), W, H)
+            mix(img, rose, np.clip(np.exp(-(ds / 130) ** 2) * vap * brume * 0.40, 0, 1))
+    vignette(img, 0.45, 2.0)
+    sauver(img, "dracula-nuit", seed=71)
+
+
+def dracula_ondes():
+    rng = np.random.default_rng(72)
+    w, h = W // 2, H // 2
+    y, x = np.mgrid[0:h, 0:w].astype(F32)
+    u = x / w
+    fond = hexc("#282a36")
+    # fond : très léger relief de lumière (le haut gauche un peu plus clair)
+    img = np.broadcast_to(fond, (h, w, 3)).copy()
+    add(img, hexc("#44475a"), np.exp(-(np.hypot(u - 0.2, (y / h - 0.1) * 0.62) / 0.55) ** 2) * 0.28)
+    img *= (1 - 0.30 * np.clip(np.hypot(u - 0.5, (y / h - 0.5) * 0.62) / 0.75, 0, 1) ** 2)[..., None]
+    violet, rose, cyan = hexc("#bd93f9"), hexc("#ff79c6"), hexc("#8be9fd")
+    rubans = [  # ordre : du fond (flou, sombre) au premier plan (net, lumineux)
+        # base y, amplitude, fréquence, phase, épaisseur, couleur A -> B, flou, intensité
+        (0.30, 0.16, 1.3, 0.4, 150, violet, rose, 18, 0.30),
+        (0.72, 0.13, 1.7, 2.1, 170, cyan, violet, 14, 0.26),
+        (0.50, 0.20, 1.1, 4.0, 120, rose, violet, 9, 0.46),
+        (0.62, 0.14, 1.9, 1.0, 95, violet, cyan, 5, 0.70),
+        (0.38, 0.11, 2.3, 5.3, 70, rose, rose, 2, 0.78),
+        (0.80, 0.09, 1.5, 3.3, 58, violet, violet, 1, 0.80),
+    ]
+    for (b, a, f, ph, ep, ca, cb, fl, k) in rubans:
+        # centre du ruban : deux sinusoïdes (fluide) ; épaisseur qui respire
+        yc = h * (b + a * np.sin(u * f * 2 * np.pi + ph) + 0.4 * a * np.sin(u * f * 4.1 * np.pi + ph * 1.7))
+        e = ep / 2 * (0.75 + 0.45 * np.sin(u * f * 2.6 * np.pi + ph * 0.6))
+        t = (y - yc) / e                               # -1 au bord haut, +1 au bord bas
+        alpha = _lisse(1.0, 0.82, np.abs(t))
+        # volume : dégradé en travers (clair en haut, plus profond en bas) et le long du ruban
+        ombre = 1.0 - 0.52 * _lisse(-0.7, 1.0, t)
+        along = np.clip(0.5 + 0.5 * np.sin(u * 2.4 * np.pi + ph), 0, 1)[..., None]
+        col = (ca * (1 - along) + cb * along) * ombre[..., None]
+        # tire vers le fond pour les rubans éloignés : moins de contraste, plus sombres
+        col = fond + (col - fond) * k
+        a2 = alpha
+        if fl > 1:
+            a2 = blur(a2.astype(F32), fl)
+            col = np.stack([blur(col[..., c], fl) for c in range(3)], -1)
+        # fine ligne de lumière sur l'arête haute des rubans nets
+        if fl <= 5:
+            add(col, hexc("#f8f8f2"), (_lisse(-0.82, -0.98, t) * 0.0 + np.clip(1 - np.abs(t + 0.9) / 0.1, 0, 1) * 0.10 * alpha))
+        mix(img, col, a2 * (0.55 + 0.45 * k))
+    img = resize3(img, W, H)
+    vignette(img, 0.30, 2.2)
+    sauver(img, "dracula-ondes", bruit=0.8, seed=72)
+
+
+# --------------------------------------------------------------------------
+# 8. Nord glacier
+# --------------------------------------------------------------------------
+def nord_glacier():
+    rng = np.random.default_rng(81)
+    y, x = np.mgrid[0:H, 0:W].astype(F32)
+    # cellules larges (grille irrégulière de points), chacune cassée en éclats autour de son centre
+    pts = []
+    pas = 760
+    for gy in range(-1, H // pas + 2):
+        for gx in range(-1, W // pas + 2):
+            pts.append((gx * pas + rng.uniform(-0.35, 0.35) * pas * 1.4 + (gy % 2) * pas / 2,
+                        gy * pas + rng.uniform(-0.35, 0.35) * pas))
+    pts = np.array(pts, F32)
+    dmin = np.full((H, W), 1e9, F32)
+    cell = np.zeros((H, W), np.int32)
+    for i, (px, py) in enumerate(pts):
+        d = (x - px) ** 2 + (y - py) ** 2
+        m = d < dmin
+        dmin[m], cell[m] = d[m], i
+    px, py = pts[cell, 0], pts[cell, 1]
+    k = rng.integers(2, 4, len(pts))                   # nombre d'éclats par cellule
+    dec = rng.uniform(0, 2 * np.pi, len(pts)).astype(F32)
+    ang = np.mod(np.arctan2(y - py, x - px) - dec[cell], 2 * np.pi)
+    eclat = np.floor(ang / (2 * np.pi) * k[cell]).astype(np.int32)
+    fid = cell * 8 + eclat
+    # luminosité par face : normale aléatoire contre une lumière venue du haut à gauche
+    nf = (len(pts) + 1) * 8
+    nx, ny = rng.normal(0, 1, nf), rng.normal(0, 1, nf)
+    nz = rng.uniform(0.35, 1.0, nf)
+    nn = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
+    lum = (nx * -0.55 + ny * -0.55 + nz * 0.63) / nn
+    face = np.clip(0.50 + 0.42 * lum, 0, 1).astype(F32)
+    b = face[fid]
+    # dégradé global : clair en haut (et à gauche), sombre en bas
+    v, u = y / H, x / W
+    b = b * 0.55 + 0.62 * (1 - v) ** 1.1 + 0.22 * (1 - u) * (1 - v) - 0.16
+    # petit dégradé à l'intérieur de chaque face, dans le sens de la lumière
+    cxm = pts[cell, 0]
+    b = b - 0.02 * np.clip((x - cxm) / 400, -1, 1)
+    b = np.clip(b, 0, 1)
+    # rampe de couleurs Nord : bleu nuit -> glace -> blanc
+    img = interp_stops(b, [(0.0, "#232936"), (0.18, "#2e3440"), (0.34, "#434c5e"), (0.50, "#4c6a96"),
+                           (0.64, "#5e81ac"), (0.74, "#81a1c1"), (0.86, "#a9c4d6"), (0.94, "#d8dee9"), (1.0, "#eceff4")])
+    # arêtes : fin liseré clair là où l'on change d'éclat (côté lumière), sans bruit
+    bord = np.zeros((H, W), F32)
+    for sy, sx in ((1, 0), (0, 1)):
+        diff = (fid != np.roll(fid, (sy, sx), (0, 1)))
+        bord = np.maximum(bord, diff.astype(F32))
+    bord = blur(bord, 1.1) * 1.8
+    add(img, hexc("#eceff4"), np.clip(bord, 0, 1) * 0.10 * (1 - v)[..., None][..., 0])
+    vignette(img, 0.35, 2.2)
+    sauver(img, "nord-glacier", seed=81)
+
+
 IMAGES = {
     "retro-grille": retro_grille, "retro-ambre": retro_ambre,
     "synthwave-soleil": synthwave_soleil, "synthwave-montagnes": synthwave_montagnes,
     "tokyo-ville": tokyo_ville, "tokyo-pluie": tokyo_pluie,
     "apple-dunes": apple_dunes, "apple-ondes": apple_ondes,
     "catppuccin-brume": catppuccin_brume, "nord-fjord": nord_fjord,
+    "dracula-nuit": dracula_nuit, "dracula-ondes": dracula_ondes, "nord-glacier": nord_glacier,
 }
 
 if __name__ == "__main__":
