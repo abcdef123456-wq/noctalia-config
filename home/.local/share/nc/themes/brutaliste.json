@@ -42,7 +42,7 @@
       "margin_edge": 0,
       "margin_ends": 0,
       "thickness": 46,
-      "capsule": true,
+      "capsule": false,
       "background_opacity": 1.0,
       "capsule_fill": "hover",
       "capsule_opacity": 1.0,

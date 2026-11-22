@@ -2,13 +2,16 @@
 - une barre collée en haut qui porte l'île (sans bande) fait au moins 40 px, sinon l'île dépasse du bandeau ;
 - une barre sans pastilles a un fond, sauf sur un thème noir pur (texte sans fond illisible sur un fond d'écran clair) ;
 - une barre du haut sans bande ne montre pas l'heure : l'île fermée la montre déjà (la date, oui) ;
-- un thème a au plus une seconde barre, sur un autre bord que la première.
+- un thème a au plus une seconde barre, sur un autre bord que la première ;
+- des bureaux en style « minimal » sans chiffres ne dessinent rien (pastille vide vue sur oled et papier).
 Règles sur les fichiers des thèmes : pas de session, pas de Noctalia."""
 from tests import _isolation  # noqa: F401  (HOME, XDG_*, langue : avant tout le reste)
+import contextlib
 import json
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 
 THEMES = Path(__file__).resolve().parents[1] / "home/.local/share/nc/themes"
 
@@ -62,6 +65,17 @@ class Regles(unittest.TestCase):
                 for t in autres:
                     self.assertNotEqual(d["noctalia"][t].get("position"), barre(d)["position"])
 
+    def test_bureaux_minimal_avec_chiffres(self):
+        for nom, d in themes().items():
+            b = d.get("noctalia", {}).get("bar.default", {})
+            membres = [m for g in b.get("capsule_group", []) for m in g.get("members", [])]
+            # sans listes, celles de config.toml (qui posent les bureaux) restent
+            pose = "workspaces" in barre(d)["listes"] + membres or not any(k in b for k in ("start", "center", "end"))
+            w = d.get("noctalia", {}).get("widget.workspaces", {})
+            if pose and w.get("style") == "minimal":
+                with self.subTest(theme=nom):
+                    self.assertIs(w.get("show_labels"), True, "style minimal sans chiffres : la pastille des bureaux est vide")
+
     def test_controle_du_controle(self):
         """Les règles attrapent bien les défauts vus : bandeau de 36, texte sans fond, heure en double."""
         d = {"reglages": {}, "noctalia": {"bar.default": {"position": "top", "margin_edge": 0, "thickness": 36,
@@ -72,6 +86,13 @@ class Regles(unittest.TestCase):
         self.assertEqual(b["fond"], 0)
         self.assertTrue(montre_l_heure(d, "t-h"))
         self.assertFalse(montre_l_heure({"noctalia": {"widget.t-d": {"type": "clock", "format": "{:%a %d %b}"}}}, "t-d"))
+        # l'ancienne table de papier (minimal sans chiffres, bureaux dans un groupe) est attrapée
+        with patch(__name__ + ".themes", lambda: {"papier": {"noctalia": {
+                "bar.default": {"capsule_group": [{"id": "b", "members": ["workspaces"]}], "start": ["group:b"]},
+                "widget.workspaces": {"style": "minimal", "show_labels": False}}}}):
+            with self.assertRaises(AssertionError):
+                with patch.object(self, "subTest", lambda **k: contextlib.nullcontext()):
+                    self.test_bureaux_minimal_avec_chiffres()
 
 
 if __name__ == "__main__":
