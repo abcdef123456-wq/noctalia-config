@@ -66,12 +66,12 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, themes=THEMES, largeur=1600):
+    def lancer(self, corps, themes=THEMES, largeur=1600, faux=FAUX):
         with tempfile.TemporaryDirectory(prefix="nc-choixtheme-") as d:
             root = H.preparer(d, ("Couleurs", "Texte", "Ico"), extra={"ChoixTheme.qml": fenetre_hors_ecran(largeur)})
             bin_ = root / "home/.local/bin"
             bin_.mkdir(parents=True)
-            H.faux(root, "nc-reglages", FAUX.replace("@ROOT@", str(root)))
+            H.faux(root, "nc-reglages", faux.replace("@ROOT@", str(root)))
             (bin_ / "nc-reglages").symlink_to(root / "bin/nc-reglages")
             (root / "themes.json").write_text(json.dumps(themes))
             (root / "shell.qml").write_text(
@@ -171,6 +171,32 @@ class HorsEcran(unittest.TestCase):
                 verifier(nom.text === "Gamma très long" && nom.elide === Text.ElideNone, "nom court sans points : " + nom.text)
                 verifier(pr.text === "néons de nuit" && pr.y > nom.y, "parenthèse dessous : " + pr.text)
                 verifier(trouver(trouver(fen.contentItem, "nc-themes-autre-1"), "nc-themes-precision").text === "", "sans parenthèse : rien dessous")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', themes=themes)
+        self.assertEqual(j, [])
+
+    def test_echec_de_l_application_la_fenetre_reste_et_le_dit(self):
+        faux = FAUX.replace("esac\nexit 0", "  set) exit 1 ;;\nesac\nexit 0")
+        j = self.lancer(self.ATTENDRE + '''
+                if (etape === 2) { touches.keyClick(Qt.Key_Return); etape++; ticks = 0; return }
+                if (ticks < 10) return
+                var aide = trouver(fen.contentItem, "nc-themes-aide")
+                verifier(fermes === 0, "pas fermée après un échec, fermes=" + fermes)
+                verifier(fen.echec && aide.text.indexOf("pas pu") >= 0, "message d'échec : " + aide.text)
+                verifier(fen.themes[2].actif === true, "le thème d'avant reste actif")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', faux=faux)
+        self.assertEqual(j, ["nc-reglages set STYLE gamma"])
+
+    def test_miniature_chemin_encode(self):
+        themes = [dict(t, miniature="/tmp/a #b/c%d.jpg") if t["nom"] == "gamma" else t for t in THEMES]
+        j = self.lancer(self.ATTENDRE + '''
+                var mid = trouver(fen.contentItem, "nc-themes-centre-2"), src = ""
+                function chercher(o) { if (o.source !== undefined && String(o.source) !== "") src = String(o.source); for (var i = 0; i < o.children.length; i++) chercher(o.children[i]) }
+                chercher(mid)
+                verifier(src.indexOf("%23b/c%25d.jpg") > 0 && src.indexOf("#") < 0, "« # » et « % » encodés (Qt garde l'espace) : " + src)
                 console.log("FINI"); Qt.exit(0)
             } }
         ''', themes=themes)

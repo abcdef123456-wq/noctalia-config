@@ -131,6 +131,12 @@ class BureauHorsEcran(unittest.TestCase):
     verifier(h.font.pixelSize > 88 && h.font.weight === Font.Light && h.style === Text.Raised, "heure très grande, fine, ombrée"); Qt.quit() }
 """)
 
+    def test_rallumes_ils_se_montrent(self):
+        """WIDGETS_BUREAU repassé à oui après « Tout masquer » : widgetsCaches remis à faux."""
+        s = lire("shell.qml")
+        self.assertIn('readonly property bool widgetsBureau: Reglages.val("WIDGETS_BUREAU", "non") === "oui"', s)
+        self.assertIn("onWidgetsBureauChanged: if (widgetsBureau) Etat.widgetsCaches = false", s)
+
     @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
     def test_le_modele_de_shell_est_vide_a_non_et_un_ecran_a_oui(self):
         m = re.search(r'model:\s*(Reglages\.val\("WIDGETS_BUREAU".*?)\n\s*Bureau \{\}', lire("shell.qml"), re.S)

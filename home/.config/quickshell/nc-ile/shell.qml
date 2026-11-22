@@ -235,7 +235,10 @@ ShellRoot {
         model: ["aurore", "vivant"].indexOf(Reglages.val("FOND_ANIME", "non")) >= 0 && !Reglages.sobre ? Quickshell.screens : []
         Fond { vivant: Reglages.val("FOND_ANIME", "non") === "vivant" }
     }
-    // Widgets du bureau (nc-reglages → Île → WIDGETS_BUREAU) : créés seulement à « oui »
+    // Widgets du bureau (nc-reglages → Île → WIDGETS_BUREAU) : créés seulement à « oui » ; rallumés, ils se montrent
+    // même si « Tout masquer » les avait cachés avant
+    readonly property bool widgetsBureau: Reglages.val("WIDGETS_BUREAU", "non") === "oui"
+    onWidgetsBureauChanged: if (widgetsBureau) Etat.widgetsCaches = false
     Variants {
         model: Reglages.val("WIDGETS_BUREAU", "non") === "oui" ? Quickshell.screens : []
         Bureau {}

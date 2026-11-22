@@ -2424,6 +2424,23 @@ def palettes_noctalia(src, pnom):
     return [os.path.join(d, "quickshell/noctalia-shell/Assets/ColorScheme", pnom, pnom + ".json") for d in dossiers if d]
 
 
+def lire_palette(fichier):
+    """« dark » d'une palette de Noctalia : fichier ordinaire seulement (pas de lien symbolique, de tube ni de
+    périphérique), 1 Mo au plus. Toute erreur lève une exception (l'appelant retombe sur les couleurs neutres)."""
+    fd = os.open(fichier, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 ** 2:
+            raise ValueError(fichier)
+        with os.fdopen(os.dup(fd), "rb") as fh:
+            brut = fh.read(1024 ** 2 + 1)
+    finally:
+        os.close(fd)
+    if len(brut) > 1024 ** 2:
+        raise ValueError(fichier)
+    return json.loads(brut.decode("utf-8"))["dark"]
+
+
 def themes_json(vals):
     """Liste des thèmes valides (lecture seule, aucun réseau) pour le carrousel de l'île : palette résolue en couleurs.
     Palette custom ou builtin : lue dans son fichier ; introuvable, illisible ou fond : couleurs neutres, « approximative »."""
@@ -2437,14 +2454,13 @@ def themes_json(vals):
         couleurs, approx = dict(COULEURS_NEUTRES), True
         for fichier in (palettes_noctalia(src, pnom) if src in ("custom", "builtin") and re.fullmatch(r"[\w .+-]+", pnom) else []):
             try:
-                with open(fichier, encoding="utf-8") as fh:
-                    m = json.load(fh)["dark"]
+                m = lire_palette(fichier)
                 lues = {c: m["m" + c[0].upper() + c[1:]] for c in couleurs}
                 if all(isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v) for v in lues.values()):
                     couleurs, approx = lues, False
                     break
-            except (OSError, ValueError, KeyError, TypeError):
-                pass                               # palette absente ou illisible : la suivante, sinon couleurs neutres
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, MemoryError, RecursionError):
+                pass                               # palette absente, illisible, trop grosse ou piégée : la suivante, sinon neutres
         # Miniature : celle du carrousel des fonds si elle existe, sinon le fond de départ lui-même (l'île le décode en petit)
         miniature = ""
         if t["fond_de_depart"]:

@@ -37,6 +37,7 @@ FloatingWindow {
     function precision(l) { var s = String(l), i = s.indexOf(" ("); return i > 0 ? s.slice(i + 2).replace(/\)\s*$/, "") : "" }
     function valider() {
         if (ct.themes.length === 0 || appliquer.running) return
+        ct.echec = false
         appliquer.command = [ct.bin, "set", "STYLE", ct.themes[ct.centre].nom]
         appliquer.running = true
     }
@@ -66,7 +67,10 @@ FloatingWindow {
             ct.centre = i >= 0 ? i : 0
         } }
     }
-    Process { id: appliquer; onExited: ct.fermer() }
+    // Le carrousel ne se ferme que si le thème a bien été appliqué ; sinon il reste ouvert et le dit (le thème
+    // d'avant reste marqué actif : la liste n'est pas relue)
+    property bool echec: false
+    Process { id: appliquer; onExited: code => { if (code === 0) ct.fermer(); else ct.echec = true } }
 
     Item {
         id: carte
@@ -93,8 +97,11 @@ FloatingWindow {
         Text {
             textFormat: Text.PlainText
             anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - 28
-            text: Reglages.t("← → choisir · Entrée appliquer · Échap fermer", "← → choose · Enter apply · Esc close")
-            color: Couleurs.texteSec; font.pixelSize: 11; font.family: Couleurs.police
+            objectName: "nc-themes-aide"
+            text: ct.echec ? Reglages.t("Le thème n'a pas pu être appliqué (voir nc-reglages). Rien n'a changé.",
+                                        "The theme could not be applied (see nc-reglages). Nothing changed.")
+                           : Reglages.t("← → choisir · Entrée appliquer · Échap fermer", "← → choose · Enter apply · Esc close")
+            color: ct.echec ? Couleurs.rouge : Couleurs.texteSec; font.pixelSize: 11; font.family: Couleurs.police
         }
 
         Repeater {
@@ -131,7 +138,8 @@ FloatingWindow {
                     color: c.surface; clip: true
                     Image {
                         anchors.fill: parent
-                        source: c.t && c.t.miniature ? "file://" + c.t.miniature : ""
+                        // chemin encodé : un « # » ou un « % » dans un nom de dossier ne casse pas l'adresse
+                        source: c.t && c.t.miniature ? "file://" + String(c.t.miniature).split("/").map(encodeURIComponent).join("/") : ""
                         fillMode: Image.PreserveAspectCrop; asynchronous: true
                         sourceSize.width: 360                // un fond de 3840 px décodé en petit
                         visible: status === Image.Ready

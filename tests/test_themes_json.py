@@ -83,6 +83,31 @@ class ThemesJson(unittest.TestCase):
         cache.write_bytes(b"x")
         self.assertEqual(self.liste()["retro"]["miniature"], str(cache))
 
+    def test_palette_enorme_lien_ou_profonde_couleurs_neutres(self):
+        """Lecture bornée (1 Mo), fichier ordinaire seulement : sinon couleurs neutres, sans erreur."""
+        d = Path(self.d) / "share/quickshell/noctalia-shell/Assets/ColorScheme/Tokyo-Night"
+        d.mkdir(parents=True)
+        f = d / "Tokyo-Night.json"
+        vraie = Path(self.d) / "vraie.json"
+        vraie.write_text(json.dumps({"dark": {"mPrimary": "#7aa2f7", "mSecondary": "#bb9af7", "mTertiary": "#9ece6a",
+                                              "mSurface": "#1a1b26", "mOnSurface": "#c0caf5"}}))
+        # énorme : une vraie palette, complétée au-delà de 1 Mo (sans borne, elle serait lue)
+        enorme = json.loads(vraie.read_text())
+        enorme["dark"]["remplissage"] = "a" * (2 * 1024 ** 2)
+        cas = {"énorme": lambda: f.write_text(json.dumps(enorme)),
+               "lien": lambda: f.symlink_to(vraie),
+               "profond": lambda: f.write_text("[" * 200000 + "]" * 200000),
+               "pas du json": lambda: f.write_bytes(b"\xff\xfe")}
+        for nom, faire in cas.items():
+            with self.subTest(cas=nom):
+                if f.is_symlink() or f.exists():
+                    f.unlink()
+                faire()
+                self.assertTrue(self.liste()["tokyo"]["palette_approximative"])
+        f.unlink()
+        f.write_text(vraie.read_text())
+        self.assertFalse(self.liste()["tokyo"]["palette_approximative"])   # le même contenu, en vrai fichier : lu
+
     def test_theme_refuse_absent(self):
         p = self.themes / "nord.json"
         j = json.loads(p.read_text())
