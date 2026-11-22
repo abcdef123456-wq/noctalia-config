@@ -500,6 +500,10 @@ REGLAGES = [
       L("Un halo doux de la couleur d'accent.", "A soft halo in the accent color.")),
     R("ILE_MAJUSCULES", "Île", L("Textes en majuscules", "Uppercase texts"), "ouinon", "non",
       L("Les textes de l'île s'écrivent en majuscules.", "The island's texts are written in capitals.")),
+    R("ILE_ACCENTS", "Île", L("Jauges et barres", "Gauges and bars"), "choix", "texte",
+      L("Jauges, barres de la musique et du volume : couleur du texte, ou couleur d'accent du thème.",
+        "Gauges, music and volume bars: text color, or the theme's accent color."),
+      [("texte", L("Couleur du texte", "Text color")), ("accent", L("Couleur d'accent", "Accent color"))]),
     R("ILE_HEURE", "Île", L("Format de l'heure", "Time format"), "choix", "24", "",
       [("24", L("24 h  (14:05)", "24-hour  (14:05)")), ("12", L("12 h  (2:05 PM)", "12-hour  (2:05 PM)"))]),
     R("ILE_SURVOL", "Île", L("Ouvrir au survol", "Open on hover"), "ouinon", "oui",
@@ -1829,7 +1833,7 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
-    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_MAJUSCULES", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
+    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
@@ -2465,6 +2469,8 @@ def regler(vals, cle, v):
     """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
     r = PAR_CLE[cle]
     theme = theme_choisi(str(v).strip()) if cle == "STYLE" else None    # thème mal écrit ou absent : refusé, rien n'est écrit
+    if theme:
+        _style_choisi[0] = theme["nom"]            # choisi par la personne : appliquer_style pose son dossier de fonds
     v = r.valider(v)
     # Fichier relu juste avant d'écrire : un réglage changé ailleurs entre-temps (autre fenêtre de nc-reglages,
     # ligne de commande) n'est pas écrasé ; vals est mis à jour sur place avec l'état du fichier
@@ -2903,6 +2909,9 @@ def appliquer_curseur(vals):
     subprocess.run(["hyprctl", "reload"], capture_output=True)      # variables XCURSOR_SIZE des applis lancées ensuite
 
 
+_style_choisi = [""]       # thème que la personne vient de choisir (regler STYLE), pas une simple réapplication
+
+
 def appliquer_style(vals):
     """Écrit les valeurs du style choisi dans style.conf (lues par Hyprland, l'île et nc-reglages) et change la palette
     de Noctalia (Apple), en gardant celle d'avant pour la remettre."""
@@ -2911,14 +2920,17 @@ def appliquer_style(vals):
     texte = "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\n"
     texte += f"STYLE={style}\n"
     prereglage = dict(theme["reglages"])
-    if theme["fonds"]:
+    ancien = open(STYLE_FICHIER, encoding="utf-8").read() if os.path.exists(STYLE_FICHIER) else ""
+    # Dossier de fonds du thème : posé quand la personne CHOISIT le thème ; à une réapplication (appliquer, mise à
+    # jour, installation), gardé seulement s'il était déjà là pour ce même thème : une mise à jour ne l'ajoute jamais
+    deja = f"STYLE={style}\n" in ancien and "\nFONDS_DOSSIER=" in ancien
+    if theme["fonds"] and (_style_choisi[0] == style or deja):
         prereglage["FONDS_DOSSIER"] = os.path.join(HOME, "Pictures/Wallpapers", theme["fonds"])
     if style == "apple":
         p = police_apple()
         if p:
             prereglage["POLICE"] = p
     texte += "".join(f"{k}={v}\n" for k, v in prereglage.items())
-    ancien = open(STYLE_FICHIER, encoding="utf-8").read() if os.path.exists(STYLE_FICHIER) else ""
     if texte != ancien:
         os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)
         with ouvrir_atomique(STYLE_FICHIER) as f:

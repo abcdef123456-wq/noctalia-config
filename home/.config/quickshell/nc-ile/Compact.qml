@@ -154,7 +154,7 @@ Item {
                     width: 3; radius: 1.5
                     height: 6 + Etat.bandes[index] * 10
                     anchors.verticalCenter: parent.verticalCenter
-                    color: Couleurs.texte
+                    color: Couleurs.jauge
                 }
             }
         }
@@ -192,7 +192,7 @@ Item {
             width: 130; height: 6; radius: 3; color: Couleurs.gris3
             anchors.verticalCenter: parent.verticalCenter
             Rectangle {
-                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: Couleurs.texte
+                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: Couleurs.jauge
                 Behavior on width { SpringAnimation { spring: 5; damping: 0.5 } }
             }
         }

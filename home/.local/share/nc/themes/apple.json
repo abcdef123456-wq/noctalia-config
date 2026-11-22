@@ -25,12 +25,8 @@
     "BARRE_SYSTEME": "non",
     "VERROU_FLOU": "35",
     "TERMINAL_LOGO": "macOS",
-    "ILE_RAYON": "auto",
     "ILE_POLICE": "Inter",
-    "ILE_ANIM": "ressort",
-    "ILE_VERRE": "100",
-    "FENETRES_OMBRE": "30",
-    "FENETRES_COINS_FORME": "doux"
+    "FENETRES_OMBRE": "30"
   },
   "noctalia": {
     "bar.default": {

@@ -1,0 +1,107 @@
+{
+ "source": "40eb708 (main d'avant les thèmes en fichiers)",
+ "STYLES": {
+  "apple": {
+   "ILE_STYLE": "noir",
+   "ILE_CONTOUR": "aucun",
+   "FENETRES_ARRONDI": "12",
+   "FENETRES_BORDURE": "1",
+   "FENETRES_ESPACE": "6",
+   "FENETRES_MARGE": "12",
+   "FENETRES_ASSOMBRIR": "non",
+   "FENETRES_OUVERTURE": "gnomed",
+   "ANIM_BUREAUX": "slide",
+   "ANIM_VERROU": "fade",
+   "ANIM_FOND": "fade",
+   "DOCK_TAILLE": "52",
+   "DOCK_LOUPE": "oui",
+   "BARRE_SYSTEME": "non",
+   "VERROU_FLOU": "35",
+   "TERMINAL_LOGO": "macOS"
+  },
+  "oled": {
+   "ILE_STYLE": "noir",
+   "ILE_CONTOUR": "aucun",
+   "FENETRES_ASSOMBRIR": "non"
+  },
+  "nord": {
+   "ILE_CONTOUR": "discret",
+   "FENETRES_ARRONDI": "10"
+  },
+  "catppuccin": {
+   "FENETRES_ARRONDI": "16",
+   "ANIM_BUREAUX": "slidefade"
+  },
+  "dracula": {
+   "FENETRES_ARRONDI": "12"
+  },
+  "gruvbox": {
+   "ILE_CONTOUR": "discret",
+   "FENETRES_ARRONDI": "8"
+  },
+  "kanagawa": {
+   "ILE_CONTOUR": "discret",
+   "FENETRES_ARRONDI": "12"
+  }
+ },
+ "PALETTES": {
+  "apple": [
+   "custom",
+   "Apple"
+  ],
+  "nord": [
+   "builtin",
+   "Nord"
+  ],
+  "catppuccin": [
+   "builtin",
+   "Catppuccin"
+  ],
+  "dracula": [
+   "builtin",
+   "Dracula"
+  ],
+  "gruvbox": [
+   "builtin",
+   "Gruvbox"
+  ],
+  "kanagawa": [
+   "builtin",
+   "Kanagawa"
+  ]
+ },
+ "style_conf": {
+  "noctalia": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=noctalia\n",
+  "apple": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=apple\nILE_STYLE=noir\nILE_CONTOUR=aucun\nFENETRES_ARRONDI=12\nFENETRES_BORDURE=1\nFENETRES_ESPACE=6\nFENETRES_MARGE=12\nFENETRES_ASSOMBRIR=non\nFENETRES_OUVERTURE=gnomed\nANIM_BUREAUX=slide\nANIM_VERROU=fade\nANIM_FOND=fade\nDOCK_TAILLE=52\nDOCK_LOUPE=oui\nBARRE_SYSTEME=non\nVERROU_FLOU=35\nTERMINAL_LOGO=macOS\n",
+  "oled": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=oled\nILE_STYLE=noir\nILE_CONTOUR=aucun\nFENETRES_ASSOMBRIR=non\n",
+  "nord": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=nord\nILE_CONTOUR=discret\nFENETRES_ARRONDI=10\n",
+  "catppuccin": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=catppuccin\nFENETRES_ARRONDI=16\nANIM_BUREAUX=slidefade\n",
+  "dracula": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=dracula\nFENETRES_ARRONDI=12\n",
+  "gruvbox": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=gruvbox\nILE_CONTOUR=discret\nFENETRES_ARRONDI=8\n",
+  "kanagawa": "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\nSTYLE=kanagawa\nILE_CONTOUR=discret\nFENETRES_ARRONDI=12\n"
+ },
+ "lignes_ile": [
+  "Behavior on opacity { NumberAnimation { duration: 250 } }",
+  "Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }",
+  "Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }",
+  "Behavior on opacity { NumberAnimation { duration: 200 } }",
+  "readonly property real e: Couleurs.aContour ? 2 : 0",
+  "Behavior on opacity { NumberAnimation { duration: 220 } }",
+  "radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)",
+  "Behavior on color { ColorAnimation { duration: 260 } }",
+  "Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }",
+  "Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }",
+  "Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { NumberAnimation { duration: fen.banniere ? 180 : 90; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { NumberAnimation { duration: fen.demandeClaude ? 180 : 90; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.confirmGpu ? 180 : 90; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.confirmNoeud ? 180 : 90; easing.type: Easing.OutCubic } }",
+  "Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.sessionNoeud ? 180 : 90; easing.type: Easing.OutCubic } }",
+  "Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }",
+  "Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }",
+  "font.family: \"Adwaita Sans\"",
+  "font.pixelSize: 13"
+ ]
+}

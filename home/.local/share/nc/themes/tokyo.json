@@ -19,7 +19,8 @@
     "FENETRES_ARRONDI": "10",
     "FENETRES_BORDURE": "2",
     "FENETRES_OMBRE": "26",
-    "ANIM_BUREAUX": "slidefade"
+    "ANIM_BUREAUX": "slidefade",
+    "ILE_ACCENTS": "accent"
   },
   "noctalia": {},
   "theme_sync": {

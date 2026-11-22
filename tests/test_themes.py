@@ -19,7 +19,9 @@ THEMES = REPO / "home/.local/share/nc/themes"
 BIN = REPO / "home/.local/bin"
 ORDRE = ["noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa"]
 FONDS = REPO / "home/Pictures/Wallpapers"
-ENRICHIS = {"apple"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
+ENRICHIS = {"apple"}
+# Seules différences admises, thème par thème, entre le style.conf d'avant et celui d'aujourd'hui à la réapplication
+AJOUTS = {"apple": "ILE_POLICE=Inter\nFENETRES_OMBRE=30\n"}            # anciens styles enrichis depuis la migration (valeurs d'origine gardées)
 CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
 
 
@@ -34,27 +36,13 @@ def credits():
     return {l.split("\t")[0] for l in lignes if l.strip()}
 
 
+REFERENCE = json.loads((REPO / "tests/donnees/styles-avant-themes.json").read_text(encoding="utf-8"))
+
+
 def anciens():
-    """(STYLES, PALETTES) de nc-reglages avant les thèmes en fichiers (commit de départ de la branche)."""
-    r = subprocess.run(["git", "show", "origin/main:home/.local/bin/nc-reglages"], cwd=str(REPO),
-                       capture_output=True, text=True)
-    if r.returncode:
-        raise unittest.SkipTest("origin/main introuvable : pas de comparaison avec les anciens styles")
-    with tempfile.TemporaryDirectory(prefix="nc-themes-ancien-") as d:
-        f = Path(d) / "ancien"
-        f.write_text(r.stdout, encoding="utf-8")
-        os.environ.setdefault("NC_LANGUE", "fr")
-        old = dict(os.environ, HOME=d)
-        sauve = dict(os.environ)
-        os.environ.update(old)
-        try:
-            ch = importlib.machinery.SourceFileLoader("nc_reglages_ancien", str(f))
-            m = importlib.util.module_from_spec(importlib.util.spec_from_loader(ch.name, ch))
-            ch.exec_module(m)
-        finally:
-            os.environ.clear()
-            os.environ.update(sauve)
-    return m.STYLES, m.PALETTES
+    """(STYLES, PALETTES) de nc-reglages d'avant les thèmes en fichiers, figés dans tests/donnees (commit 40eb708) :
+    la comparaison ne dépend ni de l'historique git (CI sans historique) ni de ce que devient main."""
+    return REFERENCE["STYLES"], {k: list(v) for k, v in REFERENCE["PALETTES"].items()}
 
 
 class Base(unittest.TestCase):
@@ -148,6 +136,56 @@ class Equivalence(Base):
         finally:
             os.environ.clear()
             os.environ.update(sauve)
+
+
+class Reapplication(Base):
+    """Un utilisateur déjà sur un ancien style : « nc-reglages appliquer » (mise à jour, installation) réécrit son
+    style.conf à l'octet près, aux seuls ajouts AJOUTS près ; jamais de dossier de fonds ajouté."""
+    def setUp(self):
+        super().setUp()
+        fc = Path(self.env["PATH"].split(":")[0]) / "fc-list"          # aucune police : POLICE d'Apple jamais posée
+        fc.write_text("#!/bin/sh\nexit 0\n")
+        fc.chmod(0o755)
+
+    def test_octet_par_octet(self):
+        for nom, avant in REFERENCE["style_conf"].items():
+            with self.subTest(theme=nom):
+                (self.home / ".config/nc/style.conf").write_text(avant, encoding="utf-8")
+                (self.home / ".config/nc/reglages.conf").write_text(f"STYLE={nom}\n", encoding="utf-8")
+                r = self.nc("appliquer")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertEqual(self.style_conf(), avant + AJOUTS.get(nom, ""))
+                self.assertNotIn("FONDS_DOSSIER", self.style_conf())
+
+    def test_dossier_de_fonds_au_choix_puis_garde(self):
+        """Choisir le thème pose son dossier de fonds ; une réapplication ensuite le garde."""
+        self.nc("set", "STYLE", "dracula")
+        r = self.nc("set", "STYLE", "nord")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        dossier = str(self.home / "Pictures/Wallpapers/nord")
+        self.assertEqual(self.lignes_style().get("FONDS_DOSSIER"), dossier)
+        self.nc("appliquer")
+        self.assertEqual(self.lignes_style().get("FONDS_DOSSIER"), dossier)
+
+    def test_dossier_des_themes_absent_ou_vide(self):
+        """STYLE=apple sans dossier de thèmes : message clair, style.conf inchangé, nc-theme-sync marche."""
+        avant = REFERENCE["style_conf"]["apple"]
+        for dossier in (self.r / "absent", self.r / "vide"):
+            with self.subTest(dossier=dossier.name):
+                if dossier.name == "vide":
+                    dossier.mkdir()
+                self.env["NC_THEMES_DIR"] = str(dossier)
+                (self.home / ".config/nc/style.conf").write_text(avant, encoding="utf-8")
+                (self.home / ".config/nc/reglages.conf").write_text("STYLE=apple\n", encoding="utf-8")
+                r = self.nc("appliquer")
+                self.assertIn("apple", r.stdout + r.stderr)
+                self.assertRegex(r.stdout + r.stderr, "introuvable|not found")
+                self.assertEqual(self.style_conf(), avant)
+                (self.home / ".config/noctalia").mkdir(parents=True, exist_ok=True)
+                (self.home / ".config/noctalia/colors.json").write_text(json.dumps(ThemeSync.COULEURS))
+                r = self.nc(script="nc-theme-sync")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertTrue((self.home / ".config/hypr/nc/couleurs.lua").exists())
 
 
 class Validation(Base):

@@ -147,7 +147,7 @@ class ReglageSeulementAvecLIle(unittest.TestCase):
 
     def test_reglages_de_l_ile_aussi(self):
         """Ceux que le plugin Noctalia ne lit pas (pages, style, heure, bannières…) : cachés sans l'île Quickshell."""
-        cles = ["ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_MAJUSCULES", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
+        cles = ["ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                 "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "ILE_APPEL", "ILE_TERMINAL"] + ["ILE_PAGE_" + x.upper() for x in (
                     "musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son", "reseau",
                     "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")]

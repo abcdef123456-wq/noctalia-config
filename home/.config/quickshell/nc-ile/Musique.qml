@@ -46,7 +46,7 @@ Item {
                         width: 4; radius: 2
                         height: Etat.joue ? 8 + Etat.bandes[index] * 20 : 8
                         anchors.verticalCenter: parent.verticalCenter
-                        color: Couleurs.texte; opacity: Etat.joue ? 1 : 0.4
+                        color: Couleurs.jauge; opacity: Etat.joue ? 1 : 0.4
                     }
                 }
             }
@@ -58,7 +58,7 @@ Item {
             Rectangle {
                 width: parent.width; height: 6; radius: 3; color: Couleurs.gris3
                 Rectangle {
-                    height: parent.height; radius: 3; color: Couleurs.texte
+                    height: parent.height; radius: 3; color: Couleurs.jauge
                     width: m.duree > 0 ? parent.width * Math.min(1, m.position / m.duree) : 0
                 }
                 MouseArea {

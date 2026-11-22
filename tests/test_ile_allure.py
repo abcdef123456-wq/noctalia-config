@@ -8,6 +8,7 @@ ILE_POLICE, ILE_ANIM, ILE_LUEUR, ILE_MAJUSCULES.
 - Source : pas de composant neuf dans un .qml existant (comparé à origin/main), pas de flou, réglages déclarés dans « Île ».
 HOME, XDG_* et TMPDIR sont ceux du dossier temporaire."""
 import json
+from pathlib import Path
 import os
 import re
 import runpy
@@ -31,7 +32,8 @@ SHELL = """
         console.log("R:" + JSON.stringify({ rayon: [Couleurs.rayon(15, 100, 30), Couleurs.rayon(42, 800, 700), Couleurs.rayon(28, 500, 60), Couleurs.rayon(32, 320, 90), Couleurs.rayon(15, 20, 8)],
             epaisseur: Couleurs.epaisseur, verre: Couleurs.verre, police: Couleurs.police, anim: Couleurs.animNom,
             ressort: [Couleurs.anim.raideur, Couleurs.anim.amortiL, Couleurs.anim.amortiH, Couleurs.anim.duree, Couleurs.anim.courbe === Easing.OutCubic, Couleurs.anim.contour, Couleurs.anim.spot],
-            lueur: Couleurs.lueur, maj: Couleurs.majuscules, carre: carre.radius }))
+            lueur: Couleurs.lueur, maj: Couleurs.majuscules, carre: carre.radius, page: Couleurs.rayon(42, 432, 600),
+            jauge: Qt.colorEqual(Couleurs.jauge, Couleurs.texte) ? "texte" : (Qt.colorEqual(Couleurs.jauge, Couleurs.accent) ? "accent" : "autre") }))
     }
     Timer { interval: 300; running: true; onTriggered: parent.fin() }
     function fin() {
@@ -76,6 +78,7 @@ class HorsEcran(unittest.TestCase):
             {"ILE_LUEUR": "oui"}, {"ILE_LUEUR": "non"}, {"ILE_LUEUR": "peut-etre"},            # 32 33 34
             {"ILE_MAJUSCULES": "oui"}, {"ILE_MAJUSCULES": "non"}, {"ILE_MAJUSCULES": "1"},     # 35 36 37
             {"ILE_RAYON": "normal"}, {"ILE_RAYON": "pilule"},                                   # 38 39 (ancien nom : invalide)
+            {"ILE_ACCENTS": "accent"}, {"ILE_ACCENTS": "texte"}, {"ILE_ACCENTS": "rose"},      # 40 41 42
         ]
         cls.r, _ = lancer_cas(cls.cas)
 
@@ -88,9 +91,10 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual((d["epaisseur"], d["verre"], d["police"], d["anim"]), (2, 1, "Adwaita Sans", "ressort"))
         self.assertEqual(d["ressort"], [3.4, 0.34, 0.36, 280, True, 220, 170])
         self.assertEqual((d["lueur"], d["maj"]), (False, False))
+        self.assertEqual(d["jauge"], "texte")
 
     def test_valeurs_invalides_donnent_le_defaut(self):
-        for i in (7, 8, 9, 10, 38, 39, 13, 14, 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 34, 37):
+        for i in (7, 8, 9, 10, 38, 39, 13, 14, 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 34, 37, 41, 42):
             with self.subTest(cas=self.cas[i]):
                 self.assertEqual(self.r[i], self.r[0])
 
@@ -173,6 +177,40 @@ class Source(unittest.TestCase):
                 r = reglages["PAR_CLE"][c]
                 self.assertEqual(r.defaut, attendu[c])
                 self.assertEqual(r.section, reglages["PAR_CLE"]["ILE_HEURE"].section)
+
+
+class AvantLesThemes(HorsEcran):
+    """Allure par défaut = constantes de Ile.qml et Texte.qml d'avant les thèmes (lignes figées dans
+    tests/donnees/styles-avant-themes.json, commit 40eb708)."""
+    def test_constantes_d_avant(self):
+        ref = json.loads((Path(__file__).resolve().parent / "donnees/styles-avant-themes.json").read_text(encoding="utf-8"))
+        lignes = "\n".join(ref["lignes_ile"])
+        d = self.r[0]
+        rayons = re.search(r"radius: fen\.ouverte \? \(fen\.recherche \? (\d+) : (\d+)\) : \(fen\.banniere \|\| fen\.enCarte \? (\d+) : (\d+)\)", lignes)
+        recherche, ouverte, carte, pilule = map(int, rayons.groups())
+        self.assertEqual(d["rayon"][:4], [pilule, ouverte, recherche, carte])
+        self.assertEqual(d["page"], ouverte)                  # page ouverte réelle (432 x 600) : 42, le plafond ne joue pas
+        self.assertEqual(d["epaisseur"], int(re.search(r"aContour \? (\d+) : 0", lignes)[1]))
+        largeur = re.search(r"on width \{[^}]*spring: ([\d.]+); damping: ([\d.]+)", lignes)
+        hauteur = re.search(r"on height \{[^}]*spring: ([\d.]+); damping: ([\d.]+)", lignes)
+        rayon_anim = re.search(r"on radius \{[^}]*duration: (\d+); easing\.type: Easing\.OutCubic", lignes)
+        couleur_contour = re.search(r"readonly property real e:.*\n.*duration: (\d+)", lignes)
+        self.assertEqual(d["ressort"][:5], [float(largeur[1]), float(largeur[2]), float(hauteur[2]), int(rayon_anim[1]), True])
+        self.assertEqual(d["ressort"][5], int(couleur_contour[1]))
+        self.assertEqual(d["police"], re.search(r'font\.family: "([^"]+)"', lignes)[1])
+        self.assertEqual(float(hauteur[1]), float(largeur[1]))
+
+
+class Accents(HorsEcran):
+    def test_accent(self):
+        self.assertEqual(self.r[40]["jauge"], "accent")
+
+    def test_barres_branchees(self):
+        """Les barres (jauges de Système, musique, volume) prennent Couleurs.jauge ; les chiffres gardent leur couleur."""
+        q = Path(__file__).resolve().parents[1] / "home/.config/quickshell/nc-ile"
+        self.assertIn("color: Qt.colorEqual(me.couleur, Couleurs.texte) ? Couleurs.jauge : me.couleur", (q / "Systeme.qml").read_text())
+        self.assertEqual((q / "Musique.qml").read_text().count("Couleurs.jauge"), 2)
+        self.assertEqual((q / "Compact.qml").read_text().count("Couleurs.jauge"), 2)
 
 
 if __name__ == "__main__":

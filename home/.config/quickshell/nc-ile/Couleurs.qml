@@ -42,6 +42,8 @@ Singleton {
     readonly property int epaisseur: entier("ILE_CONTOUR_EPAISSEUR", 2, 0, 4)
     readonly property real verre: entier("ILE_VERRE", 100, 85, 100) / 100
     readonly property bool majuscules: Reglages.val("ILE_MAJUSCULES", "non") === "oui"
+    // ILE_ACCENTS=accent : jauges, barres de la musique et du volume dans la couleur d'accent du thème (sinon : texte)
+    readonly property color jauge: Reglages.val("ILE_ACCENTS", "texte") === "accent" ? accent : texte
     readonly property bool lueur: Reglages.val("ILE_LUEUR", "non") === "oui"
     readonly property string police: Qt.fontFamilies().indexOf(Reglages.val("ILE_POLICE", "")) >= 0
                                      ? Reglages.val("ILE_POLICE", "") : "Adwaita Sans"

@@ -18,7 +18,8 @@
     "ILE_LUEUR": "oui",
     "FENETRES_ARRONDI": "16",
     "FENETRES_BORDURE": "2",
-    "FENETRES_OMBRE": "34"
+    "FENETRES_OMBRE": "34",
+    "ILE_ACCENTS": "accent"
   },
   "noctalia": {},
   "theme_sync": {

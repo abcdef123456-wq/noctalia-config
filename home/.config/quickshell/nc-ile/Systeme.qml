@@ -53,7 +53,7 @@ Item {
             }
             Rectangle {
                 width: parent.width; height: 5; radius: 2.5; color: Couleurs.gris3
-                Rectangle { height: parent.height; radius: 2.5; color: me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
+                Rectangle { height: parent.height; radius: 2.5; color: Qt.colorEqual(me.couleur, Couleurs.texte) ? Couleurs.jauge : me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
             }
         }
     }
