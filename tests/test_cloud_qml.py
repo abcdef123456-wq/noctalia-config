@@ -1,4 +1,4 @@
-"""Panneau Cloud JARVIS de l'île (CloudEtat.qml, CloudPanneau.qml, CloudBouton.qml), C2b.
+"""Fenêtre Cloud JARVIS de l'île : connexion/quota, actions, navigation et dépôt.
 Sources : aucun component inline, aucun appel réseau depuis le QML (tout par nc-cloud --json), titre exact, entrée de la
 recherche et IPC liées à CLOUD_JARVIS. Hors écran (vrai qs lancé par « qs -p », HOME et XDG_* isolés, faux nc-cloud qui
 note ses arguments et joue des lignes JSON, vrais clics de souris par QtTest) : coupé ou non associé = aucun lancement ;
@@ -17,7 +17,8 @@ from tests import _ile_hors_ecran as H
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
-FICHIERS = ("CloudEtat.qml", "CloudPanneau.qml", "CloudBouton.qml")
+COMPOSANTS = ("CloudBouton", "CloudCarte", "CloudConnexion", "CloudSelection", "CloudFichiers", "CloudDepot")
+FICHIERS = ("CloudEtat.qml", "CloudPanneau.qml", *(nom + ".qml" for nom in COMPOSANTS))
 PAGE_RACINE = {"evenement": "page", "parent": {"id": "root"}, "next_cursor": None,
                "entries": [{"id": "dddddddddddddddddddddddddddddddd", "name": "Photos", "kind": "directory", "revision": "r1", "parent": "root"},
                            {"id": "ffffffffffffffffffffffffffffffff", "name": "note.txt", "kind": "file", "size": 12, "revision": "r9", "parent": "root"}]}
@@ -122,8 +123,8 @@ def panneau_hors_fenetre():
     s = lire("CloudPanneau.qml")
     assert "FloatingWindow {" in s
     s = s.replace("FloatingWindow {", "Window {")
-    for l in ("    implicitWidth: Math.min(680, Math.round(largeurEcran * 0.92))\n",
-              "    implicitHeight: Math.min(Math.round(hauteurEcran * 0.85), contenu.implicitHeight + 48)\n",
+    for l in ("    implicitWidth: Math.min(900, Math.round(largeurEcran * 0.92))\n",
+              "    implicitHeight: Math.min(780, Math.round(hauteurEcran * 0.9), entete.y + entete.height + contenu.implicitHeight + 40)\n",
               "    minimumSize: Qt.size(420, 260)\n", "    onClosed: cloud.fermer()\n"):
         assert l in s, l
         s = s.replace(l, "")
@@ -175,7 +176,7 @@ class Sources(unittest.TestCase):
         self.assertIn("visible: CloudEtat.actif && CloudEtat.associe", compact)
         self.assertIn('nom: CloudEtat.envoie ? "cloud_upload" : "cloud"', compact)          # activité discrète pendant un envoi
         self.assertIn("color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec", compact)
-        self.assertIn("(compact.surCloud(e.x, e.y) ? CloudEtat.ouvrirPanneau()", ile)      # un clic ouvre le panneau
+        self.assertIn("(compact.surCloud(e.x, e.y) ? CloudEtat.basculerPanneau()", ile)
         self.assertIn("if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }", ile)
         m = re.search(r"DropArea \{\n\s*id: depotCloud(.*?)\n        \}\n", ile, re.S)
         self.assertIsNotNone(m)
@@ -196,9 +197,8 @@ class Sources(unittest.TestCase):
         self.assertIn("readonly property bool peutDeplacer: features.entry_move === true", e)
         self.assertIn("features.directory_delete === true && features.delete_preview === true", e)
         self.assertIn('if (!apercu || apercu.id !== e.id || !/^[0-9a-f]{64}$/.test(apercu.tree)) return', e)
-        p = lire("CloudPanneau.qml")
-        self.assertIn("suppression définitive, toutes ses versions", p)
-        self.assertIn("onDoubleClicked: CloudEtat.ouvrirEntree(ligne.modelData)", p)
+        self.assertIn("suppression définitive, toutes ses versions", lire("CloudSelection.qml"))
+        self.assertIn("onDoubleClicked: CloudEtat.ouvrirEntree(ligne.modelData)", lire("CloudFichiers.qml"))
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
@@ -206,7 +206,7 @@ class HorsEcran(unittest.TestCase):
     def lancer(self, corps, reglages=None, associe=True, suppression=True, features=None, page=None, notifier=False, sous=None, fichiers=False, recents=None, voir_recents=False,
                etat_echec_apres=None, mode_copie=None, parent_absent=False, copie_etat=None, presse_outil=False):
         with tempfile.TemporaryDirectory(prefix="nc-cloudqml-") as d:
-            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", "CloudBouton"),
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "BoutonReglages", *COMPOSANTS),
                               extra={"CloudEtat.qml": lire("CloudEtat.qml"), "CloudPanneau.qml": panneau_hors_fenetre()},
                               singletons=("CloudEtat",))
             bin_ = root / "home/.local/bin"
@@ -310,7 +310,7 @@ class HorsEcran(unittest.TestCase):
                     verifier(CloudEtat.message === "Téléchargé." && CloudEtat.aRemplacer === "", "téléchargé")
                     CloudEtat.choisir(CloudEtat.entrees[1]); trouver(corps, "nc-cloud-supprimer-ffffffffffffffffffffffffffffffff").clic(); etape++; return }
                 if (etape === 4) {
-                    verifier(vu(corps, "nc-cloud-question-ffffffffffffffffffffffffffffffff"), "question posée sur la ligne")
+                    verifier(vu(corps, "nc-cloud-question-ffffffffffffffffffffffffffffffff"), "question posée dans la carte de sélection")
                     verifier(!vu(corps, "nc-cloud-supprimer-ffffffffffffffffffffffffffffffff"), "plus de Supprimer… pendant la question")
                     verifier(textes(corps).join("|").indexOf("Une copie reste sur ce PC 24 h") >= 0, "texte de la question")
                     trouver(corps, "nc-cloud-confirmer-ffffffffffffffffffffffffffffffff").clic(); etape++; return }
@@ -528,8 +528,9 @@ class HorsEcran(unittest.TestCase):
                     verifier(CloudEtat.selection === "ffffffffffffffffffffffffffffffff" && vu(corps, "nc-cloud-actions-ffffffffffffffffffffffffffffffff"), "un clic choisit et montre les actions")
                     var apres = nom.mapToItem(corps, 0, 0)
                     verifier(avant.x === apres.x && avant.y === apres.y, "le nom a bougé sous la souris : " + avant + " / " + apres)
-                    var sous = l.childAt(120, 18)
-                    verifier(sous !== null && sous.objectName !== "" ? sous.objectName.indexOf("nc-cloud-actions") < 0 : true, "une action sous le point cliqué")
+                    var actions = trouver(corps, "nc-cloud-actions-ffffffffffffffffffffffffffffffff")
+                    var a = actions.mapToItem(corps, 0, 0)
+                    verifier(a.y + actions.height <= l.mapToItem(corps, 0, 0).y, "actions au-dessus de la liste")
                     verifier(!vu(corps, "nc-cloud-renommer-ffffffffffffffffffffffffffffffff") && !vu(corps, "nc-cloud-deplacer-ffffffffffffffffffffffffffffffff"), "ni Renommer ni Déplacer sans entry_move")
                     souris.mouseDoubleClickSequence(l, 120, 18); etape++; return }
                 if (etape === 2) {
@@ -548,6 +549,8 @@ class HorsEcran(unittest.TestCase):
                 if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
                 var corps = fen.contentItem
                 if (etape === 1) {
+                    trouver(corps, "nc-cloud-nouveau-fichier").clic()
+                    verifier(vu(corps, "nc-cloud-nom-dossier"), "champ de création d'un fichier vide")
                     trouver(corps, "nc-cloud-nom-dossier").text = "vide.txt"
                     trouver(corps, "nc-cloud-creer-fichier").clic(); etape++; return }
                 if (etape === 2) {
@@ -743,28 +746,33 @@ class HorsEcran(unittest.TestCase):
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertFalse([x for x in j if x.startswith("--json reprendre -- ")], j)          # la reprise annulée ne part pas
 
-    def test_en_tete_a_420_px_sans_chevauchement(self):
+    def test_fenetre_compacte_et_cartes_a_420_px_sans_chevauchement(self):
         self.lancer(self.OUVRIR + '''
             Timer { interval: 80; running: true; repeat: true; onTriggered: {
-                if (etape === 0) { ouvrir(); etape++; return }
+                if (etape === 0) { ouvrir(); fen.fermer.connect(() => etape = 3); etape++; return }
                 if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
                 var corps = fen.contentItem
-                var t = trouver(corps, "nc-cloud-titre"), b = trouver(corps, "nc-cloud-boutons-entete")
-                function separes() {
-                    var a = t.mapToItem(corps, 0, 0), c = b.mapToItem(corps, 0, 0)
-                    return a.x + t.implicitWidth <= c.x || a.y + t.height <= c.y
-                }
+                var titre = trouver(corps, "nc-cloud-titre"), fermer = trouver(corps, "nc-cloud-fermer")
+                var connexion = trouver(corps, "nc-cloud-connexion"), selection = trouver(corps, "nc-cloud-selection")
+                var fichiers = trouver(corps, "nc-cloud-mes-fichiers"), depot = trouver(corps, "nc-cloud-depot-carte")
+                function position(item) { return item.mapToItem(corps, 0, 0) }
+                if (etape === 3) { console.log("FINI"); Qt.exit(0); return }
+                verifier(position(titre).x + titre.width <= position(fermer).x
+                         && position(fermer).x + fermer.width < fen.width, "titre à gauche, Fermer à droite sans chevauchement")
+                verifier(position(connexion).y + connexion.height < position(selection).y
+                         && position(selection).y + selection.height < position(fichiers).y,
+                         "connexion, sélection, puis fichiers")
+                verifier(!trouver(corps, "nc-cloud-envoyer-ici").enabled, "rien à envoyer avant un dépôt")
+                verifier(vu(corps, "nc-cloud-fichiers") && vu(corps, "nc-cloud-actualiser"), "actions de connexion préservées")
                 if (etape === 1) {
-                    verifier(vu(corps, "nc-cloud-fichiers"), "4 boutons")
-                    verifier(separes() && !trouver(corps, "nc-cloud-entete").serre, "700 px : une ligne")
+                    verifier(position(fichiers).x + fichiers.width < position(depot).x && position(fichiers).y === position(depot).y,
+                             "700 px : fichiers à gauche, dépôt à droite")
                     fen.width = 420; etape++; return }
                 if (etape === 2) {
-                    verifier(separes(), "420 px : titre et boutons séparés")
-                    verifier(trouver(corps, "nc-cloud-entete").serre, "420 px : deux lignes")
-                    var c = b.mapToItem(corps, 0, 0)
-                    verifier(c.x >= 0 && c.x + b.width <= fen.width, "boutons dans la fenêtre")
-                    verifier(b.y + b.height <= trouver(corps, "nc-cloud-entete").height, "l'en-tête grandit : rien ne déborde dessous")
-                    console.log("FINI"); Qt.exit(0) }
+                    verifier(position(fichiers).x === position(depot).x && position(fichiers).y + fichiers.height < position(depot).y
+                             && position(depot).x + depot.width < fen.width, "420 px : cartes empilées, sans débordement")
+                    souris.mouseClick(fermer, 12, 12)
+                    verifier(etape === 3, "Fermer répond au clic") }
             } }
         ''', reglages={"CLOUD_JARVIS": "oui"}, fichiers=True)
 
@@ -958,7 +966,9 @@ class HorsEcran(unittest.TestCase):
                 if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
                 var corps = fen.contentItem
                 if (etape === 1) {
-                    verifier(!vu(corps, "nc-cloud-parent"), "pas de ↑ à la racine")
+                    var parent = trouver(corps, "nc-cloud-parent")
+                    verifier(parent.visible && !parent.enabled, "↑ affichée mais inactive à la racine")
+                    souris.mouseClick(parent)
                     glisser(trouver(corps, "nc-cloud-entree-ffffffffffffffffffffffffffffffff"), trouver(corps, "nc-cloud-entree-dddddddddddddddddddddddddddddddd"), false); etape++; return }
                 if (etape === 2) {
                     verifier(vu(corps, "nc-cloud-fantome") && trouver(corps, "nc-cloud-fantome").entree.id === "ffffffffffffffffffffffffffffffff", "aperçu sous le pointeur")

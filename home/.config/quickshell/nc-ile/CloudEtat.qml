@@ -21,6 +21,7 @@ Singleton {
     property bool associe: false
     property bool panneauOuvert: false            // posé par CloudPanneau.qml
     signal ouvrirPanneau()
+    signal basculerPanneau()
 
     property var chemin: [{ id: "root", nom: Reglages.t("Cloud", "Cloud") }]   // du dossier racine au dossier courant
     readonly property string dossier: chemin[chemin.length - 1].id
@@ -330,6 +331,7 @@ Singleton {
     onPanneauOuvertChanged: if (panneauOuvert) {
         relireAssociation()
         message = ""; erreur = ""; aRemplacer = ""; selection = ""; deplacement = null; apercu = null; choixErreur = ""
+        etat = ({})
     } else if (procChoix.running) procChoix.running = false      // le sélecteur se ferme avec le panneau (nc-cloud le referme)
     // Appelée quand l'association est connue (après la lecture du fichier) : état et première page, une fois par ouverture
     function demarrer() {
@@ -570,6 +572,7 @@ Singleton {
         onExited: code => {
             var fini = c.enCours
             c.enCours = null
+            if (fini && fini.quoi === "etat" && code !== 0) c.etat = ({})
             // Le dossier a changé : sa page est relue avant la suite de la file
             if (fini && ["dossier", "supprimer", "creer", "renommer", "deplacer", "remettre"].indexOf(fini.quoi) >= 0
                 && (code === 0 || code === 6))

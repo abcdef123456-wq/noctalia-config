@@ -122,10 +122,21 @@ class Sources(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class HorsEcran(unittest.TestCase):
-    def lancer(self, corps, etat=DEMO):
+    def lancer(self, corps, etat=DEMO, avec_fenetre=False):
         with tempfile.TemporaryDirectory(prefix="nc-garmin-") as d:
-            root = H.preparer(d, ("Couleurs",), extra={
-                "GarminEtat.qml": lire("GarminEtat.qml"),
+            composants = ("Couleurs",)
+            fichiers = {}
+            entete = H.ENTETE
+            if avec_fenetre:
+                composants += ("Texte", "Ico", "BoutonReglages") + tuple(
+                    Path(n).stem for n in fichiers_garmin() if n != "Garmin.qml")
+                # Comme pour le VPN, Window remplace la FloatingWindow (Wayland) hors écran.
+                panneau = lire("Garmin.qml").replace("FloatingWindow {", "Window {", 1)
+                panneau = re.sub(r"(?m)^    (implicitWidth|implicitHeight|minimumSize|onClosed|onVisibleChanged):.*\n", "", panneau)
+                fichiers["Garmin.qml"] = "import QtQuick.Window\n" + panneau
+                entete += "import QtTest\n"
+            root = H.preparer(d, composants, extra={
+                **fichiers, "GarminEtat.qml": lire("GarminEtat.qml"),
                 "Partage.qml": "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }\n"},
                 singletons=("GarminEtat", "Partage"))
             (root / "etat.json").write_text(json.dumps(etat))
@@ -133,7 +144,11 @@ class HorsEcran(unittest.TestCase):
             bin_.mkdir(parents=True)
             (bin_ / "nc-garmin").write_text(FAUX.replace("@ROOT@", str(root)))
             (bin_ / "nc-garmin").chmod(0o755)
-            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n property int etape: 0\n property int ticks: 0\n" + H.OUTILS
+            if avec_fenetre:
+                reglages = bin_ / "nc-reglages"
+                reglages.write_text(f"""#!/bin/sh\nprintf 'REGLAGES %s\\n' "$*" >> "{root}/journal"\n""")
+                reglages.chmod(0o755)
+            (root / "shell.qml").write_text(entete + "ShellRoot {\n property int etape: 0\n property int ticks: 0\n" + H.OUTILS
                                             + textwrap_corps(corps)
                                             + "\n Timer { interval: 15000; running: true; onTriggered: { console.error(\"ECHEC délai\"); Qt.exit(3) } }\n}\n")
             code, sortie = H.lancer(root, delai=40)
@@ -204,6 +219,72 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''')
+
+    def test_en_tete_et_actions_du_panneau(self):
+        etat = dict(DEMO, widgets_actifs=["body_battery", "hydratation"])
+        journal = self.lancer('''
+            property bool fermee: false
+            Garmin { id: fen; visible: true; width: 900; height: 780; onFermer: fermee = true }
+            TestCase { id: t; name: "Garmin"; when: false }
+            function chercher(suffixe) { return trouver(fen.contentItem, "nc-garmin-" + suffixe) }
+            Timer { interval: 60; running: true; repeat: true; onTriggered: {
+                if (!GarminEtat.lu) return
+                if (etape === 0) {
+                    var titre = chercher("titre"), perso = chercher("perso"), actualiser = chercher("actualiser")
+                    var reglages = chercher("reglages"), fermer = chercher("fermer")
+                    verifier(titre.text === "Santé Garmin" && chercher("sous-titre").text.indexOf("Données de démonstration") !== -1, "mode démo annoncé")
+                    verifier(perso.parent === fermer.parent && perso.x < actualiser.x && actualiser.x < reglages.x && reglages.x < fermer.x, "quatre boutons ordonnés dans l’en-tête")
+                    t.mouseClick(perso)
+                    etape++; return
+                }
+                if (etape === 1) {
+                    verifier(chercher("tiroir").visible, "Personnaliser ouvre le tiroir")
+                    t.mouseClick(chercher("coche-body_battery"))
+                    t.mouseClick(chercher("perso"))
+                    verifier(!chercher("tiroir").visible, "Personnaliser referme le tiroir")
+                    etape++; return
+                }
+                if (etape === 2) {
+                    if (GarminEtat.occupe) return
+                    t.mouseClick(chercher("actualiser"))
+                    etape++; return
+                }
+                if (etape === 3) {
+                    if (!GarminEtat.occupe) return
+                    verifier(!chercher("actualiser").enabled && chercher("actualiser").texte === "Synchro…", "actualisation en cours")
+                    t.mouseClick(chercher("eau-250"))
+                    t.mouseClick(chercher("eau-500"))
+                    t.mouseClick(chercher("reglages"))
+                    etape++; return
+                }
+                if (GarminEtat.occupe) return
+                t.mouseClick(chercher("fermer"))
+                verifier(fermee, "Fermer émet le signal de fermeture")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', etat=etat, avec_fenetre=True)
+        self.assertIn("REGLAGES fenetre Santé Garmin", journal)
+        debut = [l.split()[1:-1] for l in journal.splitlines() if l.startswith("DEBUT")]
+        self.assertEqual(debut, [["sync"], ["widgets", "basculer", "body_battery"], ["sync", "--force"],
+                                 ["hydratation", "+250"], ["hydratation", "+500"]])
+
+    def test_en_tete_sync_et_masquage(self):
+        self.lancer('''
+            Garmin { id: fen; visible: true; width: 420; height: 520 }
+            Timer { interval: 60; running: true; repeat: true; onTriggered: {
+                if (!GarminEtat.lu || ++ticks < 5) return
+                var titre = trouver(fen.contentItem, "nc-garmin-sous-titre")
+                var perso = trouver(fen.contentItem, "nc-garmin-perso")
+                var fermer = trouver(fen.contentItem, "nc-garmin-fermer")
+                var contenu = trouver(fen.contentItem, "nc-garmin-contenu")
+                verifier(titre.text.indexOf("Garmin Connect · Synchro ") === 0, "heure de synchronisation dans l’en-tête")
+                verifier(perso.mapToItem(contenu, 0, 0).x >= 0 && fermer.mapToItem(contenu, fermer.width, 0).x <= contenu.width,
+                         "contrôles contenus dans la largeur minimale")
+                Partage.silence = true
+                verifier(titre.text.indexOf("Indicateurs masqués") === 0 && titre.text.indexOf("Synchro") === -1, "statut de confidentialité sans horodatage")
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', etat=dict(DEMO, demo=False, connecte=True, maj=1761000000), avec_fenetre=True)
 
 
 

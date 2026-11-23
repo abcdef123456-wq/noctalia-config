@@ -258,6 +258,10 @@ ShellRoot {
     Connections {
         target: CloudEtat
         function onOuvrirPanneau() { racine.ouvrirCloud() }
+        function onBasculerPanneau() {
+            if (racine.cloudOuvert) racine.cloudOuvert = false
+            else racine.ouvrirCloud()
+        }
     }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {

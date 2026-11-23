@@ -117,12 +117,15 @@ class Connecteur(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Tableau(unittest.TestCase):
-    def lancer(self, corps, metriques, silence=False):
-        etat = dict(DEMO, metriques=metriques)
+    def lancer(self, corps, metriques, widgets=None, largeur=846):
+        if widgets is None:
+            widgets = ["body_battery", "frequence_cardiaque", "sommeil", "stress", "pas"]
+        etat = dict(DEMO, metriques=metriques, widgets_actifs=widgets)
         with tempfile.TemporaryDirectory(prefix="nc-garmin-g5-") as d:
             lire = lambda n: (QML / n).read_text()
-            root = H.preparer(d, ("Couleurs", "Texte", "GarminTableau", "GarminSommeil", "GarminCourbe", "GarminJauge"), extra={
-                "GarminEtat.qml": lire("GarminEtat.qml"),
+            composants = ("GarminTableau", "GarminCarte", "GarminBouton", "GarminSommeil", "GarminCourbe", "GarminJauge", "GarminEtat")
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico"), extra={
+                **{n + ".qml": lire(n + ".qml") for n in composants},
                 "Partage.qml": "pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }\n"},
                 singletons=("GarminEtat", "Partage"))
             (root / "etat.json").write_text(json.dumps(etat))
@@ -130,12 +133,18 @@ class Tableau(unittest.TestCase):
             bin_.mkdir(parents=True)
             (bin_ / "nc-garmin").write_text(FAUX.replace("@ROOT@", str(root)))
             (bin_ / "nc-garmin").chmod(0o755)
-            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n property int etape: 0\n property int ticks: 0\n property var fige: []\n" + H.OUTILS + '''
-                Window { id: w; visible: true; width: 400; height: 700
-                    Item { id: cadre; anchors.fill: parent; GarminTableau { id: tab; objectName: "nc-garmin-tableau" } } }
+            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n property int etape: 0\n property int ticks: 0\n property var fige: []\n"
+                                            + f" property int largeur: {largeur}\n" + H.OUTILS + '''
+                Window { id: w; visible: true; width: largeur; height: 780
+                    Item { id: cadre; anchors.fill: parent; GarminTableau { id: tab; width: parent.width; objectName: "nc-garmin-tableau" } } }
                 function vus() { var l = []; var noms = ["nc-garmin-jauges", "nc-garmin-courbe-bb", "nc-garmin-courbe-fc", "nc-garmin-courbe-stress", "nc-garmin-sommeil", "nc-garmin-distance"]
                     for (var i = 0; i < noms.length; i++) { var o = trouver(cadre, noms[i]); if (o && o.visible && tab.visible) l.push(noms[i]) } return l }
                 function jauge(n) { return trouver(cadre, "nc-garmin-jauge-" + n) }
+                function carte(n) { return trouver(cadre, "nc-garmin-carte-" + n) }
+                function droite(n) {
+                    var v = trouver(cadre, "nc-garmin-valeur-" + n)
+                    return v.mapToItem(cadre, v.width, 0).x
+                }
                 ''' + textwrap_corps(corps)
                                             + "\n Timer { interval: 15000; running: true; onTriggered: { console.error(\"ECHEC délai\"); Qt.exit(3) } }\n}\n")
             code, sortie = H.lancer(root, delai=40)
@@ -155,13 +164,16 @@ class Tableau(unittest.TestCase):
     '''
 
     def test_vide(self):
-        self.lancer(self.ATTENTE % '''verifier(vus().length === 0 && !tab.visible, "rien de visible sans mesure : " + vus())''', {})
+        self.lancer(self.ATTENTE % '''
+            verifier(vus().length === 0, "pas de jauge, courbe ou phase visible sans mesure : " + vus())
+            verifier(carte("body_battery").valeur === "—", "carte sans donnée")
+        ''', {})
 
     def test_partiel(self):
         self.lancer(self.ATTENTE % '''
             var v = vus()
             verifier(v.indexOf("nc-garmin-jauges") >= 0, "jauges visibles")
-            verifier(jauge("bb").texte === "70" && jauge("fc").texte === "—" && jauge("stress").texte === "—", "jauges : " + jauge("bb").texte + jauge("fc").texte)
+            verifier(jauge("bb").texte === "70 %" && jauge("fc").texte === "—" && jauge("stress").texte === "—", "jauges : " + jauge("bb").texte + jauge("fc").texte)
             verifier(v.indexOf("nc-garmin-courbe-bb") >= 0 && v.indexOf("nc-garmin-courbe-fc") < 0, "courbes : " + v)
             verifier(v.indexOf("nc-garmin-sommeil") < 0, "barre de sommeil cachée sans phases")
         ''', {"body_battery": 70, "bb_serie": [30, 45, 70], "fc_serie": [60]})
@@ -170,11 +182,39 @@ class Tableau(unittest.TestCase):
         self.lancer(self.ATTENTE % '''
             var v = vus()
             verifier(v.length === 6, "tout visible : " + v)
-            verifier(jauge("sommeil").texte === "80" && jauge("pas").texte === "6000", "jauges")
-            verifier(trouver(cadre, "nc-garmin-distance").text.indexOf("5.0") >= 0, "distance : " + trouver(cadre, "nc-garmin-distance").text)
-        ''', {"body_battery": 70, "fc_repos": 55, "sommeil_score": 80, "stress_moyen": 30, "pas": 6000, "distance_m": 5000,
+            verifier(jauge("sommeil").texte === "80/100" && jauge("pas").texte === "6000", "jauges")
+            verifier(jauge("fc").texte === "80 bpm" && carte("frequence_cardiaque").valeur === "80 bpm", "dernière mesure cardiaque dans les deux vues")
+            verifier(jauge("pas").valeur === 0.75, "fraction de l'objectif réel")
+            verifier(trouver(cadre, "nc-garmin-distance").text === "5.00 km", "distance en km")
+            var cles = ["body_battery", "frequence_cardiaque", "sommeil", "stress", "pas"]
+            var noms = ["bb", "fc", "sommeil", "stress", "pas"]
+            for (var i = 0; i < cles.length; i++) {
+                var j = jauge(noms[i]), c = carte(cles[i])
+                verifier(j.couleur === c.couleur && Math.abs(droite(cles[i]) - droite(cles[0])) < 1, "teinte et alignement " + cles[i])
+                verifier(j.parent.y === jauge("bb").parent.y && (!i || j.parent.x > jauge(noms[i - 1]).parent.x), "ordre sur une même rangée")
+                verifier(c.width === tab.width && (!i || c.y > carte(cles[i - 1]).y), "ordre des cartes pleine largeur")
+            }
+            var b = trouver(cadre, "nc-garmin-sommeil-barre"), total = b.spacing * 3
+            for (var k = 0; k < 4; k++) {
+                var segment = trouver(cadre, "nc-garmin-sommeil-" + k)
+                verifier(segment.visible && segment.width > 0, "phase représentée " + k)
+                total += segment.width
+            }
+            verifier(Math.abs(total - b.width) < 1, "la barre tient exactement dans la carte")
+        ''', {"body_battery": 70, "fc_repos": 55, "sommeil_score": 80, "stress_moyen": 30, "pas": 6000, "pas_objectif": 8000, "distance_m": 5000,
               "bb_serie": [30, 45, 70], "fc_serie": [60, 70, 80], "stress_serie": [20, 30, 25],
               "sommeil_profond_s": 5000, "sommeil_leger_s": 15000, "sommeil_paradoxal_s": 6000, "sommeil_eveil_s": 1000})
+
+    def test_ordre_personnalise_et_fenetre_etroite(self):
+        self.lancer(self.ATTENTE % '''
+            var pas = jauge("pas"), coeur = jauge("fc"), bb = jauge("bb")
+            var rang = trouver(cadre, "nc-garmin-jauges")
+            verifier(pas.parent.x < coeur.parent.x && coeur.parent.x < bb.parent.x, "ordre personnalisé des jauges")
+            verifier(rang.width === 368 && bb.parent.x + bb.parent.width <= rang.width && bb.parent.y === pas.parent.y, "jauges visibles sur une rangée étroite")
+            verifier(carte("pas").y < carte("hydratation").y && carte("hydratation").y < carte("frequence_cardiaque").y, "ordre personnalisé des cartes")
+            verifier(!jauge("stress") && !carte("stress"), "indicateur désactivé absent des deux vues")
+            verifier(coeur.texte === "55 bpm", "fréquence au repos sans série")
+        ''', {"pas": 6000, "fc_repos": 55}, widgets=["pas", "hydratation", "frequence_cardiaque", "body_battery"], largeur=368)
 
     def test_partage_cache_tout(self):
         self.lancer(self.ATTENTE % '''

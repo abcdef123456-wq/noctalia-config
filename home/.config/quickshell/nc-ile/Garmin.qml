@@ -1,8 +1,7 @@
 // Fenêtre « Santé Garmin » (Super + Alt + S si GARMIN_ACTIF=oui, ou `qs -c nc-ile ipc call ile garmin`). Une VRAIE fenêtre
 // (FloatingWindow), titre « Garmin » (stable : les règles de Hyprland la reconnaissent à ce titre exact, regles.lua et
-// automatismes.lua). Connecteur NON OFFICIEL. Une grille de cartes (GarminCarte.qml) dans l'ordre choisi, un tiroir
-// « Personnaliser » (GarminTiroir.qml), une carte d'accueil hors connexion (GarminAccueil.qml). Tout vient de nc-garmin par
-// GarminEtat.qml : seules les valeurs de GarminEtat.metriquesVisibles sont lues ici (vides pendant un partage d'écran).
+// automatismes.lua). Jauges et cartes du tableau (GarminTableau.qml) dans l'ordre choisi, avec un tiroir
+// « Personnaliser » (GarminTiroir.qml) et une carte d'accueil hors connexion (GarminAccueil.qml).
 // Rien ne tourne fermé ; Échap ferme. Verre : fond de la palette à 62 % (92 % sans flou) ; bordure et coins : ceux de Hyprland.
 import QtQuick
 import Quickshell
@@ -13,7 +12,7 @@ FloatingWindow {
     title: Reglages.t("Garmin", "Garmin")           // le même mot dans les deux langues : la règle de Hyprland vise ce titre exact
     color: "transparent"
     implicitWidth: garmin.largeurCarte
-    implicitHeight: Math.min(Math.round(garmin.hauteurEcran * 0.9), contenu.implicitHeight + 48)
+    implicitHeight: Math.min(780, Math.round(garmin.hauteurEcran * 0.9), contenu.implicitHeight + 50)
     minimumSize: Qt.size(420, 260)
     onClosed: garmin.fermer()
     onVisibleChanged: if (!visible) garmin.fermer()
@@ -21,34 +20,24 @@ FloatingWindow {
     readonly property real largeurEcran: garmin.screen ? garmin.screen.width : 1600
     readonly property real hauteurEcran: garmin.screen ? garmin.screen.height : 1000
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
-    readonly property int largeurCarte: Math.min(760, Math.round(largeurEcran * 0.92))
+    readonly property int largeurCarte: Math.min(900, Math.round(largeurEcran * 0.92))
     property bool tiroir: false
-    readonly property var m: GarminEtat.metriquesVisibles
 
     function quitter() { garmin.fermer() }
     Component.onCompleted: GarminEtat.panneauOuvert = true
     Component.onDestruction: GarminEtat.panneauOuvert = false
 
-    function nb(v, unite) { return v === undefined || v === null ? "—" : String(v) + (unite || "") }
-    function heures(s) { return s === undefined || s === null ? "—" : Math.floor(s / 3600) + " h " + String(Math.floor(s % 3600 / 60)).padStart(2, "0") }
-    function fiche(id) {
-        var m = garmin.m
-        if (GarminEtat.masque) return { titre: GarminEtat.nomDe(id), valeur: "—", sous: Reglages.t("Masqué pendant le partage d'écran", "Hidden while sharing the screen"), jauge: -1, couleur: Couleurs.gris4 }
-        var un = Reglages.t
-        switch (id) {
-        case "body_battery": return { titre: GarminEtat.nomDe(id), valeur: nb(m.body_battery), sous: "", jauge: (m.body_battery || 0) / 100, couleur: Couleurs.vert }
-        case "frequence_cardiaque": return { titre: GarminEtat.nomDe(id), valeur: nb(m.fc_repos, " bpm"), sous: un("Max ", "Max ") + nb(m.fc_max), jauge: -1, couleur: Couleurs.rouge }
-        case "sommeil": return { titre: GarminEtat.nomDe(id), valeur: heures(m.sommeil_s), sous: un("Score ", "Score ") + nb(m.sommeil_score), jauge: (m.sommeil_score || 0) / 100, couleur: Couleurs.violet }
-        case "stress": return { titre: GarminEtat.nomDe(id), valeur: nb(m.stress_moyen), sous: "", jauge: (m.stress_moyen || 0) / 100, couleur: Couleurs.orange }
-        case "pas": return { titre: GarminEtat.nomDe(id), valeur: nb(m.pas), sous: m.pas_objectif ? un("Objectif ", "Goal ") + m.pas_objectif : "", jauge: m.pas_objectif ? m.pas / m.pas_objectif : -1, couleur: Couleurs.bleu }
-        case "vfc": return { titre: GarminEtat.nomDe(id), valeur: nb(m.vfc_nuit, " ms"), sous: "", jauge: -1, couleur: Couleurs.rose }
-        case "activite": return { titre: GarminEtat.nomDe(id), valeur: m.activite_nom || "—", sous: m.activite_minutes ? m.activite_minutes + " min" : "", jauge: -1, couleur: Couleurs.vert }
-        case "calories": return { titre: GarminEtat.nomDe(id), valeur: nb(m.calories_actives, " kcal"), sous: un("Étages ", "Floors ") + nb(m.etages) + " · " + nb(m.minutes_intenses, " min"), jauge: -1, couleur: Couleurs.orange }
-        case "oxygene": return { titre: GarminEtat.nomDe(id), valeur: nb(m.spo2, " %"), sous: un("Respiration ", "Breathing ") + nb(m.respiration), jauge: (m.spo2 || 0) / 100, couleur: Couleurs.bleu }
-        case "forme": return { titre: GarminEtat.nomDe(id), valeur: nb(m.readiness), sous: "VO2 max " + nb(m.vo2max), jauge: (m.readiness || 0) / 100, couleur: Couleurs.jaune }
-        case "hydratation": return { titre: GarminEtat.nomDe(id), valeur: nb(m.hydratation_ml, " ml"), sous: "", jauge: -1, couleur: Couleurs.bleu }
-        }
-        return { titre: GarminEtat.nomDe(id), valeur: "—", sous: "", jauge: -1, couleur: Couleurs.accent }
+    readonly property string sousTitre: {
+        const t = Reglages.t
+        if (!GarminEtat.lu) return t("Chargement…", "Loading…")
+        if (!GarminEtat.actif) return t("Fonction désactivée", "Disabled")
+        if (GarminEtat.masque) return t("Indicateurs masqués (partage d'écran)", "Metrics hidden (screen sharing)")
+        if (!GarminEtat.pret) return t("Connecteur non officiel · Aucun compte connecté", "Unofficial connector · No account connected")
+        let statut = GarminEtat.demo ? t("Données de démonstration", "Demo data") : "Garmin Connect"
+        if (!GarminEtat.demo && GarminEtat.maj > 0)
+            statut += " · " + t("Synchro ", "Synced ") + Qt.formatTime(new Date(GarminEtat.maj * 1000), "hh:mm")
+        const n = GarminEtat.widgetsActifs.length
+        return statut + " · " + n + (n === 1 ? t(" indicateur actif", " active widget") : t(" indicateurs actifs", " active widgets"))
     }
 
     Item {
@@ -73,95 +62,125 @@ FloatingWindow {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.VerticalFlick
-        Column {
-            id: contenu
-            objectName: "nc-garmin-contenu"
-            x: 26; y: 24; width: defile.width - 52
-            spacing: 14
+            Column {
+                id: contenu
+                objectName: "nc-garmin-contenu"
+                x: 26; y: 24; width: defile.width - 52
+                spacing: 14
 
-            Item {
-                width: parent.width; height: 34
-                GarminIcone { id: ico; anchors.verticalCenter: parent.verticalCenter; taille: 26 }
+                Item {
+                    id: entete
+                    width: parent.width
+                    readonly property bool empile: largeurTitre + actions.implicitWidth + 14 > width
+                    readonly property real largeurTitre: Math.max(titre.implicitWidth, sousTitre.implicitWidth) + 36
+                    readonly property real hauteurTitre: Math.max(52, libelle.implicitHeight)
+                    height: empile ? hauteurTitre + actions.implicitHeight + 8
+                                   : Math.max(hauteurTitre, actions.implicitHeight)
+
+                    Item {
+                        id: identite
+                        width: entete.empile ? entete.width : entete.width - actions.width - 14
+                        height: libelle.implicitHeight
+                        y: entete.empile ? 0 : (entete.height - height) / 2
+
+                        GarminIcone {
+                            taille: 26
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: GarminEtat.pret ? Couleurs.accent : Couleurs.gris5
+                        }
+                        Column {
+                            id: libelle
+                            x: 36; width: parent.width - x; spacing: 2
+                            Row {
+                                id: titre
+                                spacing: 8
+                                Texte {
+                                    objectName: "nc-garmin-titre"
+                                    text: Reglages.t("Santé Garmin", "Garmin Health")
+                                    font.pixelSize: 24; font.weight: Font.Bold
+                                }
+                                Rectangle {
+                                    visible: GarminEtat.demo && GarminEtat.actif
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: demo.implicitWidth + 14; height: 20
+                                    radius: Couleurs.rayon(10, width, height)
+                                    color: Qt.alpha(Couleurs.orange, 0.22)
+                                    border.width: 1; border.color: Qt.alpha(Couleurs.orange, 0.5)
+                                    Texte {
+                                        id: demo
+                                        anchors.centerIn: parent
+                                        text: Reglages.t("DÉMO", "DEMO")
+                                        font.pixelSize: 10; font.weight: Font.Bold; color: Couleurs.orange
+                                    }
+                                }
+                            }
+                            Texte {
+                                id: sousTitre
+                                objectName: "nc-garmin-sous-titre"
+                                width: parent.width
+                                text: garmin.sousTitre; secondaire: true; font.pixelSize: 12
+                            }
+                        }
+                    }
+
+                    Row {
+                        id: actions
+                        anchors.right: parent.right
+                        y: entete.empile ? entete.hauteurTitre + 8 : (entete.height - implicitHeight) / 2
+                        spacing: 8
+                        readonly property bool compact: entete.width < 430
+
+                        GarminBouton {
+                            objectName: "nc-garmin-perso"
+                            visible: GarminEtat.actif
+                            texte: Reglages.t("Personnaliser", "Customize")
+                            icone: actions.compact ? "" : "tune"
+                            choisi: garmin.tiroir
+                            onClic: garmin.tiroir = !garmin.tiroir
+                        }
+                        GarminBouton {
+                            objectName: "nc-garmin-actualiser"
+                            visible: GarminEtat.actif && GarminEtat.pret
+                            enabled: !GarminEtat.occupe
+                            texte: GarminEtat.occupe ? Reglages.t("Synchro…", "Syncing…") : Reglages.t("Actualiser", "Refresh")
+                            icone: actions.compact ? "" : "refresh"
+                            onClic: GarminEtat.actualiser()
+                        }
+                        BoutonReglages {
+                            objectName: "nc-garmin-reglages"
+                            taille: 32
+                            section: "Santé Garmin"
+                        }
+                        GarminBouton {
+                            objectName: "nc-garmin-fermer"
+                            texte: Reglages.t("Fermer", "Close")
+                            icone: actions.compact ? "" : "close"
+                            onClic: garmin.quitter()
+                        }
+                    }
+                }
+
                 Texte {
-                    anchors.verticalCenter: parent.verticalCenter; x: 36
-                    text: Reglages.t("Santé", "Health"); font.pixelSize: 20; font.weight: Font.DemiBold
+                    objectName: "nc-garmin-erreur"
+                    visible: GarminEtat.erreur !== ""
+                    width: parent.width; wrapMode: Text.Wrap; color: Couleurs.rouge; text: GarminEtat.erreur
                 }
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; spacing: 8
-                    Rectangle {
-                        visible: GarminEtat.actif && GarminEtat.pret
-                        objectName: "nc-garmin-actualiser"
-                        height: 30; width: tAct.implicitWidth + 24; radius: Couleurs.rayon(15, width, height); color: Couleurs.carteSurvol
-                        Texte { id: tAct; anchors.centerIn: parent; text: Reglages.t("Actualiser", "Refresh") }
-                        MouseArea { anchors.fill: parent; onClicked: GarminEtat.actualiser() }
-                    }
-                    Rectangle {
-                        visible: GarminEtat.actif
-                        objectName: "nc-garmin-perso"
-                        height: 30; width: tPer.implicitWidth + 24; radius: Couleurs.rayon(15, width, height)
-                        color: garmin.tiroir ? Couleurs.accent : Couleurs.carteSurvol
-                        Texte { id: tPer; anchors.centerIn: parent; text: Reglages.t("Personnaliser", "Customize"); color: garmin.tiroir ? Couleurs.surAccent : Couleurs.texte }
-                        MouseArea { anchors.fill: parent; onClicked: garmin.tiroir = !garmin.tiroir }
-                    }
-                    BoutonReglages { section: "Santé Garmin" }
-                    Rectangle {
-                        height: 30; width: tFer.implicitWidth + 24; radius: Couleurs.rayon(15, width, height); color: Couleurs.carteSurvol
-                        Texte { id: tFer; anchors.centerIn: parent; text: Reglages.t("Fermer", "Close") }
-                        MouseArea { anchors.fill: parent; onClicked: garmin.quitter() }
-                    }
+                GarminTiroir {
+                    objectName: "nc-garmin-tiroir"
+                    visible: garmin.tiroir && GarminEtat.actif; width: parent.width
                 }
-            }
-
-            Texte {
-                visible: GarminEtat.erreur !== ""
-                width: parent.width; wrapMode: Text.Wrap; color: Couleurs.rouge; text: GarminEtat.erreur
-            }
-
-            GarminAccueil {
-                objectName: "nc-garmin-accueil"
-                visible: GarminEtat.lu && (!GarminEtat.actif || !GarminEtat.pret)
-                width: parent.width
-            }
-            Texte {
-                visible: GarminEtat.lu && !GarminEtat.actif
-                width: parent.width; wrapMode: Text.Wrap; secondaire: true
-                text: Reglages.t("La santé Garmin est désactivée dans les réglages.", "Garmin health is turned off in the settings.")
-            }
-
-            GarminTiroir { visible: garmin.tiroir && GarminEtat.actif; width: parent.width }
-            GarminTableau { objectName: "nc-garmin-tableau" }
-
-            Flow {
-                id: grille
-                objectName: "nc-garmin-grille"
-                visible: GarminEtat.actif && GarminEtat.pret
-                width: parent.width; spacing: 12
-                readonly property int cols: width > 600 ? 3 : 2
-                Repeater {
-                    model: GarminEtat.actif && GarminEtat.pret ? GarminEtat.widgetsActifs : []
-                    delegate: GarminCarte {
-                        id: cc
-                        required property string modelData
-                        readonly property var f: garmin.fiche(modelData)
-                        objectName: "nc-garmin-carte-" + modelData
-                        width: Math.floor((grille.width - grille.spacing * (grille.cols - 1)) / grille.cols)
-                        titre: f.titre; valeur: f.valeur; sous: f.sous; jauge: f.jauge; couleur: f.couleur
-                        Rectangle {
-                            visible: cc.modelData === "hydratation"
-                            height: 28; width: 64; radius: Couleurs.rayon(14, width, height); color: Couleurs.carteSurvol
-                            Texte { anchors.centerIn: parent; text: "+250" }
-                            MouseArea { anchors.fill: parent; onClicked: GarminEtat.hydrater("+250") }
-                        }
-                        Rectangle {
-                            visible: cc.modelData === "hydratation"
-                            height: 28; width: 64; radius: Couleurs.rayon(14, width, height); color: Couleurs.carteSurvol
-                            Texte { anchors.centerIn: parent; text: "+500" }
-                            MouseArea { anchors.fill: parent; onClicked: GarminEtat.hydrater("+500") }
-                        }
-                    }
+                GarminAccueil {
+                    objectName: "nc-garmin-accueil"
+                    visible: GarminEtat.lu && (!GarminEtat.actif || !GarminEtat.pret)
+                    width: parent.width
                 }
+                Texte {
+                    visible: GarminEtat.lu && !GarminEtat.actif
+                    width: parent.width; wrapMode: Text.Wrap; secondaire: true
+                    text: Reglages.t("La santé Garmin est désactivée dans les réglages.", "Garmin health is turned off in the settings.")
+                }
+                GarminTableau { objectName: "nc-garmin-tableau"; width: parent.width }
             }
-        }
         }
     }
 }
