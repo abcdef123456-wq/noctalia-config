@@ -1,0 +1,128 @@
+#!/usr/bin/python3 -I
+"""Depuis une copie de confiance : attester-ci-locale NUMERO_PR."""
+
+import base64
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import secrets
+import stat
+import subprocess
+import sys
+import time
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+DEPOT = 'abcdef123456-wq/noctalia-config'
+RACINE = Path(__file__).resolve().parent.parent
+ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
+       'HOME': pwd.getpwuid(os.getuid()).pw_dir,
+       'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}'}
+
+
+class SansRedirection(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+HTTP = build_opener(ProxyHandler({}), SansRedirection())
+
+
+def api(route, *, jeton=None, corps=None, methode=None):
+    headers = {'Accept': 'application/vnd.github+json',
+               'User-Agent': 'noctalia-ci-locale', 'X-GitHub-Api-Version': '2022-11-28'}
+    if jeton:
+        headers['Authorization'] = 'Bearer ' + jeton
+    data = None
+    if corps is not None:
+        headers['Content-Type'] = 'application/json'
+        data = json.dumps(corps).encode()
+    req = Request('https://api.github.com' + route, data=data, headers=headers, method=methode)
+    with HTTP.open(req, timeout=30) as rep:
+        if rep.status != 204:
+            return json.load(rep)
+
+
+def b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=')
+
+
+def jwt(app, cle):
+    maintenant = int(time.time())
+    entete = b64(b'{"alg":"RS256","typ":"JWT"}')
+    claims = b64(json.dumps({'iss': app, 'iat': maintenant - 60, 'exp': maintenant + 540}).encode())
+    message = entete + b'.' + claims
+    signature = subprocess.run(['/usr/bin/openssl', 'dgst', '-sha256', '-sign', str(cle)],
+                               input=message, stdout=subprocess.PIPE, check=True, env=ENV).stdout
+    return (message + b'.' + b64(signature)).decode('ascii')
+
+
+def statut(app, cle, depot_id, sha, etat, description):
+    identite = jwt(app, cle)
+    installation = api(f'/repos/{DEPOT}/installation', jeton=identite)['id']
+    acces = api(f'/app/installations/{installation}/access_tokens', jeton=identite,
+                corps={'repository_ids': [depot_id], 'permissions': {'statuses': 'write'}})['token']
+    try:
+        api(f'/repos/{DEPOT}/statuses/{sha}', jeton=acces,
+            corps={'context': 'ci-locale', 'state': etat, 'description': description})
+    finally:
+        api('/installation/token', jeton=acces, methode='DELETE')
+
+
+def git(*args, **options):
+    return subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', *args],
+                          cwd=RACINE, env={**ENV, 'GIT_TERMINAL_PROMPT': '0',
+                                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+                                         'GIT_NO_REPLACE_OBJECTS': '1'}, check=True, **options)
+
+
+def main():
+    if len(sys.argv) != 2 or not re.fullmatch(r'[1-9][0-9]*', sys.argv[1]):
+        sys.exit('Usage : attester-ci-locale NUMERO_PR')
+    numero = sys.argv[1]
+    app = os.environ.get('CI_LOCALE_APP_ID', '')
+    chemin = Path(os.environ.get('CI_LOCALE_CLE_PRIVEE', ''))
+    if not re.fullmatch(r'[1-9][0-9]*', app) or not chemin.is_absolute():
+        sys.exit('Configurer CI_LOCALE_APP_ID et CI_LOCALE_CLE_PRIVEE (chemin absolu).')
+    cle = chemin.resolve(strict=True)
+    info = cle.stat()
+    if (cle.is_relative_to(RACINE) or not stat.S_ISREG(info.st_mode) or
+            info.st_uid != os.getuid() or info.st_mode & 0o077):
+        sys.exit('La clé doit être un fichier privé du compte courant, hors de la copie de travail.')
+
+    def cible():
+        pr = api(f'/repos/{DEPOT}/pulls/{numero}')
+        if (pr['state'] != 'open' or pr['base']['repo']['full_name'] != DEPOT or
+                pr['base']['ref'] != 'main' or not re.fullmatch(r'[a-f0-9]{40}', pr['head']['sha'])):
+            sys.exit('La demande doit être ouverte et viser main dans le dépôt prévu.')
+        return pr['head']['sha'], pr['base']['repo']['id']
+
+    sha, depot_id = cible()
+    ref = 'refs/ci-locale/' + secrets.token_hex(16)
+    try:
+        git('-c', 'credential.helper=', 'fetch', '--no-tags', '--no-write-fetch-head',
+            '--no-recurse-submodules', f'https://github.com/{DEPOT}.git', f'refs/pull/{numero}/head:{ref}')
+        recu = git('rev-parse', '--verify', ref + '^{commit}', capture_output=True, text=True).stdout.strip()
+        if recu != sha:
+            sys.exit('La tête a changé pendant la récupération ; relancer.')
+        statut(app, cle, depot_id, sha, 'pending', 'Vérification locale en cours')
+        print(f'PR #{numero} : vérification de {sha}', flush=True)
+        resultat = subprocess.run([RACINE / 'outils/ci-locale', sha], cwd=RACINE, env=ENV).returncode
+        if cible() != (sha, depot_id):
+            sys.exit('La cible a changé ; aucun résultat final publié.')
+        if resultat != 0:
+            statut(app, cle, depot_id, sha, 'failure', 'Échec de la vérification locale')
+            return 1
+        statut(app, cle, depot_id, sha, 'success', 'Vérification locale réussie')
+        return 0
+    finally:
+        git('update-ref', '-d', ref)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, HTTPError) as exc:
+        sys.exit(f'Attestation interrompue : {exc}')
