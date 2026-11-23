@@ -1,7 +1,8 @@
 # noctalia-config
 
 Les changements passent par une pull request vers `main`, avec l'accord du propriétaire et le statut `ci-locale`.
-Les tests, l'analyse statique et les installations réelles tournent en local, pas sur GitHub Actions.
+La CI obligatoire tourne en local et rend un verdict sous 15 minutes. Les installations sur les quatre distributions
+sont un contrôle de livraison séparé ; aucun test ne tourne sur GitHub Actions.
 Voir [comment contribuer et lancer la CI](docs/ci-locale.md).
 
 Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n'importe quel PC compatible avec Noctalia

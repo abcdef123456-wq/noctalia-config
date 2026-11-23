@@ -608,7 +608,7 @@ class Dictee(unittest.TestCase):
         (self.home / ".config/nc/ia.conf").chmod(0o600)
         Serveur.code = 503
         self.limite_avec_faux_outils()
-        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.lancer("start", NC_DICTEE_LIMITE="1", NC_IA_EN_LIGNE="1")
         self.attendre("texte copié — via Groq")
         self.assertIn("[salut depuis groq]", self.appels())
         self.assertNotIn("wtype", self.appels())

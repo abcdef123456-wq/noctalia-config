@@ -11,7 +11,15 @@ outils/ci-locale --plan
 outils/ci-locale "$(git rev-parse HEAD)"
 ```
 
-La matrice comprend les tests et une installation réelle sur Arch, Debian, Fedora et openSUSE, plus l'analyse statique. Les commandes de référence sont dans `.github/workflows/`. GitHub Actions est désactivé au niveau du dépôt, y compris les tâches planifiées. Un essai personnel n'envoie aucun résultat à GitHub.
+**Sur chaque PR** : découverte de toute la suite de tests sur Debian 13, répartie entre plusieurs processus, et analyse statique sur Arch en parallèle. Le pilote réserve du temps au nettoyage ; l'attestation inclut aussi la récupération du commit et la publication dans son plafond de **15 minutes**. Une erreur ou un dépassement ne valide jamais la PR. Si GitHub est injoignable, le statut peut rester en attente et la fusion reste bloquée.
+
+**Avant une livraison**, ou pour vérifier un changement d’installateur sur les quatre distributions :
+
+```sh
+outils/ci-locale --complete --parallele 4 "$(git rev-parse HEAD)"
+```
+
+Cette vérification séparée conserve les neuf tâches : tests et installation réelle sur Arch, Debian, Fedora et openSUSE, plus l'analyse statique. Elle n’est pas plafonnée à 15 minutes et ne publie pas le statut d’une PR. Les étapes de référence sont dans `.github/workflows/`. GitHub Actions reste désactivé.
 
 ## Attester une PR (mainteneur)
 

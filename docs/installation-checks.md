@@ -36,8 +36,8 @@ commandes qui ne répondent plus, DNF en erreur, écran verrouillé et outils ma
 mode fichiers seuls. Les durées sont raccourcies dans le banc de test. Aucun paquet n'est
 installé et aucun service n'est modifié. Ces tests ne remplacent pas un essai sur Fedora réel.
 
-La [CI locale](ci-locale.md) exécute la suite dans des conteneurs Arch, Debian 13, Fedora et openSUSE,
-sans session graphique, ni systemd, ni Hyprland.
+La [CI locale](ci-locale.md) lance la suite sur Debian pour chaque PR. Le mode `--complete` vérifie également
+Arch, Fedora et openSUSE, sans session graphique, ni systemd, ni Hyprland.
 
 ```sh
 python3 -B -m unittest discover -s tests -p test_install_checks.py -v

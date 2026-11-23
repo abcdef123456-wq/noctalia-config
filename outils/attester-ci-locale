@@ -8,6 +8,7 @@ from pathlib import Path
 import pwd
 import re
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 DEPOT = 'abcdef123456-wq/noctalia-config'
+FIN = time.monotonic() + 900
 RACINE = Path(__file__).resolve().parent.parent
 ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
        'HOME': pwd.getpwuid(os.getuid()).pw_dir,
@@ -75,7 +77,8 @@ def git(*args, **options):
     return subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', *args],
                           cwd=RACINE, env={**ENV, 'GIT_TERMINAL_PROMPT': '0',
                                          'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
-                                         'GIT_NO_REPLACE_OBJECTS': '1'}, check=True, **options)
+                                         'GIT_NO_REPLACE_OBJECTS': '1'}, check=True,
+                          timeout=max(0.1, min(120, FIN - time.monotonic() - 1)), **options)
 
 
 def main():
@@ -109,7 +112,11 @@ def main():
             sys.exit('La tête a changé pendant la récupération ; relancer.')
         statut(app, cle, depot_id, sha, 'pending', 'Vérification locale en cours')
         print(f'PR #{numero} : vérification de {sha}', flush=True)
-        resultat = subprocess.run([RACINE / 'outils/ci-locale', sha], cwd=RACINE, env=ENV).returncode
+        # Réserver du temps à la publication, même si les tests prennent tout leur budget.
+        secondes = int(FIN - time.monotonic()) - 40
+        resultat = 124 if secondes < 1 else subprocess.run(
+            [RACINE / 'outils/ci-locale', '--delai', str(secondes), sha],
+            cwd=RACINE, env=ENV).returncode
         if cible() != (sha, depot_id):
             sys.exit('La cible a changé ; aucun résultat final publié.')
         if resultat != 0:
@@ -122,6 +129,8 @@ def main():
 
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, FIN - time.monotonic()))
     try:
         sys.exit(main())
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, HTTPError) as exc:
