@@ -1,7 +1,6 @@
 #!/usr/bin/python3 -I
 """Depuis une copie de confiance : attester-ci-locale NUMERO_PR."""
 
-import base64
 import json
 import os
 from pathlib import Path
@@ -9,12 +8,9 @@ import pwd
 import re
 import secrets
 import signal
-import stat
 import subprocess
 import sys
 import time
-from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 DEPOT = 'abcdef123456-wq/noctalia-config'
 FIN = time.monotonic() + 900
@@ -24,53 +20,17 @@ ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
        'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}'}
 
 
-class SansRedirection(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+def gh_api(route, *args, **options):
+    return subprocess.run(
+        ['gh', 'api', '--hostname', 'github.com', route, *args],
+        cwd=RACINE, env={**os.environ, 'GH_PROMPT_DISABLED': '1'}, text=True, check=True,
+        timeout=max(0.1, min(30, FIN - time.monotonic() - 1)), **options)
 
 
-HTTP = build_opener(ProxyHandler({}), SansRedirection())
-
-
-def api(route, *, jeton=None, corps=None, methode=None):
-    headers = {'Accept': 'application/vnd.github+json',
-               'User-Agent': 'noctalia-ci-locale', 'X-GitHub-Api-Version': '2022-11-28'}
-    if jeton:
-        headers['Authorization'] = 'Bearer ' + jeton
-    data = None
-    if corps is not None:
-        headers['Content-Type'] = 'application/json'
-        data = json.dumps(corps).encode()
-    req = Request('https://api.github.com' + route, data=data, headers=headers, method=methode)
-    with HTTP.open(req, timeout=30) as rep:
-        if rep.status != 204:
-            return json.load(rep)
-
-
-def b64(data):
-    return base64.urlsafe_b64encode(data).rstrip(b'=')
-
-
-def jwt(app, cle):
-    maintenant = int(time.time())
-    entete = b64(b'{"alg":"RS256","typ":"JWT"}')
-    claims = b64(json.dumps({'iss': app, 'iat': maintenant - 60, 'exp': maintenant + 540}).encode())
-    message = entete + b'.' + claims
-    signature = subprocess.run(['/usr/bin/openssl', 'dgst', '-sha256', '-sign', str(cle)],
-                               input=message, stdout=subprocess.PIPE, check=True, env=ENV).stdout
-    return (message + b'.' + b64(signature)).decode('ascii')
-
-
-def statut(app, cle, depot_id, sha, etat, description):
-    identite = jwt(app, cle)
-    installation = api(f'/repos/{DEPOT}/installation', jeton=identite)['id']
-    acces = api(f'/app/installations/{installation}/access_tokens', jeton=identite,
-                corps={'repository_ids': [depot_id], 'permissions': {'statuses': 'write'}})['token']
-    try:
-        api(f'/repos/{DEPOT}/statuses/{sha}', jeton=acces,
-            corps={'context': 'ci-locale', 'state': etat, 'description': description})
-    finally:
-        api('/installation/token', jeton=acces, methode='DELETE')
+def statut(sha, etat, description):
+    gh_api(f'repos/{DEPOT}/statuses/{sha}', '--method', 'POST',
+           '--raw-field', 'context=ci-locale', '--raw-field', f'state={etat}',
+           '--raw-field', f'description={description}', stdout=subprocess.DEVNULL)
 
 
 def git(*args, **options):
@@ -85,24 +45,15 @@ def main():
     if len(sys.argv) != 2 or not re.fullmatch(r'[1-9][0-9]*', sys.argv[1]):
         sys.exit('Usage : attester-ci-locale NUMERO_PR')
     numero = sys.argv[1]
-    app = os.environ.get('CI_LOCALE_APP_ID', '')
-    chemin = Path(os.environ.get('CI_LOCALE_CLE_PRIVEE', ''))
-    if not re.fullmatch(r'[1-9][0-9]*', app) or not chemin.is_absolute():
-        sys.exit('Configurer CI_LOCALE_APP_ID et CI_LOCALE_CLE_PRIVEE (chemin absolu).')
-    cle = chemin.resolve(strict=True)
-    info = cle.stat()
-    if (cle.is_relative_to(RACINE) or not stat.S_ISREG(info.st_mode) or
-            info.st_uid != os.getuid() or info.st_mode & 0o077):
-        sys.exit('La clé doit être un fichier privé du compte courant, hors de la copie de travail.')
 
     def cible():
-        pr = api(f'/repos/{DEPOT}/pulls/{numero}')
+        pr = json.loads(gh_api(f'repos/{DEPOT}/pulls/{numero}', stdout=subprocess.PIPE).stdout)
         if (pr['state'] != 'open' or pr['base']['repo']['full_name'] != DEPOT or
                 pr['base']['ref'] != 'main' or not re.fullmatch(r'[a-f0-9]{40}', pr['head']['sha'])):
             sys.exit('La demande doit être ouverte et viser main dans le dépôt prévu.')
-        return pr['head']['sha'], pr['base']['repo']['id']
+        return pr['head']['sha']
 
-    sha, depot_id = cible()
+    sha = cible()
     ref = 'refs/ci-locale/' + secrets.token_hex(16)
     try:
         git('-c', 'credential.helper=', 'fetch', '--no-tags', '--no-write-fetch-head',
@@ -110,19 +61,19 @@ def main():
         recu = git('rev-parse', '--verify', ref + '^{commit}', capture_output=True, text=True).stdout.strip()
         if recu != sha:
             sys.exit('La tête a changé pendant la récupération ; relancer.')
-        statut(app, cle, depot_id, sha, 'pending', 'Vérification locale en cours')
+        statut(sha, 'pending', 'Vérification locale en cours')
         print(f'PR #{numero} : vérification de {sha}', flush=True)
         # Réserver du temps à la publication, même si les tests prennent tout leur budget.
         secondes = int(FIN - time.monotonic()) - 40
         resultat = 124 if secondes < 1 else subprocess.run(
             [RACINE / 'outils/ci-locale', '--delai', str(secondes), sha],
             cwd=RACINE, env=ENV).returncode
-        if cible() != (sha, depot_id):
+        if cible() != sha:
             sys.exit('La cible a changé ; aucun résultat final publié.')
         if resultat != 0:
-            statut(app, cle, depot_id, sha, 'failure', 'Échec de la vérification locale')
+            statut(sha, 'failure', 'Échec de la vérification locale')
             return 1
-        statut(app, cle, depot_id, sha, 'success', 'Vérification locale réussie')
+        statut(sha, 'success', 'Vérification locale réussie')
         return 0
     finally:
         git('update-ref', '-d', ref)
@@ -133,5 +84,5 @@ if __name__ == '__main__':
     signal.setitimer(signal.ITIMER_REAL, max(0.001, FIN - time.monotonic()))
     try:
         sys.exit(main())
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, HTTPError) as exc:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         sys.exit(f'Attestation interrompue : {exc}')
