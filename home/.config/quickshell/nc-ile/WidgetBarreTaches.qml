@@ -142,6 +142,7 @@ Item {
                                     readonly property int nombre: points.clients.length
                                     visible: w.contenuGroupe === "count" || nombre > 5
                                     text: w.contenuGroupe === "dots" ? "+" + (nombre - 5) : String(nombre)
+                                    textFormat: Text.PlainText
                                     color: groupeVisuel.couleurTag
                                     font.family: w.barre.police; font.pixelSize: w.barre.tailleTexte
                                 }
@@ -239,6 +240,7 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter; x: 7
             text: choix.label; color: Couleurs.texte
+            textFormat: Text.PlainText
             font.family: w.barre.police; font.pixelSize: w.barre.tailleTexte
         }
         MouseArea {

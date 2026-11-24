@@ -38,7 +38,7 @@ Item {
     readonly property real espace: largeurIcone > 0 && aTexte ? (barre.vertical ? 2 : 4) : 0
     readonly property real largeurContenu: barre.vertical ? Math.max(largeurIcone, largeurTexte) : largeurIcone + espace + largeurTexte
     readonly property real hauteurContenu: barre.vertical ? hauteurIcone + espace + hauteurTexte : Math.max(hauteurIcone, hauteurTexte)
-    readonly property bool glisse: aTexte && texte.implicitWidth > largeurTexte && !barre.vertical
+    readonly property bool anime: !Reglages.sobre && aTexte && texte.implicitWidth > largeurTexte && !barre.vertical
                                   && (defilement === "always" || (defilement === "on_hover" && survol))
     implicitWidth: largeurContenu
     implicitHeight: hauteurContenu
@@ -65,21 +65,20 @@ Item {
         y: l.barre.vertical ? (l.iconeApres ? 0 : l.hauteurIcone + l.espace) : (l.height - height) / 2
         Text {
             id: texte
-            width: l.glisse ? implicitWidth : parent.width
+            width: l.anime ? implicitWidth : parent.width
             text: l.libelle
             textFormat: Text.PlainText
-            elide: l.glisse ? Text.ElideNone : Text.ElideRight
+            elide: l.anime ? Text.ElideNone : Text.ElideRight
             horizontalAlignment: l.barre.vertical ? Text.AlignHCenter : Text.AlignLeft
             color: l.barre.premierPlan
             font.family: l.barre.police
             font.pixelSize: Math.max(5, Math.round(l.barre.tailleTexte * l.barre.echelle))
             font.weight: l.barre.graisse
-            onTextChanged: if (l.glisse) glissement.restart()
+            onTextChanged: if (l.anime) glissement.restart()
         }
         SequentialAnimation {
             id: glissement
-            running: l.glisse
-            loops: Animation.Infinite
+            running: l.anime; loops: Animation.Infinite
             onStopped: texte.x = 0
             PauseAnimation { duration: 700 }
             NumberAnimation { target: texte; property: "x"; from: 0; to: Math.min(0, l.largeurTexte - texte.implicitWidth)

@@ -915,9 +915,6 @@ REGLAGES = [
     R("NUIT_DEBUT", "Lumière nocturne", L("Commence à", "Starts at"), "choix", "21:00", "", ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'], groupe="noctalia"),
     R("NUIT_FIN", "Lumière nocturne", L("S'arrête à", "Ends at"), "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
     # Barre et dock
-    R("BARRE_MODULAIRE", "Barre et dock", L("Barre modulaire (expérimentale)", "Modular bar (experimental)"), "ouinon", "non",
-      L("Remplace les barres Noctalia par des panneaux modulaires. Nécessite l'île Quickshell. Ne change pas le dock.",
-        "Replace Noctalia's bars with modular panels. Requires the Quickshell island. Does not change the dock."), groupe="noctalia"),
     R("BARRE_OPACITE", "Barre et dock", L("Opacité des pastilles de la barre", "Bar pill opacity"), "entier", "82",
       L("Sans effet dans un thème dont la barre n'a pas de pastilles (Apple, Noir pur…).",
         "No effect with a theme whose bar has no pills (Apple, Pure black…)."),
@@ -933,6 +930,9 @@ REGLAGES = [
     R("DOCK_LOUPE", "Barre et dock", L("Effet loupe du dock", "Dock magnification"), "ouinon", "oui", groupe="noctalia"),
     R("DOCK_POSITION", "Barre et dock", L("Position du dock", "Dock position"), "choix", "bottom", "",
       [("bottom", L("En bas", "Bottom")), ("left", L("À gauche", "Left")), ("right", L("À droite", "Right"))], groupe="noctalia"),
+    R("BARRE_MODULAIRE", "Barre et dock", L("Barre modulaire (expérimentale)", "Modular bar (experimental)"), "ouinon", "non",
+      L("Remplace les barres Noctalia par des panneaux modulaires. Nécessite l'île Quickshell. Ne change pas le dock.",
+        "Replace Noctalia's bars with modular panels. Requires the Quickshell island. Does not change the dock."), groupe="noctalia"),
     # Fenêtres
     R("NAVIGATEURS_XWAYLAND", "Fenêtres", L("Glisser les onglets entre fenêtres (Chrome, Brave…)", "Drag tabs between windows (Chrome, Brave…)"),
       "ouinon", "non",

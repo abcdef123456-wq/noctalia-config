@@ -89,6 +89,7 @@ WidgetBarreLibelle {
                     anchors.margins: 1
                     visible: w.montrerChiffre
                     text: w.valeur(true)
+                    textFormat: Text.PlainText
                     font.family: w.barre.police; font.pixelSize: batterieGraphique.verticale ? 11 : 13; font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                     fontSizeMode: Text.Fit; minimumPixelSize: 7; color: Couleurs.carte

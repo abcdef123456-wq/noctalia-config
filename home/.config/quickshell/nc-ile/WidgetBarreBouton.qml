@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Effects
 import Quickshell
@@ -38,10 +39,15 @@ WidgetBarreLibelle {
         : code > 0 && code <= 0x10ffff && policeTabler.status === FontLoader.Ready && barre.definition.show_glyph !== false ? glyphePerso : null
 
     // La police est livrée par Noctalia, uniquement chargée pour un glyphe explicitement configuré.
-    FontLoader { id: policeTabler; source: bouton.glypheTabler ? "file:///usr/share/noctalia/assets/fonts/noctalia-tabler.ttf" : "" }
+    FontLoader {
+        id: policeTabler
+        source: bouton.glypheTabler ? StandardPaths.locate(StandardPaths.GenericDataLocation,
+                                                          "noctalia/assets/fonts/noctalia-tabler.ttf") : ""
+    }
     FileView {
         id: tabler
-        path: bouton.glypheTabler && !/^(U\+|0x)/i.test(bouton.glypheTabler) ? "/usr/share/noctalia/assets/fonts/tabler.json" : ""
+        path: bouton.glypheTabler && !/^(U\+|0x)/i.test(bouton.glypheTabler)
+              ? StandardPaths.locate(StandardPaths.GenericDataLocation, "noctalia/assets/fonts/tabler.json").toString() : ""
         printErrors: false
     }
     Component {
@@ -51,6 +57,7 @@ WidgetBarreLibelle {
             Text {
                 anchors.centerIn: parent
                 text: String.fromCodePoint(bouton.code)
+                textFormat: Text.PlainText
                 font.family: policeTabler.name; font.pixelSize: bouton.barre.tailleIcone
                 color: bouton.encreGlyphe
             }

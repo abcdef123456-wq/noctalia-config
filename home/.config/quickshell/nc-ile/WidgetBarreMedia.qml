@@ -35,9 +35,11 @@ WidgetBarreLibelle {
                     source: Etat.pochette
                     asynchronous: true; fillMode: Image.PreserveAspectCrop
                     sourceSize: Qt.size(width * 2, height * 2)
+                    readonly property bool anime: !Reglages.sobre && media.options.rotate_album_art === true
+                                                  && Etat.joue && status === Image.Ready && media.visible
                     RotationAnimation on rotation {
-                        from: 0; to: 360; duration: 13000; loops: Animation.Infinite
-                        running: media.options.rotate_album_art === true && Etat.joue && art.status === Image.Ready && media.visible
+                        from: 0; to: 360; duration: 13000
+                        running: art.anime; loops: Animation.Infinite
                     }
                 }
                 Image { id: appli; anchors.fill: parent; source: art.status !== Image.Ready ? Etat.iconeLecteur : ""; fillMode: Image.PreserveAspectFit; sourceSize: Qt.size(width * 2, height * 2) }
