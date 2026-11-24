@@ -1,0 +1,313 @@
+#!/usr/bin/python3 -I
+"""Exécute les workflows du checkout de confiance sur un commit déjà récupéré."""
+import argparse
+import concurrent.futures
+from dataclasses import dataclass
+import os
+from pathlib import Path
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+
+import yaml
+
+DEBUT = time.monotonic()
+
+
+DEPOT = Path(__file__).resolve().parents[1]
+ESPACE = "/ci/depot"
+IMAGES = {"archlinux:latest", "debian:trixie", "fedora:44", "opensuse/tumbleweed"}
+ARRET = threading.Event()
+AFFICHAGE = threading.Lock()
+
+
+def dire(message):
+    with AFFICHAGE:
+        print(message, flush=True)
+
+
+def exiger(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+@dataclass(frozen=True)
+class Etape:
+    nom: str
+    script: str | None  # None : remplacement local de checkout
+    env: tuple = ()
+    facultative: bool = False
+    toujours: bool = False
+
+
+@dataclass(frozen=True)
+class Job:
+    famille: str
+    image: str
+    minutes: int
+    shell: str
+    etapes: tuple
+
+    @property
+    def nom(self):
+        return f"{self.famille}/{self.image}"
+
+
+def traduire(texte, matrice):
+    def valeur(m):
+        if m[1] == "jq17":
+            return matrice.get("jq17", "")
+        return matrice[m[1]]
+    texte = re.sub(r"\$\{\{\s*matrix\.(\w+)\s*\}\}", valeur, texte)
+    exiger("${{" not in texte, f"Expression non prise en charge : {texte!r}")
+    return texte
+
+
+def plan():
+    jobs = []
+    for fichier, familles in (("tests", {"tests", "verifications"}), ("install", {"installation"})):
+        workflow = yaml.safe_load((DEPOT / ".github/workflows" / f"{fichier}.yml").read_text())
+        exiger(set(workflow) <= {True, "on", "name", "permissions", "concurrency", "jobs"},
+               f"Directive de workflow non prise en charge : {fichier}")
+        exiger(workflow["jobs"].keys() == familles, f"Liste de jobs inattendue : {fichier}")
+        for famille, spec in workflow["jobs"].items():
+            exiger(set(spec) <= {"name", "runs-on", "timeout-minutes", "container", "defaults", "strategy", "steps"}
+                   and set(spec["container"]) == {"image"}, f"Directive de job inconnue : {famille}")
+            strategie = spec.get("strategy", {})
+            matrice = strategie.get("matrix", {})
+            exiger(set(strategie) <= {"fail-fast", "matrix"} and set(matrice) <= {"include"}, "Matrice inconnue")
+            defauts = spec.get("defaults", {})
+            exiger(defauts in ({}, {"run": {"shell": "bash"}}), "Shell non pris en charge")
+            lignes = matrice.get("include", [{}])
+            images = [traduire(spec["container"]["image"], ligne) for ligne in lignes]
+            attendues = {"archlinux:latest"} if famille == "verifications" else IMAGES
+            exiger(set(images) == attendues and len(images) == len(attendues), f"Images inattendues : {famille}")
+            minutes = spec["timeout-minutes"]
+            exiger(type(minutes) is int and 1 <= minutes <= 60, "Délai hors limites")
+            for image, ligne in zip(images, lignes):
+                etapes = []
+                for e in spec["steps"]:
+                    if "uses" in e:
+                        if re.fullmatch(r"actions/checkout@[0-9a-f]{40}", e["uses"]):
+                            exiger(set(e) == {"uses", "name", "with"} and e["with"] == {"persist-credentials": False},
+                                   "Options de checkout non prises en charge")
+                            etapes.append(Etape(e["name"], None))
+                        else:
+                            exiger(famille == "installation" and re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", e["uses"]),
+                                   f"Action inconnue : {e['uses']}")
+                            # Pas de téléversement local. Le contrôle des secrets reste un vrai test.
+                        continue
+                    exiger(set(e) <= {"name", "run", "if", "id", "env", "continue-on-error"}
+                           and e.get("if", "always()") == "always()", f"Étape inconnue : {e!r}")
+                    env = tuple(f"{k}={traduire(v, ligne)}" for k, v in e.get("env", {}).items())
+                    etapes.append(Etape(e["name"], traduire(e["run"], ligne), env,
+                                       e.get("continue-on-error", False), "if" in e))
+                exiger(sum(e.script is None for e in etapes) == 1, f"Checkout manquant ou répété : {famille}")
+                jobs.append(Job(famille, image, minutes, "bash" if defauts else "sh", tuple(etapes)))
+    return jobs
+
+
+def preparer(tmp, sha, env, fin):
+    # Un dépôt superficiel neuf, sans config, hooks, alternates, historique ni identifiants du clone hôte.
+    copie = tmp / "copie"
+
+    def git(*args, cwd=tmp):
+        reste = fin - time.monotonic()
+        exiger(reste > 0, "Délai global dépassé pendant la préparation")
+        p = subprocess.run(["git", *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=min(300, reste))
+        if p.returncode:
+            raise RuntimeError(f"git {args[0]} : {p.stderr[-1500:]!r}")
+        return p.stdout
+
+    exiger(git("cat-file", "-t", sha, cwd=DEPOT).strip() == b"commit", "Le SHA ne désigne pas un commit")
+    git("init", "--quiet", "--template=", str(copie))
+    git("-c", "fetch.fsckObjects=true", "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules",
+        "--no-write-fetch-head", "--no-auto-maintenance", DEPOT.as_uri(), sha, cwd=copie)
+    git("update-ref", "--no-deref", "HEAD", sha, cwd=copie)
+    git("read-tree", sha, cwd=copie)
+    index = git("ls-tree", "-rlz", sha, cwd=copie).rstrip(b"\0").split(b"\0")
+    tailles = []
+    for entree in index:
+        mode, typ, _, taille = entree.partition(b"\t")[0].split()
+        exiger(typ == b"blob" and mode in {b"100644", b"100755", b"120000"}, "Sous-module ou entrée non prise en charge")
+        tailles.append(int(taille))
+    exiger(len(tailles) <= 50000 and sum(tailles) <= 1024**3, "Instantané supérieur à 50 000 fichiers ou 1 Gio")
+    # Les attributs proposés ne doivent ni omettre, ni transformer des blobs dans l'archive.
+    attributs = copie / ".git/info/attributes"
+    attributs.parent.mkdir(exist_ok=True)
+    attributs.write_text("* -export-ignore -export-subst -text -ident -filter !eol !working-tree-encoding\n")
+    archive = tmp / "sources.tar"
+    git("archive", "--format=tar", f"--output={archive}", sha, cwd=copie)
+    attributs.unlink()
+    return archive, copie / ".git"
+
+
+def docker(cmd, env, fin, entree=None):
+    """Délai commun au job ; ne conserve que la fin du diagnostic, sans fichier journal illimité."""
+    if ARRET.is_set() or time.monotonic() >= fin:
+        raise RuntimeError("interrompu ou délai dépassé")
+    with subprocess.Popen(cmd, env=env, stdin=entree or subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
+        sortie = bytearray()
+        try:
+            with selectors.DefaultSelector() as sel:
+                sel.register(p.stdout, selectors.EVENT_READ)
+                while True:
+                    reste = fin - time.monotonic()
+                    if reste <= 0 or ARRET.is_set():
+                        raise RuntimeError("interrompu ou délai dépassé")
+                    if not sel.select(min(reste, 0.5)):
+                        continue
+                    bloc = os.read(p.stdout.fileno(), 65536)
+                    if not bloc:
+                        break
+                    sortie.extend(bloc)
+                    del sortie[:-8192]
+            code = p.wait(timeout=max(0.01, fin - time.monotonic()))
+        finally:
+            if p.poll() is None:
+                p.kill()
+    if code:
+        # Ne jamais interpréter de séquences terminal émises par le commit testé.
+        diagnostic = '\n'.join('  | ' + ''.join(c if c.isprintable() else ' ' for c in ligne)
+                               for ligne in sortie.decode(errors='replace').splitlines())
+        raise RuntimeError(f"code {code}\n{diagnostic}")
+    return sortie
+
+
+def executer(job, cli, env, archive, metadata, fin_globale, rapide):
+    nom = "noctalia-ci-" + uuid.uuid4().hex
+    fin = min(fin_globale, time.monotonic() + 60 * job.minutes)
+    ok = True
+
+    def appel(*args, entree=None):
+        return docker([*cli, *args], env, fin, entree)
+
+    try:
+        if ARRET.is_set():
+            return False
+        parallele = rapide and job.famille == "tests"
+        dire(f"[{job.nom}] démarrage")
+        appel("create", "--name", nom, "--init", "--no-healthcheck", "--log-driver=none", "--network=bridge",
+              "--pids-limit=2048" if parallele else "--pids-limit=512", "--cpus=8" if parallele else "--cpus=2",
+              "--memory=8g" if parallele else "--memory=4g", "--memory-swap=8g" if parallele else "--memory-swap=4g", "--cap-drop=NET_RAW",
+              "--workdir", ESPACE, "--env", "CI=true", "--env", f"GITHUB_WORKSPACE={ESPACE}", "--env", "RUNNER_TEMP=/tmp/ci",
+              "--entrypoint=/bin/sh", job.image, "-c", "exec sleep infinity")
+        appel("start", nom)
+        for e in job.etapes:
+            if not ok and not e.toujours:
+                continue
+            dire(f"[{job.nom}] {e.nom}")
+            try:
+                if e.script is None:
+                    # La vérification de Fedora ne demande pas tar dans ses paquets minimaux.
+                    if job.image == "fedora:44":
+                        appel("exec", nom, "sh", "-ec", "command -v tar >/dev/null || dnf install -y -q tar")
+                    if job.famille != "installation":
+                        appel("network", "disconnect", "bridge", nom)
+                    with archive.open("rb") as f:
+                        appel("exec", "-i", nom, "tar", "-xf", "-", entree=f)
+                    appel("cp", str(metadata), f"{nom}:{ESPACE}/")
+                    if parallele:
+                        appel("cp", str(DEPOT / "outils/ci-unittest-parallele.py"), f"{nom}:/tmp/ci-unittest-parallele.py")
+                else:
+                    options = [a for v in e.env for a in ("--env", v)]
+                    shell = ["bash", "--noprofile", "--norc", "-eo", "pipefail"] if job.shell == "bash" else ["sh", "-e"]
+                    script = e.script
+                    if parallele and e is job.etapes[-1]:
+                        commande = "python3 -m unittest discover -s tests -t ."
+                        exiger(script.count(commande) == 1, "Commande de découverte modifiée : adapter le lanceur parallèle")
+                        script = script.replace(commande, "python3 -I /tmp/ci-unittest-parallele.py")
+                    sortie = appel("exec", *options, nom, *shell, "-c", script)
+                    if parallele and e is job.etapes[-1]:
+                        bilans = re.findall(r"^Bilan unittest : [0-9]+ exécutés, [0-9]+ ignorés$",
+                                            sortie.decode(errors="replace"), re.M)
+                        exiger(bool(bilans), "Bilan de la suite parallèle absent")
+                        dire(bilans[-1])
+            except RuntimeError as erreur:
+                dire(f"[{job.nom}] {e.nom} : {erreur}")
+                if not e.facultative:
+                    ok = False
+                if ARRET.is_set() or time.monotonic() >= fin:
+                    ok = False
+                    break
+    except (OSError, RuntimeError, subprocess.SubprocessError) as erreur:
+        dire(f"[{job.nom}] {erreur}")
+        ok = False
+    finally:
+        # rm -f arrête aussi les enfants restés actifs après un timeout de docker exec.
+        retrait = subprocess.run([*cli, "rm", "-fv", nom], env=env, stdin=subprocess.DEVNULL,
+                                 capture_output=True, timeout=30)
+        if retrait.returncode and b"No such container" not in retrait.stderr:
+            dire(f"[{job.nom}] nettoyage impossible : docker rm -fv {nom}")
+            ok = False
+    return ok and not ARRET.is_set()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("sha", nargs="?", help="SHA Git complet à vérifier (40 caractères hexadécimaux)")
+    parser.add_argument("--plan", action="store_true", help="afficher la matrice sans Docker ni exécution")
+    parser.add_argument("--complete", action="store_true", help="matrice de livraison, sans le plafond global de PR")
+    parser.add_argument("--delai", type=int, metavar="SECONDES", help="réduire le plafond PR (défaut et maximum : 900)")
+    parser.add_argument("--parallele", type=int, default=2, choices=range(1, 5), help="jobs simultanés (défaut : 2)")
+    args = parser.parse_args()
+    if args.plan and args.sha or not args.plan and not re.fullmatch(r"[0-9a-f]{40}", args.sha or ""):
+        parser.error("fournir soit --plan seul, soit le SHA complet du commit")
+    if args.delai is not None and (args.complete or not 1 <= args.delai <= 900):
+        parser.error("--delai doit être entre 1 et 900, uniquement pour la CI de PR")
+    budget = args.delai or 900
+    fin = float("inf") if args.complete else DEBUT + budget - min(30, budget / 10)
+    if not args.complete:
+        # Borne de dernier recours si le démon Docker bloque, même pendant le nettoyage.
+        signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
+        signal.setitimer(signal.ITIMER_REAL, max(0.001, DEBUT + budget - time.monotonic()))
+    jobs = plan()
+    if not args.complete:
+        jobs = [j for j in jobs if j.famille == "verifications" or (j.famille == "tests" and j.image == "debian:trixie")]
+        dire(f"CI de PR : suite Debian parallèle et analyse Arch ; délai global {budget} s, nettoyage compris.")
+    if args.plan:
+        for j in jobs:
+            dire(f"{j.nom} : " + " ; ".join(e.nom for e in j.etapes))
+        return 0
+
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda *_: ARRET.set())
+    with tempfile.TemporaryDirectory(prefix="noctalia-ci-") as dossier:
+        tmp = Path(dossier)
+        env = {"PATH": "/usr/bin:/bin", "HOME": dossier, "LC_ALL": "C", "GIT_ALLOW_PROTOCOL": "file",
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_ATTR_NOSYSTEM": "1", "GIT_NO_REPLACE_OBJECTS": "1",
+               "GIT_TERMINAL_PROMPT": "0"}
+        archive, metadata = preparer(tmp, args.sha, env, fin)
+        # Ni contexte distant, ni identifiants/proxy du ~/.docker de l'opérateur.
+        rootless = Path(f"/run/user/{os.getuid()}/docker.sock")
+        socket = rootless if rootless.is_socket() else Path("/var/run/docker.sock")
+        cli = ["docker", "--config", dossier, "--host", f"unix://{socket}"]
+        resultats = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallele) as pool:
+            taches = {pool.submit(executer, j, cli, env, archive, metadata, fin, not args.complete): j for j in jobs}
+            for t in concurrent.futures.as_completed(taches):
+                j = taches[t]
+                try:
+                    resultats[j.nom] = t.result()
+                except Exception as erreur:
+                    dire(f"[{j.nom}] erreur locale : {erreur}")
+                    resultats[j.nom] = False
+        dire(f"\nBilan pour {args.sha} ({time.monotonic() - DEBUT:.1f} s) :")
+        for nom, ok in sorted(resultats.items()):
+            dire(f"  {'OK' if ok else 'ÉCHEC'}  {nom}")
+        return 0 if all(resultats.values()) and not ARRET.is_set() else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, KeyError, ValueError, RuntimeError, subprocess.SubprocessError, yaml.YAMLError) as exc:
+        sys.exit(f"CI locale impossible : {exc}")

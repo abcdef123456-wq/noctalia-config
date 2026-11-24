@@ -1,11 +1,9 @@
 # noctalia-config
 
-[![Tests](https://github.com/abcdef123456-wq/noctalia-config/actions/workflows/tests.yml/badge.svg)](https://github.com/abcdef123456-wq/noctalia-config/actions/workflows/tests.yml)
-
-À chaque push et à chaque PR sur main, la CI lance toute la suite de tests sur Arch, Debian 13, Fedora et openSUSE :
-elle garantit que les tests passent sur ces 4 distributions, sans session graphique, ni systemd, ni Hyprland.
-Chaque semaine, une autre CI, « Installation réelle », lance `install.sh` de bout en bout sur ces 4 distributions
-(conteneur neuf) et vérifie le résultat.
+Les changements passent par une pull request vers `main` avec le statut `ci-locale`, sans approbation humaine obligatoire.
+La CI obligatoire tourne en local et rend un verdict sous 15 minutes. Les installations sur les quatre distributions
+sont un contrôle de livraison séparé ; aucun test ne tourne sur GitHub Actions.
+Voir [comment contribuer et lancer la CI](docs/ci-locale.md).
 
 Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n'importe quel PC compatible avec Noctalia
 (portable ou fixe, Intel, AMD ou NVIDIA). La config Hyprland est au **format Lua** (Hyprland 0.55 ou plus).

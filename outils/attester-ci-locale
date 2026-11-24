@@ -1,0 +1,88 @@
+#!/usr/bin/python3 -I
+"""Depuis une copie de confiance : attester-ci-locale NUMERO_PR."""
+
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import secrets
+import signal
+import subprocess
+import sys
+import time
+
+DEPOT = 'abcdef123456-wq/noctalia-config'
+FIN = time.monotonic() + 900
+RACINE = Path(__file__).resolve().parent.parent
+ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
+       'HOME': pwd.getpwuid(os.getuid()).pw_dir,
+       'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}'}
+
+
+def gh_api(route, *args, **options):
+    return subprocess.run(
+        ['gh', 'api', '--hostname', 'github.com', route, *args],
+        cwd=RACINE, env={**os.environ, 'GH_PROMPT_DISABLED': '1'}, text=True, check=True,
+        timeout=max(0.1, min(30, FIN - time.monotonic() - 1)), **options)
+
+
+def statut(sha, etat, description):
+    gh_api(f'repos/{DEPOT}/statuses/{sha}', '--method', 'POST',
+           '--raw-field', 'context=ci-locale', '--raw-field', f'state={etat}',
+           '--raw-field', f'description={description}', stdout=subprocess.DEVNULL)
+
+
+def git(*args, **options):
+    return subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', *args],
+                          cwd=RACINE, env={**ENV, 'GIT_TERMINAL_PROMPT': '0',
+                                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+                                         'GIT_NO_REPLACE_OBJECTS': '1'}, check=True,
+                          timeout=max(0.1, min(120, FIN - time.monotonic() - 1)), **options)
+
+
+def main():
+    if len(sys.argv) != 2 or not re.fullmatch(r'[1-9][0-9]*', sys.argv[1]):
+        sys.exit('Usage : attester-ci-locale NUMERO_PR')
+    numero = sys.argv[1]
+
+    def cible():
+        pr = json.loads(gh_api(f'repos/{DEPOT}/pulls/{numero}', stdout=subprocess.PIPE).stdout)
+        if (pr['state'] != 'open' or pr['base']['repo']['full_name'] != DEPOT or
+                pr['base']['ref'] != 'main' or not re.fullmatch(r'[a-f0-9]{40}', pr['head']['sha'])):
+            sys.exit('La demande doit être ouverte et viser main dans le dépôt prévu.')
+        return pr['head']['sha']
+
+    sha = cible()
+    ref = 'refs/ci-locale/' + secrets.token_hex(16)
+    try:
+        git('-c', 'credential.helper=', 'fetch', '--no-tags', '--no-write-fetch-head',
+            '--no-recurse-submodules', f'https://github.com/{DEPOT}.git', f'refs/pull/{numero}/head:{ref}')
+        recu = git('rev-parse', '--verify', ref + '^{commit}', capture_output=True, text=True).stdout.strip()
+        if recu != sha:
+            sys.exit('La tête a changé pendant la récupération ; relancer.')
+        statut(sha, 'pending', 'Vérification locale en cours')
+        print(f'PR #{numero} : vérification de {sha}', flush=True)
+        # Réserver du temps à la publication, même si les tests prennent tout leur budget.
+        secondes = int(FIN - time.monotonic()) - 40
+        resultat = 124 if secondes < 1 else subprocess.run(
+            [RACINE / 'outils/ci-locale', '--delai', str(secondes), sha],
+            cwd=RACINE, env=ENV).returncode
+        if cible() != sha:
+            sys.exit('La cible a changé ; aucun résultat final publié.')
+        if resultat != 0:
+            statut(sha, 'failure', 'Échec de la vérification locale')
+            return 1
+        statut(sha, 'success', 'Vérification locale réussie')
+        return 0
+    finally:
+        git('update-ref', '-d', ref)
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, FIN - time.monotonic()))
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        sys.exit(f'Attestation interrompue : {exc}')

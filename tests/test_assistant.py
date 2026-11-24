@@ -81,7 +81,7 @@ class Assistant(unittest.TestCase):
         hypr.write_text('#!/bin/sh\nprintf "[]\\n"\n')
         hypr.chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.root), XDG_RUNTIME_DIR=str(self.run), NC_LANGUE="en",
-                        PATH=str(self.bin) + ":/usr/bin:/bin")
+                        NC_IA_EN_LIGNE="1", PATH=str(self.bin) + ":/usr/bin:/bin")
         for cle in ("NC_ILE_SANS", "NC_CLAUDE_SYNC"):
             self.env.pop(cle, None)
         self.patch = patch.dict(os.environ, self.env, clear=True)
