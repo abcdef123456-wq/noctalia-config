@@ -144,6 +144,14 @@ CloudCarte {
                            : zoneLigne.containsMouse ? Qt.alpha(Couleurs.accent, 0.10) : "transparent"
                     border.width: cibleLigne.containsDrag ? 2 : (choisie ? 1 : 0); border.color: Couleurs.accent
                     activeFocusOnTab: true
+                    onActiveFocusChanged: if (activeFocus) {
+                        const haut = mapToItem(liste.contentItem, 0, 0).y
+                        const bas = haut + height
+                        if (haut < liste.contentY || bas > liste.contentY + liste.height) {
+                            liste.cancelFlick()
+                            liste.contentY = haut < liste.contentY ? haut : bas - liste.height
+                        }
+                    }
                     Accessible.role: Accessible.ListItem
                     Accessible.name: modelData.name
                     Accessible.selected: choisie

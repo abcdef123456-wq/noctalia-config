@@ -41,6 +41,8 @@ ramène à un dossier parent.
 
 - Un clic choisit une ligne et montre ses actions dans la carte au-dessus de la liste ; un double-clic l'ouvre : un
   dossier, on y entre ; un fichier, une copie privée s'ouvre avec l'application par défaut (`nc-cloud ouvrir`, types sûrs seulement).
+- Au clavier, Tab et Maj+Tab parcourent les fichiers en gardant la ligne active visible. Espace choisit la ligne ;
+  Entrée l'ouvre.
 - Les boutons « Dossier » et « Fichier » ouvrent le champ de création d'un dossier ou d'un fichier vide.
 - Télécharger un fichier dans le dossier Téléchargements (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé :
   le bouton devient « Remplacer ». En ligne de commande, `nc-cloud telecharger ID` sans destination utilise ce même

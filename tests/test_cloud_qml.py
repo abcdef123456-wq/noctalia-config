@@ -542,6 +542,43 @@ class HorsEcran(unittest.TestCase):
         ''', reglages={"CLOUD_JARVIS": "oui"})
         self.assertEqual(j, ["--json etat", "--json lister -- root", "--json reprendre", "--json ouvrir --dossier=root -- ffffffffffffffffffffffffffffffff", "--json lister -- dddddddddddddddddddddddddddddddd"])
 
+    def test_tab_garde_le_fichier_actif_dans_la_zone_visible(self):
+        entrees = [{"id": f"{i:032x}", "name": f"Fichier {i}.txt", "kind": "file", "size": 12, "revision": "r1"}
+                   for i in range(1, 11)]
+        j = self.lancer(self.OUVRIR + '''
+            function ligne(i) {
+                return trouver(fen.contentItem, "nc-cloud-entree-" + i.toString(16).padStart(32, "0"))
+            }
+            function visibleDans(l, vue) {
+                var y = l.mapToItem(vue, 0, 0).y
+                return y >= 0 && y + l.height <= vue.height
+            }
+            Timer { interval: 80; running: true; repeat: true; onTriggered: {
+                if (etape === 0) { ouvrir(); etape++; return }
+                if (CloudEtat.occupe || CloudEtat.suites.length || !CloudEtat.lu) return
+                if (etape === 1) {
+                    var sixieme = ligne(6), septieme = ligne(7)
+                    var vue = sixieme.parent.parent.parent
+                    verifier(sixieme.mapToItem(vue, 0, 0).y < vue.height && septieme.mapToItem(vue, 0, 0).y >= vue.height,
+                             "la sixième ligne est partiellement visible, la septième est masquée")
+                    sixieme.forceActiveFocus()
+                    souris.keyClick(Qt.Key_Tab)
+                    verifier(septieme.activeFocus && visibleDans(septieme, vue), "Tab défile jusqu’à la septième ligne")
+                    for (var i = 6; i >= 1; --i) {
+                        souris.keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+                        verifier(ligne(i).activeFocus && visibleDans(ligne(i), vue), "Maj+Tab garde visible la ligne " + i)
+                    }
+                    for (var k = 1; k < 7; ++k) souris.keyClick(Qt.Key_Tab)
+                    verifier(septieme.activeFocus && visibleDans(septieme, vue), "Entrée part d’une ligne visible")
+                    souris.keyClick(Qt.Key_Return)
+                    etape++; return
+                }
+                console.log("FINI"); Qt.exit(0)
+            } }
+        ''', reglages={"CLOUD_JARVIS": "oui"}, page=dict(PAGE_RACINE, entries=entrees))
+        self.assertEqual([ligne for ligne in j if ligne.startswith("--json ouvrir ")],
+                         [f"--json ouvrir --dossier=root -- {7:032x}"])
+
     def test_creer_fichier_renommer_deplacer_ici(self):
         j = self.lancer(self.OUVRIR + '''
             Timer { interval: 80; running: true; repeat: true; onTriggered: {
