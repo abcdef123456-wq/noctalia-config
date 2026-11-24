@@ -42,27 +42,25 @@ ShellRoot {
         onLoaded: racine.palettePanneaux = JSON.parse(text())
         onLoadFailed: racine.palettePanneaux = {}
     }
-    readonly property bool panneauxReserventHaut: (modelePanneaux.barres || []).some(b => b.enabled !== false && b.reserve_space !== false && (b.position ?? "top") === "top")
+    readonly property bool panneauxActifs: (modelePanneaux.barres?.length ?? 0) > 0
+    readonly property bool bandeIle: Reglages.val("ILE_BANDE", "non") === "oui"
     Variants {
         model: Quickshell.screens
-        Scope {
-            required property var modelData
-            id: moniteur
-            Ile { id: ile; modelData: moniteur.modelData }
+        Ile {
+            id: ile
             Panneaux {
-                ecran: moniteur.modelData
+                ecran: ile.modelData
                 modele: racine.modelePanneaux
                 palette: racine.palettePanneaux
                 obstacle: ile.obstaclePanneaux
-                reserveIleHaut: Reglages.val("ILE_BANDE", "non") === "oui" ? 42 : 0
+                reserveIleHaut: racine.panneauxActifs && racine.bandeIle ? 42 : 0
             }
         }
     }
-    // Bande réservée pour l'île sur chaque écran (ILE_BANDE=oui, thèmes à barre en bas ou sur un côté) : à « non »,
-    // aucune fenêtre n'est créée ; si les panneaux modulaires réservent déjà le bord haut, ils assurent cette marge.
+    // Barre native : la bande optionnelle reste indépendante. En mode modulaire les réserves sont calculées par écran.
     LazyLoader {
         id: chargeurBande
-        active: Reglages.val("ILE_BANDE", "non") === "oui" && !racine.panneauxReserventHaut
+        active: racine.bandeIle && !racine.panneauxActifs
         Variants {
             model: Quickshell.screens
             ReserveIle {}

@@ -28,6 +28,7 @@ assert.ok(b.every(x => x.barre.id !== 'solide'));
 const res = reserves(barres, 42);
 assert.deepEqual(res, { top: 46, bottom: 36, left: 62, right: 0 });
 assert.deepEqual(reserves([{id:'b', position:'top', margin_edge:6, thickness:34}], 42), { top: 42, bottom: 0, left: 0, right: 0 });
+assert.deepEqual(reserves([{id:'b', position:'top', enabled:false}, barres[1]], 42), { top: 42, bottom: 36, left: 0, right: 0 });
 
 const dimensions = b.map(({barre,cote}) => barre.position === 'top'
     ? {width:cote === 'end' ? 100 : 112, height:40} : {width:48, height:78});

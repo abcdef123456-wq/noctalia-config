@@ -39,7 +39,7 @@ function reserves(barres, reserveIleHaut) {
         const zone = Math.round((barre.margin_edge ?? 0) + (barre.thickness ?? 34))
         if (zone > bords[pos]) bords[pos] = zone
     }
-    if (bords.top > 0 && reserveIleHaut > 0) bords.top = Math.max(bords.top, Math.round(reserveIleHaut))
+    bords.top = Math.max(bords.top, Math.round(reserveIleHaut))
     return bords
 }
 

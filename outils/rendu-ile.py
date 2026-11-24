@@ -346,7 +346,8 @@ def essai(etat, sortie, reglages, palette, polices, echelle, forcer_alpha=False)
     png = Path(sortie) / (etat + ".png")
     try:
         ile = preparer(racine, etat, reglages, palette)
-        p = subprocess.Popen(["qs", "--no-color", "-p", str(ile / "shell.qml")], env=environnement(racine, png, polices, echelle),
+        p = subprocess.Popen(["qs", "--no-color", "--log-rules", "qml.debug=true", "-p", str(ile / "shell.qml")],
+                             env=environnement(racine, png, polices, echelle),
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
         try:
             journal, _ = p.communicate(timeout=LIMITE)
