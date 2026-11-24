@@ -27,12 +27,12 @@ Item {
         var p = c.mapToItem(pastilleVpn, x, y)
         return p.x >= -4 && p.x <= pastilleVpn.width + 4 && p.y >= -6 && p.y <= pastilleVpn.height + 6
     }
-    // Sur l'indicateur Cloud JARVIS ? (le clic ouvre le panneau ; le survol n'ouvre pas l'île)
     function surEnvoiTelechargement(x, y) {
         if (!envoiTelechargement.visible || mode !== "telechargement-fini") return false
         var p = c.mapToItem(envoiTelechargement, x, y)
         return p.x >= -6 && p.x <= envoiTelechargement.width + 6 && p.y >= -8 && p.y <= envoiTelechargement.height + 8
     }
+    // Sur l'indicateur Cloud JARVIS ? Le clic bascule le panneau ; le survol n'ouvre pas l'île.
     function surCloud(x, y) {
         if (!pastilleCloud.visible || mode !== "repos") return false
         var p = c.mapToItem(pastilleCloud, x, y)
@@ -96,7 +96,7 @@ Item {
             Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle
         }
         // Cloud JARVIS (CLOUD_JARVIS=oui et ce PC associé) : un petit nuage ; pendant un envoi, la flèche d'envoi en
-        // couleur d'accent, fixe (aucune animation sans fin dans la pilule : test_ile_cadence). Un clic ouvre le panneau
+        // couleur d'accent, fixe (aucune animation sans fin dans la pilule : test_ile_cadence).
         Ico {
             id: pastilleCloud
             objectName: "nc-cloud-pill"

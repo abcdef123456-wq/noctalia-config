@@ -31,21 +31,29 @@ terminal ; seule `nc-cloud fenetre`, une action du bureau, refuse quand il n'est
 
 `nc-cloud fenetre`, l'entrée « Cloud JARVIS » de la recherche de l'île (seulement avec `CLOUD_JARVIS=oui` et ce PC
 associé) ou `qs -c nc-ile ipc call ile cloud` ouvrent la fenêtre « Cloud JARVIS », sur l'écran qui a le focus à ce
-moment ; elle y reste (changer d'écran ne la déplace pas) et ne se ferme que par toi (Fermer ou Échap). Le chemin en haut
+moment ; changer d'écran ne la déplace pas. Pour fermer la fenêtre, clique de nouveau sur le nuage de l'île, clique
+sur « Fermer » en haut à droite ou appuie sur Échap (qui annule d'abord un renommage, une suppression à confirmer ou
+un déplacement en cours).
+
+La connexion et le quota sont en haut. En dessous viennent les actions de la sélection, puis « Mes fichiers » à
+gauche et le dépôt à droite (les deux cartes s'empilent si la fenêtre est étroite). Le chemin dans « Mes fichiers »
 ramène à un dossier parent.
 
-- Un clic choisit une ligne et montre ses actions sous son nom ; un double-clic l'ouvre : un dossier, on y entre ; un
-  fichier, une copie privée s'ouvre avec l'application par défaut (`nc-cloud ouvrir`, types sûrs seulement).
-- Créer un dossier ou un fichier vide (le champ en haut). Télécharger un fichier dans le dossier Téléchargements
-  (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé : le bouton devient « Remplacer ». En ligne de
-  commande, `nc-cloud telecharger ID` sans destination utilise ce même dossier.
+- Un clic choisit une ligne et montre ses actions dans la carte au-dessus de la liste ; un double-clic l'ouvre : un
+  dossier, on y entre ; un fichier, une copie privée s'ouvre avec l'application par défaut (`nc-cloud ouvrir`, types sûrs seulement).
+- Au clavier, Tab et Maj+Tab parcourent les fichiers en gardant la ligne active visible. Espace choisit la ligne ;
+  Entrée l'ouvre.
+- Les boutons « Dossier » et « Fichier » ouvrent le champ de création d'un dossier ou d'un fichier vide.
+- Télécharger un fichier dans le dossier Téléchargements (`XDG_DOWNLOAD_DIR`) ; s'il y existe déjà, rien n'est écrasé :
+  le bouton devient « Remplacer ». En ligne de commande, `nc-cloud telecharger ID` sans destination utilise ce même
+  dossier.
 - Renommer, et Déplacer… : on parcourt les dossiers, puis « Déplacer ici » (jamais un dossier dans lui-même).
 - Ou glisse une ligne : un aperçu suit le pointeur ; lâchée sur un dossier de la liste, elle y va ; sur « ↑ » (en tête
   du chemin), elle remonte dans le dossier parent sans que tu quittes le dossier affiché. La destination s'allume ; sur
   elle-même, sur un fichier ou dans son propre dossier, rien ne s'allume et rien ne part. Le serveur vérifie le reste.
-- Supprimer… demande d'abord sur la ligne : « suppression définitive, toutes ses versions » ; pour un dossier, d'abord
-  l'aperçu (« N fichier(s), M dossier(s), taille »). Si le dossier a changé entre-temps, rien n'est supprimé : nouvel
-  aperçu, nouvelle question.
+- Supprimer… demande d'abord dans la carte de sélection : « suppression définitive, toutes ses versions ». Pour un
+  dossier, il faut d'abord l'aperçu (« N fichier(s), M dossier(s), taille »). Si le dossier a changé entre-temps, rien
+  n'est supprimé : nouvel aperçu, nouvelle question.
 - Chaque action n'apparaît que si le serveur annonce sa capacité (déplacer, aperçu, suppression de dossier).
 
 ### Ouvrir dans Fichiers
@@ -81,15 +89,16 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 ### Envoyer des fichiers
 
 - Un petit nuage dans la pilule (à côté de l'heure, avec `CLOUD_JARVIS=oui` et ce PC associé) : un clic ouvre le
-  panneau ; le survoler n'ouvre pas l'île. Pendant un envoi, il devient une flèche d'envoi en couleur d'accent, et une
-  notification dit la fin.
-- Glisse des fichiers sur l'île fermée : un cadre d'accent apparaît ; au lâcher, le panneau s'ouvre avec les fichiers
-  reçus et le dossier de destination (le dossier affiché). Rien ne part avant « Envoyer ici ». C'est une copie : les
-  fichiers restent où ils sont. L'île ouverte (la page JARVIS et ses pièces jointes) garde son propre dépôt.
+  panneau, un autre le ferme ; le survoler n'ouvre pas l'île. Pendant un envoi, il devient une flèche d'envoi en couleur
+  d'accent, et une notification dit la fin.
+- Glisse des fichiers dans la carte « Déposer des fichiers » ou sur l'île fermée (un cadre d'accent s'allume et le
+  panneau s'ouvre au lâcher). La sélection affiche les fichiers reçus et le dossier de destination (le dossier
+  affiché). Rien ne part avant « Envoyer ici ». C'est une copie : les fichiers restent où ils sont.
+  L'île ouverte (la page JARVIS et ses pièces jointes) garde son propre dépôt.
 - « Importer des fichiers… » ouvre le sélecteur de fichiers du bureau (le portail, `nc-cloud choisir`) ; l'annuler garde
   la sélection d'avant. Il faut un portail qui sait choisir des fichiers : `xdg-desktop-portal-gtk`, installé par
-  `install.sh` sur les 4 distributions (celui de Hyprland ne le fait pas). Sans lui, le panneau dit de déposer les
-  fichiers sur l'île, et `nc-diag` le signale. Fermer le panneau referme le sélecteur ; il ne reste ouvert qu'une heure
+  `install.sh` sur les 4 distributions (celui de Hyprland ne le fait pas). Sans lui, utilise le dépôt dans la fenêtre
+  ou sur l'île ; `nc-diag` le signale. Fermer le panneau referme le sélecteur ; il ne reste ouvert qu'une heure
   au plus.
 - 8 fichiers locaux au plus ; le reste est écarté et le panneau le dit. Un dossier, un lien ou un fichier spécial est
   refusé ligne par ligne, comme une adresse qui n'est pas un chemin net (`/` final, `.` ou `..`).
@@ -233,7 +242,8 @@ Un fichier d'une autre forme n'est jamais touché.
 
 ### Récents
 
-En haut du panneau, « Récents » montre les 5 derniers fichiers que CE PC a envoyés ou ouverts ; un clic en ouvre un.
+Sous les cartes « Mes fichiers » et « Déposer des fichiers », « Récents » montre les 5 derniers fichiers que CE PC
+a envoyés ou ouverts ; un clic en ouvre un.
 La liste est locale (`~/.local/state/nc-cloud/recents.json`, 0600 : ids et noms seulement), jamais demandée au
 serveur. Un fichier supprimé ailleurs en sort au premier refus. « Effacer les récents » la vide, et `dissocier`
 aussi.

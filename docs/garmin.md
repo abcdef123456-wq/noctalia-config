@@ -12,6 +12,18 @@ Tu choisis les cartes affichées et tu peux noter ton hydratation.
 À l'ouverture, le panneau lit l'état puis lance une synchronisation. « Actualiser » force la synchronisation.
 Il n'y a aucune minuterie : panneau fermé, rien ne s'exécute.
 
+## Lire le tableau
+
+Par défaut, la rangée du haut affiche Body Battery, Cœur, Sommeil, Stress et Pas, dans cet ordre. Les jauges et
+les cartes détaillées reprennent les mêmes couleurs du thème actif. « Personnaliser » permet de masquer ou
+de déplacer les indicateurs ; les jauges suivent le même ordre que leurs cartes. Le cœur affiche le dernier
+point disponible (ou la fréquence au repos s'il n'y a pas de série). La jauge des pas suit ton objectif et
+indique la distance parcourue.
+
+Les cartes détaillées montrent notamment les courbes du jour et les durées des quatre phases du sommeil.
+L'en-tête indique le mode démo ou l'heure de la dernière synchronisation disponible. Il donne accès à
+« Personnaliser », « Actualiser », aux réglages Santé Garmin (⚙) et à « Fermer » (ou Échap).
+
 ## Connecteur non officiel
 
 Le connecteur utilise la bibliothèque `garminconnect`, qui n'est pas un service officiel de Garmin.
@@ -21,10 +33,9 @@ Il peut cesser de marcher si Garmin change son service.
 
 Les clés JSON lues (`bodyBatteryValuesArray`, `dailySleepDTO`, `sleepScores`, `hrvSummary`, `avgStressLevel`...,
 voir `home/.local/libexec/nc-garmin-connecteur.py`) n'ont PAS été confirmées avec un vrai compte Garmin.
-Une mesure peut donc manquer ou rester vide. Si c'est le cas, le panneau n'affiche rien pour cette carte.
+Les champs peuvent donc manquer : une valeur indisponible est indiquée par « — ».
 
-Le tableau du haut (5 jauges, courbes de la journée, phases du sommeil, distance) lit en plus ces noms, eux aussi
-**à confirmer avec un vrai compte** :
+Les jauges et leurs cartes détaillées lisent en plus ces noms, eux aussi **à confirmer avec un vrai compte** :
 
 | Mesure | Clé lue chez Garmin | Clé du panneau |
 |---|---|---|

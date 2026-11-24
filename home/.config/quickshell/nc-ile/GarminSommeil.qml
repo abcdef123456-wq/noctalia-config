@@ -4,35 +4,49 @@ import QtQuick
 Column {
     id: so
     property var phases: []
-    readonly property real total: {
-        var t = 0
-        for (var i = 0; i < 4; i++) { var v = phases[i]; if (typeof v === "number" && isFinite(v) && v > 0) t += v }
-        return t
-    }
-    readonly property var couleurs: [Couleurs.violet, Couleurs.bleu, Couleurs.rose, Couleurs.orange]
-    readonly property var noms: [Reglages.t("Profond", "Deep"), Reglages.t("Léger", "Light"), Reglages.t("Paradoxal", "REM"), Reglages.t("Éveil", "Awake")]
+    readonly property var durees: phases.map(v => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null)
+    readonly property real total: durees.reduce((t, v) => t + (v || 0), 0)
+    readonly property int segments: durees.filter(v => v > 0).length
+    readonly property var couleurs: [Couleurs.bleu, Qt.tint(Couleurs.bleu, Qt.alpha(Couleurs.texte, 0.38)), Couleurs.violet, Couleurs.orange]
+    readonly property var noms: [Reglages.t("Profond", "Deep"), Reglages.t("Léger", "Light"), "REM", Reglages.t("Éveil", "Awake")]
     visible: total > 0
-    spacing: 6
+    spacing: 9
     Row {
+        id: barre
         objectName: "nc-garmin-sommeil-barre"
-        width: parent.width; height: 10; spacing: 2
+        width: parent.width; height: 14; spacing: 3
         Repeater {
-            model: 4
-            Rectangle {
-                readonly property real v: typeof so.phases[index] === "number" && isFinite(so.phases[index]) && so.phases[index] > 0 ? so.phases[index] : 0
+            model: so.durees
+            delegate: Rectangle {
+                required property var modelData
+                required property int index
                 objectName: "nc-garmin-sommeil-" + index
-                visible: v > 0
-                height: 10; radius: Couleurs.rayon(5, width, height)
-                width: Math.max(4, (so.width - 6) * v / so.total)
+                visible: modelData > 0
+                height: barre.height; radius: Couleurs.rayon(6, width, height)
+                width: modelData > 0 ? (barre.width - barre.spacing * (so.segments - 1)) * modelData / so.total : 0
                 color: so.couleurs[index]
             }
         }
     }
-    Row {
-        spacing: 12
+    Flow {
+        width: parent.width; spacing: 16
         Repeater {
-            model: 4
-            Texte { text: so.noms[index]; secondaire: true; font.pixelSize: 11; color: so.couleurs[index] }
+            model: so.noms
+            delegate: Row {
+                required property string modelData
+                required property int index
+                readonly property var secondes: so.durees[index]
+                readonly property int minutes: Math.floor((secondes || 0) / 60)
+                readonly property string duree: secondes === null ? "—"
+                                                 : minutes < 60 ? minutes + "m"
+                                                 : Math.floor(minutes / 60) + "h " + String(minutes % 60).padStart(2, "0") + "m"
+                spacing: 6
+                Rectangle {
+                    width: 10; height: 10; radius: Couleurs.rayon(5, width, height)
+                    anchors.verticalCenter: parent.verticalCenter; color: so.couleurs[index]
+                }
+                Texte { text: parent.modelData + " : " + parent.duree; font.pixelSize: 12 }
+            }
         }
     }
 }
