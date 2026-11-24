@@ -147,6 +147,7 @@ NOCTALIA_DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.environ
 # zz-economie.toml (profil Économie, qui doit gagner). Les réglages faits dans l'interface de Noctalia
 # (~/.local/state/noctalia/settings.toml) passent devant tout : la palette se change donc avec color-scheme-set.
 NOCTALIA_OUT = os.path.join(NOCTALIA_DIR, "zy-reglages.toml")
+PANNEAUX_OUT = os.path.join(HOME, ".config/nc/panneaux.json")
 
 
 def charger(nom, fichier):
@@ -914,6 +915,9 @@ REGLAGES = [
     R("NUIT_DEBUT", "Lumière nocturne", L("Commence à", "Starts at"), "choix", "21:00", "", ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'], groupe="noctalia"),
     R("NUIT_FIN", "Lumière nocturne", L("S'arrête à", "Ends at"), "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
     # Barre et dock
+    R("BARRE_MODULAIRE", "Barre et dock", L("Barre modulaire (expérimentale)", "Modular bar (experimental)"), "ouinon", "non",
+      L("Remplace les barres Noctalia par des panneaux modulaires. Nécessite l'île Quickshell. Ne change pas le dock.",
+        "Replace Noctalia's bars with modular panels. Requires the Quickshell island. Does not change the dock."), groupe="noctalia"),
     R("BARRE_OPACITE", "Barre et dock", L("Opacité des pastilles de la barre", "Bar pill opacity"), "entier", "82",
       L("Sans effet dans un thème dont la barre n'a pas de pastilles (Apple, Noir pur…).",
         "No effect with a theme whose bar has no pills (Apple, Pure black…)."),
@@ -3357,14 +3361,17 @@ def plugins_manquants(depot, installes, actifs, ignores=PLUGINS_OPTIONNELS):
     return res
 
 
+def toml_cle(k):
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k, ensure_ascii=False)
+
+
 def toml_val(v):
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return repr(v)
     if isinstance(v, dict):         # table en ligne (groupes de pastilles : capsule_group = [{ id = "a", members = [...] }])
-        return "{ " + ", ".join(f"{k if re.fullmatch(r'[A-Za-z0-9_-]+', k) else json.dumps(k)} = {toml_val(x)}"
-                                for k, x in v.items()) + " }"
+        return "{ " + ", ".join(f"{toml_cle(k)} = {toml_val(x)}" for k, x in v.items()) + " }"
     if isinstance(v, list) and any(isinstance(x, dict) for x in v):
         return "[" + ", ".join(toml_val(x) for x in v) + "]"
     return json.dumps(v, ensure_ascii=False)
@@ -3383,6 +3390,83 @@ _CONDITIONNELS = ("group:sys", PILULE_VPN, PILULE_GARMIN, "notifications", "nc/i
 TRAY_VPN = ("nordvpn-tray-white", "nordvpn-tray-black", "nordvpn-tray", "nordvpn", "nordvpn-gui",
             "protonvpn-app", "proton-vpn-app", "protonvpn", "Proton VPN", "ProtonVPN",
             "mullvad-vpn", "Mullvad VPN", "mullvad-gui")
+
+
+def configuration_panneaux(tables):
+    """Instantané de la barre installée et de ses réglages composés, avant de masquer les barres natives."""
+    if not tomllib:
+        return None                  # le lecteur de repli des listes ne conserve pas les styles ni les widgets
+    try:
+        with open(os.path.join(NOCTALIA_DIR, "config.toml"), "rb") as f:
+            config = tomllib.load(f)
+    except (OSError, ValueError):
+        return None
+    # install.sh pose ces marqueurs même s'il copie les QML pour les deux variantes. Tester la base, pas le thème.
+    notif = config.get("notification", {})
+    barres = config.get("bar", {})
+    defaut = barres.get("default") if isinstance(barres, dict) else None
+    if not isinstance(notif, dict) or notif.get("enable_daemon") is not False or not isinstance(defaut, dict):
+        return None
+    centre = defaut.get("center", [])
+    if not isinstance(centre, list) or "nc/ile:pilule" in centre:
+        return None
+
+    fusion_noctalia(config, tables)
+    ordre = barres.get("order", [])
+    if not isinstance(ordre, list) or not all(isinstance(n, str) for n in ordre):
+        return None
+    noms = dict.fromkeys([*ordre, *barres])
+    panneaux, utilises = [], set()
+
+    def liste_widgets(liste):
+        return isinstance(liste, list) and all(isinstance(w, str) and w for w in liste)
+
+    for nom in noms:
+        if nom == "order" or nom not in barres:
+            continue
+        options = barres[nom]
+        if not isinstance(options, dict) or not isinstance(options.get("monitor", {}), dict):
+            return None
+        # Noctalia peut remplir ses propres listes par défaut. Sans composition explicite, ne pas masquer une barre active.
+        if options.get("enabled", True) and not all(k in options for k in _LISTES):
+            return None
+        panneau = {"position": "top", "start": [], "center": [], "end": [], "capsule_group": [], **options, "id": nom}
+        if panneau["position"] not in ("top", "bottom", "left", "right") or not all(liste_widgets(panneau[k]) for k in _LISTES):
+            return None
+        groupes = panneau["capsule_group"]
+        if not isinstance(groupes, list) or not all(
+                isinstance(g, dict) and isinstance(g.get("id"), str) and liste_widgets(g.get("members")) for g in groupes):
+            return None
+        refs = {w for k in _LISTES for w in panneau[k]}
+        if not {w[6:] for w in refs if w.startswith("group:")} <= {g["id"] for g in groupes}:
+            return None
+        utilises.update(w for w in refs if not w.startswith("group:"))
+        utilises.update(m for g in groupes for m in g["members"])
+        panneaux.append(panneau)
+
+    widgets = config.get("widget", {})
+    if not isinstance(widgets, dict) or not all(isinstance(w, dict) and isinstance(w.get("type", ""), str) for w in widgets.values()):
+        return None
+    widgets = {nom: {"type": nom, **options} for nom, options in widgets.items()}
+    for nom in sorted(utilises - widgets.keys()):
+        widgets[nom] = {"type": nom}
+    docks = [w for w in widgets.values() if w["type"] == "dock" and "pinned" not in w]
+    if docks:
+        # nc-dock donne la priorité aux réglages faits dans le dock de Noctalia (même à une liste vide).
+        try:
+            epingles = charger("nc_dock", "nc-dock").epinglees()
+        except OSError:
+            dock = config.get("dock", {})
+            epingles = dock.get("pinned", []) if isinstance(dock, dict) else []
+        for w in docks:
+            w["pinned"] = epingles
+    shell = config.get("shell", {})
+    if not isinstance(shell, dict):
+        return None
+    police = shell.get("font_family", PAR_CLE["POLICE"].defaut)
+    if not isinstance(police, str):
+        return None
+    return {"barres": panneaux, "widgets": widgets, "police": police}
 
 
 def appliquer_noctalia(vals):
@@ -3515,8 +3599,26 @@ def appliquer_noctalia(vals):
             barre.pop("capsule_group", None)        # plus aucun groupe n'est posé : ceux du thème ne serviraient à rien
         except (OSError, KeyError, ValueError):
             pass
-    if barre.get("position") in ("left", "right"):
-        for cote in ("start", "center", "end"):
+    panneaux = configuration_panneaux(tables) if vals.get("BARRE_MODULAIRE") == "oui" else None
+    if panneaux:
+        try:
+            texte_panneaux = json.dumps(panneaux, ensure_ascii=False, allow_nan=False) + "\n"
+            os.makedirs(os.path.dirname(PANNEAUX_OUT), exist_ok=True)
+            with ouvrir_atomique(PANNEAUX_OUT) as f:
+                f.write(texte_panneaux)
+        except (OSError, TypeError, ValueError) as e:
+            print(T(f"nc-reglages : export des panneaux impossible : {e}", f"nc-settings: cannot export modular panels: {e}"), file=sys.stderr)
+            panneaux = None
+        else:
+            for panneau in panneaux["barres"]:
+                table = "bar." + toml_cle(panneau["id"])
+                mettre(table, "enabled", False)
+                for moniteur in panneau.get("monitor", {}):
+                    mettre(f"{table}.monitor.{toml_cle(moniteur)}", "enabled", False)
+
+    # Ces limites étaient celles du rendu vertical natif. Les widgets modulaires gardent leur composition.
+    if not panneaux and barre.get("position") in ("left", "right"):
+        for cote in _LISTES:
             try:
                 liste = barre[cote] if cote in barre else barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))[cote]
             except (OSError, KeyError, ValueError):
@@ -3540,6 +3642,10 @@ def appliquer_noctalia(vals):
                 f.write(texte)
         elif os.path.exists(NOCTALIA_OUT):
             os.remove(NOCTALIA_OUT)
+    if not panneaux:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(PANNEAUX_OUT)
+    if texte != ancien:
         subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
     # À chaque application (un thème change aussi le dossier des fonds, et le retour au dossier par défaut doit retirer
     # le drop-in) : nc-carousel-thumbs, qui lit le même dossier que Noctalia, met à jour la surveillance de son .path et

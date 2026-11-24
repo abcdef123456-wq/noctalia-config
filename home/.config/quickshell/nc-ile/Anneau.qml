@@ -14,7 +14,7 @@ Item {
     property string policePetite: Couleurs.police
     property int taillePetite: 11
     readonly property int points: 40
-    readonly property int allumes: Math.round(Math.max(0, Math.min(1, valeur)) * points)
+    readonly property int allumes: Number.isFinite(valeur) ? Math.round(Math.max(0, Math.min(1, valeur)) * points) : 0
     implicitWidth: diametre
     implicitHeight: diametre
 
@@ -37,7 +37,7 @@ Item {
         anchors.centerIn: parent
         Texte {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Math.round(Math.max(0, Math.min(1, anneau.valeur)) * 100) + "%"
+            text: Number.isFinite(anneau.valeur) ? Math.round(Math.max(0, Math.min(1, anneau.valeur)) * 100) + "%" : "—"
             color: anneau.couleur
             font.family: anneau.police
             font.pixelSize: Math.round(anneau.diametre * 0.24)

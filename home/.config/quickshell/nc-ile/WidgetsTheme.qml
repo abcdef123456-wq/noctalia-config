@@ -5,11 +5,9 @@
 // jauge-aiguille, meteo, accueil. Chiffres d'une horloge : un fichier Chiffres<Nom>.qml par style (CarteWidget.qml). Coins : haut-gauche, haut-droite, bas-gauche, bas-droite, centre. Tailles : petit, moyen, grand.
 // Styles (CarteWidget.qml) : texte (sans carte, le défaut), carte, carte-ronde, brutal. 8 widgets au plus : ceux d'un même
 // coin s'empilent (disposer), jamais l'un sur l'autre ni hors de l'écran.
-// Énergie : aucune pendule à soi. Horloges, date, accueil, calendrier et citation suivent Etat.minute ; météo et musique,
-// les signaux d'Etat (nc-meteo et MPRIS déjà lus par l'île) ; la citation relit son fichier une fois par jour. Jauges,
-// anneau et jauge à aiguille : un relevé à chaque minute (Etat.minute, en même temps que l'heure : rien ne bouge entre
-// deux), plus un seul minuteur de 2 s, une fois, quand l'un d'eux devient visible (le processeur se mesure entre deux
-// relevés). Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
+// Horloges, date, accueil, calendrier et citation suivent Etat.minute ; météo et musique, les signaux d'Etat.
+// Les jauges se branchent sur la même sonde que la barre, seulement quand elles sont visibles.
+// Un seul échantillonnage pour tous les écrans. Ni animation ni flou.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -31,7 +29,8 @@ Scope {
         return r
     }
     readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches
-    readonly property bool aJauges: { for (var i = 0; i < liste.length; i++) if (["jauges", "anneau", "jauge-aiguille"].indexOf(liste[i].type) >= 0) return true; return false }
+    readonly property bool suitMesures: vu && liste.some(p => p.type === "jauges" || p.type === "anneau" || p.type === "jauge-aiguille")
+    readonly property bool suitDisque: vu && liste.some(p => p.type === "jauges")
     readonly property bool aCitation: { for (var i = 0; i < liste.length; i++) if (liste[i].type === "citation") return true; return false }
     // Musique : seulement quand un titre JOUE (en pause ou sans titre, la carte n'est pas là : jamais de pochette vide)
     readonly property bool musique: Etat.aMusique && Etat.joue
@@ -60,53 +59,21 @@ Scope {
         onLoadFailed: w.citations = []
     }
 
-    // ── Jauges : CPU (/proc/stat), RAM (/proc/meminfo), disque (df, un relevé sur quinze) ──
-    property real cpu: 0
-    property real ram: 0
-    property real disque: 0
-    property var cpuAvant: null
-    property int tic: 0
-    function echantillon() {
-        procStat.reload(); procMem.reload()
-        if (tic++ % 15 === 0 && !dfProc.running) dfProc.running = true
+    readonly property real cpu: fraction(WidgetBarreSonde.valeurs.cpu_usage)
+    readonly property real ram: fraction(WidgetBarreSonde.valeurs.ram_used)
+    readonly property real disque: fraction(WidgetBarreSonde.disque.disk_used_pct)
+    onSuitMesuresChanged: WidgetBarreSonde.utilisateurs += suitMesures ? 1 : -1
+    onSuitDisqueChanged: WidgetBarreSonde.disques += suitDisque ? 1 : -1
+    Component.onDestruction: {
+        if (suitMesures) WidgetBarreSonde.utilisateurs--
+        if (suitDisque) WidgetBarreSonde.disques--
     }
-    onVuChanged: if (vu && aJauges) echantillon()
-    readonly property var minute: Etat.minute
-    onMinuteChanged: if (vu && aJauges) echantillon()
-    readonly property var minuteur: echantillonneur
-    Timer { id: echantillonneur; interval: 2000; running: w.vu && w.aJauges; onTriggered: w.echantillon() }
-    FileView {
-        id: procStat
-        path: w.aJauges ? "/proc/stat" : ""
-        printErrors: false
-        onLoaded: {
-            var m = text().split("\n")[0].trim().split(/\s+/).slice(1).map(Number)
-            var total = m.reduce((a, b) => a + b, 0), repos = (m[3] || 0) + (m[4] || 0)
-            if (w.cpuAvant && total > w.cpuAvant[0]) w.cpu = 1 - (repos - w.cpuAvant[1]) / (total - w.cpuAvant[0])
-            w.cpuAvant = [total, repos]
-        }
-    }
-    FileView {
-        id: procMem
-        path: w.aJauges ? "/proc/meminfo" : ""
-        printErrors: false
-        onLoaded: {
-            var t = text(), a = /MemTotal:\s+(\d+)/.exec(t), b = /MemAvailable:\s+(\d+)/.exec(t)
-            if (a && b && Number(a[1]) > 0) w.ram = 1 - Number(b[1]) / Number(a[1])
-        }
-    }
-    Process {
-        id: dfProc
-        command: ["df", "-P", "/"]
-        stdout: StdioCollector {
-            onStreamFinished: { var m = /(\d+)%/.exec(text.split("\n")[1] || ""); if (m) w.disque = Number(m[1]) / 100 }
-        }
-    }
+    function fraction(p) { return Number.isFinite(p) ? Math.max(0, Math.min(100, p)) / 100 : NaN }
     function barre(v) {
-        var n = Math.max(0, Math.min(10, Math.round(v * 10)))
+        var n = Number.isFinite(v) ? Math.round(v * 10) : 0
         return "█".repeat(n) + "░".repeat(10 - n)
     }
-    function pct(v) { return Math.round(Math.max(0, Math.min(1, v)) * 100) + "%" }
+    function pct(v) { return Number.isFinite(v) ? Math.round(v * 100) + "%" : "—" }
 
     // ── Contenu (lignes de texte) de chaque type ──
     readonly property var unites: ["", "une", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze"]

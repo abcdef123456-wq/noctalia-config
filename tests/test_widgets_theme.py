@@ -4,11 +4,11 @@
   français et en anglais.
 - style.conf : sans « widgets » rien de nouveau ; avec, une ligne WIDGETS_THEME=type:coin:taille[:style],…
 - Hors écran (qs -p, offscreen) : un contenu par type, coupé à WIDGETS_BUREAU=non, caché par « Tout masquer », rien écran
-  éteint ; citation du jour (4 Kio, 200 caractères, une par jour) ; jauges relevées à la minute (un seul minuteur de 2 s, une fois, jauges vues seulement)
-  dans tous les fichiers du widget ; cartes (brutal : contour et ombre dure ; ronde : coins transparents), horloge géante,
+  éteint ; citation du jour (4 Kio, 200 caractères, une par jour) ; jauges synchronisées avec la sonde de la barre ;
+  cartes (brutal : contour et ombre dure ; ronde : coins transparents), horloge géante,
   météo absente = rien, widgets d'un même coin empilés sans se toucher ni sortir de l'écran.
 - Chiffres d'une horloge : un fichier Chiffres<Nom>.qml par valeur de WIDGETS_CHIFFRES, ni plus ni moins ; séparateur de
-  « points » en deux disques (aucun glyphe « : ») ; aiguilles justes à 3 h et 6 h ; jauge à aiguille sur le même minuteur.
+  « points » en deux disques (aucun glyphe « : ») ; aiguilles justes à 3 h et 6 h.
 - Lisibilité mesurée sur des rendus hors écran (échelle 1,6, taille « petit ») : chaque texte a 4,5:1 sur le fond réel
   derrière lui (carte, ou voile du style « texte » sur un fond d'écran clair ET sombre) et 11 px au moins.
 - Musique cachée quand rien ne joue ; WIDGETS_POLICE (liste avec repli, petits textes : la suivante ; accepté par un thème).
@@ -59,6 +59,15 @@ ETAT = (' property bool widgetsCaches: false; property bool aMusique: false; pro
         ' property var minute: new Date(2026, 10, 22, 9, 5)\n'
         ' property var jours: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]\n'
         ' property var mois: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]\n')
+SONDE = """pragma Singleton
+import QtQuick
+QtObject {
+    property int utilisateurs: 0
+    property int disques: 0
+    property var valeurs: ({})
+    property var disque: ({})
+}
+"""
 REMPLACEMENTS = (("import Quickshell.Wayland\n", "import QtQuick.Window\n"), ("PanelWindow {", "Window {"),
                  ("            required property var modelData\n            screen: modelData\n", ""),
                  ("            anchors { top: true; bottom: true; left: true; right: true }\n", ""),
@@ -76,24 +85,6 @@ class Source(unittest.TestCase):
         # Créé seulement si WIDGETS_BUREAU=oui ET un thème a des widgets : rien en mémoire sinon
         self.assertRegex(lire("shell.qml"), r'LazyLoader \{\s*active: Reglages\.val\("WIDGETS_BUREAU", "non"\) === "oui" '
                          r'&& Reglages\.val\("WIDGETS_THEME", ""\) !== ""\s*WidgetsTheme \{\}')
-
-    def test_un_seul_minuteur_de_2_s_seulement_pour_les_jauges_vues(self):
-        w = lire("WidgetsTheme.qml")
-        tous = [m for nom in FICHIERS for m in re.findall(r"\bTimer\s*\{[^}]*\}", lire(nom))]
-        self.assertEqual(tous, ["Timer { id: echantillonneur; interval: 2000; running: w.vu && w.aJauges; onTriggered: w.echantillon() }"])
-        self.assertIn("onMinuteChanged: if (vu && aJauges) echantillon()", w)
-        self.assertIn('["jauges", "anneau", "jauge-aiguille"].indexOf(liste[i].type) >= 0', w)
-        self.assertIn("readonly property bool vu: Etat.ecranVu && !Etat.widgetsCaches", w)
-        self.assertIn('Reglages.val("WIDGETS_BUREAU", "non") === "oui"', w)
-        self.assertIn("slice(0, 4096)", w)
-        self.assertIn("slice(0, 200)", w)
-        for nom in FICHIERS:
-            for interdit in ("MouseArea", "Behavior", "Animation", "layer.effect", "MultiEffect", "Blur", "Canvas", "Shape", "Process {"):
-                if not (nom == "WidgetsTheme.qml" and interdit == "Process {"):      # df, un relevé sur quinze, jauges vues seulement
-                    self.assertNotIn(interdit, lire(nom), nom)
-        # Météo et musique : ce qu'Etat lit déjà (nc-meteo, MPRIS), aucun processus de plus
-        self.assertNotIn('"nc-meteo"', lire("CarteWidget.qml"))
-        self.assertIn("Etat.meteoPilule", lire("CarteWidget.qml"))
 
     def test_un_fichier_chiffres_par_valeur_de_la_liste_fermee(self):
         # Un nouveau style (volets, nixie…) = un fichier Chiffres<Nom>.qml ET son nom dans la liste, ni l'un sans l'autre
@@ -277,13 +268,13 @@ class HorsEcran(unittest.TestCase):
             source = source.replace("visible: w.vu\n", 'visible: w.vu\n            Rectangle { anchors.fill: parent; color: "%s" }\n' % fond)
         with tempfile.TemporaryDirectory(prefix="nc-wt-") as d:
             root = H.preparer(d, COMPOSANTS, etat=ETAT,
-                              extra={"Couleurs.qml": COULEURS, "WidgetsTheme.qml": source})
+                              extra={"Couleurs.qml": COULEURS, "WidgetsTheme.qml": source, "WidgetBarreSonde.qml": SONDE},
+                              singletons=("WidgetBarreSonde",))
             scenario = scenario.replace("DOSSIER", str(root))
             if citations is not None:
                 (root / "config/nc").mkdir(parents=True)
                 (root / "config/nc/citations.txt").write_text(citations, encoding="utf-8")
-            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n id: racine\n property int etape: 0\n property var w: null\n property var tic0: null\n" + H.OUTILS + """
- function minuteurs() { return [w.minuteur] }
+            (root / "shell.qml").write_text(H.ENTETE + "ShellRoot {\n id: racine\n property int etape: 0\n property var w: null\n" + H.OUTILS + """
  Timer { interval: 150; running: true; repeat: true; onTriggered: {
   if (etape === 0) { Reglages.valeurs = %s; var c = Qt.createComponent("WidgetsTheme.qml"); verifier(c.status === Component.Ready, c.errorString())
     w = c.createObject(racine); etape++; return }
@@ -325,38 +316,40 @@ class HorsEcran(unittest.TestCase):
                 self.executer(valeurs, """
   if (etape === 1) {
     verifier(w.liste.length === 0 && w.fenetres.length === 0, "aucune fenêtre")
-    for (var i = 0, m = minuteurs(); i < m.length; i++) verifier(!m[i].running, "aucun minuteur actif")
+    verifier(WidgetBarreSonde.utilisateurs === 0 && WidgetBarreSonde.disques === 0, "aucun relevé sans widgets visibles")
     Qt.quit() }
 """)
 
-    def test_jauges_cachees_ou_ecran_eteint_ne_tournent_pas(self):
-        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "jauges:centre:petit"}, """
-  var m = minuteurs()
-  if (etape === 1) {
-    verifier(m.length === 1 && m[0].interval === 2000 && !m[0].repeat, "un seul minuteur de 2 s, une fois : " + m.length)
-    verifier(m[0].running && w.fenetres[0].visible, "actif quand vu")
-    Etat.widgetsCaches = true; etape++; return }
-  if (etape === 2) { verifier(!m[0].running && !w.fenetres[0].visible, "arrêté et caché par Tout masquer")
-    Etat.widgetsCaches = false; Etat.ecranVu = false; etape++; return }
-  if (etape === 3) { verifier(!m[0].running && !w.fenetres[0].visible, "rien écran éteint")
-    Etat.ecranVu = true; etape++; return }
-  if (etape === 4) { verifier(m[0].running && w.fenetres[0].visible, "reprise"); Qt.quit() }
-""")
-
-    def test_jauges_immobiles_entre_deux_minutes(self):
-        # Rien ne bouge au repos : après le relevé de départ, plus rien jusqu'à la minute suivante, comme l'heure
+    def test_jauges_suivent_les_releves_de_la_barre_et_s_arretent_hors_vue(self):
         self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "jauges:centre:petit:carte"}, """
-  if (etape === 1) { racine.tic0 = w.tic; etape++; return }
-  if (etape < 20) { etape++; return }
-  if (etape === 20) { verifier(!w.minuteur.running && w.tic === racine.tic0 + 1, "un seul relevé de plus, puis rien : " + (w.tic - racine.tic0))
-    racine.tic0 = w.tic; Etat.minute = new Date(2026, 10, 22, 9, 6); etape++; return }
-  if (etape === 21) { verifier(w.tic === racine.tic0 + 1, "un relevé à la minute"); Qt.quit() }
-""")
-
-    def test_sans_jauges_le_minuteur_dort(self):
-        self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": "horloge-fine:centre:moyen"}, """
-  if (etape === 1) { var m = minuteurs()
-    verifier(m.length === 1 && !m[0].running, "minuteur arrêté sans jauges"); Qt.quit() }
+  function textes(it) {
+    var r = it.text ? [String(it.text)] : []
+    for (const enfant of it.children) r.push(...textes(enfant))
+    return r
+  }
+  function jauges() { return trouver(w.fenetres[0].contentItem, "nc-widget-jauges") }
+  if (etape === 1) {
+    verifier(jauges().visible && textes(jauges()).filter(t => t === "—").length === 3, "pas de faux 0% avant le premier relevé")
+    WidgetBarreSonde.valeurs = { cpu_usage: 35, ram_used: 48 }; WidgetBarreSonde.disque = { disk_used_pct: 67 }; etape++; return }
+  if (etape === 2) {
+    var t = textes(jauges())
+    verifier(["35%", "48%", "67%"].every(x => t.includes(x)), "mêmes chiffres que la barre : " + t)
+    WidgetBarreSonde.valeurs = { cpu_usage: 0, ram_used: 49 }; etape++; return }
+  if (etape === 3) {
+    var t = textes(jauges())
+    verifier(t.includes("0%") && t.includes("49%") && !t.includes("35%"), "mise à jour sans attendre la minute : " + t)
+    Etat.widgetsCaches = true; etape++; return }
+  if (etape === 4) {
+    verifier(!w.fenetres[0].visible && !WidgetBarreSonde.utilisateurs && !WidgetBarreSonde.disques, "arrêt quand masquées")
+    Etat.ecranVu = false; Etat.widgetsCaches = false; etape++; return }
+  if (etape === 5) {
+    verifier(!w.fenetres[0].visible && !WidgetBarreSonde.utilisateurs && !WidgetBarreSonde.disques, "arrêt écran éteint")
+    Etat.ecranVu = true; etape++; return }
+  if (etape === 6) {
+    verifier(w.fenetres[0].visible && WidgetBarreSonde.utilisateurs === 1 && WidgetBarreSonde.disques === 1, "reprise")
+    w.destroy(); etape++; return }
+  if (etape === 7) {
+    verifier(!WidgetBarreSonde.utilisateurs && !WidgetBarreSonde.disques, "aucun relevé après destruction"); Qt.quit() }
 """)
 
     def test_citation_du_jour_4_kio_200_caracteres_une_par_jour(self):
@@ -524,12 +517,12 @@ class HorsEcran(unittest.TestCase):
     verifier(Math.abs(h[0] - h[2]) < 1.5 && Math.abs(h[1]) < 1.5, "3 h : heures à l'horizontale, à droite : " + h)
     verifier(Math.abs(m[0]) < 1.5 && Math.abs(m[1] + m[2]) < 1.5, "3 h : minutes vers le haut : " + m)
     var j = trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille")
-    verifier(j && j.visible && w.minuteur.running, "jauge à aiguille vue, minuteur partagé actif")
-    w.cpu = 0.5; etape++; return }
+    verifier(j && !j.visible && WidgetBarreSonde.utilisateurs === 1 && !WidgetBarreSonde.disques, "aiguille sans relevé, pas de sonde disque")
+    WidgetBarreSonde.valeurs = { cpu_usage: 50 }; etape++; return }
   if (etape === 4) { var a = trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille")
-    verifier(Math.abs(a.rotation) < 0.01, "jauge à 50 % : aiguille droite : " + a.rotation)
+    verifier(a.visible && Math.abs(a.rotation) < 0.01, "jauge à 50 % : aiguille droite : " + a.rotation)
     Etat.minute = new Date(2026, 10, 22, 18, 0); etape++; return }
-  if (etape === 5) { w.cpu = 0; etape++; return }          // après le relevé de la minute
+  if (etape === 5) { WidgetBarreSonde.valeurs = { cpu_usage: 0 }; etape++; return }
   if (etape === 6) { var h2 = pointe("nc-aiguille-heures")
     verifier(Math.abs(h2[0]) < 1.5 && Math.abs(h2[1] - h2[2]) < 1.5, "6 h : heures vers le bas : " + h2)
     verifier(Math.abs(trouver(w.fenetres[0].contentItem, "nc-jauge-aiguille").rotation + 90) < 0.01, "jauge à 0 : à gauche")
@@ -563,7 +556,8 @@ class HorsEcran(unittest.TestCase):
     def mesurer(self, theme, fond):
         self.executer({"WIDGETS_BUREAU": "oui", "WIDGETS_THEME": theme}, """
   if (etape === 1) { Etat.meteo = { temp: 13, icone: "cloud", texte: "Nuageux", min: 8, max: 13 }; Etat.meteoPilule = true
-    Etat.aMusique = true; Etat.joue = true; Etat.titre = "Titre"; Etat.artiste = "Artiste"; w.cpu = 0.42; etape++; return }
+    Etat.aMusique = true; Etat.joue = true; Etat.titre = "Titre"; Etat.artiste = "Artiste"
+    WidgetBarreSonde.valeurs = { cpu_usage: 42, ram_used: 65 }; WidgetBarreSonde.disque = { disk_used_pct: 37 }; etape++; return }
   if (etape === 2 || etape === 3) { etape++; return }
   if (etape === 4) { etape = 10
     var f = w.fenetres[0].contentItem, textes = [], objets = [], widgets = 0

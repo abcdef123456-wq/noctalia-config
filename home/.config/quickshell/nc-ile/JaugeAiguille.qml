@@ -47,12 +47,13 @@ Item {
         }
     }
     Rectangle {
+        visible: Number.isFinite(jauge.v)
         objectName: "nc-jauge-aiguille"
         width: Math.max(3, Math.round(jauge.diametre / 45)); height: Math.round(jauge.r * 0.78)
         x: jauge.r - width / 2; y: jauge.r - height
         radius: width / 2
         transformOrigin: Item.Bottom
-        rotation: -90 + 180 * jauge.v
+        rotation: visible ? -90 + 180 * jauge.v : 0
         color: jauge.couleur
     }
     Rectangle {
@@ -66,7 +67,7 @@ Item {
         y: jauge.r + Math.round(jauge.diametre / 16)
         Texte {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Math.round(jauge.v * 100) + "%"
+            text: Number.isFinite(jauge.v) ? Math.round(jauge.v * 100) + "%" : "—"
             color: jauge.couleur
             font.family: jauge.police
             font.pixelSize: Math.round(jauge.diametre * 0.2)

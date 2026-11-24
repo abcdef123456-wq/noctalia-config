@@ -24,15 +24,45 @@ import Quickshell.Hyprland
 
 ShellRoot {
     id: racine
+    property var modelePanneaux: ({})
+    property var palettePanneaux: ({})
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/nc/panneaux.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: racine.modelePanneaux = JSON.parse(text())
+        onLoadFailed: racine.modelePanneaux = {}
+    }
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/noctalia/colors.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: racine.palettePanneaux = JSON.parse(text())
+        onLoadFailed: racine.palettePanneaux = {}
+    }
+    readonly property bool panneauxReserventHaut: (modelePanneaux.barres || []).some(b => b.enabled !== false && b.reserve_space !== false && (b.position ?? "top") === "top")
     Variants {
         model: Quickshell.screens
-        Ile {}
+        Scope {
+            required property var modelData
+            id: moniteur
+            Ile { id: ile; modelData: moniteur.modelData }
+            Panneaux {
+                ecran: moniteur.modelData
+                modele: racine.modelePanneaux
+                palette: racine.palettePanneaux
+                obstacle: ile.obstaclePanneaux
+                reserveIleHaut: Reglages.val("ILE_BANDE", "non") === "oui" ? 42 : 0
+            }
+        }
     }
     // Bande réservée pour l'île sur chaque écran (ILE_BANDE=oui, thèmes à barre en bas ou sur un côté) : à « non »,
-    // aucune fenêtre n'est créée
+    // aucune fenêtre n'est créée ; si les panneaux modulaires réservent déjà le bord haut, ils assurent cette marge.
     LazyLoader {
         id: chargeurBande
-        active: Reglages.val("ILE_BANDE", "non") === "oui"
+        active: Reglages.val("ILE_BANDE", "non") === "oui" && !racine.panneauxReserventHaut
         Variants {
             model: Quickshell.screens
             ReserveIle {}
