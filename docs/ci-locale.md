@@ -1,6 +1,6 @@
 # Contribuer sans exécuter de CI sur GitHub
 
-Ouvrir une PR vers `main` depuis une branche à jour. L'approbation de `@abcdef123456-wq` et le statut `ci-locale` sont deux conditions distinctes. Un changement de code après la revue impose une nouvelle approbation ; le résultat de CI ne vaut que pour le commit testé. Si `main` avance, mettre la branche à jour avant la fusion. GitHub interdit l'auto-approbation : ne pas ouvrir la PR sous le compte propriétaire si celui-ci doit l’approuver.
+Ouvrir une PR vers `main` depuis une branche à jour. GitHub exige le statut `ci-locale`, mais pas d’approbation humaine. Le statut ne vaut que pour le commit testé : après un nouveau push ou une mise à jour depuis `main`, relancer la CI sur la nouvelle tête.
 
 ## Lancer les tests
 
@@ -32,6 +32,18 @@ outils/attester-ci-locale NUMERO_PR
 
 Lancer la commande depuis une copie de confiance des outils, à jour depuis `main`, et non depuis la branche à tester. Le pilote récupère le commit de la PR sans changer de branche, l’exécute dans des conteneurs et publie `ci-locale` sur ce commit. Si la tête de la PR change pendant le test, relancer sur la nouvelle version.
 
-La [règle de `main`](https://github.com/abcdef123456-wq/noctalia-config/settings/rules/27927625) accepte le statut quelle que soit sa source GitHub. Il s’agit d’une attestation de confiance : GitHub enregistre le compte qui publie le statut, mais ne prouve pas que les tests ont tourné. L’approbation du propriétaire reste obligatoire et distincte.
+La [règle de `main`](https://github.com/abcdef123456-wq/noctalia-config/settings/rules/27927625) accepte le statut quelle que soit sa source GitHub. Il s’agit d’une attestation de confiance : un compte avec l’accès **Write** peut publier un succès sans exécuter les tests, et ce succès permet la fusion sans revue. N’accorder cet accès qu’aux personnes de confiance.
 
-Pour la première PR, `CODEOWNERS` n’existe pas encore sur la branche de base. Une deuxième règle réserve donc la fusion au propriétaire en passant par une PR ; elle ne dispense jamais des autres contrôles. Après fusion de `.github/CODEOWNERS` sur `main`, le propriétaire peut supprimer la règle d’amorçage s’il veut permettre aux collaborateurs de cliquer sur Fusionner **après** son approbation.
+## Demander la fusion automatique
+
+Sur une PR prête à fusionner, un collaborateur avec l’accès **Write** peut armer la fusion, puis lancer la CI :
+
+```sh
+gh pr merge NUMERO_PR --auto --squash
+outils/attester-ci-locale NUMERO_PR
+```
+
+GitHub fusionne lorsque `ci-locale` est vert et que la PR est à jour avec `main`. La fusion automatique s’active par PR ; lancer la CI seule ne la demande pas.
+Pour annuler la demande, utiliser `gh pr merge NUMERO_PR --disable-auto`.
+Les commandes `gh pr merge` supposent qu’elles sont exécutées depuis une copie du dépôt GitHub `abcdef123456-wq/noctalia-config`.
+Seule la fusion est gérée par GitHub : les tests restent locaux.
