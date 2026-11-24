@@ -1,6 +1,6 @@
 # noctalia-config
 
-Les changements passent par une pull request vers `main`, avec l'accord du propriétaire et le statut `ci-locale`.
+Les changements passent par une pull request vers `main` avec le statut `ci-locale`, sans approbation humaine obligatoire.
 La CI obligatoire tourne en local et rend un verdict sous 15 minutes. Les installations sur les quatre distributions
 sont un contrôle de livraison séparé ; aucun test ne tourne sur GitHub Actions.
 Voir [comment contribuer et lancer la CI](docs/ci-locale.md).
