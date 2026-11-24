@@ -1,11 +1,12 @@
-"""Connexion.qml : l'île démarre même si Quickshell a été compilé sans Quickshell.Networking (ancienne compilation
-Debian, -DNETWORK=OFF) ; elle suppose alors qu'on est en ligne. Avant, toute l'île plantait au chargement."""
+"""L'île et ses widgets de barre restent utilisables avec les modules Quickshell facultatifs absents."""
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+
+from tests import _ile_hors_ecran as he
 
 QML = Path(__file__).resolve().parents[1] / "home/.config/quickshell/nc-ile"
 
@@ -35,9 +36,92 @@ class ConnexionIle(unittest.TestCase):
         self.assertRegex(sortie, r"RESULTAT (true|false) true")
 
 
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+class ModulesFacultatifsBarre(unittest.TestCase):
+    def test_absence_des_modules(self):
+        # Même avec un binaire qui fournit les modules, rendre les imports des vrais widgets introuvables.
+        modules = {
+            "WidgetBarreStatus": {"Quickshell.Networking": "Quickshell.ReseauAbsent",
+                                  "Quickshell.Bluetooth": "Quickshell.BluetoothAbsent"},
+            "WidgetBarreTray": {"Quickshell.Services.SystemTray": "Quickshell.Services.TrayAbsent"},
+        }
+        with tempfile.TemporaryDirectory(prefix="nc-barre-modules-") as d:
+            fichiers = {}
+            for nom, imports in modules.items():
+                texte = (QML / (nom + ".qml")).read_text()
+                for module, absent in imports.items():
+                    texte = texte.replace(module, absent)
+                fichiers[nom + ".qml"] = texte
+            fichiers["VpnEtat.qml"] = ('pragma Singleton\nimport QtQuick\n'
+                                       'QtObject { property bool actif: false; property string libelle: "Test VPN" }')
+            root = he.preparer(d, ("WidgetBarreLibelle", "WidgetBarreBulle", "WidgetBarrePopup", "Couleurs", "Ico"),
+                               etat="property real luminosite: 0.42\nfunction lireLuminosite(force) {}",
+                               extra=fichiers, singletons=("VpnEtat",))
+            (root / "shell.qml").write_text(he.ENTETE + "ShellRoot {\n" + he.OUTILS + """
+                Item {
+                    id: hote
+                    property string type: "brightness"
+                    property var definition: ({ peek: true, vpn_status: "both", show_vpn_label: true })
+                    property bool vertical: false
+                    property string position: "top"
+                    property color premierPlan: "white"
+                    property string police: "Sans"
+                    property real tailleIcone: 15
+                    property real tailleTexte: 12
+                    property real echelle: 1
+                    property int graisse: Font.DemiBold
+                    property int bordInterieur: Edges.Bottom
+                    WidgetBarreStatus { id: etats; barre: hote }
+                    WidgetBarreTray { id: tray; barre: hote }
+                }
+                Timer {
+                    interval: 20; repeat: true; running: true
+                    property int etape: 0
+                    onTriggered: {
+                        switch (etape++) {
+                        case 0:
+                            if (!verifier(etats.affiche && etats.libelle === "42%", "luminosité intacte")) return
+                            if (!verifier(!tray.affiche && !tray.boutonVisible && tray.implicitWidth === 0,
+                                          "pas de zone de notification ni de chevron sans module")) return
+                            hote.type = "network"
+                            break
+                        case 1:
+                            if (!verifier(!etats.affiche, "réseau masqué sans module")) return
+                            etats.droit()
+                            VpnEtat.actif = true
+                            break
+                        case 2:
+                            if (!verifier(etats.affiche && etats.glyphe === "shield" && !etats.visuel
+                                          && etats.infobulle === "Test VPN", "VPN seul sans module réseau")) return
+                            hote.type = "bluetooth"
+                            break
+                        case 3:
+                            if (!verifier(!etats.affiche, "Bluetooth masqué sans module")) return
+                            etats.droit()
+                            hote.type = "brightness"
+                            break
+                        case 4:
+                            if (!verifier(etats.affiche, "le widget reste utilisable après changement de type")) return
+                            console.log("BARRE SANS MODULES OK")
+                            Qt.quit()
+                        }
+                    }
+                }
+            }
+            """)
+            code, journal = he.lancer(root)
+        self.assertEqual(code, 0, journal)
+        self.assertIn("BARRE SANS MODULES OK", journal)
+        for erreur in he.ERREURS:
+            self.assertNotIn(erreur, journal)
+        for imports in modules.values():
+            for absent in imports.values():
+                self.assertIn(f'module "{absent}" is not installed', journal)
+
+
 class ModulesCompilesSurDebian(unittest.TestCase):
-    """Sur Debian, install.sh compile Quickshell sans certains modules : aucune page de l'île ne doit les importer
-    directement (un seul import manquant et toute l'île refuse de se charger, comme Quickshell.Networking)."""
+    """Un import obligatoire absent suffit à empêcher le chargement de l'île, même sans utiliser le widget.
+    Le réseau est activé aujourd'hui, mais reste facultatif pour les anciennes compilations sans -DNETWORK=ON."""
     MODULES = {"Quickshell.Networking": "NETWORK", "Quickshell.Bluetooth": "BLUETOOTH", "Quickshell.Services.Pam": "SERVICE_PAM",
                "Quickshell.Services.Polkit": "SERVICE_POLKIT", "Quickshell.Services.Greetd": "SERVICE_GREETD",
                "Quickshell.Services.SystemTray": "SERVICE_STATUS_NOTIFIER"}
@@ -52,9 +136,9 @@ class ModulesCompilesSurDebian(unittest.TestCase):
         for f in QML.glob("*.qml"):
             texte = f.read_text()
             for module, option in self.MODULES.items():
-                if option in desactives:
-                    self.assertNotRegex(texte, r"(?m)^import " + re.escape(module) + r"\s*$",
-                                        f"{f.name} importe {module}, absent de la compilation Debian (-D{option}=OFF)")
+                if option in desactives or option == "NETWORK":
+                    self.assertNotRegex(texte, r"(?m)^[ \t]*import[ \t]+" + re.escape(module) + r"(?![\w.])",
+                                        f"{f.name} importe {module} statiquement (facultatif : -D{option})")
             for type_, option in self.TYPES.items():
                 if option in desactives:
                     self.assertNotRegex(texte, r"\b" + type_ + r"\s*\{", f"{f.name} utilise {type_} (-D{option}=OFF)")

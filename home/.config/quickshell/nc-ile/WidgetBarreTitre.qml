@@ -89,7 +89,7 @@ WidgetBarreLibelle {
         implicitHeight: panneau.implicitHeight + 16
         Rectangle {
             anchors.fill: parent
-            radius: 10; color: Couleurs.carte; border.color: Couleurs.gris3
+            radius: Couleurs.rayon(10, width, height); color: Couleurs.carte; border.color: Couleurs.gris3
             HoverHandler { id: panneauSurvol }
             Column {
                 id: panneau
@@ -110,7 +110,7 @@ WidgetBarreLibelle {
                                 readonly property bool masquee: w.masquees.indexOf(modelData) >= 0
                                 width: 26; height: 26
                                 Rectangle {
-                                    anchors.fill: parent; radius: 5
+                                    anchors.fill: parent; radius: Couleurs.rayon(5, width, height)
                                     color: zone.containsMouse ? Couleurs.carteSurvol : w.courante === tuile.modelData ? Couleurs.gris3 : "transparent"
                                 }
                                 Image {

@@ -133,7 +133,7 @@ Item {
                                     model: w.contenuGroupe === "dots" ? Math.min(5, points.clients.length) : 0
                                     Rectangle {
                                         required property int index
-                                        width: 5; height: 5; radius: 2.5
+                                        width: 5; height: width; radius: width / 2
                                         anchors.verticalCenter: points.verticalCenter
                                         color: w.options.show_active_indicator !== false && Hyprland.activeToplevel === points.clients[index] ? w.accent : groupeVisuel.couleurTag
                                     }
@@ -189,13 +189,13 @@ Item {
         Rectangle {
             visible: !!tuile.active && w.options.show_active_indicator !== false
             anchors.horizontalCenter: logo.horizontalCenter; anchors.bottom: parent.bottom
-            width: 4; height: 2; radius: 1; color: w.accent
+            width: 4; height: 2; radius: height / 2; color: w.accent
         }
         Column {
             visible: tuile.app.fenetres.length > 1
             anchors.right: logo.right; anchors.bottom: logo.bottom
             spacing: 1
-            Repeater { model: Math.min(3, tuile.app.fenetres.length); Rectangle { width: 3; height: 3; radius: 1.5; color: w.accent; border.color: Couleurs.carte; border.width: 0.5 } }
+            Repeater { model: Math.min(3, tuile.app.fenetres.length); Rectangle { width: 3; height: width; radius: width / 2; color: w.accent; border.color: Couleurs.carte; border.width: 0.5 } }
         }
         MouseArea {
             id: zone
@@ -219,7 +219,7 @@ Item {
             implicitWidth: 230
             implicitHeight: menu.implicitHeight + 12
             Rectangle {
-                anchors.fill: parent; color: Couleurs.carte; radius: 8; border.color: Couleurs.gris3
+                anchors.fill: parent; color: Couleurs.carte; radius: Couleurs.rayon(8, width, height); border.color: Couleurs.gris3
                 Column {
                     id: menu
                     anchors.centerIn: parent; width: parent.width - 12
@@ -234,7 +234,7 @@ Item {
         id: choix
         required property string label
         signal choisi()
-        width: parent.width; height: 29; radius: 5
+        width: parent.width; height: 29; radius: Couleurs.rayon(5, width, height)
         color: action.containsMouse ? Couleurs.carteSurvol : "transparent"
         Text {
             anchors.verticalCenter: parent.verticalCenter; x: 7

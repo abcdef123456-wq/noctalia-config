@@ -243,12 +243,15 @@ Par défaut, chaque bord de barre réserve une marge aux fenêtres (`reserve_spa
 La bande optionnelle de l'île ne s'ajoute pas à celle d'une barre haute. Si l'île s'élargit, les pastilles qu'elle
 recouvrirait s'effacent sur place au lieu de passer en dessous ou sur une deuxième rangée.
 Les jauges CPU, RAM et disque du bureau lisent les mêmes mesures que celles de la barre, sans seconde sonde.
+Bluetooth et la zone de notification sont masqués si leurs modules Quickshell ne sont pas installés.
 
 Les thèmes gardent leur composition `noctalia.bar.default` et peuvent ajouter `noctalia.bar.<nom>` sur un autre bord.
 `position` accepte `top`, `bottom`, `left`, `right` ; `start`, `center`, `end` ordonnent les blocs,
 et `capsule_group` réunit plusieurs widgets dans la même pastille. Les instances `noctalia.widget.t-<nom>` gardent
 leurs réglages par widget. Le placement est déclaratif, pas un éditeur par glisser-déposer. Ne pas modifier
-`~/.config/nc/panneaux.json`, regénéré par `nc-reglages`. `nc-reglages set BARRE_MODULAIRE non` restaure la barre de Noctalia.
+`~/.config/nc/panneaux.json`, régénéré par `nc-reglages`. `nc-reglages set BARRE_MODULAIRE non` restaure la barre de Noctalia.
+La bascule se fait depuis une session Hyprland : si la barre entrante ne s'affiche pas sur les écrans concernés, la barre
+sortante est conservée. En particulier, l'activation ne masque pas Noctalia si `nc-ile.service` est arrêté.
 
 **Île Quickshell seulement :**
 

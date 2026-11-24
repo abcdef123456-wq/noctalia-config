@@ -75,14 +75,14 @@ WidgetBarreLibelle {
                 width: batterieGraphique.verticale ? (w.montrerChiffre ? 18 : 14) : 25
                 height: batterieGraphique.verticale ? (w.montrerChiffre ? 23 : 22) : 15
                 y: batterieGraphique.verticale ? borne.height : 0
-                radius: 4
+                radius: Couleurs.rayon(4, width, height)
                 color: Couleurs.carte
                 Rectangle { anchors.fill: parent; color: w.encre; opacity: 0.65 }
                 Rectangle {
                     anchors.left: parent.left; anchors.bottom: parent.bottom
                     width: batterieGraphique.verticale ? corps.width : corps.width * w.pourcent / 100
                     height: batterieGraphique.verticale ? corps.height * w.pourcent / 100 : corps.height
-                    color: w.encre; radius: 3
+                    color: w.encre; radius: Couleurs.rayon(3, width, height)
                 }
                 Text {
                     anchors.fill: parent
@@ -99,7 +99,7 @@ WidgetBarreLibelle {
                 width: batterieGraphique.verticale ? 7 : 3; height: batterieGraphique.verticale ? 3 : 7
                 x: batterieGraphique.verticale ? (corps.width - width) / 2 : corps.width
                 y: batterieGraphique.verticale ? 0 : (corps.height - height) / 2
-                radius: 1.5; color: w.encre
+                radius: Math.min(width, height) / 2; color: w.encre
             }
             Ico {
                 visible: batterieGraphique.etatVisible

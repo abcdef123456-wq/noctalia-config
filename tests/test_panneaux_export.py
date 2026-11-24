@@ -1,9 +1,134 @@
 """L'export reprend la composition native avant de masquer la barre (HOME isolé)."""
 import json
+import os
 import shutil
+import subprocess
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from tests import test_barre_composition as tb
+
+
+class SessionBarres:
+    """Simule seulement les IPC ; nc-reglages crée, relit et restaure ses vrais fichiers."""
+
+    NATIVE = "noctalia-bar-default-DP-1"
+    MODULAIRE = "nc-panneau-default-start"
+
+    def __init__(self, nc, sortie):
+        self.nc = nc["appliquer_noctalia"].__globals__
+        self.sortie = sortie
+        self.panneaux = Path(self.nc["PANNEAUX_OUT"])
+        self.natifs = {"DP-1", "eDP-1"}
+        self.modulaires = {"DP-1", "eDP-1"}
+        self.ile_repond = True
+        self.noctalia_repond = True
+        self.noctalia_affiche = True
+        self.natif_cache = False
+        self.panneaux_pendant_recharge = []
+        self.etapes = []
+
+    def __enter__(self):
+        self.patches = (
+            patch.dict(os.environ, {"WAYLAND_DISPLAY": "voie-de-test"}),
+            patch.object(self.nc["subprocess"], "run", side_effect=self.commande),
+            patch.dict(self.nc, {"attendre_barres": lambda condition: condition()}),
+        )
+        for p in self.patches:
+            p.start()
+        return self
+
+    def __exit__(self, *_):
+        for p in reversed(self.patches):
+            p.stop()
+
+    def commande(self, cmd, **_):
+        texte = ""
+        code = 0
+        if cmd == ["hyprctl", "layers", "-j"]:
+            ecrans = {}
+            for ecran in self.natifs | self.modulaires:
+                couches = []
+                if ecran in self.natifs and not self.natif_cache and self.noctalia_affiche:
+                    couches.append({"namespace": self.NATIVE, "w": 1200, "h": 36})
+                if self.panneaux.exists():
+                    couches.append({"namespace": "nc-panneau-reserve-top", "w": 1200, "h": 40})
+                    if ecran in self.modulaires and self.ile_repond:
+                        couches.append({"namespace": self.MODULAIRE, "w": 80, "h": 34})
+                ecrans[ecran] = {"levels": {"2": couches}}
+            texte = json.dumps(ecrans)
+        elif cmd[:3] == ["noctalia", "config", "validate"]:
+            tb.tomllib.loads(Path(cmd[-1]).read_text(encoding="utf-8"))
+        elif cmd[:6] == ["qs", "-c", "nc-ile", "ipc", "call", "ile"]:
+            self.etapes.append("acquittement île")
+            modele = json.loads(self.panneaux.read_text(encoding="utf-8"))
+            assert modele["generation"] == cmd[-1]
+            if self.ile_repond:
+                texte = modele["generation"]
+        elif cmd == ["noctalia", "msg", "config-reload"]:
+            self.etapes.append("recharge Noctalia")
+            self.panneaux_pendant_recharge.append(self.panneaux.exists())
+            if self.noctalia_repond:
+                t = tb.tomllib.loads(self.sortie.read_text(encoding="utf-8")) if self.sortie.exists() else {}
+                self.natif_cache = t.get("bar", {}).get("default", {}).get("enabled") is False
+                texte = "ok"
+            else:
+                code = 1
+        return subprocess.CompletedProcess(cmd, code, texte, "")
+
+
+def config_quickshell(sortie):
+    base = sortie.with_name("config.toml")
+    return base.read_text(encoding="utf-8").replace("enable_daemon = 0", "enable_daemon = false")
+
+
+class BasculePanneaux(unittest.TestCase):
+    def test_ile_arretee_ou_absente_sur_un_ecran_garde_noctalia(self):
+        for repond, ecrans in ((False, {"DP-1", "eDP-1"}), (True, {"DP-1"})):
+            with self.subTest(repond=repond), tb.nc_isole(install="quickshell") as (nc, sortie):
+                sortie.with_name("config.toml").write_text(config_quickshell(sortie), encoding="utf-8")
+                with SessionBarres(nc, sortie) as session:
+                    session.ile_repond = repond
+                    session.modulaires = ecrans
+                    with self.assertRaises(ValueError):
+                        nc["regler"]({}, "BARRE_MODULAIRE", "oui")
+                    self.assertEqual(session.etapes, ["acquittement île"])
+                    self.assertFalse(sortie.exists())
+                    self.assertFalse(session.panneaux.exists())
+                    self.assertNotIn("BARRE_MODULAIRE", nc["lire"]())
+
+    def test_retour_garde_les_panneaux_jusqua_affichage_noctalia(self):
+        with tb.nc_isole(install="quickshell") as (nc, sortie):
+            sortie.with_name("config.toml").write_text(config_quickshell(sortie), encoding="utf-8")
+            with SessionBarres(nc, sortie) as session:
+                nc["regler"]({}, "BARRE_MODULAIRE", "oui")
+                self.assertEqual(session.etapes, ["acquittement île", "recharge Noctalia"])
+                avant = (sortie.read_bytes(), session.panneaux.read_bytes())
+                for repond, affiche in ((False, True), (True, False)):
+                    with self.subTest(repond=repond, affiche=affiche):
+                        session.noctalia_repond = repond
+                        session.noctalia_affiche = affiche
+                        with self.assertRaises(ValueError):
+                            nc["regler"]({}, "BARRE_MODULAIRE", "non")
+                        self.assertEqual((sortie.read_bytes(), session.panneaux.read_bytes()), avant)
+                        self.assertEqual(nc["lire"]()["BARRE_MODULAIRE"], "oui")
+                session.noctalia_repond = session.noctalia_affiche = True
+                nc["regler"]({}, "BARRE_MODULAIRE", "non")
+                self.assertTrue(session.panneaux_pendant_recharge[-1])
+                self.assertFalse(session.panneaux.exists())
+                self.assertFalse(session.natif_cache)
+                self.assertNotIn("BARRE_MODULAIRE", nc["lire"]())
+
+    def test_hors_session_ne_masque_pas_noctalia(self):
+        with tb.nc_isole(install="quickshell") as (nc, sortie):
+            sortie.with_name("config.toml").write_text(config_quickshell(sortie), encoding="utf-8")
+            with patch.dict(os.environ, {"WAYLAND_DISPLAY": "", "HYPRLAND_INSTANCE_SIGNATURE": ""}):
+                with self.assertRaises(ValueError):
+                    nc["regler"]({}, "BARRE_MODULAIRE", "oui")
+                nc["appliquer_noctalia"]({"BARRE_MODULAIRE": "oui", "BARRE_OPACITE": "64"})
+                self.assertNotIn("enabled", tb.tomllib.loads(sortie.read_text(encoding="utf-8"))["bar"]["default"])
+                self.assertFalse(Path(nc["PANNEAUX_OUT"]).exists())
 
 
 class ExportPanneaux(unittest.TestCase):
@@ -20,7 +145,8 @@ class ExportPanneaux(unittest.TestCase):
             panneaux = sortie.parent.parent / "nc/panneaux.json"
             vals = {"BARRE_MODULAIRE": "oui", "BARRE_OPACITE": "64", "VPN_PILULE_BARRE": "oui", "VPN_MASQUER_TRAY": "oui",
                     "VPN_BOUCLIER_WIFI": "non", "POLICE": "Inter"}
-            natif = tb.barre(nc, sortie, vals)["bar"]
+            with SessionBarres(nc, sortie):
+                natif = tb.barre(nc, sortie, vals)["bar"]
             export = json.loads(panneaux.read_text(encoding="utf-8"))
             barres = {b["id"]: b for b in export["barres"]}
             principale = barres["default"]
@@ -41,7 +167,9 @@ class ExportPanneaux(unittest.TestCase):
             self.assertIn("nordvpn", widgets["tray"]["hidden"])
             self.assertEqual(export["police"], "Inter")
 
-            natif = tb.barre(nc, sortie, {"BARRE_MODULAIRE": "non"})["bar"]
+            with SessionBarres(nc, sortie) as session:
+                session.natif_cache = True
+                natif = tb.barre(nc, sortie, {"BARRE_MODULAIRE": "non"})["bar"]
             self.assertFalse(panneaux.exists())
             self.assertNotIn("enabled", natif["default"])
             self.assertNotIn("enabled", natif["bas"])
@@ -63,7 +191,8 @@ class ExportPanneaux(unittest.TestCase):
         with tb.nc_isole(install="quickshell", style="essai", themes={"essai": tb.theme(composition)}) as (nc, sortie):
             base = sortie.with_name("config.toml")
             base.write_text(base.read_text(encoding="utf-8").replace("enable_daemon = 0", "enable_daemon = false"), encoding="utf-8")
-            tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui"})
+            with SessionBarres(nc, sortie):
+                tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui"})
             panneaux = sortie.parent.parent / "nc/panneaux.json"
             barres = {b["position"]: b for b in json.loads(panneaux.read_text(encoding="utf-8"))["barres"]}
             self.assertIn("nc/fenetres:titre", barres["left"]["start"])
@@ -86,7 +215,8 @@ class ExportPanneaux(unittest.TestCase):
             for epingles in ('["org.gnome.Nautilus"]', '[]'):
                 with self.subTest(epingles=epingles):
                     etat.write_text(f"[dock]\npinned = {epingles}\n", encoding="utf-8")
-                    tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui"})
+                    with SessionBarres(nc, sortie):
+                        tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui"})
                     widgets = json.loads(panneaux.read_text(encoding="utf-8"))["widgets"]
                     self.assertEqual(widgets["raccourcis"]["pinned"], json.loads(epingles))
                     self.assertEqual(widgets["prive"]["pinned"], ["org.gnome.Console"])

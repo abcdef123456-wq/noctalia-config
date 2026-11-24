@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
 import Quickshell
-import Quickshell.Services.SystemTray
 
 Item {
     id: tray
@@ -10,13 +9,14 @@ Item {
     readonly property var options: barre.definition
     readonly property var caches: (options.hidden || []).map(x => String(x).toLowerCase())
     readonly property var epingles: (options.pinned || []).map(x => String(x).toLowerCase())
-    readonly property var icones: SystemTray.items.values.filter(x => (options.hide_passive === false || x.status !== Status.Passive) && !correspond(x, caches))
+    property var service: null
+    readonly property var icones: service ? service.icones.filter(x => (options.hide_passive === false || x.status !== service.passif) && !correspond(x, caches)) : []
     readonly property bool tiroir: options.drawer === true
     readonly property bool peek: !tiroir && options.peek === true
     readonly property bool apres: options.glyph_position === "after"
     readonly property var rangee: tiroir ? icones.filter(x => correspond(x, epingles)) : peek && !revele ? [] : icones
     readonly property var iconesTiroir: tiroir ? icones.filter(x => !correspond(x, epingles)) : []
-    readonly property bool boutonVisible: peek || iconesTiroir.length > 0
+    readonly property bool boutonVisible: icones.length > 0 && (peek || iconesTiroir.length > 0)
     readonly property real taille: barre.tailleIcone
     readonly property real espace: Number(options.item_spacing ?? (options.match_adjacent_spacing ? 10 : 5))
     readonly property real longueur: (rangee.length + (boutonVisible ? 1 : 0)) * (taille + espace) - espace
@@ -25,6 +25,19 @@ Item {
     property bool ouvert: false
     implicitWidth: barre.vertical ? taille : Math.max(0, longueur)
     implicitHeight: barre.vertical ? Math.max(0, longueur) : taille
+
+    Component.onCompleted: {
+        try {
+            service = Qt.createQmlObject(`import QtQuick; import Quickshell.Services.SystemTray
+                QtObject {
+                    readonly property var icones: SystemTray.items.values
+                    readonly property int passif: Status.Passive
+                    readonly property int attention: Status.NeedsAttention
+                }`, tray, "BarreTray")
+        } catch (e) {
+            console.warn("Module de zone de notification indisponible : " + e)
+        }
+    }
 
     function correspond(item, liste) {
         if (!liste.length) return false
@@ -81,7 +94,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             color: Qt.alpha(Couleurs.carte, Number(tray.options.drawer_background_opacity ?? 0.97))
-            radius: 10; border.color: Couleurs.gris3
+            radius: Couleurs.rayon(10, width, height); border.color: Couleurs.gris3
             Grid {
                 id: grille
                 anchors.centerIn: parent
@@ -104,7 +117,7 @@ Item {
         required property real taille
         width: taille; height: taille
         readonly property string titre: item.tooltipTitle || item.title || item.id
-        readonly property color encre: item.status === Status.NeedsAttention ? Couleurs.rouge : tray.barre.teinte(tray.options.icon_color || tray.options.color, tray.barre.premierPlan)
+        readonly property color encre: tray.service && item.status === tray.service.attention ? Couleurs.rouge : tray.barre.teinte(tray.options.icon_color || tray.options.color, tray.barre.premierPlan)
         Image {
             id: image
             anchors.fill: parent

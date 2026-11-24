@@ -11,6 +11,7 @@ PanelWindow {
     required property string police
     required property var teinte
     required property rect obstacle
+    required property rect obstacleRepos
     readonly property string position: barre.position ?? "top"
     readonly property bool vertical: position === "left" || position === "right"
     readonly property real epaisseur: Math.ceil(barre.thickness ?? 36)
@@ -26,11 +27,10 @@ PanelWindow {
     readonly property var pastillesStart: Disposition.pastillesCote(barre, "start")
     readonly property var pastillesCenter: Disposition.pastillesCote(barre, "center")
     readonly property var pastillesEnd: Disposition.pastillesCote(barre, "end")
-    readonly property bool bloqueParIle: !vertical && position === "top" && obstacle.width > 0 && obstacle.height > 0
-                                         && margeBord < obstacle.y + obstacle.height && margeBord + epaisseur > obstacle.y
+    readonly property bool bloqueParIle: partageLigne(obstacle)
     readonly property real disponibleStart: {
         if (!screen || vertical) return 0
-        const bord = bloqueParIle ? Math.min(screen.width / 2 - 120, obstacle.x - 10) : screen.width * 0.45
+        const bord = partageLigne(obstacleRepos) ? Math.min(screen.width / 2 - 120, obstacleRepos.x - 10) : screen.width * 0.45
         return Math.max(80, bord - margeBouts - pad)
     }
     readonly property bool compactEnd: {
@@ -39,6 +39,11 @@ PanelWindow {
         let nb = 0
         for (const p of pastillesEnd) nb += p.membres.length
         return nb >= 9
+    }
+
+    function partageLigne(rect) {
+        return position === "top" && rect.width > 0 && rect.height > 0
+            && margeBord < rect.y + rect.height && margeBord + epaisseur > rect.y
     }
 
     function aTitre(pastille) {

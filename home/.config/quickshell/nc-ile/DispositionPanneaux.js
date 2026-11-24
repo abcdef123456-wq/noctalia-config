@@ -1,5 +1,26 @@
 .pragma library
 
+function barresPourEcran(barres, nomEcran, description) {
+    return barres.map(barre => {
+        for (const [identifiant, options] of Object.entries(barre.monitor || {})) {
+            const nom = options.match ?? identifiant
+            if (!nom || (nomEcran !== nom && !description.includes(nom))) continue
+            const resultat = Object.assign({}, barre, options, { id: barre.id })
+            if (options.capsule_group) {
+                const groupes = new Map((barre.capsule_group || []).map(g => [g.id, g]))
+                for (const groupe of options.capsule_group) {
+                    const base = groupes.get(groupe.id)
+                    if (base || Array.isArray(groupe.members))
+                        groupes.set(groupe.id, Object.assign({}, base, groupe))
+                }
+                resultat.capsule_group = Array.from(groupes.values())
+            }
+            return resultat
+        }
+        return barre
+    })
+}
+
 function pastillesCote(barre, cote) {
     const groupes = new Map((barre.capsule_group || []).map(g => [g.id, g]))
     const pastilles = []
@@ -49,12 +70,14 @@ function chevauche(a, b, marge) {
         && a.y < b.y + b.height + m && a.y + a.height + m > b.y
 }
 
-// Disposition sur une seule ligne par bord : les pastilles ne descendent jamais sur une 2e rangée par-dessus les fenêtres.
-// Quand l'espace se resserre, l'écart entre pastilles se comprime légèrement ; si l'île ouverte (Spotlight, centre)
-// recouvre une pastille intérieure, celle-ci est marquée occulte et s'efface en fondu à sa place.
-function placer(blocs, tailles, largeur, hauteur, ile) {
+function occulte(placement, obstacle) {
+    return !placement || placement.occulte || (obstacle.width > 0 && obstacle.height > 0 && chevauche(placement, obstacle, 2))
+}
+
+// Une seule rangée par bord, calculée d'après l'île au repos. L'animation ne change que l'occultation.
+function placer(blocs, tailles, largeur, hauteur, ileRepos) {
     const places = new Array(blocs.length).fill(null)
-    const aIle = !!(ile && ile.width > 0 && ile.height > 0)
+    const aIle = ileRepos.width > 0 && ileRepos.height > 0
     const occupes = []
     const groupes = new Map()
     for (let i = 0; i < blocs.length; ++i) {
@@ -79,7 +102,7 @@ function placer(blocs, tailles, largeur, hauteur, ile) {
             if (longueur > 0 && epaisseur > 0 && longueur <= axe && epaisseur <= profondeur) {
                 visibles.push({ i, longueur, epaisseur })
                 totalLen += longueur
-                if (epaisseur > maxEp) maxEp = epaisseur
+                maxEp = Math.max(maxEp, epaisseur)
             }
         }
         if (!visibles.length) continue
@@ -88,11 +111,10 @@ function placer(blocs, tailles, largeur, hauteur, ile) {
         const margeBord = barre.margin_ends ?? 0
         const marge = Math.max(0, Math.round(typeof margeBord === "string" ? axe * parseFloat(margeBord) / 100 : margeBord))
         const ecartVoulu = Math.max(2, barre.widget_spacing ?? 6)
-        const ileSurLigne = aIle && !vertical && !inverse && v < ile.y + ile.height && v + maxEp > ile.y
-        const demie = Math.max(0, Math.floor(axe / 2) - marge - 126)
-        const minDispo = ileSurLigne && cote === "end" ? Math.max(marge, Math.ceil(ile.x + ile.width + 6)) : marge
-        const maxDispo = ileSurLigne && cote === "start" ? Math.min(axe - marge, Math.floor(ile.x - 6)) : axe - marge
-        const span = ileSurLigne && ile.width > 320 ? demie : Math.max(0, maxDispo - minDispo)
+        const ileSurLigne = aIle && !vertical && !inverse && v < ileRepos.y + ileRepos.height && v + maxEp > ileRepos.y
+        const minDispo = ileSurLigne && cote === "end" ? Math.max(marge, Math.ceil(ileRepos.x + ileRepos.width + 6)) : marge
+        const maxDispo = ileSurLigne && cote === "start" ? Math.min(axe - marge, Math.floor(ileRepos.x - 6)) : axe - marge
+        const span = Math.max(0, maxDispo - minDispo)
         let ecart = ecartVoulu
         if (visibles.length > 1 && span > 0 && totalLen + (visibles.length - 1) * ecartVoulu > span) {
             ecart = Math.max(4, Math.min(ecartVoulu, Math.floor((span - totalLen) / (visibles.length - 1))))
@@ -114,9 +136,8 @@ function placer(blocs, tailles, largeur, hauteur, ile) {
             const rect = vertical ? { x: p, y: u, width: epaisseur, height: longueur }
                                   : { x: u, y: p, width: longueur, height: epaisseur }
             const horsChamp = u < marge - 1 || u + longueur > axe - marge + 1
-            const toucheIle = aIle && chevauche(rect, ile, 2)
             const toucheAutre = occupes.some(o => chevauche(rect, o, 1))
-            const occulte = horsChamp || toucheIle || toucheAutre
+            const occulte = horsChamp || toucheAutre
             places[i] = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, occulte }
             if (!occulte) occupes.push(rect)
         }

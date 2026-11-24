@@ -24,7 +24,7 @@ QtObject {
             implicitHeight: texteBulle.contentHeight + 12
             Rectangle {
                 anchors.fill: parent
-                radius: 8
+                radius: Couleurs.rayon(8, width, height)
                 color: Couleurs.carte
                 border.color: Couleurs.gris3
                 Text {

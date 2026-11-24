@@ -1,9 +1,7 @@
 import QtQuick
 import Quickshell
-import Quickshell.Bluetooth
 import Quickshell.Hyprland
 import Quickshell.Io
-import Quickshell.Networking
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 
@@ -15,23 +13,25 @@ WidgetBarreLibelle {
     readonly property var audio: type !== "volume" ? null : micro ? Pipewire.defaultAudioSource : Etat.sortie
     readonly property int volume: audio && audio.audio ? Math.round(audio.audio.volume * 100) : 0
     readonly property bool muet: audio && audio.audio ? audio.audio.muted || volume <= 0 : true
+    readonly property var reseau: chargeurReseau.item ? chargeurReseau.item.service : null
+    readonly property var bluetooth: chargeurBluetooth.item ? chargeurBluetooth.item.service : null
     readonly property var pointAcces: {
-        if (type !== "network") return null
-        for (const d of Networking.devices.values) {
-            if (d.type !== DeviceType.Wifi || !d.connected) continue
+        if (!reseau) return null
+        for (const d of reseau.wifi) {
+            if (!d.connected) continue
             const point = d.networks.values.find(n => n.connected)
             if (point) return point
         }
         return null
     }
-    readonly property var ethernet: type === "network" ? Networking.devices.values.find(d => d.type === DeviceType.Wired && d.connected) || null : null
+    readonly property var ethernet: reseau ? reseau.filaire.find(d => d.connected) || null : null
     readonly property int signalWifi: pointAcces ? Math.round(pointAcces.signalStrength * (pointAcces.signalStrength <= 1 ? 100 : 1)) : 0
     readonly property bool vpn: type === "network" && options.vpn_status !== "hidden" && VpnEtat.actif
     readonly property string nomWifi: ethernet ? (ethernet.network && ethernet.network.name || ethernet.name) : pointAcces ? pointAcces.name : ""
     readonly property string nomReseau: vpn && options.show_vpn_label === true ? (options.vpn_status === "both" && nomWifi ? nomWifi + " · " : "") + VpnEtat.libelle : nomWifi
     readonly property string glypheReseau: ethernet ? "lan" : pointAcces ? (signalWifi < 26 ? "wifi_1_bar" : signalWifi < 61 ? "wifi_2_bar" : "wifi")
-                                                    : Networking.wifiEnabled ? "wifi_off" : "signal_wifi_off"
-    readonly property var adaptateur: type === "bluetooth" ? Bluetooth.defaultAdapter : null
+                                                    : reseau && reseau.wifiActive ? "wifi_off" : "signal_wifi_off"
+    readonly property var adaptateur: bluetooth ? bluetooth.adaptateur : null
     readonly property var appareils: adaptateur && adaptateur.enabled ? adaptateur.devices.values.filter(d => d.connected) : []
     readonly property string nomBluetooth: appareils.map(d => d.name).join(", ")
     readonly property bool economie: type === "power_profile" && Etat.profil === PowerProfile.PowerSaver
@@ -44,7 +44,8 @@ WidgetBarreLibelle {
         switch (type) {
         case "power_profile": return !Etat.profilsAbsents
         case "volume": return !!audio && (!micro || options.hide_when_inactive !== true || Etat.microActif)
-        case "bluetooth": return (options.hide_when_adapter_off !== true || !!adaptateur && adaptateur.enabled)
+        case "network": return !!reseau || vpn
+        case "bluetooth": return !!bluetooth && (options.hide_when_adapter_off !== true || !!adaptateur && adaptateur.enabled)
                                && (options.hide_when_no_connected_device !== true || appareils.length > 0)
         case "notifications": return options.hide_when_no_unread !== true || Notifs.nonLues > 0
         case "keyboard_layout": return disposition !== ""
@@ -55,7 +56,7 @@ WidgetBarreLibelle {
     glyphe: {
         switch (type) {
         case "volume": return micro ? (muet ? "mic_off" : "mic") : muet ? "volume_off" : volume < 45 ? "volume_down" : "volume_up"
-        case "network": return vpn && options.vpn_status !== "both" ? "shield" : glypheReseau
+        case "network": return vpn && (!reseau || options.vpn_status !== "both") ? "shield" : glypheReseau
         case "bluetooth": return !adaptateur || !adaptateur.enabled ? "bluetooth_disabled" : appareils.length ? "bluetooth_connected" : "bluetooth"
         case "power_profile": return economie ? "eco" : performance ? "bolt" : "balance"
         case "notifications": return Notifs.concentration ? "notifications_off" : Notifs.nonLues ? "notifications_active" : "notifications"
@@ -67,7 +68,7 @@ WidgetBarreLibelle {
         default: return ""
         }
     }
-    visuel: vpn && options.vpn_status === "both" && options.show_glyph !== false ? deuxGlyphes : null
+    visuel: reseau && vpn && options.vpn_status === "both" && options.show_glyph !== false ? deuxGlyphes : null
     encreGlyphe: type === "volume" && muet ? barre.teinte(options.mute_color || "error", barre.premierPlan) : barre.premierPlan
     plein: performance || economie || type === "notifications" && Notifs.nonLues > 0
     libelle: {
@@ -85,8 +86,10 @@ WidgetBarreLibelle {
         switch (type) {
         case "volume": return (micro ? Reglages.t("Microphone", "Microphone") : Reglages.t("Volume", "Volume")) + " · " + volume + "%"
         case "brightness": return Reglages.t("Luminosité", "Brightness") + " · " + Math.round(Etat.luminosite * 100) + "%"
-        case "network": return (nomWifi || Reglages.t("Réseau déconnecté", "Network disconnected"))
-                               + (pointAcces && !ethernet ? " · " + signalWifi + "% · " + pointAcces.device.name : "") + (vpn ? "\n" + VpnEtat.libelle : "")
+        case "network":
+            if (!reseau) return vpn ? VpnEtat.libelle : ""
+            return (nomWifi || Reglages.t("Réseau déconnecté", "Network disconnected"))
+                   + (pointAcces && !ethernet ? " · " + signalWifi + "% · " + pointAcces.device.name : "") + (vpn ? "\n" + VpnEtat.libelle : "")
         case "bluetooth": return nomBluetooth || (adaptateur && adaptateur.enabled ? "Bluetooth" : Reglages.t("Bluetooth désactivé", "Bluetooth off"))
         case "power_profile": return profil
         case "notifications": return Notifs.concentration ? Reglages.t("Ne pas déranger", "Do Not Disturb") : Reglages.t("Notifications", "Notifications") + " · " + Notifs.nonLues
@@ -118,10 +121,11 @@ WidgetBarreLibelle {
         case "notifications": Notifs.basculerConcentration(); break
         case "power_profile": cycle(-1); break
         case "network":
+            if (!reseau) break
             if (ethernet) ethernet.disconnect()
-            else if (pointAcces || Networking.devices.values.some(d => d.type === DeviceType.Wifi && d.nmManaged)) Networking.wifiEnabled = !Networking.wifiEnabled
+            else if (pointAcces || reseau.wifi.some(d => d.nmManaged)) reseau.basculerWifi()
             else {
-                const d = Networking.devices.values.find(d => d.type === DeviceType.Wired && d.hasLink && d.nmManaged)
+                const d = reseau.filaire.find(d => d.hasLink && d.nmManaged)
                 if (d) Quickshell.execDetached(["nmcli", "device", "connect", d.name])
             }
             break
@@ -144,6 +148,44 @@ WidgetBarreLibelle {
     Component.onCompleted: {
         if (type === "brightness") Etat.lireLuminosite(false)
         if (type === "keyboard_layout") clavier.running = true
+    }
+    // Sans ces modules facultatifs, le reste de la barre doit pouvoir se charger.
+    Loader {
+        id: chargeurReseau
+        active: w.type === "network"
+        sourceComponent: QtObject {
+            id: sondeReseau
+            property var service: null
+            Component.onCompleted: {
+                try {
+                    service = Qt.createQmlObject(`import QtQuick; import Quickshell.Networking
+                        QtObject {
+                            readonly property var wifi: Networking.devices.values.filter(d => d.type === DeviceType.Wifi)
+                            readonly property var filaire: Networking.devices.values.filter(d => d.type === DeviceType.Wired)
+                            readonly property bool wifiActive: Networking.wifiEnabled
+                            function basculerWifi() { Networking.wifiEnabled = !Networking.wifiEnabled }
+                        }`, sondeReseau, "BarreReseau")
+                } catch (e) {
+                    console.warn("Module réseau de la barre indisponible : " + e)
+                }
+            }
+        }
+    }
+    Loader {
+        id: chargeurBluetooth
+        active: w.type === "bluetooth"
+        sourceComponent: QtObject {
+            id: sondeBluetooth
+            property var service: null
+            Component.onCompleted: {
+                try {
+                    service = Qt.createQmlObject(`import QtQuick; import Quickshell.Bluetooth
+                        QtObject { readonly property var adaptateur: Bluetooth.defaultAdapter }`, sondeBluetooth, "BarreBluetooth")
+                } catch (e) {
+                    console.warn("Module Bluetooth de la barre indisponible : " + e)
+                }
+            }
+        }
     }
     Connections {
         target: w.type === "keyboard_layout" ? Hyprland : null

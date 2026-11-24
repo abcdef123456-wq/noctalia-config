@@ -10,15 +10,10 @@ Scope {
     required property var modele
     required property var palette
     required property rect obstacle
+    required property rect obstacleRepos
     property int reserveIleHaut: 0
     readonly property string descriptionEcran: Hyprland.monitorFor(ecran)?.lastIpcObject?.description ?? ""
-    readonly property var barresActives: (modele.barres || []).map(barre => {
-        for (const [identifiant, options] of Object.entries(barre.monitor || {})) {
-            const nom = options.match ?? identifiant
-            if (nom && (ecran.name === nom || descriptionEcran.includes(nom))) return Object.assign({}, barre, options, { id: barre.id })
-        }
-        return barre
-    })
+    readonly property var barresActives: Disposition.barresPourEcran(modele.barres || [], ecran.name, descriptionEcran)
     readonly property var barresContinues: barresActives.filter(b => b.enabled !== false && (b.background_opacity ?? 0) > 0)
     readonly property var blocs: Disposition.blocs(barresActives)
     readonly property var reservesMap: Disposition.reserves(barresActives, reserveIleHaut)
@@ -28,7 +23,7 @@ Scope {
     readonly property var places: {
         panneaux.revision
         const tailles = blocs.map((_, i) => panneaux.objectAt(i)?.mesure)
-        return Disposition.placer(blocs, tailles, ecran.width, ecran.height, obstacle)
+        return Disposition.placer(blocs, tailles, ecran.width, ecran.height, obstacleRepos)
     }
 
     function teinte(role, defaut) {
@@ -63,6 +58,7 @@ Scope {
             police: ecranPanneaux.modele.police || ""
             teinte: ecranPanneaux.teinte
             obstacle: ecranPanneaux.obstacle
+            obstacleRepos: ecranPanneaux.obstacleRepos
         }
     }
 
@@ -81,12 +77,13 @@ Scope {
             police: ecranPanneaux.modele.police || ""
             teinte: ecranPanneaux.teinte
             placement: ecranPanneaux.places[index] || null
+            obstacle: ecranPanneaux.obstacle
             limiteLargeur: {
                 if (modelData.cote !== "start" || modelData.barre.position !== "top") return 0
                 const axe = ecranPanneaux.ecran.width
                 const marge = Math.round(typeof modelData.barre.margin_ends === "string"
                     ? axe * parseFloat(modelData.barre.margin_ends) / 100 : (modelData.barre.margin_ends ?? 0))
-                const bordIle = Math.min(axe / 2 - 120, ecranPanneaux.obstacle.width > 0 ? ecranPanneaux.obstacle.x - 10 : axe / 2)
+                const bordIle = Math.min(axe / 2 - 120, ecranPanneaux.obstacleRepos.x - 10)
                 return Math.max(80, Math.min(240, bordIle - marge - 130))
             }
             compact: {

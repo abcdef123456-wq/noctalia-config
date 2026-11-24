@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import "DispositionPanneaux.js" as Disposition
 
 PanelWindow {
     id: fen
@@ -8,12 +9,13 @@ PanelWindow {
     required property var definitions
     required property string police
     required property var teinte
+    required property rect obstacle
     property var placement: null
     property real limiteLargeur: 0
     property bool compact: false
     readonly property var barre: bloc.barre
     readonly property bool vertical: barre.position === "left" || barre.position === "right"
-    readonly property bool occulte: !placement || placement.occulte === true
+    readonly property bool occulte: Disposition.occulte(placement, obstacle)
     readonly property var mesure: {
         repeater.revision
         let longueur = 0

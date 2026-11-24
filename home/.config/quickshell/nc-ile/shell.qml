@@ -31,8 +31,16 @@ ShellRoot {
         watchChanges: true
         printErrors: false
         onFileChanged: reload()
-        onLoaded: racine.modelePanneaux = JSON.parse(text())
-        onLoadFailed: racine.modelePanneaux = {}
+        onLoaded: {
+            try {
+                const modele = JSON.parse(text())
+                if (Array.isArray(modele.barres)) racine.modelePanneaux = modele
+            } catch (e) {
+                console.warn("Réglages des panneaux illisibles : " + e)
+            }
+        }
+        // L'ancien modèle reste affiché en cas d'erreur de lecture ; seul le retrait du fichier rend la main.
+        onLoadFailed: error => { if (error === FileViewError.FileNotFound) racine.modelePanneaux = ({}) }
     }
     FileView {
         path: Quickshell.env("HOME") + "/.config/noctalia/colors.json"
@@ -53,6 +61,7 @@ ShellRoot {
                 modele: racine.modelePanneaux
                 palette: racine.palettePanneaux
                 obstacle: ile.obstaclePanneaux
+                obstacleRepos: ile.obstaclePanneauxRepos
                 reserveIleHaut: racine.panneauxActifs && racine.bandeIle ? 42 : 0
             }
         }
@@ -323,6 +332,13 @@ ShellRoot {
 
     IpcHandler {
         target: "ile"
+        // Le réglage demandé et le modèle exporté sont relus indépendamment. Un vieux modèle ne peut pas acquitter
+        // une bascule ; nc-reglages vérifie aussi les surfaces mappées avant de masquer la barre Noctalia.
+        function panneauxPrets(generation: string): string {
+            return racine.panneauxActifs && Quickshell.screens.length > 0
+                && Reglages.val("BARRE_MODULAIRE", "non") === "oui"
+                && racine.modelePanneaux.generation === generation ? generation : ""
+        }
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }

@@ -3026,6 +3026,14 @@ def regler(vals, cle, v):
             vals.pop(cle, None)
         else:
             vals[cle] = v
+        if cle == "BARRE_MODULAIRE":
+            try:
+                regler_barre(vals)
+            except ValueError:
+                vals.clear()
+                vals.update(frais)
+                raise
+            return ""                         # la bascule est terminée, pas d'application différée
         ecrire(vals)
     if theme and theme["fonds"] and theme["fond_de_depart"]:
         # Thème choisi par la personne (pas à chaque réapplication) : son fond de départ
@@ -3469,7 +3477,172 @@ def configuration_panneaux(tables):
     return {"barres": panneaux, "widgets": widgets, "police": police}
 
 
-def appliquer_noctalia(vals):
+def lire_sortie_barre(chemin):
+    try:
+        return Path(chemin).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
+def ecrire_sortie_barre(chemin, texte):
+    if texte is None:
+        Path(chemin).unlink(missing_ok=True)
+    else:
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        with ouvrir_atomique(chemin) as f:
+            f.write(texte)
+
+
+def lire_modele_barre(texte):
+    try:
+        modele = json.loads(texte or "null")
+        barres = modele["barres"]
+        if isinstance(barres, list) and barres and all(isinstance(b["id"], str) for b in barres):
+            return modele
+    except (ValueError, TypeError, KeyError):
+        pass
+    return None
+
+
+def barre_native_masquee(texte, modele):
+    """Un JSON laissé entre les deux étapes ne suffit pas à déclarer le mode modulaire installé."""
+    if modele and texte and tomllib:
+        try:
+            barres = tomllib.loads(texte)["bar"]
+            return all(barres[b["id"]]["enabled"] is False for b in modele["barres"])
+        except (ValueError, TypeError, KeyError):
+            pass
+    return False
+
+
+def commande_barre(cmd, timeout=1):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout.strip() if p is not None and p.returncode == 0 else None
+
+
+def calques_barres():
+    """Écrans avec une surface de barre mappée (les réserves transparentes de l'île ne comptent pas)."""
+    natifs, modulaires = set(), set()
+    try:
+        ecrans = json.loads(commande_barre(["hyprctl", "layers", "-j"]) or "null")
+        if not isinstance(ecrans, dict) or not ecrans:
+            return None
+        for ecran, donnees in ecrans.items():
+            for niveau in donnees["levels"].values():
+                for calque in niveau:
+                    if calque["w"] <= 1 or calque["h"] <= 1:
+                        continue
+                    nom = calque["namespace"]
+                    if nom.startswith("noctalia-bar-"):
+                        natifs.add(ecran)
+                    elif nom.startswith("nc-panneau-") and nom not in (
+                            "nc-panneau-reserve-top", "nc-panneau-reserve-bottom",
+                            "nc-panneau-reserve-left", "nc-panneau-reserve-right"):
+                        modulaires.add(ecran)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    return natifs, modulaires
+
+
+def attendre_barres(condition):
+    fin = time.monotonic() + 4
+    while time.monotonic() < fin:
+        if condition():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def publier_barres(ancien, texte, ancien_json, texte_json, generation, calques):
+    """Un seul calque peut être retiré à la fois, derrière son remplaçant déjà mappé."""
+    reload = ["noctalia", "msg", "config-reload"]
+    if calques is None:                                           # pas de changement de propriétaire
+        if texte_json != ancien_json:
+            ecrire_sortie_barre(PANNEAUX_OUT, texte_json)
+        if texte != ancien:
+            ecrire_sortie_barre(NOCTALIA_OUT, texte)
+            commande_barre(reload)
+        return
+
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".toml") as f:
+        f.write(texte or "")
+        f.flush()
+        if commande_barre(["noctalia", "config", "validate", f.name], timeout=3) is None:
+            raise ValueError(T("Configuration de barre Noctalia refusée.", "Noctalia rejected the bar configuration."))
+
+    natifs, modulaires = calques
+    json_change = natif_change = False
+
+    def module_pret():
+        if commande_barre(["qs", "-c", "nc-ile", "ipc", "call", "ile", "panneauxPrets", generation]) != generation:
+            return False
+        presents = calques_barres()
+        return presents is not None and presents[1] and natifs <= presents[1]
+
+    def natif_pret(ecrans):
+        presents = calques_barres()
+        return presents is not None and presents[0] and ecrans <= presents[0]
+
+    try:
+        if generation:
+            ecrire_sortie_barre(PANNEAUX_OUT, texte_json)
+            json_change = True
+            if not attendre_barres(module_pret):
+                raise ValueError(T("L’île n’a pas confirmé l’affichage des panneaux ; la barre Noctalia est conservée.",
+                                   "The island did not confirm that its panels were shown; the Noctalia bar was kept."))
+        if texte != ancien:
+            ecrire_sortie_barre(NOCTALIA_OUT, texte)
+            natif_change = True
+        if commande_barre(reload, timeout=3) != "ok":
+            raise ValueError(T("Noctalia n’a pas confirmé le rechargement de sa configuration.",
+                               "Noctalia did not acknowledge the configuration reload."))
+        if generation:
+            def module_seul():
+                presents = calques_barres()
+                return presents is not None and not presents[0] and presents[1] and natifs <= presents[1]
+
+            if not attendre_barres(module_seul):
+                raise ValueError(T("Le transfert de la barre vers l’île n’a pas été confirmé.",
+                                   "The bar handover to the island was not confirmed."))
+        else:
+            if not attendre_barres(lambda: natif_pret(modulaires)):
+                raise ValueError(T("La barre Noctalia ne s’est pas affichée ; les panneaux sont conservés.",
+                                   "The Noctalia bar did not appear; the modular panels were kept."))
+            ecrire_sortie_barre(PANNEAUX_OUT, None)
+    except BaseException:
+        if natif_change:
+            ecrire_sortie_barre(NOCTALIA_OUT, ancien)
+            commande_barre(reload)
+        # Le fichier restauré est relu par Noctalia. En cas de panne après le masquage, ne pas enlever le
+        # remplaçant déjà prêt si le compositeur ne confirme toujours pas le retour de la barre d'origine.
+        if json_change and (not natif_change or not natifs or attendre_barres(lambda: natif_pret(natifs))):
+            ecrire_sortie_barre(PANNEAUX_OUT, ancien_json)
+        raise
+
+
+def regler_barre(vals):
+    """Le watcher de l’île voit d’abord le choix demandé ; sur échec, rendre aussi le choix précédent."""
+    ancien = lire_sortie_barre(FICHIER)
+    ecrire(vals)
+    try:
+        appliquer_noctalia(effectifs(vals), bascule_explicite=True)
+    except BaseException as e:
+        ecrire_sortie_barre(FICHIER, ancien)
+        if isinstance(e, OSError):
+            raise ValueError(str(e)) from e
+        raise
+
+
+def appliquer_noctalia(vals, bascule_explicite=False):
+    # Le même verrou protège la demande et les deux sorties, y compris pendant les applications d’un thème.
+    with verrou():
+        _appliquer_noctalia(vals, bascule_explicite)
+
+
+def _appliquer_noctalia(vals, bascule_explicite):
     tables = {}
 
     def mettre(table, cle, v):
@@ -3599,22 +3772,46 @@ def appliquer_noctalia(vals):
             barre.pop("capsule_group", None)        # plus aucun groupe n'est posé : ceux du thème ne serviraient à rien
         except (OSError, KeyError, ValueError):
             pass
-    panneaux = configuration_panneaux(tables) if vals.get("BARRE_MODULAIRE") == "oui" else None
-    if panneaux:
-        try:
-            texte_panneaux = json.dumps(panneaux, ensure_ascii=False, allow_nan=False) + "\n"
-            os.makedirs(os.path.dirname(PANNEAUX_OUT), exist_ok=True)
-            with ouvrir_atomique(PANNEAUX_OUT) as f:
-                f.write(texte_panneaux)
-        except (OSError, TypeError, ValueError) as e:
-            print(T(f"nc-reglages : export des panneaux impossible : {e}", f"nc-settings: cannot export modular panels: {e}"), file=sys.stderr)
-            panneaux = None
+    ancien = lire_sortie_barre(NOCTALIA_OUT)
+    ancien_json = lire_sortie_barre(PANNEAUX_OUT)
+    ancien_modele = lire_modele_barre(ancien_json)
+    veut_modulaire = vals.get("BARRE_MODULAIRE") == "oui"
+    panneaux = configuration_panneaux(tables) if veut_modulaire else None
+    if veut_modulaire and not panneaux and (bascule_explicite or ancien_modele):
+        raise ValueError(T("Impossible de préparer des panneaux pour cette configuration.",
+                           "Cannot prepare modular panels for this configuration."))
+    native_masquee = barre_native_masquee(ancien, ancien_modele)
+    calques = None
+    generation = None
+    if (panneaux and not native_masquee) or (not panneaux and ancien_modele):
+        if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            calques = calques_barres()
+            if calques is None:
+                raise ValueError(T("Le compositeur ne confirme pas l’état des barres ; bascule annulée.",
+                                   "The compositor did not report the bar surfaces; handover cancelled."))
+            if panneaux:
+                generation = os.urandom(16).hex()
+        elif bascule_explicite:
+            raise ValueError(T("Change la barre depuis une session Hyprland active.",
+                               "Switch bars from an active Hyprland session."))
         else:
-            for panneau in panneaux["barres"]:
-                table = "bar." + toml_cle(panneau["id"])
-                mettre(table, "enabled", False)
-                for moniteur in panneau.get("monitor", {}):
-                    mettre(f"{table}.monitor.{toml_cle(moniteur)}", "enabled", False)
+            # Une installation ou réapplication hors session peut mettre à jour les réglages sans changer de barre.
+            if native_masquee:
+                panneaux = configuration_panneaux(tables) or ancien_modele
+            else:
+                panneaux = None
+    # Même un JSON posé lors d'une bascule interrompue n'est retiré qu'en présence de la barre native.
+    texte_json = ancien_json if ancien_modele and calques is None else None
+    if panneaux:
+        jeton = generation or (ancien_modele and ancien_modele.get("generation"))
+        if jeton:
+            panneaux["generation"] = jeton
+        texte_json = json.dumps(panneaux, ensure_ascii=False, allow_nan=False) + "\n"
+        for panneau in panneaux["barres"]:
+            table = "bar." + toml_cle(panneau["id"])
+            mettre(table, "enabled", False)
+            for moniteur in panneau.get("monitor", {}):
+                mettre(f"{table}.monitor.{toml_cle(moniteur)}", "enabled", False)
 
     # Ces limites étaient celles du rendu vertical natif. Les widgets modulaires gardent leur composition.
     if not panneaux and barre.get("position") in ("left", "right"):
@@ -3629,30 +3826,18 @@ def appliquer_noctalia(vals):
         if barre.get("thickness", 0) < 52:
             mettre("bar.default", "thickness", 52)
 
-    texte = ""
+    texte = None
     if tables:
         texte = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n"
         for t, kv in tables.items():
             texte += f"\n[{t}]\n" + "".join(f"{k} = {toml_val(v)}\n" for k, v in kv.items())
-    ancien = open(NOCTALIA_OUT, encoding="utf-8").read() if os.path.exists(NOCTALIA_OUT) else ""
-    if texte != ancien:
-        if texte:
-            os.makedirs(NOCTALIA_DIR, exist_ok=True)
-            with ouvrir_atomique(NOCTALIA_OUT) as f:
-                f.write(texte)
-        elif os.path.exists(NOCTALIA_OUT):
-            os.remove(NOCTALIA_OUT)
-    if not panneaux:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(PANNEAUX_OUT)
-    if texte != ancien:
-        subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+    publier_barres(ancien, texte, ancien_json, texte_json, generation, calques)
     # À chaque application (un thème change aussi le dossier des fonds, et le retour au dossier par défaut doit retirer
     # le drop-in) : nc-carousel-thumbs, qui lit le même dossier que Noctalia, met à jour la surveillance de son .path et
     # lance les miniatures du dossier réel ; sans systemd ou sans le script, rien
     try:
-        subprocess.run([os.path.join(HOME, ".local/bin/nc-carousel-thumbs"), "--surveillance"], capture_output=True)
-    except OSError:
+        subprocess.run([os.path.join(HOME, ".local/bin/nc-carousel-thumbs"), "--surveillance"], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
         pass
 
 
@@ -4676,13 +4861,14 @@ class Ecran:
             g = regler(self.vals, r.cle, v)
         except ValueError as err:
             self.statut(T("Valeur refusée : ", "Value rejected: ") + str(err), erreur=True)
-            return
+            return False
         if g:
             self.attente.add(g)
         if r.cle == "LANGUE":
             self.lignes_r = self.lignes_n = None       # relues dans la nouvelle langue
         self.derniere = time.time()
         self.statut(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(self.vals, r.cle))}")
+        return True
 
     def entree(self, r):
         if r.genre == "ouinon":
@@ -4887,10 +5073,10 @@ class Ecran:
                     self.entree(cur)
                 elif c in ("r", "R") and cur.cle in self.vals:
                     st = style_vals()
-                    self.poser(cur, st[cur.cle] if cur.cle in st and cur.cle != "STYLE" else cur.defaut)
-                    du = cur.cle in st and cur.cle != "STYLE"
-                    self.statut(T(f"{cur.nom} : valeur {'du style' if du else 'de la config'}",
-                                  f"{cur.nom}: {'desktop style' if du else 'config'} value"))
+                    if self.poser(cur, st[cur.cle] if cur.cle in st and cur.cle != "STYLE" else cur.defaut):
+                        du = cur.cle in st and cur.cle != "STYLE"
+                        self.statut(T(f"{cur.nom} : valeur {'du style' if du else 'de la config'}",
+                                      f"{cur.nom}: {'desktop style' if du else 'config'} value"))
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
             elif cur["genre"] == "assistant":
@@ -6083,13 +6269,21 @@ def cli(a):
             sys.exit(T(f"nc-reglages : réglage inconnu : {a[1]}", f"nc-settings: unknown setting: {a[1]}"))
         with verrou():
             vals = lire()                        # relu sous le verrou : rien d'écrasé entre-temps
+            barre_reset = a[1:] == ["BARRE_MODULAIRE"] or len(a) == 1 and "BARRE_MODULAIRE" in vals
             if len(a) == 2:
                 vals.pop(a[1], None)
                 groupes = {PAR_CLE[a[1]].groupe}
             else:
                 groupes = {PAR_CLE[k].groupe for k in vals if k in PAR_CLE}
                 vals = {}
-            ecrire(vals)
+            try:
+                if barre_reset:
+                    regler_barre(vals)
+                    groupes.discard("noctalia")   # déjà appliqué ; le groupe style l'ajoute si le thème change
+                else:
+                    ecrire(vals)
+            except ValueError as e:
+                sys.exit(f"nc-reglages : {e}")
         appliquer([g for g in groupes if g], vals)
         print(T("Valeur de la config remise.", "Config value restored."))
     elif a[0] == "pour-le-cloud" and len(a) == 1:

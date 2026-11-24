@@ -15,6 +15,15 @@ PanelWindow {
     screen: modelData
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
 
+    // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
+    readonly property rect obstaclePanneauxRepos: {
+        const point = Couleurs.forme === "point"
+        const largeur = point ? 10 : compact.largeur
+        const x = Math.floor((modelData.width - largeur) / 2 - 5)
+        const y = Math.max(0, Math.floor(ile.y - 5))
+        return Qt.rect(x, y, modelData.width - 2 * x, Math.ceil(ile.y + (point ? 10 : 30) + 5) - y)
+    }
+
     // Rectangle réellement occupé à l'échelle de l'écran, pas la surface Wayland (800 px, voire tout l'écran).
     // Réserver la taille cible dès le début du ressort, et la taille courante jusqu'à la fin du repli.
     readonly property rect obstaclePanneaux: {
