@@ -1511,7 +1511,7 @@ ILE=noctalia
 # Debian / Ubuntu : chaque module QML de Qt est un paquet à part. Un seul module importé par l'île sans son paquet, et
 # toute l'île refuse de se charger : cette liste est installée à la compilation et à chaque passage si Quickshell est
 # déjà là (un module ajouté à l'île plus tard). tests/test_connexion_ile.py vérifie qu'elle couvre tous les imports.
-QS_QML_DEBIAN="qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects
+QS_QML_DEBIAN="qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects qml6-module-qtquick-controls
   qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models"
 # Sources téléchargées puis compilées ou installées en root : épinglées par l'empreinte exacte du commit (une étiquette de
 # version peut être déplacée sur le dépôt). Après le clone, le commit obtenu est comparé à celui-ci ; s'il diffère, rien
