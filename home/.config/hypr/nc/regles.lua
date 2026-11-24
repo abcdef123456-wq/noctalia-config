@@ -130,6 +130,15 @@ hl.layer_rule({
     blur         = true,
     blur_popups  = true,
 })
+-- Panneaux modulaires : leurs positions se recalculent avant que le ressort de l'île ne recouvre une pastille.
+hl.layer_rule({
+    name         = "nc-panneaux",
+    match        = { namespace = "^nc-panneau-" },
+    no_anim      = true,
+    ignore_alpha = 0.5,
+    blur         = true,
+    blur_popups  = true,
+})
 -- Île (nc-ile) : elle anime elle-même ses ressorts. Sans cette règle, Hyprland animait la place et la taille du calque
 -- (layersIn) à chaque changement de taille de la surface (Spotlight, ouverture, fermeture) : l'île glissait de côté,
 -- étirée, pendant environ 270 ms (vu image par image : à droite puis à gauche, retour lent au centre)

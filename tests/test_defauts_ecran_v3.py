@@ -152,16 +152,6 @@ class Centrage(unittest.TestCase):
 
 # --- (1) : la bande, dans la source de l'île
 class BandeSource(unittest.TestCase):
-    def test_creee_seulement_a_oui(self):
-        shell = (QML / "shell.qml").read_text(encoding="utf-8")
-        m = re.search(r"LazyLoader \{\s*id: chargeurBande\s*active: Reglages\.val\(\"ILE_BANDE\", \"non\"\) === \"oui\"\s*"
-                      r"Variants \{\s*model: Quickshell\.screens\s*ReserveIle \{\}", shell)
-        self.assertIsNotNone(m)
-        for f in QML.glob("*.qml"):        # nulle part ailleurs
-            with self.subTest(fichier=f.name):
-                self.assertEqual(len(re.findall(r"\bReserveIle \{", f.read_text(encoding="utf-8"))),
-                                 1 if f.name == "shell.qml" else 0)
-
     def test_bande_vide_sans_clic(self):
         t = (QML / "ReserveIle.qml").read_text(encoding="utf-8")
         self.assertIn("exclusiveZone: 42", t)

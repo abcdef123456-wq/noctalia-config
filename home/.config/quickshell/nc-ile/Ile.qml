@@ -15,6 +15,34 @@ PanelWindow {
     screen: modelData
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
 
+    // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
+    readonly property rect obstaclePanneauxRepos: {
+        const point = Couleurs.forme === "point"
+        const largeur = point ? 10 : compact.largeur
+        const x = Math.floor((modelData.width - largeur) / 2 - 5)
+        const y = Math.max(0, Math.floor(ile.y - 5))
+        return Qt.rect(x, y, modelData.width - 2 * x, Math.ceil(ile.y + (point ? 10 : 30) + 5) - y)
+    }
+
+    // Rectangle réellement occupé à l'échelle de l'écran, pas la surface Wayland (800 px, voire tout l'écran).
+    // Réserver la taille cible dès le début du ressort, et la taille courante jusqu'à la fin du repli.
+    readonly property rect obstaclePanneaux: {
+        if (pilCachee && ile.opacity <= 0) return Qt.rect(0, 0, 0, 0)
+        const largeur = Math.max(ile.width, ile.cibleLargeur)
+        const gauche = (modelData.width - largeur) / 2
+        const annexe = pointPrive.montre || pointPrive.visible ? (bulle.montre || bulle.visible ? 52 : 17)
+                        : bulle.montre || bulle.visible ? 37 : 0
+        const contour = 5
+        const centreLocal = ile.x + ile.width / 2
+        let droite = gauche + largeur + annexe
+        if (bulle.visible) droite = Math.max(droite, modelData.width / 2 + bulle.x + bulle.width - centreLocal)
+        if (pointPrive.visible) droite = Math.max(droite, modelData.width / 2 + pointPrive.x + pointPrive.width - centreLocal)
+        const x = Math.floor(gauche - contour)
+        const y = Math.max(0, Math.floor(ile.y - contour))
+        return Qt.rect(x, y, Math.ceil(droite + contour) - x,
+                       Math.ceil(ile.y + Math.max(ile.height, ile.cibleHauteur) + contour) - y)
+    }
+
     // Recherche : la fenêtre couvre tout l'écran (invisible) pour qu'un clic à côté la referme. L'île prend alors le
     // clavier en exclusif, et Hyprland ne laisse aucun clic arriver ailleurs : une couche séparée ne les recevait pas
     // Toujours ancrée en haut seulement : en recherche, la surface prend la taille de l'écran. Changer les ancres faisait

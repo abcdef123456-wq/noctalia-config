@@ -24,15 +24,52 @@ import Quickshell.Hyprland
 
 ShellRoot {
     id: racine
+    property var modelePanneaux: ({})
+    property var palettePanneaux: ({})
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/nc/panneaux.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: {
+            try {
+                const modele = JSON.parse(text())
+                if (Array.isArray(modele.barres)) racine.modelePanneaux = modele
+            } catch (e) {
+                console.warn("Réglages des panneaux illisibles : " + e)
+            }
+        }
+        // L'ancien modèle reste affiché en cas d'erreur de lecture ; seul le retrait du fichier rend la main.
+        onLoadFailed: error => { if (error === FileViewError.FileNotFound) racine.modelePanneaux = ({}) }
+    }
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/noctalia/colors.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: racine.palettePanneaux = JSON.parse(text())
+        onLoadFailed: racine.palettePanneaux = {}
+    }
+    readonly property bool panneauxActifs: (modelePanneaux.barres?.length ?? 0) > 0
+    readonly property bool bandeIle: Reglages.val("ILE_BANDE", "non") === "oui"
     Variants {
         model: Quickshell.screens
-        Ile {}
+        Ile {
+            id: ile
+            Panneaux {
+                ecran: ile.modelData
+                modele: racine.modelePanneaux
+                palette: racine.palettePanneaux
+                obstacle: ile.obstaclePanneaux
+                obstacleRepos: ile.obstaclePanneauxRepos
+                reserveIleHaut: racine.panneauxActifs && racine.bandeIle ? 42 : 0
+            }
+        }
     }
-    // Bande réservée pour l'île sur chaque écran (ILE_BANDE=oui, thèmes à barre en bas ou sur un côté) : à « non »,
-    // aucune fenêtre n'est créée
+    // Barre native : la bande optionnelle reste indépendante. En mode modulaire les réserves sont calculées par écran.
     LazyLoader {
         id: chargeurBande
-        active: Reglages.val("ILE_BANDE", "non") === "oui"
+        active: racine.bandeIle && !racine.panneauxActifs
         Variants {
             model: Quickshell.screens
             ReserveIle {}
@@ -295,6 +332,13 @@ ShellRoot {
 
     IpcHandler {
         target: "ile"
+        // Le réglage demandé et le modèle exporté sont relus indépendamment. Un vieux modèle ne peut pas acquitter
+        // une bascule ; nc-reglages vérifie aussi les surfaces mappées avant de masquer la barre Noctalia.
+        function panneauxPrets(generation: string): string {
+            return racine.panneauxActifs && Quickshell.screens.length > 0
+                && Reglages.val("BARRE_MODULAIRE", "non") === "oui"
+                && racine.modelePanneaux.generation === generation ? generation : ""
+        }
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }

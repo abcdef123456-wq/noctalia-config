@@ -133,12 +133,14 @@ Item {
             readonly property bool vide: false
             spacing: Math.round(34 * cw.t)
             Repeater {
-                model: [["CPU", cw.donnees.cpu], ["RAM", cw.donnees.ram], [Reglages.t("Disque", "Disk"), cw.donnees.disque]]
+                model: ["cpu", "ram", "disque"]
                 Column {
-                    required property var modelData
+                    id: mesure
+                    required property string modelData
+                    readonly property real valeur: cw.donnees[modelData]
                     spacing: Math.round(4 * cw.t)
                     Texte {
-                        text: parent.modelData[0]
+                        text: ({ cpu: "CPU", ram: "RAM", disque: Reglages.t("Disque", "Disk") })[mesure.modelData]
                         color: cw.sec
                         font.family: cw.policeDe(cw.px(11))
                         font.pixelSize: cw.px(11)
@@ -146,7 +148,7 @@ Item {
                         font.letterSpacing: Math.round(3 * cw.t)
                     }
                     Texte {
-                        text: cw.donnees.pct(parent.modelData[1])
+                        text: cw.donnees.pct(mesure.valeur)
                         color: cw.pri
                         font.family: cw.policeDe(cw.px(34))
                         font.pixelSize: cw.px(34)
@@ -159,7 +161,7 @@ Item {
                             Rectangle {
                                 required property int index
                                 width: Math.max(3, Math.round(5 * cw.t)); height: width; radius: width / 2
-                                color: index < Math.round(Math.max(0, Math.min(1, parent.parent.modelData[1])) * 10) ? Couleurs.jauge : Couleurs.gris3
+                                color: index < Math.round(mesure.valeur * 10) ? Couleurs.jauge : Couleurs.gris3
                             }
                         }
                     }
@@ -401,7 +403,7 @@ Item {
             font.pixelSize: cw.px(34)
         }
     }
-    // Anneau : le processeur (échantillonnage partagé des jauges), la mémoire en dessous
+    // Anneau : la charge du processeur au centre, la mémoire en dessous.
     Component {
         id: wAnneau
         Anneau {
@@ -413,7 +415,7 @@ Item {
             couleur: cw.pri; couleurSec: cw.sec; police: cw.police; policePetite: cw.policePetite; taillePetite: cw.px(15)
         }
     }
-    // Jauge à aiguille : le processeur sur un demi-cercle (même échantillonnage, même minuteur que l'anneau)
+    // Jauge à aiguille : la même charge CPU sur un demi-cercle.
     Component {
         id: wJaugeAiguille
         JaugeAiguille {

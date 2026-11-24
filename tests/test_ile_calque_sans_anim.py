@@ -11,6 +11,7 @@ from pathlib import Path
 DEPOT = Path(__file__).resolve().parents[1]
 REGLES = DEPOT / "home/.config/hypr/nc/regles.lua"
 ILE = DEPOT / "home/.config/quickshell/nc-ile/Ile.qml"
+LUA = shutil.which("lua")
 
 
 class CalqueSansAnim(unittest.TestCase):
@@ -22,7 +23,7 @@ nc = setmetatable({ reglage = function(c, d) return VALEUR or d end },
                   { __index = function() return function() return "" end end })
 dofile(FICHIER)
 '''.replace("FICHIER", json.dumps(str(REGLES))).replace("VALEUR", json.dumps(valeur) if valeur is not None else "nil")
-        r = subprocess.run(["lua", "-"], input=harnais, text=True, capture_output=True, timeout=10, env=dict(PATH="/usr/bin:/bin"))
+        r = subprocess.run([LUA, "-"], input=harnais, text=True, capture_output=True, timeout=10, env=dict(PATH="/usr/bin:/bin"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return dict(l.split("\t", 1) for l in r.stdout.splitlines())
 
@@ -31,7 +32,7 @@ dofile(FICHIER)
         self.assertIsNotNone(m, "Ile.qml sans namespace de calque")
         return m.group(1)
 
-    @unittest.skipUnless(shutil.which("lua"), "lua absent")
+    @unittest.skipUnless(LUA, "lua absent")
     def test_regle_sans_condition_pour_le_calque_de_l_ile(self):
         ns = self.namespace_ile()
         # Quel que soit un réglage (aucun, oui, non) : la règle est là, et son motif vise exactement ce calque
