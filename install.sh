@@ -1721,6 +1721,14 @@ while IFS= read -r -d '' src; do
 done < <(find "$root" -type f -print0)
 relancer_noctalia   # la copie est finie : Noctalia repart tout de suite (le reste de l'install ne la gêne plus)
 fournir_jeux        # gamemode.ini et MangoHud.conf : hors de la boucle de copie, rien n'y est écrasé
+# Sources du plugin Hyprland nc-gestes (gestes d'ouverture du thème) : nc-plugin-sync les recompile pour chaque nouvel
+# Hyprland. Copiées d'un bloc (dossier temporaire puis mv), jamais à moitié
+PG="$HOME/.local/share/nc/plugins/nc-gestes"
+if ! diff -r "$REPO/plugins/nc-gestes/src" "$PG/src" >/dev/null 2>&1 || ! cmp -s "$REPO/plugins/nc-gestes/Makefile" "$PG/Makefile"; then
+  { rm -rf "$PG.nc-new" && mkdir -p "$PG.nc-new" && cp -R "$REPO/plugins/nc-gestes/Makefile" "$REPO/plugins/nc-gestes/src" "$PG.nc-new/" \
+      && chmod -R u+w "$PG.nc-new" && rm -rf "$PG" && mv "$PG.nc-new" "$PG"; } \
+    || warn "$(t "Sources du plugin nc-gestes non copiées : gestes d'ouverture natifs." "nc-gestes plugin sources not copied: native opening gestures.")"
+fi
 ok "$(t "$copied fichier(s) installé(s), $same déjà à jour." "$copied file(s) installed, $same already up to date.")$([ "$copied" -gt 0 ] && echo " $(t "Sauvegarde : $BK" "Backup: $BK")")"
 # Noms anglais des commandes (nc-settings = nc-reglages…) : liens, quelle que soit la langue choisie
 # (NOMS_ANGLAIS : défini par nc-langue, lu en haut du script)
@@ -1946,6 +1954,10 @@ if [ ! -s "$KEY" ]; then
 fi
 
 [ "$MODE" = files ] && { noter_version; say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; info "$(t "Assistant distant facultatif : nc-assistant configurer (URL et clé du serveur)." "Optional remote assistant: nc-assistant configurer (server URL and key).")"; exit 0; }
+
+# Plugin nc-gestes compilé et chargé tout de suite s'il y a les en-têtes d'Hyprland (sinon rien : gestes natifs) ;
+# ensuite nc-plugin-sync le refait au démarrage de la session, seulement quand Hyprland change
+if have pkg-config && pkg-config --exists hyprland 2>/dev/null; then "$HOME/.local/bin/nc-plugin-sync" || true; fi
 
 if [ "$FAMILY" = nixos ]; then
   info "$(t "NixOS : terminal (zsh, oh-my-zsh, powerlevel10k) et Neovim sont à déclarer dans ta configuration Nix ; .zshrc, .p10k.zsh et .config/nvim sont copiés s'ils sont absents, sinon sur ta réponse." "NixOS: terminal (zsh, oh-my-zsh, powerlevel10k) and Neovim are declared in your Nix configuration; .zshrc, .p10k.zsh and .config/nvim are copied if absent, otherwise on your answer.")"

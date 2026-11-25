@@ -177,20 +177,20 @@ local gestes = {
     feuille    = { style = "slide left", courbe = { { 0.25, 0.1 }, { 0.25, 1 } } }, -- papier : glisse hors d'une pile, sans rebond
     volet      = { style = "slide top" },                                          -- gruvbox : coulisse le long de la pile
     -- Gestes du plugin nc-gestes (mêmes noms) : ici seulement leur repli, quand le plugin n'est pas chargé
-    goutte     = { style = "popin 85%" },
-    paravent   = { style = "popin 92%" },
-    coupe      = { style = "popin 95%" },
-    horizon    = { style = "slide bottom" },
-    maree      = { style = "slide bottom" },
-    eventail   = { style = "popin 88%" },
-    rideau     = { style = "popin 92%" },
-    cathodique = { style = "gnomed" },
-    fuite      = { style = "popin 78%" },
-    vantaux    = { style = "popin 92%" },
-    balayage   = { style = "slide left" },
-    averse     = { style = "slide top" },
-    paliers    = { style = "gnomed" },
-    contour    = { style = "popin 98%" },
+    goutte     = { style = "popin 85%", plugin = true },
+    paravent   = { style = "popin 92%", plugin = true },
+    coupe      = { style = "popin 95%", plugin = true },
+    horizon    = { style = "slide bottom", plugin = true },
+    maree      = { style = "slide bottom", plugin = true },
+    eventail   = { style = "popin 88%", plugin = true },
+    rideau     = { style = "popin 92%", plugin = true },
+    cathodique = { style = "gnomed", plugin = true },
+    fuite      = { style = "popin 78%", plugin = true },
+    vantaux    = { style = "popin 92%", plugin = true },
+    balayage   = { style = "slide left", plugin = true },
+    averse     = { style = "slide top", plugin = true },
+    paliers    = { style = "gnomed", plugin = true },
+    contour    = { style = "popin 98%", plugin = true },
 }
 local geste = gestes[nc.reglage("FENETRES_GESTE", "auto")]
 if geste then ouverture = geste.style end
@@ -206,6 +206,8 @@ local caracteres = {
 }
 local car = caracteres[nc.reglage("FENETRES_CARACTERE", "auto")] or caracteres.auto
 duree = duree * car.f
+-- Pour nc.gestes_sync (nc/energie.lua) : le geste à demander au plugin (false : natif) et le facteur de durée
+nc.geste_ouverture = { plugin = geste ~= nil and geste.plugin == true and nc.reglage("FENETRES_GESTE", "auto"), duree = duree }
 hl.curve("emphasized",      { type = "bezier", points = car.e })
 hl.curve("emphasizedAccel", { type = "bezier", points = car.a })
 hl.curve("standard",        { type = "bezier", points = car.s })

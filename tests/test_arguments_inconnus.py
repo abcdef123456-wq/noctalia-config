@@ -19,7 +19,7 @@ FAUX = ("hyprctl", "noctalia", "curl", "systemctl", "swaybg", "kitty", "notify-s
 BASH = {"nc-boot-wallpaper": ["--zzz-inconnu", "x"], "nc-finger": ["--zzz-inconnu"], "nc-verrou-media": ["--zzz-inconnu"],
         "nc-presse-capture": ["--zzz-inconnu"], "nc-carousel-thumbs": ["--zzz-inconnu", "surveillance"],
         "nc-fonds": ["--zzz-inconnu", "ajoute", "retirer"],
-        "nc-session-propre": ["--zzz-inconnu", "abc", "6 7"]}
+        "nc-session-propre": ["--zzz-inconnu", "abc", "6 7"], "nc-plugin-sync": ["--zzz-inconnu", "x y"]}
 PYTHON = {"nc-theme-sync": ["--zzz-inconnu"], "nc-verrou-place": ["--zzz-inconnu"], "nc-noctalia-avant": ["--zzz-inconnu"],
           "nc-icones": ["--zzz-inconnu"], "nc-meteo": ["--zzz-inconnu", "texte x"], "nc-demander": ["--zzz-inconnu"],
           "nc-code": ["--zzz-inconnu"], "nc-processus": ["--zzz-inconnu", "8080"]}

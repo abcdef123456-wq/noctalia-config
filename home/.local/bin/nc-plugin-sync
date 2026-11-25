@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# nc-plugin-sync : compile et charge le plugin Hyprland nc-gestes (gestes d'ouverture des fenêtres du thème).
+#   Lancé en arrière-plan au démarrage de la session (nc/session.lua) et une fois par install.sh ; sans root.
+#   1. Commit de l'Hyprland en cours (hyprctl version -j). Les en-têtes installés (pkg-config hyprland) doivent être
+#      ceux du même commit : sinon le .so serait refusé (Hyprland mis à jour mais pas encore relancé), on attend la
+#      prochaine session.
+#   2. Compile ~/.local/share/nc/plugins/nc-gestes (copié par install.sh) vers ~/.local/lib/noctalia-config/nc-gestes.so,
+#      seulement si le commit ou les sources ont changé (noté dans nc-gestes.abi). Fichier temporaire puis mv : le .so
+#      n'est jamais à moitié écrit, et celui qu'Hyprland a déjà chargé reste intact.
+#   3. Le charge (rechargé s'il vient d'être recompilé), lui donne le geste du thème (nc.gestes_sync, nc/energie.lua)
+#      et demande à l'île la place de sa pilule.
+# Rien de tout ça possible (pas de session Hyprland, pas d'en-têtes ni de compilateur : Debian, Fedora, Nobara…) :
+# sortie 0 en silence, les gestes natifs de nc/apparence.lua restent. Un échec ne bloque jamais la session.
+set -euo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+# Sans argument ; -h, --help : usage et code 0 ; tout autre argument : usage sur stderr, code 2, rien n'est fait
+case "$#:${1:-}" in
+  0:) ;;
+  1:-h | 1:--help) echo "usage : nc-plugin-sync $(t "(sans argument) : compile et charge le plugin nc-gestes" "(no arguments): builds and loads the nc-gestes plugin")"; exit 0 ;;
+  *) echo "usage : nc-plugin-sync $(t "(sans argument)" "(no arguments)")" >&2; exit 2 ;;
+esac
+
+SRC="$HOME/.local/share/nc/plugins/nc-gestes"
+LIB="$HOME/.local/lib/noctalia-config"
+SO="$LIB/nc-gestes.so"
+ABI="$LIB/nc-gestes.abi"
+
+[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -f "$SRC/Makefile" ] || exit 0
+for outil in hyprctl jq pkg-config make "${CXX:-g++}" sha256sum; do command -v "$outil" >/dev/null 2>&1 || exit 0; done
+pkg-config --exists hyprland 2>/dev/null || exit 0
+
+commit="$(hyprctl version -j 2>/dev/null | jq -r '.commit // empty' 2>/dev/null)" || exit 0
+# Commit des en-têtes : GIT_COMMIT_HASH de version.h, dans un des dossiers -I de pkg-config
+entetes=""
+read -ra dossiers <<< "$(pkg-config --cflags-only-I hyprland 2>/dev/null || true)"
+for d in "${dossiers[@]}"; do
+  f="${d#-I}/version.h"
+  [ -f "$f" ] || continue
+  entetes="$(sed -n 's/^#define GIT_COMMIT_HASH *"\([^"]*\)".*/\1/p' "$f" | head -1)"
+  [ -n "$entetes" ] && break
+done
+[ -n "$commit" ] && [ "$entetes" = "$commit" ] || exit 0
+
+mkdir -p "$LIB"
+# Une seule à la fois (install.sh et le démarrage de la session peuvent se croiser)
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LIB/.verrou"
+  flock -w 300 9 || exit 0
+fi
+
+cle="$commit $(cat "$SRC/Makefile" "$SRC"/src/* | sha256sum | cut -d' ' -f1)" || exit 0
+neuf=0
+if [ ! -s "$SO" ] || [ "$(cat "$ABI" 2>/dev/null || true)" != "$cle" ]; then
+  tmp="$(mktemp "$LIB/.nc-gestes.XXXXXX")"
+  trap 'rm -f "$tmp" "$ABI.nc-new"' EXIT
+  # Basse priorité : la session démarre en même temps. -B : le fichier temporaire existe déjà, make le croirait à jour
+  if ! nice -n 19 make -s -B -C "$SRC" SORTIE="$tmp" > "$LIB/nc-gestes.log" 2>&1; then
+    echo "nc-plugin-sync : $(t "compilation de nc-gestes impossible, gestes natifs gardés (détails : $LIB/nc-gestes.log)." "could not build nc-gestes, native gestures kept (details: $LIB/nc-gestes.log).")" >&2
+    exit 0
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$SO"
+  printf '%s\n' "$cle" > "$ABI.nc-new" && mv -f "$ABI.nc-new" "$ABI"
+  neuf=1
+fi
+
+charge=0
+hyprctl plugin list -j 2>/dev/null | jq -e 'any(.[]?; .name == "nc-gestes")' >/dev/null 2>&1 && charge=1
+if [ "$charge" = 1 ] && [ "$neuf" = 1 ]; then
+  hyprctl plugin unload "$SO" >/dev/null 2>&1 || true
+  charge=0
+fi
+if [ "$charge" = 0 ]; then
+  r="$(hyprctl plugin load "$SO" 2>&1 || true)"
+  if [ "$r" != ok ]; then
+    echo "nc-plugin-sync : $(t "nc-gestes non chargé, gestes natifs gardés" "nc-gestes not loaded, native gestures kept") ($r)" >&2
+    exit 0
+  fi
+fi
+# Le geste du thème, puis la pilule de l'île (perdue si le plugin vient d'être chargé)
+hyprctl eval 'if nc and nc.gestes_sync then nc.gestes_sync() end' >/dev/null 2>&1 || true
+timeout 2 qs -c nc-ile ipc call ile gestesAncre >/dev/null 2>&1 || true
+exit 0

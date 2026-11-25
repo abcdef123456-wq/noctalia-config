@@ -28,6 +28,23 @@ L'animation est seulement visuelle : la fenêtre est posée, focalisable et à s
 Le plugin s'appuie sur les « transformers » de fenêtre d'Hyprland (`Render::IWindowTransformer`), sans aucun
 crochet en mémoire. Seule la goutte dessine hors du cadre de la fenêtre (son col), grâce à `transformedExtents`.
 
+## Dans la session
+
+Tout est automatique, sans root :
+
+- `install.sh` copie `Makefile` et `src/` dans `~/.local/share/nc/plugins/nc-gestes`, puis lance `nc-plugin-sync`
+  s'il y a les en-têtes (pas en `--files-only`).
+- `nc-plugin-sync`, lancé aussi en arrière-plan au démarrage de la session (`nc/session.lua`), compile vers
+  `~/.local/lib/noctalia-config/nc-gestes.so` seulement quand le commit d'Hyprland ou les sources changent
+  (`nc-gestes.abi`), puis charge le plugin. Sans session, sans en-têtes, sans compilateur, ou avec les en-têtes
+  d'un autre commit qu'Hyprland en cours : il ne fait rien et sort avec 0.
+- `nc.gestes_sync()` (`nc/energie.lua`, à chaque chargement de la config) envoie `set enabled/mode/speed` : le geste
+  du thème, ou `natif` pour un geste natif ou `auto` ; coupé avec les animations (réglage, caractère `aucun`,
+  Économie, « Aucun effet », mode jeu, « Aucune sur batterie » de l'île) ; durée suivant la vitesse des animations
+  et le caractère, un peu plus courte sur batterie en « Douces ».
+- L'île (`Ile.qml`) envoie `anchor` quand la pilule au repos change, jamais pendant un ressort ; `nc-plugin-sync` la
+  redemande après un chargement (`qs -c nc-ile ipc call ile gestesAncre`).
+
 ## Compiler
 
 Il faut les en-têtes d'Hyprland (`pkg-config --exists hyprland`) et `g++`.

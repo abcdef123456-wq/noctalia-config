@@ -120,6 +120,22 @@ if nc.jeu then
     hl.animation({ leaf = "borderangle", enabled = false })
 end
 
+-- Plugin nc-gestes (chargé par nc-plugin-sync) : le geste du thème (nc.geste_ouverture, nc/apparence.lua), « natif »
+-- pour un geste natif ou « auto ». Coupé avec les animations : réglage, caractère « aucun », Économie ou « Aucun effet »,
+-- mode jeu, « Aucune sur batterie » de l'île (ILE_ANIM_BATTERIE) ; « Douces » sur batterie : un peu plus court. Durée
+-- suivant FENETRES_ANIMATIONS_VITESSE et le caractère, comme les gestes natifs. Appelée à chaque chargement de la config
+-- et par nc-plugin-sync une fois le plugin chargé ; plugin absent : hyprctl répond une erreur, jetée, rien n'attend.
+function nc.gestes_sync()
+    local g = nc.geste_ouverture or {}
+    local batterie = nc.profil.batterie and nc.reglage("ILE_ANIM_BATTERIE", "douces")
+    local actif = not coupe and not nc.jeu and nc.reglage("FENETRES_ANIMATIONS", true)
+        and nc.reglage("FENETRES_CARACTERE", "auto") ~= "aucun" and batterie ~= "aucune"
+    local vitesse = math.max(0.1, math.min(10, (batterie == "douces" and 1.25 or 1) / (g.duree or 1)))
+    hl.exec_cmd(string.format("hyprctl nc-gestes set enabled %d mode %s speed %.2f >/dev/null 2>&1",
+        actif and 1 or 0, g.plugin or "natif", vitesse))
+end
+nc.gestes_sync()
+
 function nc.mode_jeu()
     local actif = not nc.jeu
     if actif then
