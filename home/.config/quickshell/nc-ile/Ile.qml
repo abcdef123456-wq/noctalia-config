@@ -272,7 +272,11 @@ PanelWindow {
                                                    : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : 30))))))
         width: cibleLargeur
         height: cibleHauteur
-        radius: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
+        // La page a 16 px de marge. Dans un quart de cercle, le retrait diagonal
+        // minimal vaut r × (1 − 1/√2). Garder ses quatre coins dans le fond.
+        readonly property real retraitCoin: Math.ceil(radius * (1 - Math.SQRT1_2))
+        readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
+        radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
         color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
         border.width: Couleurs.forme === "cadre" ? 1 : 0
         border.color: Couleurs.accent
@@ -525,7 +529,7 @@ PanelWindow {
                 readonly property bool voisine: Math.abs(index - Etat.vue) <= 1
                 Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
                 x: (ile.width - t.width) / 2 + 16
-                width: Math.max(0, t.width - 32 - (fen.points ? 22 : 0))
+                width: Math.max(0, t.width - 32 - (fen.points ? Math.max(22, boutonPage.width + boutonPage.anchors.rightMargin - 16 + 4) : 0))
                 height: t.height - 32
                 y: 16 + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
@@ -571,7 +575,7 @@ PanelWindow {
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: Math.max(0, Math.min(parent.height - 64, Etat.vues.length * 14))
+            width: 18; height: Math.max(0, Math.min(parent.height - 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2), Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)
@@ -579,10 +583,11 @@ PanelWindow {
 
         // ⚙ : les réglages de la page affichée (fenêtre des réglages sur la bonne section)
         ReglagesIle {
-            anchors.right: parent.right; anchors.rightMargin: 5
-            anchors.bottom: parent.bottom; anchors.bottomMargin: 8
+            id: boutonPage
+            anchors.right: parent.right; anchors.rightMargin: Math.max(5, ile.retraitCoin)
+            anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(8, ile.retraitCoin)
             visible: fen.ouverte && fen.points
-            vue: Etat.vue
+            vue: Etat.vueActive
             onOuvert: Etat.fermer()
         }
 
