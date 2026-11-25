@@ -200,7 +200,7 @@
   "DOCK_AUTO=oui",
   "ILE_BANDE=non",
   "WIDGETS_BUREAU=oui",
-  "FENETRES_COLONNE_LARGEUR=0.80",
+  "FENETRES_COLONNE_LARGEUR=0.50",
   "FENETRES_SEULE_CENTREE=16:10",
   "WIDGETS_THEME=horloge-geante:haut-gauche:petit:carte,calendrier:haut-gauche:moyen:carte,meteo:haut-gauche:moyen:carte,musique:haut-droite:grand:carte",
   "ILE_Y=5"
