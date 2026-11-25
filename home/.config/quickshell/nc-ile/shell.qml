@@ -21,6 +21,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import "DispositionPanneaux.js" as Disposition
 
 ShellRoot {
     id: racine
@@ -279,18 +280,58 @@ ShellRoot {
         target: GarminEtat
         function onOuvrirPanneau() { if (!racine.garminOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.garminOuvert = true } }
     }
+    function barreControlePourEcran(ecran, bord) {
+        if (!ecran) return null
+        const description = Hyprland.monitorFor(ecran)?.lastIpcObject?.description ?? ""
+        const barres = Disposition.barresPourEcran(racine.modelePanneaux.barres ?? [], ecran.name, description)
+        return Disposition.barreControle(barres, racine.modelePanneaux.widgets ?? {}, bord)
+    }
+    function reservesPourEcran(ecran) {
+        var m = ecran ? Hyprland.monitorFor(ecran) : Hyprland.focusedMonitor
+        var r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
+        if (r && r.length >= 4) return { gauche: r[0], haut: r[1], droite: r[2], bas: r[3] }
+        return { gauche: 0, haut: Gabarit.barre, droite: 0, bas: 0 }
+    }
+    function bordControlePourReserves(res) {
+        if (res.bas > 0 && res.bas >= res.haut) return "bottom"
+        if (res.haut > 0) return "top"
+        return res.droite > res.gauche ? "right" : res.gauche > 0 ? "left" : "top"
+    }
     // Panneau Centre de contrôle dédié (Super + C ; icônes de la barre ; bouton de l'île) : chargé à l'ouverture seulement
     LazyLoader {
         id: chargeurControle
         active: Etat.controleOuvert
         PanneauControle {
-            screen: Quickshell.screens.find(s => s.name === Etat.controleEcran)
+            id: controleFenetre
+            readonly property var _ecranCible: Quickshell.screens.find(s => s.name === Etat.controleEcran)
                     || Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name)
                     || Quickshell.screens[0]
-            hautReserve: { var m = Hyprland.focusedMonitor, r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
-                           return r && r.length > 1 ? r[1] : Gabarit.barre }
+            readonly property var _reserves: racine.reservesPourEcran(_ecranCible)
+            screen: _ecranCible
+            readonly property var _barre: racine.barreControlePourEcran(_ecranCible, Etat.controleBord)
+            readonly property var _moniteur: _ecranCible ? Hyprland.monitorFor(_ecranCible)?.lastIpcObject : null
+            property var _calques: ({})
+            readonly property var _barreNative: !_barre && _moniteur
+                ? Disposition.barreNativeControle(_calques[_ecranCible.name], _moniteur.x, _moniteur.y, _ecranCible.width, _ecranCible.height) : null
+            readonly property real _empriseBarre: _barre ? Math.ceil(_barre.thickness ?? 36) + Math.round(_barre.margin_edge ?? 0)
+                : _barreNative?.emprise ?? 0
+            bord: Etat.controleBord || (_barre ? _barre.position ?? "top" : _barreNative?.bord ?? racine.bordControlePourReserves(_reserves))
+            gaucheReserve: Math.max(_reserves.gauche, bord === "left" ? _empriseBarre : 0)
+            hautReserve: Math.max(_reserves.haut, bord === "top" ? _empriseBarre : 0)
+            droiteReserve: Math.max(_reserves.droite, bord === "right" ? _empriseBarre : 0)
+            basReserve: Math.max(_reserves.bas, bord === "bottom" ? _empriseBarre : 0)
             onFermer: Etat.fermerControle()
             onOuvrirThemes: { Etat.fermerControle(); Hyprland.refreshMonitors(); racine.themesOuvert = true }
+            Process {
+                command: ["hyprctl", "-j", "layers"]
+                running: !racine.panneauxActifs
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        try { controleFenetre._calques = JSON.parse(text) }
+                        catch (_) { /* Réserves du moniteur en repli. */ }
+                    }
+                }
+            }
         }
     }
     // Carrousel des thèmes (Super + Alt + T, recherche « Thèmes ») : créé à l'ouverture seulement
@@ -509,6 +550,7 @@ ShellRoot {
         // Ouvre une page : sur l'île si elle y est activée, sinon dans le panneau Centre de contrôle si c'est un outil rapide
         function page(nom: string): void {
             var cible = nom === "wifi" ? "reseau" : nom
+            if (Etat.estPageControle(cible)) { controlePage(cible); return }
             if (Etat.vues.indexOf(cible) >= 0) {
                 if (cible === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
                 if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === cible) { Etat.fermer(); return }
@@ -516,7 +558,6 @@ ShellRoot {
                 Etat.aller(cible)
                 return
             }
-            if (Etat.estPageControle(cible)) { controlePage(cible); return }
         }
         // Notification d'un agent qui t'attend, cliquée (« Voir », nc-claude) : l'île sur sa question, jamais refermée
         // (sa demande avec ses choix, sinon sa session en tête de la page des agents, avec le texte entier)
@@ -529,8 +570,6 @@ ShellRoot {
         }
         // La même, avec une page de repli si celle-ci n'existe pas (coupée dans les réglages, PC sans batterie…)
         function pageOu(nom: string, repli: string): void {
-            if (nom === "charge" && !Etat.batteriePc) { page(repli); return }
-            if (Etat.vues.indexOf(nom) >= 0 || Etat.estPageControle(nom)) { page(nom); return }
             page(Etat.pageOu(nom, repli))
         }
         function jarvis(): void {

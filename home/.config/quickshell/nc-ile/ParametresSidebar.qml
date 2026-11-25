@@ -1,136 +1,84 @@
-// Barre latérale structurée de la fenêtre des réglages (Parametres.qml) :
-// en-tête, recherche (Ctrl + F), filtre « Modifiés », et rail de navigation par catégories avec icônes.
+// Volet des réglages : accueil, domaines extensibles, recherche et filtre global.
 import QtQuick
 import QtQuick.Controls
 
 Rectangle {
     id: rail
-    property var sections: []
-    property var catalogue: []
+    property var domaines: []
+    property var chiffres: ({})
+    property string domaineActif: ""
     property string sectionActive: ""
     property string recherche: ""
     property bool filtreModifies: false
     property int totalReglages: 0
     property int nbModifies: 0
     property bool enCours: false
+    property var domainesDeplies: ({})
+    property string repere: "accueil"
+    readonly property bool filtreActif: recherche.trim() !== "" || filtreModifies
+    readonly property string routeActive: sectionActive ? "section:" + sectionActive
+        : domaineActif ? "domaine:" + domaineActif : "accueil"
+    onRouteActiveChanged: Qt.callLater(synchroniserRoute)
 
     readonly property alias champRecherche: champInput
     readonly property alias zoneSections: listeSections
 
-    signal choisirSection(string nom)
+    signal choisirAccueil()
+    signal choisirDomaine(string id)
+    signal choisirSection(string id)
     signal changerRecherche(string texte)
     signal basculerFiltreModifies()
     signal allerListe()
     signal sectionDelta(int delta)
     signal demarrerRecherche(string lettre)
     signal relire()
-    signal fermer()
 
-    color: Qt.alpha(Couleurs.carte, Couleurs.sombre ? 0.56 : 0.72)
+    color: Couleurs.surfaceDouce
 
-    // Métadonnées de chaque section (FR et EN) : icône et catégorie logique
-    function metaSection(nom) {
-        var carte = ({
-            "Apparence":                 { ico: "palette",              cat: "bureau" },
-            "Appearance":                { ico: "palette",              cat: "bureau" },
-            "Fonds d'écran":             { ico: "wallpaper",            cat: "bureau" },
-            "Wallpapers":                { ico: "wallpaper",            cat: "bureau" },
-            "Barre et dock":             { ico: "dock_to_bottom",       cat: "bureau" },
-            "Bar and Dock":              { ico: "dock_to_bottom",       cat: "bureau" },
-            "Fenêtres":                  { ico: "window",               cat: "bureau" },
-            "Windows":                   { ico: "window",               cat: "bureau" },
-            "Animations":                { ico: "animation",            cat: "bureau" },
-
-            "Île":                       { ico: "widgets",              cat: "ile" },
-            "Island":                    { ico: "widgets",              cat: "ile" },
-            "Pages de l’île":            { ico: "layers",               cat: "ile" },
-            "Island pages":              { ico: "layers",               cat: "ile" },
-            "Notifications":             { ico: "notifications",        cat: "ile" },
-
-            "Énergie":                   { ico: "bolt",                 cat: "systeme" },
-            "Power":                     { ico: "bolt",                 cat: "systeme" },
-            "Son et luminosité":         { ico: "volume_up",            cat: "systeme" },
-            "Sound and Brightness":      { ico: "volume_up",            cat: "systeme" },
-            "Lumière nocturne":          { ico: "wb_twilight",          cat: "systeme" },
-            "Night Light":               { ico: "wb_twilight",          cat: "systeme" },
-            "Clavier et souris":         { ico: "keyboard",             cat: "systeme" },
-            "Keyboard and Mouse":        { ico: "keyboard",             cat: "systeme" },
-            "Veille":                    { ico: "bedtime",              cat: "systeme" },
-            "Sleep":                     { ico: "bedtime",              cat: "systeme" },
-            "Captures":                  { ico: "screenshot_monitor",   cat: "systeme" },
-            "Screenshots":               { ico: "screenshot_monitor",   cat: "systeme" },
-
-            "Raccourcis":                { ico: "keyboard_command_key", cat: "apps" },
-            "Shortcuts":                 { ico: "keyboard_command_key", cat: "apps" },
-            "Terminal":                  { ico: "terminal",             cat: "apps" },
-            "Applications":              { ico: "apps",                 cat: "apps" },
-
-            "Intelligence artificielle": { ico: "auto_awesome",         cat: "ia" },
-            "Artificial intelligence":   { ico: "auto_awesome",         cat: "ia" },
-            "Agents IA (coucou)":        { ico: "smart_toy",            cat: "ia" },
-            "AI Agents (coucou)":        { ico: "smart_toy",            cat: "ia" },
-            "Cloud JARVIS":              { ico: "cloud",                cat: "ia" },
-            "JARVIS Cloud":              { ico: "cloud",                cat: "ia" },
-            "Santé Garmin":              { ico: "favorite",             cat: "ia" },
-            "Garmin health":             { ico: "favorite",             cat: "ia" },
-            "Intégration Google":        { ico: "calendar_month",       cat: "ia" },
-            "Google integration":        { ico: "calendar_month",       cat: "ia" },
-
-            "Mises à jour":              { ico: "system_update",        cat: "maint" },
-            "Updates":                   { ico: "system_update",        cat: "maint" },
-            "Composants":                { ico: "extension",            cat: "maint" },
-            "Components":                { ico: "extension",            cat: "maint" },
-            "Nouveautés":                { ico: "new_releases",         cat: "maint" },
-            "What's New":                { ico: "new_releases",         cat: "maint" }
-        })
-        return carte[nom] || { ico: "tune", cat: "autres" }
+    function deplier(id, oui) {
+        if (!!domainesDeplies[id] === oui) return
+        const copie = Object.assign({}, domainesDeplies)
+        if (oui) copie[id] = true
+        else delete copie[id]
+        domainesDeplies = copie
+    }
+    function synchroniserRoute() {
+        if (domaineActif) deplier(domaineActif, true)
+        viser(routeActive)
+    }
+    function viser(cle) {
+        repere = cle
+        Qt.callLater(revelerRepere)
+    }
+    function revelerRepere() {
+        const i = elementsRail.findIndex(e => e.cle === repere)
+        const ligne = i >= 0 ? entreesRail.itemAt(i) : null
+        if (!ligne) return
+        const y = ligne.y
+        if (y < defileSections.contentY) defileSections.contentY = y
+        else if (y + ligne.height > defileSections.contentY + defileSections.height)
+            defileSections.contentY = y + ligne.height - defileSections.height
+    }
+    function choisir(e) {
+        viser(e.cle)
+        if (e.genre === "accueil") choisirAccueil()
+        else if (e.genre === "domaine") { deplier(e.id, true); choisirDomaine(e.id) }
+        else choisirSection(e.id)
+    }
+    function basculerDomaine(e) {
+        deplier(e.id, !domainesDeplies[e.id])
+        viser(e.cle)
     }
 
-    function libelleCategorie(id) {
-        var c = ({
-            bureau:  ["Bureau & style", "Desktop & style"],
-            ile:     ["Île & alertes",  "Island & alerts"],
-            systeme: ["Système",        "System"],
-            apps:    ["Apps & touches", "Apps & shortcuts"],
-            ia:      ["IA & services",  "AI & services"],
-            maint:   ["Maintenance",    "Maintenance"],
-            autres:  ["Autres",         "Other"]
-        })[id]
-        return c ? Reglages.t(c[0], c[1]) : id
-    }
-
-    // Nombre de réglages modifiés par section
-    readonly property var modifiesParSection: {
-        var m = {}
-        for (var i = 0; i < catalogue.length; i++) {
-            var r = catalogue[i]
-            if (r && r.modifie) m[r.sectionNom] = (m[r.sectionNom] || 0) + 1
-        }
-        return m
-    }
-
-    // Liste structurée des entrées du rail (titres de catégories + sections, seulement si plusieurs catégories)
     readonly property var elementsRail: {
-        var ordre = ["bureau", "ile", "systeme", "apps", "ia", "maint", "autres"]
-        var groupes = {}
-        for (var i = 0; i < sections.length; i++) {
-            var nom = sections[i]
-            var cat = metaSection(nom).cat
-            if (!groupes[cat]) groupes[cat] = []
-            groupes[cat].push(nom)
+        const entrees = [{ genre: "accueil", cle: "accueil", nom: Reglages.t("Accueil", "Home"), icone: "home" }]
+        for (const d of domaines) {
+            entrees.push({ genre: "domaine", cle: "domaine:" + d.id, id: d.id, nom: d.nom, icone: d.icone })
+            if (!domainesDeplies[d.id]) continue
+            for (const s of d.sections)
+                entrees.push({ genre: "section", cle: "section:" + s.id, id: s.id, nom: s.nom, icone: s.icone })
         }
-        var nbCats = Object.keys(groupes).length
-        var out = []
-        for (var k = 0; k < ordre.length; k++) {
-            var c = ordre[k]
-            if (!groupes[c] || !groupes[c].length) continue
-            if (nbCats > 1 && sections.length > 5) out.push({ genre: "titre", texte: libelleCategorie(c), nom: "" })
-            for (var j = 0; j < groupes[c].length; j++) {
-                var s = groupes[c][j]
-                out.push({ genre: "section", nom: s, ico: metaSection(s).ico })
-            }
-        }
-        return out
+        return entrees
     }
 
     // Filet de séparation sur le bord droit du rail
@@ -147,23 +95,26 @@ Rectangle {
         Rectangle {
             width: 34; height: 34
             anchors.verticalCenter: parent.verticalCenter
-            radius: Couleurs.rayon(11, width, height)
-            color: Couleurs.accentDoux
-            border.width: 1; border.color: Couleurs.accentBord
-            Ico { anchors.centerIn: parent; nom: "tune"; taille: 18; color: Couleurs.accent }
+            radius: Couleurs.rayonBouton
+            color: Couleurs.surfaceActive
+            border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.accentBord
+            Ico { anchors.centerIn: parent; nom: "tune"; taille: 18; color: Couleurs.texteSurSurfaceActive }
         }
         Column {
+            width: enteteRail.width - 44
             anchors.verticalCenter: parent.verticalCenter
             spacing: 1
             Texte {
+                width: parent.width
                 text: Reglages.t("Réglages", "Settings")
                 font.pixelSize: 16; font.weight: Font.Bold
             }
             Texte {
+                width: parent.width
                 secondaire: true; font.pixelSize: 11
                 text: rail.totalReglages > 0
-                    ? (rail.totalReglages + Reglages.t(" options · ", " options · ") + Couleurs.themeActif)
-                    : Couleurs.themeActif
+                    ? (rail.totalReglages + Reglages.t(" options · ", " options · ") + Couleurs.nomThemeAffiche)
+                    : Couleurs.nomThemeAffiche
             }
         }
     }
@@ -173,9 +124,9 @@ Rectangle {
         id: blocRecherche
         x: 14; y: enteteRail.y + enteteRail.height + 12
         width: parent.width - 28; height: 36
-        radius: Couleurs.rayon(12, width, height)
-        color: Couleurs.gris2
-        border.width: champInput.activeFocus ? 1.5 : 1
+        radius: Couleurs.rayonBouton
+        color: Couleurs.surfaceDouce
+        border.width: champInput.activeFocus ? 2 : Couleurs.epaisseurBordureCarte
         border.color: champInput.activeFocus ? Couleurs.accent : Couleurs.bordureSubtile
 
         Ico {
@@ -188,8 +139,9 @@ Rectangle {
             objectName: "nc-reglages-recherche"
             anchors.fill: parent; anchors.leftMargin: 32; anchors.rightMargin: 30
             verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
-            color: Couleurs.texte; selectionColor: Couleurs.accent
+            color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
             font.family: Couleurs.police; font.pixelSize: 13
+            Accessible.name: Reglages.t("Chercher dans tous les réglages", "Search all settings")
             onTextChanged: rail.changerRecherche(text)
             Keys.onDownPressed: {
                 if (rail.recherche.trim() !== "") rail.allerListe()
@@ -197,6 +149,7 @@ Rectangle {
             }
             Keys.onReturnPressed: rail.allerListe()
             Keys.onTabPressed: rail.sectionDelta(1)
+            Keys.onBacktabPressed: rail.sectionDelta(-1)
             Text {
                 anchors.fill: parent; verticalAlignment: Text.AlignVCenter
                 visible: !champInput.text
@@ -208,7 +161,7 @@ Rectangle {
         Rectangle {
             visible: champInput.text !== ""
             anchors.right: parent.right; anchors.rightMargin: 5; anchors.verticalCenter: parent.verticalCenter
-            width: 24; height: 24; radius: width / 2
+            width: 24; height: 24; radius: Couleurs.rayonBouton
             color: zClr.containsMouse ? Couleurs.gris3 : "transparent"
             Ico { anchors.centerIn: parent; nom: "close"; taille: 14; color: Couleurs.texteSec }
             MouseArea {
@@ -222,32 +175,41 @@ Rectangle {
     Rectangle {
         id: boutonModifies
         objectName: "nc-reglages-filtre-modifies"
-        visible: rail.nbModifies > 0
+        visible: rail.nbModifies > 0 || rail.filtreModifies
         x: 14; y: blocRecherche.y + blocRecherche.height + 8
         width: parent.width - 28; height: visible ? 32 : 0
-        radius: Couleurs.rayon(10, width, height)
-        color: rail.filtreModifies ? Couleurs.accentDoux : (zMod.containsMouse ? Couleurs.gris2 : "transparent")
-        border.width: 1; border.color: rail.filtreModifies ? Couleurs.accentBord : Couleurs.bordureSubtile
+        radius: Couleurs.rayonBouton
+        color: rail.filtreModifies ? Couleurs.surfaceActive : (zMod.containsMouse || activeFocus ? Couleurs.carteSurvol : Couleurs.surfaceDouce)
+        border.width: activeFocus ? 2 : Couleurs.epaisseurBordureCarte
+        border.color: activeFocus ? Couleurs.accent : rail.filtreModifies ? Couleurs.accentBord : Couleurs.bordureSubtile
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: Reglages.t("Modifiés uniquement", "Modified only")
+        Accessible.checkable: true
+        Accessible.checked: rail.filtreModifies
+        Accessible.onPressAction: rail.basculerFiltreModifies()
+        Keys.onReturnPressed: rail.basculerFiltreModifies()
+        Keys.onSpacePressed: rail.basculerFiltreModifies()
 
         Row {
             anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter
             spacing: 7
-            Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 14; color: rail.filtreModifies ? Couleurs.accent : Couleurs.texteSec }
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 14; color: rail.filtreModifies ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec }
             Texte {
                 anchors.verticalCenter: parent.verticalCenter
                 text: Reglages.t("Modifiés uniquement", "Modified only")
                 font.pixelSize: 12; font.weight: rail.filtreModifies ? Font.DemiBold : Font.Medium
-                color: rail.filtreModifies ? Couleurs.texte : Couleurs.texteSec
+                color: rail.filtreModifies ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
             }
         }
         Rectangle {
             anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(20, tMod.implicitWidth + 10); height: 20; radius: height / 2
-            color: rail.filtreModifies ? Couleurs.accent : Couleurs.gris3
+            width: Math.max(20, tMod.implicitWidth + 10); height: 20; radius: Couleurs.rayonBouton
+            color: rail.filtreModifies ? Qt.alpha(Couleurs.texteSurSurfaceActive, 0.16) : Couleurs.gris3
             Texte {
                 id: tMod; anchors.centerIn: parent
                 text: String(rail.nbModifies); font.pixelSize: 11; font.weight: Font.Bold
-                color: rail.filtreModifies ? Couleurs.surAccent : Couleurs.texte
+                color: rail.filtreModifies ? Couleurs.texteSurSurfaceActive : Couleurs.texte
             }
         }
         MouseArea {
@@ -256,7 +218,7 @@ Rectangle {
         }
     }
 
-    // ── Rail des sections par catégories (focusable au clavier : ← → ↑ ↓) ──
+    // ── Navigation hiérarchique : ↑↓ pour parcourir, Entrée pour ouvrir, ←→ pour replier/déplier ──
     Flickable {
         id: defileSections
         anchors.top: boutonModifies.visible ? boutonModifies.bottom : blocRecherche.bottom
@@ -276,107 +238,138 @@ Rectangle {
             objectName: "nc-reglages-sections"
             width: defileSections.width
             spacing: 3
-            opacity: (rail.recherche.trim() !== "" || rail.filtreModifies) && !activeFocus ? 0.5 : 1
+            activeFocusOnTab: true
+            onActiveFocusChanged: {
+                if (!activeFocus) return
+                viser(elementsRail.some(e => e.cle === routeActive) ? routeActive : (rail.domaineActif ? "domaine:" + rail.domaineActif : "accueil"))
+            }
 
             Keys.onPressed: event => {
+                if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) { event.accepted = false; return }
+                const liste = rail.elementsRail
+                const i = Math.max(0, liste.findIndex(e => e.cle === rail.repere))
+                const e = liste[i]
                 event.accepted = true
-                if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab) rail.sectionDelta(1)
-                else if (event.key === Qt.Key_Left || event.key === Qt.Key_Backtab) rail.sectionDelta(-1)
-                else if (event.key === Qt.Key_Home) { if (rail.sections.length) rail.choisirSection(rail.sections[0]) }
-                else if (event.key === Qt.Key_End) { if (rail.sections.length) rail.choisirSection(rail.sections[rail.sections.length - 1]) }
-                else if (event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) rail.allerListe()
-                else if (event.key === Qt.Key_Up) champInput.forceActiveFocus()
-                else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) && event.text && event.text.length === 1 && /^[a-zA-Z0-9À-ÿ]$/.test(event.text)) {
-                    rail.demarrerRecherche(event.text)
-                }
+                if (event.key === Qt.Key_Down) {
+                    if (i < liste.length - 1) rail.viser(liste[i + 1].cle)
+                    else rail.allerListe()
+                } else if (event.key === Qt.Key_Up) {
+                    if (i > 0) rail.viser(liste[i - 1].cle)
+                    else champInput.forceActiveFocus()
+                } else if (event.key === Qt.Key_Right) {
+                    if (e.genre === "domaine") {
+                        if (!rail.domainesDeplies[e.id]) rail.deplier(e.id, true)
+                        else if (i + 1 < liste.length) rail.viser(liste[i + 1].cle)
+                    } else if (e.genre === "section") rail.sectionDelta(1)
+                    else rail.allerListe()
+                } else if (event.key === Qt.Key_Left) {
+                    if (e.genre === "domaine") rail.deplier(e.id, false)
+                    else if (e.genre === "section") rail.sectionDelta(-1)
+                    else champInput.forceActiveFocus()
+                } else if (event.key === Qt.Key_Tab) rail.sectionDelta(1)
+                else if (event.key === Qt.Key_Backtab) rail.sectionDelta(-1)
+                else if (event.key === Qt.Key_Home) rail.viser(liste[0].cle)
+                else if (event.key === Qt.Key_End) rail.viser(liste[liste.length - 1].cle)
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) rail.choisir(e)
+                else if (/^[a-zA-Z0-9À-ÿ]$/.test(event.text)) rail.demarrerRecherche(event.text)
                 else event.accepted = false
             }
 
             Repeater {
+                id: entreesRail
                 model: rail.elementsRail
-                Item {
+                Rectangle {
                     id: itemRail
                     required property var modelData
-                    readonly property bool estTitre: modelData.genre === "titre"
-                    readonly property bool estActif: !estTitre && !rail.recherche.trim() && !rail.filtreModifies && rail.sectionActive === modelData.nom
-                    readonly property bool estFocusClavier: estActif && listeSections.activeFocus
-                    readonly property int nbMod: estTitre ? 0 : (rail.modifiesParSection[modelData.nom] || 0)
+                    readonly property bool estDomaine: modelData.genre === "domaine"
+                    readonly property bool estSection: modelData.genre === "section"
+                    readonly property bool estActif: !rail.filtreActif && modelData.cle === rail.routeActive
+                    readonly property bool estFocusClavier: modelData.cle === rail.repere && listeSections.activeFocus
+                    readonly property bool deployee: estDomaine && !!rail.domainesDeplies[modelData.id]
+                    readonly property var compte: rail.chiffres[estSection ? modelData.id : modelData.cle]
+                    readonly property int nbMod: compte ? compte.modifies : 0
+                    readonly property color encre: estActif ? Couleurs.texteSurSurfaceActive : Couleurs.texte
 
-                    width: listeSections.width
-                    height: estTitre ? 26 : 34
+                    objectName: estDomaine ? "nc-reglages-domaine-" + modelData.id
+                        : estSection ? "nc-reglages-tab-" + modelData.id : "nc-reglages-tab-accueil"
+                    x: estSection ? 15 : 0
+                    width: listeSections.width - x
+                    height: estSection ? 32 : 37
+                    radius: Couleurs.rayonBouton
+                    color: estActif ? Couleurs.surfaceActive
+                        : (zSec.containsMouse || zDeplier.containsMouse || estFocusClavier) ? Couleurs.carteSurvol : "transparent"
+                    border.width: estFocusClavier ? 2 : estActif ? Couleurs.epaisseurBordureCarte : 0
+                    border.color: estFocusClavier ? (estActif ? encre : Couleurs.accent) : Couleurs.accentBord
+                    Accessible.role: Accessible.Button
+                    Accessible.name: modelData.nom
+                    Accessible.onPressAction: rail.choisir(modelData)
 
-                    // En-tête de catégorie
+                    Rectangle {
+                        visible: itemRail.estSection && !itemRail.estActif
+                        x: 1; anchors.verticalCenter: parent.verticalCenter
+                        width: 1; height: parent.height
+                        color: Couleurs.separateur
+                    }
+                    Ico {
+                        id: icoSec
+                        x: 11; anchors.verticalCenter: parent.verticalCenter
+                        nom: itemRail.modelData.icone; taille: itemRail.estSection ? 15 : 17
+                        color: itemRail.estActif ? itemRail.encre : Couleurs.texteSec
+                    }
                     Texte {
-                        visible: itemRail.estTitre
-                        x: 10; anchors.bottom: parent.bottom; anchors.bottomMargin: 4
-                        text: itemRail.modelData.texte || ""
-                        secondaire: true; font.pixelSize: 10; font.weight: Font.Bold
-                        font.letterSpacing: 0.7
-                        opacity: 0.72
+                        anchors.left: icoSec.right; anchors.leftMargin: 8
+                        anchors.right: pastilleMod.visible ? pastilleMod.left : controleDroit.left
+                        anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter
+                        text: itemRail.modelData.nom
+                        font.pixelSize: itemRail.estSection ? 12 : 13
+                        font.weight: itemRail.estSection && !itemRail.estActif ? Font.Medium : Font.DemiBold
+                        color: itemRail.encre
+                    }
+                    Rectangle {
+                        id: pastilleMod
+                        visible: itemRail.nbMod > 0
+                        anchors.right: controleDroit.left; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(18, tNb.implicitWidth + 8); height: 18
+                        radius: Couleurs.rayonBouton
+                        color: itemRail.estActif ? Qt.alpha(itemRail.encre, 0.16) : Couleurs.gris3
+                        Texte {
+                            id: tNb; anchors.centerIn: parent
+                            text: String(itemRail.nbMod); font.pixelSize: 10; font.weight: Font.Bold
+                            color: itemRail.estActif ? itemRail.encre : Couleurs.accent
+                        }
                     }
 
-                    // Entrée de section cliquable
-                    Rectangle {
-                        visible: !itemRail.estTitre
-                        objectName: !itemRail.estTitre ? ("nc-reglages-tab-" + itemRail.modelData.nom) : ""
-                        anchors.fill: parent
-                        radius: Couleurs.rayon(10, width, height)
-                        color: itemRail.estFocusClavier ? Couleurs.accent
-                             : (itemRail.estActif ? Couleurs.accentDoux : (zSec.containsMouse ? Couleurs.gris2 : "transparent"))
-                        border.width: itemRail.estFocusClavier ? 1.5 : (itemRail.estActif ? 1 : 0)
-                        border.color: itemRail.estFocusClavier ? Couleurs.texte : Couleurs.accentBord
-                        Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
-
-                        // Barre d'accent gauche sur la section active
+                    MouseArea {
+                        id: zSec
+                        anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: controleDroit.left
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: rail.choisir(itemRail.modelData)
+                    }
+                    Item {
+                        id: controleDroit
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        width: itemRail.estDomaine ? 35 : 0; height: parent.height
+                        visible: itemRail.estDomaine
+                        objectName: itemRail.estDomaine ? "nc-reglages-deplier-" + itemRail.modelData.id : ""
+                        Accessible.role: Accessible.Button
+                        Accessible.name: itemRail.deployee ? Reglages.t("Replier", "Collapse") : Reglages.t("Déplier", "Expand")
+                        Accessible.description: itemRail.modelData.nom
+                        Accessible.onPressAction: rail.basculerDomaine(itemRail.modelData)
                         Rectangle {
-                            visible: itemRail.estActif && !itemRail.estFocusClavier
-                            x: 3; anchors.verticalCenter: parent.verticalCenter
-                            width: 3; height: 16
-                            radius: Couleurs.rayon(2, width, height)
-                            color: Couleurs.accent
-                        }
-
-                        Ico {
-                            id: icoSec
-                            x: 12; anchors.verticalCenter: parent.verticalCenter
-                            nom: itemRail.modelData.ico || "tune"; taille: 16
-                            color: itemRail.estFocusClavier ? Couleurs.surAccent
-                                 : (itemRail.estActif ? Couleurs.accent : Couleurs.texteSec)
-                        }
-
-                        Texte {
-                            anchors.left: icoSec.right; anchors.leftMargin: 9
-                            anchors.right: pastilleMod.visible ? pastilleMod.left : parent.right
-                            anchors.rightMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: itemRail.modelData.nom || ""
-                            font.pixelSize: 13
-                            font.weight: itemRail.estActif ? Font.DemiBold : Font.Medium
-                            color: itemRail.estFocusClavier ? Couleurs.surAccent
-                                 : (itemRail.estActif ? Couleurs.texte : Couleurs.texteDoux)
-                        }
-
-                        Rectangle {
-                            id: pastilleMod
-                            visible: itemRail.nbMod > 0
-                            anchors.right: parent.right; anchors.rightMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: Math.max(18, tNb.implicitWidth + 8); height: 18
-                            radius: height / 2
-                            color: itemRail.estFocusClavier ? Qt.alpha(Couleurs.surAccent, 0.25) : Couleurs.gris3
-                            Texte {
-                                id: tNb; anchors.centerIn: parent
-                                text: String(itemRail.nbMod); font.pixelSize: 10; font.weight: Font.Bold
-                                color: itemRail.estFocusClavier ? Couleurs.surAccent : Couleurs.accent
+                            anchors.centerIn: parent
+                            width: 25; height: 25; radius: Couleurs.rayonBouton
+                            color: zDeplier.containsMouse ? Qt.alpha(itemRail.encre, 0.16) : "transparent"
+                            Ico {
+                                anchors.centerIn: parent
+                                nom: itemRail.deployee ? "expand_more" : "chevron_right"
+                                taille: 17; color: itemRail.encre
                             }
                         }
-
                         MouseArea {
-                            id: zSec; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            onClicked: rail.choisirSection(itemRail.modelData.nom)
+                            id: zDeplier
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: rail.basculerDomaine(itemRail.modelData)
                         }
-                        Accessible.role: Accessible.Button
-                        Accessible.name: itemRail.modelData.nom || ""
                     }
                 }
             }

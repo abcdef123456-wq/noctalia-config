@@ -97,6 +97,22 @@ assert.deepEqual(pastillesCote(interne, 'end').map(p => p.membres), [['cpu','ram
 assert.equal(pastillesCote(interne, 'end')[0].groupe.opacity, 0.8);
 """)
 
+    def test_controle_suit_la_barre_de_statut_par_ecran(self):
+        self.verifier("""
+const assert = require('node:assert/strict');
+const logo = {id:'haut', position:'top', start:['logo']};
+const statut = {id:'statut', position:'left', end:['group:etat'],
+    capsule_group:[{id:'etat', members:['connexion']}],
+    monitor:{externe:{match:'DELL', position:'bottom'}}};
+const widgets = {logo:{type:'control-center'}, connexion:{type:'network'}};
+const barres = barresPourEcran([logo, statut], 'DP-1', 'DELL U2724D');
+assert.equal(barreControle(barres, widgets).position, 'bottom');
+assert.equal(barreControle(barres, widgets, 'top').id, 'haut');
+const calques = {levels:{2:[{namespace:'noctalia-dock', x:-1600, y:0, w:50, h:900},
+    {namespace:'noctalia-bar-default', x:-1594, y:852, w:1588, h:42}]}};
+assert.deepEqual(barreNativeControle(calques, -1600, 0, 1600, 900), {bord:'bottom', emprise:48});
+""")
+
     def test_barres_flottantes_et_placer_barre(self):
         self.verifier("""
 const assert = require('node:assert/strict');

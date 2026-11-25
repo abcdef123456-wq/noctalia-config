@@ -97,7 +97,12 @@ PanelWindow {
                 const actions = fen.barre.dead_zone?.actions
                 if (!actions) return
                 const cle = e.button === Qt.RightButton ? "right" : e.button === Qt.MiddleButton ? "middle" : "left"
-                if (typeof actions[cle] === "string") Actions.lancer(actions[cle])
+                Actions.lancerDepuisBarre(actions[cle], (nom, repli) => {
+                    const cible = repli ? Etat.pageOu(nom, repli) : nom
+                    if (!Etat.estPageControle(cible)) return false
+                    Etat.basculerControle(fen.screen.name, cible, fen.position)
+                    return true
+                })
             }
         }
 

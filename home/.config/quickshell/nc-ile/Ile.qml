@@ -176,13 +176,13 @@ PanelWindow {
     }
     onOuverteChanged: { prise.prete = false; if (ouverte) prise.restart() }
 
-    // Hauteur réservée à l'en-tête lisible (EnteteIle) quand l'île est ouverte hors recherche
-    readonly property int hauteurEntete: 42
+    // Hauteur réservée à l'en-tête lisible (EnteteIle) : 0 quand une seule vue est active (zéro chrome inutile)
+    readonly property int hauteurEntete: Etat.vues.length > 1 ? 38 : 0
     // Taille de chaque page (hauteur + en-tête)
     function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32)) + hauteurEntete) }
-    readonly property int hauteurEssentiel: Etat.aMusique ? 248 : (Notifs.nonLues > 0 ? 236 : 186)
+    readonly property int hauteurEssentiel: Math.max(152, (Etat.hauteurs.essentiel ?? 120) + 32)
     readonly property var tailles: ({
-        essentiel: Qt.size(424, hauteurEssentiel + hauteurEntete),
+        essentiel: Qt.size(408, hauteurEssentiel + hauteurEntete),
         musique: Qt.size(430, 214 + hauteurEntete), minuteur: Qt.size(430, (Etat.minuteurFin > 0 ? 150 : 334) + hauteurEntete), charge: adaptee("charge", 140),
         jeu: Qt.size(432, 250 + hauteurEntete), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600 + hauteurEntete), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
@@ -378,7 +378,31 @@ PanelWindow {
         Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
         clip: true
         FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
-
+        // Finitions d'archétype du thème actif sur l'île ouverte (purs rectangles statiques : coût GPU nul)
+        Rectangle {
+            objectName: "nc-ile-accent-haut"
+            visible: fen.ouverte && !fen.recherche && (Couleurs.styleNeon || Couleurs.styleEditorial || Couleurs.styleApple || Couleurs.styleModerne)
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Couleurs.styleEditorial ? 36 : (Couleurs.styleNeon ? parent.width : Math.max(0, parent.width - ile.radius * 2))
+            height: (Couleurs.styleNeon || Couleurs.styleEditorial) ? 2 : 1
+            opacity: Couleurs.styleApple || Couleurs.styleModerne ? (Couleurs.sombre ? 0.14 : 0.28) : 0.92
+            color: (Couleurs.styleApple || Couleurs.styleModerne) ? Couleurs.voile : Couleurs.accent
+        }
+        // Repères d'angle CRT / Terminal sur les 4 coins de l'île ouverte
+        Repeater {
+            model: fen.ouverte && !fen.recherche && Couleurs.styleTerminal ? 4 : 0
+            Item {
+                required property int index
+                readonly property bool droite: index % 2 === 1
+                readonly property bool bas: index >= 2
+                x: droite ? parent.width - 14 : 4
+                y: bas ? parent.height - 14 : 4
+                width: 10; height: 10
+                Rectangle { width: 10; height: 2; y: bas ? 8 : 0; color: Couleurs.accent }
+                Rectangle { width: 2; height: 10; x: droite ? 8 : 0; color: Couleurs.accent }
+            }
+        }
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
@@ -582,9 +606,9 @@ PanelWindow {
             width: Math.max(0, ile.width - 32)
             pages: Etat.vues
             active: Etat.vueActive
-            nonLues: Notifs.nonLues
-            opacity: fen.ouverte && !fen.recherche && ile.height > fen.taille.height * 0.65 ? 1 : 0
-            visible: opacity > 0.01
+            nonLues: Partage.silence ? 0 : Notifs.nonLues
+            opacity: fen.ouverte && !fen.recherche && Etat.vues.length > 1 && ile.height > fen.taille.height * 0.65 ? 1 : 0
+            visible: opacity > 0.01 && Etat.vues.length > 1
             Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
             onChoisir: nom => Etat.aller(nom)
             onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
@@ -632,6 +656,8 @@ PanelWindow {
         Component {
             id: pEssentiel
             EssentielIle {
+                Component.onCompleted: Etat.annoncerHauteur("essentiel", implicitHeight)
+                onImplicitHeightChanged: Etat.annoncerHauteur("essentiel", implicitHeight)
                 onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
                 onOuvrirRecherche: Etat.chercher(fen.modelData.name)
                 onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }

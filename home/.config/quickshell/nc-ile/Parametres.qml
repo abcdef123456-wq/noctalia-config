@@ -1,7 +1,5 @@
-// Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre ; appli « Réglages du bureau ») :
-// interface deux volets intégrée au thème actif (rail de navigation par catégories + scène des réglages),
-// recherche instantanée (Ctrl + F), filtre des options modifiées, contrôles adaptés (interrupteur, barre
-// segmentée, curseur, touches clavier), capture de raccourcis et navigation 100 % clavier.
+// Réglages du bureau : accueil, domaines et rubriques. Les vues transversales (recherche,
+// modifications) n'effacent pas l'emplacement courant. Les contrôles écrivent dans nc-reglages.
 import QtQuick
 import QtQuick.Controls
 import Quickshell
@@ -18,7 +16,10 @@ FloatingWindow {
 
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
     property var catalogue: []
+    // `section` est un identifiant stable de la fenêtre, jamais un libellé traduit.
+    property string domaine: ""
     property string section: ""
+    property string requeteSection: ""
     property string recherche: ""
     property bool filtreModifies: false
     property string message: ""
@@ -33,8 +34,125 @@ FloatingWindow {
     signal fermerIle()
     property bool relire: false
     readonly property bool enCours: lecture.running || ecriture.running || relire || file.length > 0
-    readonly property var sections: { var s = []; catalogue.forEach(r => { if (s.indexOf(r.sectionNom) < 0) s.push(r.sectionNom) }); return s }
-    readonly property int nbModifies: { var n = 0; catalogue.forEach(r => { if (r && r.modifie) n++ }); return n }
+    property var navigation: ({ sections: [], domaines: [] })
+    readonly property var sections: navigation.sections.map(s => s.id)
+    readonly property var sectionCourante: navigation.sections.find(s => s.id === section) || null
+    readonly property var domaineCourant: navigation.domaines.find(d => d.id === (sectionCourante ? sectionCourante.domaine : domaine)) || null
+    readonly property bool vueRecherche: recherche.trim() !== ""
+    readonly property bool vueListe: vueRecherche || filtreModifies || section !== ""
+    readonly property var chiffres: {
+        const parId = Object.create(null)
+        for (const s of navigation.sections) parId[s.source] = { total: 0, modifies: 0 }
+        for (const r of catalogue) {
+            const c = parId[r.section]
+            if (c) { c.total++; if (r.modifie) c.modifies++ }
+        }
+        const parRoute = {}
+        for (const d of navigation.domaines) {
+            let modifies = 0
+            for (const s of d.sections) {
+                const c = parId[s.source]
+                parRoute[s.id] = c
+                modifies += c.modifies
+            }
+            parRoute["domaine:" + d.id] = { modifies: modifies }
+        }
+        return parRoute
+    }
+    readonly property int nbModifies: catalogue.reduce((n, r) => n + (r.modifie ? 1 : 0), 0)
+
+    // Clés françaises du catalogue, identifiants de navigation, alias IPC anglais, icônes et descriptions.
+    // Les rubriques nouvelles restent découvrables dans « Autres » sans modifier le catalogue.
+    readonly property var structure: [
+        { id: "bureau", nom: ["Bureau et style", "Desktop and style"], icone: "palette",
+          description: ["Thème, fonds d’écran, barre et comportement des fenêtres.", "Theme, wallpapers, bar and window behavior."],
+          sections: [
+            ["Apparence", "apparence", "Appearance", "palette", "Style du bureau et typographie.", "Desktop style and typography."],
+            ["Fonds d'écran", "fonds-ecran", "Wallpapers", "wallpaper", "Images, dossiers et transitions.", "Images, folders and transitions."],
+            ["Barre et dock", "barre-dock", "Bar and Dock", "dock_to_bottom", "Disposition, pastilles et applications épinglées.", "Layout, pills and pinned apps."],
+            ["Fenêtres", "fenetres", "Windows", "window", "Disposition, transparence et sessions.", "Layout, transparency and sessions."],
+            ["Animations", "animations", "Animations", "animation", "Mouvement du bureau et des fenêtres.", "Desktop and window motion."]
+          ] },
+        { id: "ile", nom: ["Île et alertes", "Island and alerts"], icone: "widgets",
+          description: ["Pilule, pages de l’île, Spotlight et notifications.", "Pill, island pages, Spotlight and notifications."],
+          sections: [
+            ["Île", "ile", "Island", "widgets", "Allure, contenu de la pilule et recherche Spotlight.", "Design, pill content and Spotlight search."],
+            ["Pages de l’île", "pages-ile", "Island pages", "layers", "Choisir les pages disponibles dans l’île.", "Choose the pages shown in the island."],
+            ["Notifications", "notifications", "Notifications", "notifications", "Bannières, partage d’écran et Ne pas déranger.", "Banners, screen sharing and Do Not Disturb."]
+          ] },
+        { id: "systeme", nom: ["Système", "System"], icone: "devices",
+          description: ["Énergie, affichage, son et périphériques.", "Power, display, sound and input devices."],
+          sections: [
+            ["Énergie", "energie", "Power", "bolt", "Profils d’alimentation et modes graphiques.", "Power profiles and graphics modes."],
+            ["Son et luminosité", "son-luminosite", "Sound and Brightness", "volume_up", "Niveaux, pas de réglage et affichage.", "Levels, adjustment steps and display."],
+            ["Lumière nocturne", "lumiere-nocturne", "Night Light", "wb_twilight", "Température des couleurs et horaires.", "Color temperature and schedule."],
+            ["Clavier et souris", "clavier-souris", "Keyboard and Mouse", "keyboard", "Disposition, pointeur et gestes.", "Keyboard layout, pointer and gestures."],
+            ["Veille", "veille", "Sleep", "bedtime", "Écran, verrouillage et mise en veille.", "Display, locking and sleep."],
+            ["Captures", "captures", "Screenshots", "screenshot_monitor", "Comportement et destination des captures.", "Screenshot behavior and destination."]
+          ] },
+        { id: "apps", nom: ["Applications et raccourcis", "Apps and shortcuts"], icone: "apps",
+          description: ["Applications, terminal, touches et snippets.", "Apps, terminal, key bindings and snippets."],
+          sections: [
+            ["Applications", "applications", "Applications", "apps", "Programmes par défaut et intégration au bureau.", "Default apps and desktop integration."],
+            ["Terminal", "terminal", "Terminal", "terminal", "Émulateur, police et options du terminal.", "Terminal emulator, font and options."],
+            ["Raccourcis", "raccourcis", "Shortcuts", "keyboard_command_key", "Consulter, modifier ou désactiver les touches.", "View, edit or disable key bindings."],
+            ["Snippets", "snippets", "Snippets", "content_paste", "Gérer les extraits de texte réutilisables.", "Manage reusable text snippets."]
+          ] },
+        { id: "ia", nom: ["IA et services", "AI and services"], icone: "auto_awesome",
+          description: ["Assistant, agents, comptes et services connectés.", "Assistant, agents, accounts and connected services."],
+          sections: [
+            ["Intelligence artificielle", "intelligence-artificielle", "Artificial intelligence", "auto_awesome", "Fournisseurs, modèles et clés d’API.", "Providers, models and API keys."],
+            ["Agents IA (coucou)", "agents-ia", "AI Agents (coucou)", "smart_toy", "Agents et connexion à l’assistant JARVIS.", "Agents and JARVIS assistant connection."],
+            ["Cloud JARVIS", "cloud-jarvis", "JARVIS Cloud", "cloud", "Synchronisation et données JARVIS.", "JARVIS sync and data."],
+            ["Santé Garmin", "sante-garmin", "Garmin health", "favorite", "Connecteur Garmin et données de santé.", "Garmin connector and health data."],
+            ["Intégration Google", "integration-google", "Google integration", "calendar_month", "Connexion et intégration des services Google.", "Google service sign-in and integration."]
+          ] },
+        { id: "maintenance", nom: ["Maintenance", "Maintenance"], icone: "build",
+          description: ["Mises à jour, composants et nouveautés.", "Updates, components and release notes."],
+          sections: [
+            ["Mises à jour", "mises-a-jour", "Updates", "system_update", "Préférences et rapports de mise à jour.", "Update preferences and reports."],
+            ["Composants", "composants", "Components", "extension", "Installer ou retirer des composants.", "Install or remove components."],
+            ["Nouveautés", "nouveautes", "What's New", "new_releases", "Retrouver les derniers changements.", "See what’s changed."]
+          ] },
+        { id: "autres", nom: ["Autres", "Other"], icone: "tune",
+          description: ["Rubriques supplémentaires du catalogue.", "Additional catalogue sections."], sections: [] }
+    ]
+
+    function organiserSections(lignes) {
+        const parSource = new Map()
+        for (const r of lignes) if (!parSource.has(r.section)) parSource.set(r.section, r.sectionNom)
+        const anciennes = navigation.sections
+        const sources = Array.from(parSource)
+        if (sources.length === anciennes.length && sources.every(([s, n], i) => s === anciennes[i].source && n === anciennes[i].nom)) return
+
+        const parDomaine = {}
+        const parCle = new Map()
+        for (const d of structure) {
+            const liste = []
+            parDomaine[d.id] = liste
+            for (const [source, id, en, icone, descFr, descEn] of d.sections) {
+                if (!parSource.has(source)) continue
+                const s = { id: id, source: source, domaine: d.id, nom: parSource.get(source), en: en,
+                            icone: icone, description: Reglages.t(descFr, descEn) }
+                liste.push(s)
+                parCle.set(source, s)
+            }
+        }
+        for (const [source, nom] of sources) {
+            if (parCle.has(source)) continue
+            const s = { id: "catalogue:" + source, source: source, domaine: "autres", nom: nom, en: nom,
+                        icone: "tune", description: Reglages.t("Voir les préférences de cette rubrique.", "View this section’s preferences.") }
+            parDomaine.autres.push(s)
+            parCle.set(source, s)
+        }
+        navigation = {
+            sections: sources.map(([s]) => parCle.get(s)),
+            domaines: structure.filter(d => parDomaine[d.id].length).map(d => ({
+                id: d.id, nom: Reglages.t(d.nom[0], d.nom[1]), icone: d.icone,
+                description: Reglages.t(d.description[0], d.description[1]), sections: parDomaine[d.id]
+            }))
+        }
+    }
 
     property var prepAide: null
     FileView {
@@ -51,8 +169,14 @@ FloatingWindow {
     readonly property var visibles: {
         var mots = normaliser(recherche).split(/[\s+]+/).filter(m => m !== "")
         if (!mots.length) {
-            if (filtreModifies) return catalogue.filter(r => r && r.modifie)
-            return catalogue.filter(r => r.sectionNom === section)
+            if (filtreModifies) return catalogue.filter(r => r.modifie)
+            const source = sectionCourante ? sectionCourante.source : ""
+            if (!source) return []
+            const lignes = catalogue.filter(r => r.section === source)
+            if (section !== "ile") return lignes
+            const groupes = [[], [], [], []]
+            for (const r of lignes) groupes[groupeIle(r.cle)].push(r)
+            return groupes[0].concat(groupes[1], groupes[2], groupes[3])
         }
         var exacts = catalogue.filter(r => {
             var t = normaliser(r.nom + " " + r.aide + " " + r.cle + " " + r.sectionNom + " " + r.affiche)
@@ -71,23 +195,46 @@ FloatingWindow {
         return exacts.concat(plus, docs)
     }
 
+    readonly property var titresGroupesIle: [
+        Reglages.t("Pilule et outils", "Pill and tools"),
+        "VPN",
+        "Spotlight",
+        Reglages.t("Alertes système", "System alerts")
+    ]
+    function groupeIle(cle) {
+        if (cle.startsWith("VPN_")) return 1
+        if (cle.startsWith("SPOTLIGHT_")) return 2
+        if (cle === "BATTERIE_ALERTE" || cle === "CHALEUR_ALERTE" || cle === "IA_CHALEUR") return 3
+        return 0
+    }
+    function groupePreference(r) {
+        if (r.genre === "raccourci") return r.aide
+        if (section === "ile") return titresGroupesIle[groupeIle(r.cle)]
+        return ""
+    }
+
     property var parCle: ({})
     property string contexteListe: ""
     ListModel { id: modeleCles }
     onVisiblesChanged: synchroniser()
     function synchroniser() {
         var v = visibles, m = modeleCles, pareil = v.length === m.count
+        const groupes = !vueRecherche && !filtreModifies ? v.map(groupePreference) : []
+        const grouper = groupes.some(g => g !== groupes[0])
         var carte = Object.assign({}, parCle)
         v.forEach(r => carte[r.cle] = r)
         parCle = carte
-        for (let i = 0; pareil && i < v.length; i++) if (m.get(i).cle !== v[i].cle) pareil = false
+        for (let i = 0; pareil && i < v.length; i++) {
+            const item = m.get(i)
+            pareil = item.cle === v[i].cle && item.groupe === (grouper ? groupes[i] : "")
+        }
         if (pareil) return
         var ctx = section + "\n" + recherche + "\n" + (filtreModifies ? "1" : "0")
         var meme = ctx === contexteListe && m.count > 0
         contexteListe = ctx
         var y = liste.contentY, cle = liste.currentIndex >= 0 && liste.currentIndex < m.count ? m.get(liste.currentIndex).cle : ""
         m.clear()
-        v.forEach(r => m.append({ cle: r.cle }))
+        v.forEach((r, i) => m.append({ cle: r.cle, groupe: grouper ? groupes[i] : "" }))
         var i = meme ? v.findIndex(r => r.cle === cle) : -1
         liste.currentIndex = i >= 0 ? i : (v.length ? 0 : -1)
         if (!meme) { liste.contentY = 0; return }
@@ -95,10 +242,69 @@ FloatingWindow {
         garder(); Qt.callLater(garder)
     }
 
-    function chercherTexte(t) { sidebar.champRecherche.text = t; filtreModifies = false; liste.forceActiveFocus() }
-    function allerSection(s) { sidebar.champRecherche.text = ""; recherche = ""; filtreModifies = false; section = s; liste.currentIndex = 0; liste.forceActiveFocus() }
+    function focaliserScene() {
+        if (vueListe) liste.forceActiveFocus()
+        else accueil.forceActiveFocus()
+    }
+    function demarrerRecherche(t) {
+        sidebar.champRecherche.text = t
+        sidebar.champRecherche.forceActiveFocus()
+        sidebar.champRecherche.cursorPosition = t.length
+    }
+    function viderFiltres() {
+        sidebar.champRecherche.text = ""
+        recherche = ""
+        filtreModifies = false
+        if (confirmation) liste.currentItem.aConfirmer = false
+    }
+    function allerAccueil() {
+        requeteSection = ""
+        section = ""; domaine = ""
+        viderFiltres()
+        focaliserScene()
+    }
+    function allerDomaine(id) {
+        requeteSection = ""
+        section = ""; domaine = id
+        viderFiltres()
+        focaliserScene()
+    }
+    function chercherTexte(t) { requeteSection = ""; sidebar.champRecherche.text = t; filtreModifies = false; focaliserScene() }
+    function selectionnerSection(s) {
+        domaine = s.domaine; section = s.id
+        viderFiltres()
+    }
+    function allerSection(s) {
+        // Les appels IPC historiques acceptent les libellés français et anglais, y compris à froid.
+        requeteSection = s
+        if (resoudreSection()) focaliserScene()
+    }
+    function resoudreSection() {
+        if (!requeteSection) return false
+        const nom = normaliser(requeteSection.trim()).replace(/’/g, "'")
+        const s = navigation.sections.find(x => [x.id, x.source, x.nom, x.en].some(n => normaliser(n).replace(/’/g, "'") === nom))
+        if (!s) return false
+        requeteSection = ""
+        selectionnerSection(s)
+        return true
+    }
+    function basculerModifies() {
+        requeteSection = ""
+        const activer = !filtreModifies
+        viderFiltres()
+        filtreModifies = activer
+        focaliserScene()
+    }
     function normaliser(t) { var s = String(t).toLowerCase(); try { return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "") } catch (e) { return s } }
-    function afficher(nom) { surEcran(nom); visible = true; charger(); if (!majAide.running) majAide.running = true; liste.forceActiveFocus() }
+    function afficher(nom) {
+        surEcran(nom)
+        const ouvrir = !visible
+        visible = true
+        if (ouvrir) allerAccueil()
+        charger()
+        if (!majAide.running) majAide.running = true
+        focaliserScene()
+    }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
         for (let i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
@@ -153,7 +359,7 @@ FloatingWindow {
     Connections {
         target: Raccourcis
         function onEcrit() { if (Raccourcis.message) { fen.message = Raccourcis.message; fen.erreur = Raccourcis.erreur }; fen.charger() }
-        function onCaptureFinie() { if (fen.visible) liste.forceActiveFocus() }
+        function onCaptureFinie() { if (fen.visible) fen.focaliserScene() }
     }
     function remettreLigne(r) {
         if (!r || !r.modifie) return
@@ -194,9 +400,12 @@ FloatingWindow {
         else changer(r, 1)
     }
     function sectionSuivante(d) {
-        if (!sections.length) return
-        sidebar.champRecherche.text = ""; recherche = ""; filtreModifies = false
-        section = sections[(Math.max(0, sections.indexOf(section)) + d + sections.length) % sections.length]
+        const ss = navigation.sections
+        if (!ss.length) return
+        const i = sections.indexOf(section)
+        const prochaine = ss[i < 0 ? (d > 0 ? 0 : ss.length - 1) : (i + d + ss.length) % ss.length]
+        requeteSection = ""
+        selectionnerSection(prochaine)
         liste.currentIndex = liste.count ? 0 : -1
     }
     function lettre(event) {
@@ -220,8 +429,16 @@ FloatingWindow {
                     var avant = {}
                     fen.catalogue.forEach(r => avant[r.cle] = r)
                     d = d.map(r => { var o = avant[r.cle]; return o && JSON.stringify(o) === JSON.stringify(r) ? o : r })
+                    fen.organiserSections(d)
                     fen.catalogue = d
-                    if (!fen.section || fen.sections.indexOf(fen.section) < 0) fen.section = fen.sections.length ? fen.sections[0] : ""
+                    if (fen.resoudreSection()) fen.focaliserScene()
+                    else {
+                        fen.requeteSection = ""
+                        const refocaliser = liste.activeFocus && !fen.vueRecherche && !fen.filtreModifies
+                        if (fen.section && !fen.sectionCourante) fen.section = ""
+                        if (fen.domaine && !fen.domaineCourant) fen.domaine = ""
+                        if (refocaliser && !fen.vueListe) fen.focaliserScene()
+                    }
                     if (fen.lectureIllisible) { fen.lectureIllisible = false; fen.message = ""; fen.erreur = false }
                 } catch (e) {
                     fen.message = Reglages.t("Réglages illisibles : lance nc-reglages dans un terminal.", "Settings unreadable: run nc-settings in a terminal.")
@@ -248,12 +465,15 @@ FloatingWindow {
         onActivated: {
             if (fen.confirmation) liste.currentItem.aConfirmer = false
             else if (fen.ileOuverte) fen.fermerIle()
-            else if (fen.recherche !== "") { fen.recherche = ""; sidebar.champRecherche.text = "" }
-            else if (fen.filtreModifies) fen.filtreModifies = false
+            else if (fen.recherche !== "" || fen.filtreModifies) { fen.viderFiltres(); fen.focaliserScene() }
             else fen.close()
         }
     }
     Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; enabled: !fen.capture; onActivated: { sidebar.champRecherche.forceActiveFocus(); sidebar.champRecherche.selectAll() } }
+    Shortcut {
+        sequence: "Alt+Left"; enabled: !fen.capture && !fen.vueRecherche && !fen.filtreModifies && !!fen.domaineCourant
+        onActivated: if (fen.sectionCourante) fen.allerDomaine(fen.domaineCourant.id); else fen.allerAccueil()
+    }
     onVisibleChanged: if (!visible && capture) finCapture("")
 
     // ── Contenu principal : deux volets (rail gauche + scène droite) ──
@@ -273,96 +493,148 @@ FloatingWindow {
             id: sidebar
             anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.left: parent.left
             width: Math.max(216, Math.min(264, Math.round(tout.width * 0.25)))
-            sections: fen.sections
-            catalogue: fen.catalogue
+            domaines: fen.navigation.domaines
+            domaineActif: fen.domaineCourant ? fen.domaineCourant.id : ""
             sectionActive: fen.section
+            chiffres: fen.chiffres
             recherche: fen.recherche
             filtreModifies: fen.filtreModifies
             totalReglages: fen.catalogue.length
             nbModifies: fen.nbModifies
             enCours: fen.enCours
 
-            onChoisirSection: nom => {
-                fen.filtreModifies = false
-                fen.section = nom
-                sidebar.champRecherche.text = ""
-                fen.recherche = ""
-                liste.currentIndex = liste.count ? 0 : -1
-                liste.forceActiveFocus()
-            }
+            onChoisirAccueil: fen.allerAccueil()
+            onChoisirDomaine: id => fen.allerDomaine(id)
+            onChoisirSection: id => fen.allerSection(id)
             onChangerRecherche: texte => {
+                fen.requeteSection = ""
                 fen.recherche = texte
                 if (texte.trim() !== "") fen.filtreModifies = false
                 liste.currentIndex = liste.count ? 0 : -1
             }
-            onBasculerFiltreModifies: {
-                fen.filtreModifies = !fen.filtreModifies
-                if (fen.filtreModifies) { sidebar.champRecherche.text = ""; fen.recherche = "" }
-                liste.currentIndex = liste.count ? 0 : -1
-                liste.forceActiveFocus()
-            }
-            onAllerListe: { liste.currentIndex = liste.count ? 0 : -1; liste.forceActiveFocus() }
+            onBasculerFiltreModifies: fen.basculerModifies()
+            onAllerListe: fen.focaliserScene()
             onSectionDelta: d => fen.sectionSuivante(d)
-            onDemarrerRecherche: lettre => {
-                sidebar.champRecherche.text = lettre
-                sidebar.champRecherche.forceActiveFocus()
-                sidebar.champRecherche.cursorPosition = 1
-            }
+            onDemarrerRecherche: lettre => fen.demarrerRecherche(lettre)
             onRelire: fen.charger()
-            onFermer: fen.close()
         }
 
-        // ── Volet droit : scène de la section active ──
+        // ── Scène : accueil, menu du domaine ou préférences ──
         Item {
             id: scene
             anchors.top: parent.top; anchors.bottom: parent.bottom
             anchors.left: sidebar.right; anchors.right: parent.right
 
-            // En-tête contextuel de la section
+            component LienReglages: AbstractButton {
+                id: lien
+                property bool courant: false
+                hoverEnabled: true
+                focusPolicy: Qt.StrongFocus
+                padding: 0
+                implicitWidth: etiquette.implicitWidth + 16
+                implicitHeight: 26
+                Accessible.name: text
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                background: Rectangle {
+                    radius: Couleurs.rayonBouton
+                    color: lien.courant ? Couleurs.surfaceActive : (lien.hovered || lien.activeFocus ? Couleurs.surfaceDouce : "transparent")
+                    border.width: lien.activeFocus ? 2 : (lien.courant ? Couleurs.epaisseurBordureCarte : 0)
+                    border.color: lien.activeFocus ? Couleurs.accent : Couleurs.accentBord
+                }
+                contentItem: Texte {
+                    id: etiquette
+                    horizontalAlignment: Text.AlignHCenter
+                    text: lien.text; font.pixelSize: 12; font.weight: Font.DemiBold
+                    color: lien.courant ? Couleurs.texteSurSurfaceActive : Couleurs.texteDoux
+                }
+            }
+
             Item {
                 id: enteteScene
                 anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-                height: 68
+                height: enteteContenu.implicitHeight + 24
 
-                Row {
+                Column {
+                    id: enteteContenu
                     anchors.left: parent.left; anchors.leftMargin: 24
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 12
+                    anchors.right: boutonsFenetre.left; anchors.rightMargin: 12
+                    y: 10; spacing: 6
 
-                    Rectangle {
-                        width: 38; height: 38
-                        anchors.verticalCenter: parent.verticalCenter
-                        radius: Couleurs.rayon(12, width, height)
-                        color: Couleurs.accentDoux
-                        border.width: 1; border.color: Couleurs.accentBord
+                    Row {
+                        objectName: "nc-reglages-fil-ariane"
+                        visible: fen.vueListe || !!fen.domaineCourant
+                        width: parent.width
+                        spacing: 3
+                        LienReglages {
+                            id: lienAccueil
+                            text: Reglages.t("Accueil", "Home")
+                            onClicked: fen.allerAccueil()
+                        }
                         Ico {
-                            anchors.centerIn: parent
-                            nom: fen.recherche.trim() !== "" ? "search"
-                                 : (fen.filtreModifies ? "edit" : sidebar.metaSection(fen.section).ico)
-                            taille: 20; color: Couleurs.accent
+                            id: separateurAccueil
+                            anchors.verticalCenter: parent.verticalCenter; nom: "chevron_right"; taille: 13; color: Couleurs.texteSec
+                        }
+                        LienReglages {
+                            id: lienDomaine
+                            visible: !fen.vueRecherche && !fen.filtreModifies && !!fen.sectionCourante && !!fen.domaineCourant
+                            text: fen.domaineCourant ? fen.domaineCourant.nom : ""
+                            onClicked: fen.allerDomaine(fen.domaineCourant.id)
+                        }
+                        Ico {
+                            id: separateurDomaine
+                            visible: !fen.vueRecherche && !fen.filtreModifies && !!fen.sectionCourante && !!fen.domaineCourant
+                            anchors.verticalCenter: parent.verticalCenter; nom: "chevron_right"; taille: 13; color: Couleurs.texteSec
+                        }
+                        Texte {
+                            width: Math.max(0, parent.width - lienAccueil.width - separateurAccueil.width - parent.spacing * 2
+                                            - (lienDomaine.visible ? lienDomaine.width + separateurDomaine.width + parent.spacing * 2 : 0))
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: fen.vueRecherche ? Reglages.t("Recherche", "Search")
+                                : fen.filtreModifies ? Reglages.t("Modifiés", "Modified")
+                                : fen.sectionCourante ? fen.sectionCourante.nom : fen.domaineCourant ? fen.domaineCourant.nom : ""
+                            secondaire: true; font.pixelSize: 12
                         }
                     }
-
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-                        Texte {
-                            objectName: "nc-reglages-titre-section"
-                            text: fen.recherche.trim() !== ""
-                                ? (Reglages.t("Résultats pour « ", "Results for “") + fen.recherche.trim() + Reglages.t(" »", "”"))
-                                : (fen.filtreModifies
-                                   ? Reglages.t("Réglages modifiés", "Modified settings")
-                                   : (fen.section || Reglages.t("Réglages", "Settings")))
-                            font.pixelSize: 19; font.weight: Font.Bold
+                    Row {
+                        width: parent.width; spacing: 12
+                        Rectangle {
+                            id: iconeScene
+                            width: 40; height: 40
+                            radius: Couleurs.rayonBloc
+                            color: Couleurs.surfaceActive
+                            border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.accentBord
+                            Ico {
+                                anchors.centerIn: parent
+                                nom: fen.vueRecherche ? "search" : fen.filtreModifies ? "edit"
+                                    : fen.sectionCourante ? fen.sectionCourante.icone : fen.domaineCourant ? fen.domaineCourant.icone : "home"
+                                taille: 21; color: Couleurs.texteSurSurfaceActive
+                            }
                         }
-                        Texte {
-                            secondaire: true; font.pixelSize: 12
-                            text: {
-                                var n = fen.visibles.length
-                                var m = 0
-                                for (var i = 0; i < fen.visibles.length; i++) if (fen.visibles[i] && fen.visibles[i].modifie) m++
-                                var base = n + (n > 1 ? Reglages.t(" éléments", " items") : Reglages.t(" élément", " item"))
-                                return m > 0 ? base + " · " + m + (m > 1 ? Reglages.t(" modifiés", " modified") : Reglages.t(" modifié", " modified")) : base
+                        Column {
+                            width: Math.max(0, parent.width - iconeScene.width - parent.spacing)
+                            spacing: 2
+                            Texte {
+                                objectName: "nc-reglages-titre-section"
+                                width: parent.width
+                                text: fen.vueRecherche ? Reglages.t("Résultats pour « ", "Results for “") + fen.recherche.trim() + Reglages.t(" »", "”")
+                                    : fen.filtreModifies ? Reglages.t("Réglages modifiés", "Modified settings")
+                                    : fen.sectionCourante ? fen.sectionCourante.nom
+                                    : fen.domaineCourant ? fen.domaineCourant.nom : Reglages.t("Accueil", "Home")
+                                font.pixelSize: Couleurs.styleEditorial ? 25 : 22; font.weight: Font.Bold
+                            }
+                            Texte {
+                                width: parent.width
+                                wrapMode: Text.Wrap; elide: Text.ElideNone
+                                secondaire: true; font.pixelSize: 12
+                                text: {
+                                    if (!fen.vueListe) return fen.domaineCourant ? fen.domaineCourant.description
+                                        : Reglages.t("Personnalise ton bureau, rubrique par rubrique.", "Make the desktop yours, section by section.")
+                                    const n = fen.visibles.length
+                                    const m = fen.visibles.filter(r => r.modifie).length
+                                    const nombre = n + Reglages.t(n === 1 ? " élément" : " éléments", n === 1 ? " item" : " items")
+                                    return m > 0 ? nombre + " · " + m + Reglages.t(m === 1 ? " modifié" : " modifiés", " modified") : nombre
+                                }
                             }
                         }
                     }
@@ -370,8 +642,9 @@ FloatingWindow {
 
                 // Boutons de fenêtre en haut à droite
                 Row {
+                    id: boutonsFenetre
                     anchors.right: parent.right; anchors.rightMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
+                    y: 15
                     spacing: 8
                     AssistantCommande {
                         rond: true; width: 34; height: 34; icone: "close"
@@ -387,20 +660,68 @@ FloatingWindow {
                 }
             }
 
+            Flow {
+                id: liensFreres
+                objectName: "nc-reglages-rubriques-voisines"
+                anchors.top: enteteScene.bottom; anchors.topMargin: 8
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.leftMargin: 24; anchors.rightMargin: 24
+                visible: !fen.vueRecherche && !fen.filtreModifies && !!fen.sectionCourante && !!fen.domaineCourant && fen.domaineCourant.sections.length > 1
+                spacing: 5
+                Repeater {
+                    model: liensFreres.visible ? fen.domaineCourant.sections : []
+                    LienReglages {
+                        required property var modelData
+                        objectName: "nc-reglages-rubrique-" + modelData.id
+                        text: modelData.nom
+                        courant: modelData.id === fen.section
+                        onClicked: fen.allerSection(modelData.id)
+                    }
+                }
+            }
+
+            ParametresAccueil {
+                id: accueil
+                visible: !fen.vueListe
+                anchors.top: enteteScene.bottom; anchors.topMargin: 14
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.bottom: pied.top; anchors.bottomMargin: 8
+                anchors.leftMargin: 24; anchors.rightMargin: 24
+                domaines: fen.navigation.domaines
+                domaine: fen.domaineCourant
+                stats: fen.chiffres
+                total: fen.catalogue.length
+                modifies: fen.nbModifies
+                enCours: fen.enCours
+                onChoisirDomaine: id => fen.allerDomaine(id)
+                onChoisirSection: id => fen.allerSection(id)
+                onMontrerModifies: fen.basculerModifies()
+                onAllerRail: sidebar.zoneSections.forceActiveFocus()
+                onDemarrerRecherche: lettre => fen.demarrerRecherche(lettre)
+            }
+
             // ── Liste des réglages (cartes aérées et contrôles modernes) ──
             ListView {
                 id: liste
                 objectName: "nc-reglages-liste"
-                anchors.top: enteteScene.bottom; anchors.topMargin: 14
+                visible: fen.vueListe
+                anchors.top: liensFreres.visible ? liensFreres.bottom : enteteScene.bottom
+                anchors.topMargin: liensFreres.visible ? 8 : 14
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.bottom: pied.top; anchors.bottomMargin: 8
                 anchors.leftMargin: 24; anchors.rightMargin: 24
                 clip: true; spacing: 10; model: modeleCles
                 boundsBehavior: Flickable.StopAtBounds
-                focus: true
                 currentIndex: 0
                 highlightMoveDuration: 80
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                section.property: "groupe"
+                section.delegate: Texte {
+                    required property string section
+                    width: liste.width; height: section === "" ? 0 : 24
+                    visible: section !== ""
+                    text: section; secondaire: true; font.pixelSize: 12; font.weight: Font.Bold
+                }
 
                 onCountChanged: if (currentIndex < 0 && count) currentIndex = 0
                 onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
@@ -411,7 +732,7 @@ FloatingWindow {
                     if (event.key === Qt.Key_Down) { if (currentIndex < count - 1) currentIndex++ }
                     else if (event.key === Qt.Key_Up) {
                         if (currentIndex > 0) currentIndex--
-                        else if (fen.recherche.trim()) sidebar.champRecherche.forceActiveFocus()
+                        else if (fen.vueRecherche) sidebar.champRecherche.forceActiveFocus()
                         else sidebar.zoneSections.forceActiveFocus()
                     }
                     else if (event.key === Qt.Key_Right || event.key === Qt.Key_Plus) fen.changer(r, 1)
@@ -425,10 +746,8 @@ FloatingWindow {
                     else if (event.key === Qt.Key_PageUp) currentIndex = Math.max(0, currentIndex - 8)
                     else if (event.key === Qt.Key_R && !(event.modifiers & Qt.ControlModifier)) fen.remettreLigne(r)
                     else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) { if (r && r.genre === "raccourci") fen.supprimerLigne(r); else fen.remettreLigne(r) }
-                    else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) && fen.lettre(event) !== "") {
-                        sidebar.champRecherche.text = fen.lettre(event)
-                        sidebar.champRecherche.forceActiveFocus()
-                        sidebar.champRecherche.cursorPosition = 1
+                    else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) && fen.lettre(event) !== "") {
+                        fen.demarrerRecherche(fen.lettre(event))
                     }
                     else event.accepted = false
                 }
@@ -437,19 +756,21 @@ FloatingWindow {
                 // État vide élégant
                 Column {
                     anchors.centerIn: parent; spacing: 8
-                    visible: liste.count === 0 && !fen.enCours
+                    visible: liste.count === 0
                     Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: fen.recherche.trim() ? "search_off" : "tune"; taille: 32; color: Couleurs.texteSec; opacity: 0.6 }
                     Texte {
                         anchors.horizontalCenter: parent.horizontalCenter; secondaire: true; font.pixelSize: 14
                         text: fen.recherche.trim()
                             ? Reglages.t("Aucun réglage ne correspond.", "No setting matches.")
-                            : (fen.filtreModifies ? Reglages.t("Aucun réglage modifié.", "No modified settings.") : Reglages.t("Chargement…", "Loading…"))
+                            : fen.filtreModifies ? Reglages.t("Aucun réglage modifié.", "No modified settings.")
+                            : fen.enCours ? Reglages.t("Chargement…", "Loading…") : Reglages.t("Aucun réglage dans cette rubrique.", "No settings in this section.")
                     }
                 }
 
                 delegate: Rectangle {
                     id: ligne
                     required property string cle
+                    required property string groupe
                     required property int index
                     objectName: "nc-reglage-" + cle
                     readonly property var r: fen.parCle[cle]
@@ -463,10 +784,10 @@ FloatingWindow {
 
                     width: liste.width
                     height: Math.max(66, blocLigne.implicitHeight + 28)
-                    radius: Couleurs.rayon(16, width, height)
-                    color: r.genre === "doc" ? Qt.alpha(Couleurs.accent, 0.07)
-                         : (estCourante ? Couleurs.carteSurvol : Couleurs.carte)
-                    border.width: estCourante && liste.activeFocus ? 1.5 : 1
+                    radius: Couleurs.rayonBloc
+                    color: r.genre === "doc" ? Couleurs.accentDoux
+                         : (estCourante && liste.activeFocus ? Couleurs.carteSurvol : Couleurs.surfaceDouce)
+                    border.width: estCourante && liste.activeFocus ? 2 : Couleurs.epaisseurBordureCarte
                     border.color: estCourante && liste.activeFocus ? Couleurs.accent : Couleurs.bordureSubtile
                     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
 
@@ -483,49 +804,51 @@ FloatingWindow {
                         // Rangée supérieure : texte à gauche, contrôle principal à droite
                         Item {
                             width: parent.width
-                            implicitHeight: Math.max(contenu.implicitHeight, commande.implicitHeight)
+                            readonly property bool empiler: commande.implicitWidth > 0 && width - commande.implicitWidth < 240
+                            implicitHeight: empiler ? contenu.implicitHeight + 10 + commande.implicitHeight
+                                                    : Math.max(contenu.implicitHeight, commande.implicitHeight)
 
                             Column {
                                 id: contenu
                                 anchors.left: parent.left
-                                anchors.right: commande.left; anchors.rightMargin: 16
-                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.empiler ? parent.width : Math.max(0, commande.x - (commande.width > 0 ? 16 : 0))
+                                y: parent.empiler ? 0 : (parent.height - height) / 2
                                 spacing: 4
 
-                                Row {
-                                    spacing: 8
-                                    Ico {
-                                        visible: ligne.r.genre === "doc"
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        nom: "menu_book"; taille: 16; color: Couleurs.accent
-                                    }
-                                    Texte {
-                                        text: ligne.r.nom
-                                        font.weight: Font.DemiBold; font.pixelSize: 14
-                                    }
+                                Texte {
+                                    width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone
+                                    text: ligne.r.nom
+                                    font.weight: Font.DemiBold; font.pixelSize: 14
+                                }
+                                Flow {
+                                    width: parent.width
+                                    visible: fen.vueRecherche || fen.filtreModifies || ligne.r.modifie
+                                    spacing: 5
                                     // Pastille de section lors d'une recherche ou du filtre Modifiés
                                     Rectangle {
                                         visible: (fen.recherche.trim() !== "" || fen.filtreModifies) && ligne.r.sectionNom !== ""
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: sec.implicitWidth + 14; height: 20
-                                        radius: Couleurs.rayon(8, width, height)
-                                        color: Couleurs.gris2
-                                        border.width: 1; border.color: Couleurs.bordureSubtile
-                                        Texte { id: sec; anchors.centerIn: parent; text: ligne.r.sectionNom; font.pixelSize: 11; secondaire: true }
+                                        width: Math.min(sec.implicitWidth + 14, parent.width); height: 20
+                                        radius: Couleurs.rayonBouton
+                                        color: Couleurs.surfaceDouce
+                                        border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.bordureSubtile
+                                        Texte {
+                                            id: sec; anchors.centerIn: parent; width: Math.max(0, parent.width - 14)
+                                            text: ligne.r.sectionNom; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 11; secondaire: true
+                                        }
                                     }
                                     // Badge discret « Modifié »
                                     Rectangle {
                                         visible: ligne.r.modifie
-                                        anchors.verticalCenter: parent.verticalCenter
                                         width: badgeMod.implicitWidth + 12; height: 19
-                                        radius: height / 2
-                                        color: Couleurs.accentDoux
-                                        Texte { id: badgeMod; anchors.centerIn: parent; text: Reglages.t("Modifié", "Modified"); font.pixelSize: 10; font.weight: Font.DemiBold; color: Couleurs.accent }
+                                        radius: Couleurs.rayonBouton
+                                        color: Couleurs.surfaceActive
+                                        Texte { id: badgeMod; anchors.centerIn: parent; text: Reglages.t("Modifié", "Modified"); font.pixelSize: 10; font.weight: Font.DemiBold; color: Couleurs.texteSurSurfaceActive }
                                     }
                                 }
 
                                 Texte {
                                     visible: ligne.r.aide !== "" && ligne.r.genre !== "rapport"
+                                        && !(ligne.r.genre === "raccourci" && ligne.groupe !== "")
                                     width: parent.width
                                     text: ligne.r.aide; secondaire: true; font.pixelSize: 12
                                     wrapMode: Text.Wrap; elide: Text.ElideNone
@@ -572,7 +895,7 @@ FloatingWindow {
                             Row {
                                 id: commande
                                 anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
+                                y: parent.empiler ? contenu.height + 10 : (parent.height - height) / 2
                                 spacing: 8
 
                                 // 1. Interrupteur oui/non tactile
@@ -580,14 +903,14 @@ FloatingWindow {
                                     visible: ligne.r.genre === "ouinon"
                                     anchors.verticalCenter: parent.verticalCenter
                                     readonly property bool oui: ligne.r.valeur === "oui"
-                                    width: 48; height: 26; radius: height / 2
+                                    width: 48; height: 26; radius: Couleurs.rayonBouton
                                     color: oui ? Couleurs.accent : Couleurs.gris3
                                     border.width: oui ? 0 : 1; border.color: Couleurs.bordureSubtile
                                     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 130 } }
                                     Rectangle {
                                         x: parent.oui ? parent.width - width - 3 : 3
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 20; height: 20; radius: width / 2
+                                        width: 20; height: 20; radius: Math.min(Couleurs.rayonBouton, width / 2)
                                         color: parent.oui ? Couleurs.surAccent : Couleurs.texte
                                         Behavior on x { enabled: !Reglages.sobre; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
                                     }
@@ -602,9 +925,9 @@ FloatingWindow {
                                     visible: (ligne.r.genre === "choix" || ligne.r.genre === "hz") && !ligne.choixEnDessous
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: segRow.implicitWidth + 6; height: 34
-                                    radius: Couleurs.rayon(11, width, height)
-                                    color: Couleurs.gris2
-                                    border.width: 1; border.color: Couleurs.bordureSubtile
+                                    radius: Couleurs.rayonBouton
+                                    color: Couleurs.surfaceDouce
+                                    border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.bordureSubtile
                                     Row {
                                         id: segRow
                                         anchors.centerIn: parent; spacing: 3
@@ -615,14 +938,14 @@ FloatingWindow {
                                                 required property var modelData
                                                 readonly property bool estActif: ligne.r.valeur === modelData[0]
                                                 width: segTxt.implicitWidth + 18; height: 26
-                                                radius: Couleurs.rayon(8, width, height)
-                                                color: estActif ? Couleurs.accent : (zSeg.containsMouse ? Couleurs.gris3 : "transparent")
+                                                radius: Couleurs.rayonBouton
+                                                color: estActif ? Couleurs.surfaceActive : (zSeg.containsMouse ? Couleurs.gris3 : "transparent")
                                                 Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
                                                 Texte {
                                                     id: segTxt; anchors.centerIn: parent
                                                     text: seg.modelData[1]
                                                     font.pixelSize: 12; font.weight: seg.estActif ? Font.DemiBold : Font.Medium
-                                                    color: seg.estActif ? Couleurs.surAccent : Couleurs.texteSec
+                                                    color: seg.estActif ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
                                                 }
                                                 MouseArea {
                                                     id: zSeg; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -640,7 +963,7 @@ FloatingWindow {
                                     spacing: 8
 
                                     Rectangle {
-                                        width: 26; height: 26; radius: Couleurs.rayon(8, width, height)
+                                        width: 26; height: 26; radius: Couleurs.rayonBouton
                                         anchors.verticalCenter: parent.verticalCenter
                                         color: zMoins.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                                         Ico { anchors.centerIn: parent; nom: "remove"; taille: 15; color: Couleurs.texte }
@@ -676,7 +999,7 @@ FloatingWindow {
                                         }
                                     }
                                     Rectangle {
-                                        width: 26; height: 26; radius: Couleurs.rayon(8, width, height)
+                                        width: 26; height: 26; radius: Couleurs.rayonBouton
                                         anchors.verticalCenter: parent.verticalCenter
                                         color: zPlus.containsMouse ? Couleurs.gris3 : Couleurs.gris2
                                         Ico { anchors.centerIn: parent; nom: "add"; taille: 15; color: Couleurs.texte }
@@ -685,7 +1008,7 @@ FloatingWindow {
                                     Rectangle {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: Math.max(54, valEntier.implicitWidth + 16); height: 28
-                                        radius: Couleurs.rayon(9, width, height)
+                                        radius: Couleurs.rayonBouton
                                         color: Couleurs.gris2; border.width: 1; border.color: Couleurs.bordureSubtile
                                         Texte {
                                             id: valEntier; anchors.centerIn: parent
@@ -699,9 +1022,9 @@ FloatingWindow {
                                 Rectangle {
                                     visible: ligne.r.genre === "texte" || ligne.r.genre === "dossier"
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: 230; height: 34; radius: Couleurs.rayon(10, width, height)
-                                    color: Couleurs.gris2
-                                    border.width: saisie.activeFocus ? 1.5 : 1
+                                    width: 230; height: 34; radius: Couleurs.rayonBouton
+                                    color: Couleurs.surfaceDouce
+                                    border.width: saisie.activeFocus ? 2 : Couleurs.epaisseurBordureCarte
                                     border.color: saisie.activeFocus ? Couleurs.accent : Couleurs.bordureSubtile
                                     TextInput {
                                         id: saisie
@@ -720,8 +1043,8 @@ FloatingWindow {
                                     visible: ligne.r.genre === "info"
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: Math.min(340, infoTxt.implicitWidth + 22); height: 30
-                                    radius: Couleurs.rayon(10, width, height)
-                                    color: Couleurs.gris2; border.width: 1; border.color: Couleurs.bordureSubtile
+                                    radius: Couleurs.rayonBouton
+                                    color: Couleurs.surfaceDouce; border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.bordureSubtile
                                     Texte {
                                         id: infoTxt
                                         objectName: "nc-reglage-info-" + ligne.r.cle
@@ -775,7 +1098,7 @@ FloatingWindow {
                                         Rectangle {
                                             required property string modelData
                                             width: kTxt.implicitWidth + 16; height: 28
-                                            radius: Couleurs.rayon(7, width, height)
+                                            radius: Couleurs.rayonBouton
                                             color: Couleurs.gris2
                                             border.width: 1; border.color: Couleurs.gris4
                                             Texte {
@@ -868,10 +1191,12 @@ FloatingWindow {
                                ? Reglages.t("↑↓ Choisir · Entrée Changer · Suppr Désactiver · r Origine · Échap Fermer",
                                             "↑↓ Choose · Enter Change · Del Disable · r Reset · Esc Close")
                                : (sidebar.zoneSections.activeFocus
-                                  ? Reglages.t("←→ Changer de section · ↓ Entrée Liste · ↑ Chercher · Échap Fermer",
-                                               "←→ Switch section · ↓ Enter List · ↑ Search · Esc Close")
-                                  : Reglages.t("↑↓ Naviguer · ←→ Modifier · Entrée Basculer · Tab Section · r Défaut · Ctrl+F Chercher",
-                                               "↑↓ Navigate · ←→ Change · Enter Toggle · Tab Section · r Reset · Ctrl+F Search")))))
+                                  ? Reglages.t("↑↓ Parcourir · ←→ Déplier ou changer · Entrée Ouvrir",
+                                               "↑↓ Browse · ←→ Expand or switch · Enter Open")
+                                  : !fen.vueListe ? Reglages.t("↑ Volet · ↓ Rubriques · Tab Naviguer · Ctrl+F Chercher",
+                                                              "↑ Sidebar · ↓ Sections · Tab Navigate · Ctrl+F Search")
+                                  : Reglages.t("↑↓ Naviguer · ←→ Modifier · Entrée Basculer · Tab Rubrique · r Défaut",
+                                               "↑↓ Navigate · ←→ Change · Enter Toggle · Tab Section · r Reset")))))
                     }
                 }
             }
@@ -885,16 +1210,16 @@ FloatingWindow {
                 anchors.centerIn: parent
                 width: Math.min(520, parent.width - 80)
                 height: colCapture.implicitHeight + 52
-                radius: Couleurs.rayon(22, width, height)
-                color: Couleurs.carte; border.width: 1.5; border.color: Couleurs.accent
+                radius: Couleurs.rayonPanneau
+                color: Couleurs.carte; border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.accent
                 Column {
                     id: colCapture
                     anchors.centerIn: parent; width: parent.width - 48; spacing: 12
                     Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 52; height: 52; radius: Couleurs.rayon(16, width, height)
-                        color: Couleurs.accentDoux; border.width: 1; border.color: Couleurs.accentBord
-                        Ico { anchors.centerIn: parent; nom: "keyboard"; taille: 28; color: Couleurs.accent }
+                        width: 52; height: 52; radius: Couleurs.rayonBloc
+                        color: Couleurs.surfaceActive; border.width: Couleurs.epaisseurBordureCarte; border.color: Couleurs.accentBord
+                        Ico { anchors.centerIn: parent; nom: "keyboard"; taille: 28; color: Couleurs.texteSurSurfaceActive }
                     }
                     Texte {
                         width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap

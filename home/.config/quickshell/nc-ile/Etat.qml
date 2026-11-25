@@ -25,6 +25,7 @@ Singleton {
     // Panneau Centre de contrôle dédié (PanneauControle.qml) : séparé de l'île pour garder l'île sur l'essentiel
     property string controleEcran: ""
     property string controleSection: "accueil"
+    property string controleBord: ""        // "" = détection auto (barre active / réserves), sinon "top"|"bottom"|"left"|"right"
     readonly property bool controleOuvert: controleEcran !== ""
     readonly property var pagesControle: ["centre", "reseau", "wifi", "bluetooth", "son", "systeme", "sante",
                                           "charge", "meteo", "presse", "fenetres", "concentration", "jeu", "calendrier", "minuteur"]
@@ -33,22 +34,27 @@ Singleton {
         if (nom === "centre" || nom === "" || !nom) return "accueil"
         return nom
     }
+    function normaliserBordControle(bord) {
+        return ["top", "bottom", "left", "right"].indexOf(bord) >= 0 ? bord : ""
+    }
     function estPageControle(nom) { return pagesControle.indexOf(nom) >= 0 }
-    function basculerControle(ecran, section) {
+    function basculerControle(ecran, section, bord) {
         var cible = normaliserSectionControle(section)
         fermer()
         if (controleEcran === ecran && (section === undefined || section === "" || controleSection === cible)) {
             fermerControle(); return
         }
+        controleBord = normaliserBordControle(bord)
         controleSection = cible
         controleEcran = ecran
         lire()
         lireLuminosite(false)
         lirePage()
     }
-    function ouvrirControle(ecran, section) {
+    function ouvrirControle(ecran, section, bord) {
         var cible = normaliserSectionControle(section)
         fermer()
+        controleBord = normaliserBordControle(bord)
         controleSection = cible
         controleEcran = ecran
         lire()
@@ -60,8 +66,7 @@ Singleton {
         lire()
         lirePage()
     }
-    function fermerControle() { controleEcran = ""; controleSection = "accueil" }
-    // état qui bouge) ; pendant l'animation, « lanceurFondu » = écran dont la pilule est cachée, « lanceurProprio » = le lanceur
+    function fermerControle() { controleEcran = ""; controleSection = "accueil"; controleBord = "" }
     property var pilules: ({})
     property string lanceurFondu: ""
     property var lanceurProprio: null
@@ -142,7 +147,10 @@ Singleton {
     }
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
     // La page voulue si elle est affichable, sinon le repli (clic sur la batterie de la barre : Batterie, sinon Système)
-    function pageOu(nom, repli) { return vues.indexOf(nom) >= 0 ? nom : repli }
+    function pageOu(nom, repli) {
+        if (nom === "charge" && !batteriePc) return repli
+        return estPageControle(nom) || vues.indexOf(nom) >= 0 ? nom : repli
+    }
     function aller(nom) {
         if (vues.indexOf(nom) < 0) return
         recherche = false
@@ -667,6 +675,7 @@ Singleton {
 
     // ── Luminosité (nc-brightness, même échelle que les touches) ──
     property real luminosite: 0.5
+    property bool aLuminosite: false
     property bool luminositeVueParTouche: false
     Process {
         id: lecteurLum
@@ -674,7 +683,8 @@ Singleton {
         stdout: StdioCollector {
             onStreamFinished: {
                 var v = parseInt(this.text)
-                if (!isNaN(v)) etat.luminosite = v / 100
+                etat.aLuminosite = !isNaN(v)
+                if (etat.aLuminosite) etat.luminosite = v / 100
                 if (etat.luminositeVueParTouche) activite("luminosite")
                 etat.luminositeVueParTouche = false
             }

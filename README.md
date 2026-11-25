@@ -226,6 +226,15 @@ Casque Bluetooth (AirPods…) sans micro : `nc-micro-bluetooth` le passe en mode
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
 
+Avec Quickshell, **Super + C** (`nc-shell-msg control-center`) ouvre le centre de contrôle au bord de la
+barre de l'écran actif. Un clic sur Wi-Fi, Bluetooth ou Son dans la barre ouvre directement son tiroir.
+Dans le panneau : **Tab** choisit un contrôle, **Entrée** ou **Espace** l'active, et **Échap** revient
+au tableau de bord puis ferme le panneau. Les flèches règlent la glissière sélectionnée.
+
+**Super + Alt + ,** (`nc-reglages fenetre`) ouvre les réglages sur leur page d'accueil : choisir une
+catégorie, puis une page, ou rechercher un réglage dans toutes les catégories. La présentation de l'île,
+du centre de contrôle et des réglages suit le thème actif ; les surcharges personnelles restent prioritaires.
+
 L'île complète est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
 service `nc-ile`), avec les icônes Material Symbols Rounded. Quickshell vient du paquet sur Arch, du dépôt COPR sur
 Fedora, et il est compilé par l'installation sur Debian et Ubuntu. Sur openSUSE (pas de paquet), ou si la compilation

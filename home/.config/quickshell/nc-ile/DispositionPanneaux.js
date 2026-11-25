@@ -33,6 +33,28 @@ function pastillesCote(barre, cote) {
     return pastilles
 }
 
+function barreControle(barres, definitions, bord) {
+    const actives = barres.filter(b => b.enabled !== false && (!bord || (b.position ?? "top") === bord))
+    const porte = (b, types) => ["end", "start", "center"].some(cote => pastillesCote(b, cote).some(p =>
+        p.membres.some(nom => definitions[nom]?.enabled !== false && types.includes(definitions[nom]?.type ?? nom))))
+    return actives.find(b => porte(b, ["network", "bluetooth", "volume", "battery", "nc/batterie:batterie"]))
+        ?? actives.find(b => porte(b, ["control-center", "notifications"]))
+        ?? actives.find(b => (b.end?.length ?? 0) > 0) ?? actives[0]
+}
+
+// hyprctl -j layers donne des coordonnées globales en pixels logiques.
+function barreNativeControle(calques, x, y, largeur, hauteur) {
+    const barres = Object.values(calques?.levels ?? {}).flat().filter(c => c.namespace?.startsWith("noctalia-bar-") && c.w > 1 && c.h > 1)
+    const barre = barres.find(c => c.namespace === "noctalia-bar-default") ?? barres[0]
+    if (!barre) return null
+    if (barre.w >= barre.h) {
+        const haut = barre.y - y, bas = y + hauteur - barre.y - barre.h
+        return haut <= bas ? { bord: "top", emprise: haut + barre.h } : { bord: "bottom", emprise: bas + barre.h }
+    }
+    const gauche = barre.x - x, droite = x + largeur - barre.x - barre.w
+    return gauche <= droite ? { bord: "left", emprise: gauche + barre.w } : { bord: "right", emprise: droite + barre.w }
+}
+
 function blocs(barres) {
     const resultat = []
     for (const barre of barres) {

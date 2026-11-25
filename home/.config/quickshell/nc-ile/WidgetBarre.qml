@@ -35,7 +35,7 @@ Item {
 
     function aAction(cle) { return !!definition.actions && typeof definition.actions[cle] === "string" }
     function agir(cle, defaut) {
-        if (aAction(cle) && Actions.lancer(definition.actions[cle])) return
+        if (aAction(cle) && Actions.lancerDepuisBarre(definition.actions[cle], (nom, repli) => page(nom, repli))) return
         if (defaut) defaut()
     }
     function clic(bouton, gauche, droit, milieu, retour, avance) {
@@ -72,11 +72,18 @@ Item {
     }
     function page(nom, repli) {
         const cible = repli ? Etat.pageOu(nom, repli) : nom
-        if (Etat.vues.indexOf(cible) < 0) return
         const sortie = ecran ? ecran.name : ""
-        if (Etat.ecranOuvert === sortie && !Etat.recherche && Etat.vueActive === cible) { Etat.fermer(); return }
-        if (Etat.ecranOuvert !== sortie) Etat.basculer(sortie, false)
-        Etat.aller(cible)
+        if (Etat.estPageControle(cible)) {
+            Etat.basculerControle(sortie, cible, position)
+            return true
+        }
+        if (Etat.vues.indexOf(cible) >= 0) {
+            if (Etat.ecranOuvert === sortie && !Etat.recherche && Etat.vueActive === cible) { Etat.fermer(); return true }
+            if (Etat.ecranOuvert !== sortie) Etat.basculer(sortie, false)
+            Etat.aller(cible)
+            return true
+        }
+        return false
     }
     function ipc(commande) { Quickshell.execDetached(["qs", "-c", "nc-ile", "ipc", "call", "ile", commande]) }
     function teinte(nom, repli) {

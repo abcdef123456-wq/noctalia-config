@@ -1,6 +1,16 @@
 .pragma library
 .import Quickshell as Qs
 
+// Intercepte uniquement le raccourci standard, pour transmettre l'écran et le bord du widget.
+function lancerDepuisBarre(action, ouvrir) {
+    if (typeof action === "string") {
+        const match = /^exec\s+(\S+)\s+ile\s+([a-z]+)(?:\s+([a-z]+))?$/.exec(action.trim())
+        if (match && match[1] === Qs.Quickshell.env("HOME") + "/.local/bin/nc-shell-msg" && ouvrir(match[2], match[3]))
+            return true
+    }
+    return lancer(action)
+}
+
 // Les commandes sont celles de la configuration locale de la barre, jamais des données d'un widget.
 function lancer(action) {
     if (typeof action !== "string" || !action.trim()) return false

@@ -83,13 +83,22 @@ Item {
     Fondu {
         id: repos
         montre: c.mode === "repos"
-        // Repère d'accent discret dans la pilule pour les thèmes architecturaux / terminal / cadre
+        // Signature visuelle discrète selon l'archétype du thème actif
         Rectangle {
             objectName: "nc-pilule-repere-theme"
             anchors.verticalCenter: parent.verticalCenter
-            visible: Couleurs.familleTheme === "brut" || Couleurs.forme === "cadre"
-            width: 3; height: 12
-            radius: Couleurs.rayon(2, width, height)
+            visible: Couleurs.styleBrut || Couleurs.styleEditorial || Couleurs.styleNeon || Couleurs.forme === "cadre"
+            width: Couleurs.styleNeon ? 5 : (Couleurs.styleEditorial ? 2 : 3)
+            height: Couleurs.styleNeon ? 5 : (Couleurs.styleEditorial ? 10 : 12)
+            radius: Couleurs.rayon(Couleurs.styleNeon ? 3 : 1, width, height)
+            color: Couleurs.accent
+            opacity: Couleurs.styleEditorial ? 0.78 : 1.0
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: Couleurs.styleTerminal
+            text: ">"
+            font.pixelSize: 12; font.weight: Font.Bold
             color: Couleurs.accent
         }
         // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : bouclier à cadenas discret ; clic ouvre le panneau VPN.
@@ -128,14 +137,14 @@ Item {
         Texte {
             anchors.verticalCenter: parent.verticalCenter
             text: Etat.heure
-            font.weight: Font.DemiBold
+            font.weight: Couleurs.styleEditorial ? Font.Medium : Font.DemiBold
             font.features: ({ "tnum": 1 })
-            color: (Couleurs.familleTheme === "brut" || Couleurs.familleTheme === "matrice") ? Couleurs.accent : Couleurs.texte
+            color: (Couleurs.styleBrut || Couleurs.styleTerminal) ? Couleurs.accent : Couleurs.texte
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
             visible: Reglages.val("ILE_DATE", "oui") !== "non"
-            text: Couleurs.estTech ? "/" : "·"
+            text: (Couleurs.styleBrut || Couleurs.styleTerminal) ? "/" : "·"
             secondaire: true; opacity: 0.55; font.pixelSize: 11
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true

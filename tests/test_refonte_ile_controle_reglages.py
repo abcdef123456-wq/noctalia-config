@@ -140,6 +140,34 @@ ShellRoot {{
 ''', reglages=reg)
                 self.assertIn("FAMILLE:" + attendu, out)
 
+    def test_changement_de_theme_et_de_palette_sans_redemarrage(self):
+        self.lancer_qml('''import QtQuick
+import Quickshell
+import Quickshell.Io
+ShellRoot {
+    id: r
+    property bool change: false
+    Process {
+        id: applique
+        command: ["sh", "-c",
+            "cd \\"$HOME/.config/nc\\" && printf '%s\\\\n' 'STYLE=sakura' > style.tmp && mv style.tmp style.conf && " +
+            "printf '%s\\\\n' '{\\"fond\\":\\"#f3e3e3\\",\\"sombre\\":false}' > palette.tmp && mv palette.tmp palette-ile.json"]
+    }
+    Timer {
+        interval: 40; running: true; repeat: true
+        onTriggered: {
+            if (!r.change && Couleurs.familleTheme === "noctalia" && Couleurs.fond.toString() === "#101820") {
+                r.change = true
+                applique.running = true
+            }
+            if (r.change && Couleurs.familleTheme === "editorial" && Couleurs.fond.toString() === "#f3e3e3" && !Couleurs.sombre)
+                Qt.quit()
+        }
+    }
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(2) }
+}
+''', reglages="STYLE=noctalia\n", palette={"fond": "#101820", "sombre": True})
+
     def test_ile_essentielle_par_defaut_et_navigation_entete(self):
         out = self.lancer_qml('''import QtQuick
 import Quickshell
@@ -178,7 +206,7 @@ ShellRoot {
             if (v.indexOf("centre") >= 0 || v.indexOf("son") >= 0 || v.indexOf("reseau") >= 0 || v.indexOf("systeme") >= 0) {
                 console.error("pages du centre de contrôle encore sur l'île par défaut: " + v); Qt.exit(3)
             }
-            if (ess.implicitHeight < 120) { console.error("hauteur EssentielIle trop faible: " + ess.implicitHeight); Qt.exit(4) }
+            if (ess.height > ess.parent.height - entete.height) { console.error("les actions sont rognées"); Qt.exit(4) }
             ess.ouvrirControle()
             ess.ouvrirRecherche()
             ess.ouvrirThemes()
@@ -191,13 +219,18 @@ ShellRoot {
 ''')
         self.assertIn("VUES_DEFAUT:essentiel,notifications", out)
 
-    def test_panneau_controle_dedie_et_sous_vues(self):
+    def test_panneau_controle_ancrage_et_clavier(self):
         out = self.lancer_qml('''import QtQuick
+import QtTest
 import Quickshell
 ShellRoot {
     id: r
     property bool ferme: false
     property int etape: 0
+    TestCase { id: clavier; name: "ClavierControle"; when: false }
+    function verifier(ok, message) {
+        if (!ok) { console.error(message); Qt.exit(2); throw new Error(message) }
+    }
     function trouver(item, nom) {
         if (!item) return null
         if (item.objectName === nom) return item
@@ -210,40 +243,50 @@ ShellRoot {
     PanneauControle {
         id: ctrl
         visible: true; implicitWidth: 900; implicitHeight: 720
+        bord: Etat.controleBord || "top"
+        basReserve: 44
         onFermer: { r.ferme = true; Etat.fermerControle() }
     }
     Timer {
         interval: 180; running: true; repeat: true
         onTriggered: {
+            const panneau = trouver(ctrl.contentItem, "nc-controle-panneau")
+            const tiroir = trouver(ctrl.contentItem, "nc-controle-tiroir")
             if (r.etape === 0) {
-                Etat.ouvrirControle("TEST", "accueil")
-                if (!Etat.controleOuvert || Etat.controleSection !== "accueil") { console.error("ouverture accueil"); Qt.exit(2) }
-                if (!trouver(ctrl.contentItem, "nc-controle-tuile-reseau")) { console.error("tuile réseau absente"); Qt.exit(3) }
-                if (!trouver(ctrl.contentItem, "nc-controle-volume")) { console.error("glissière volume absente"); Qt.exit(4) }
+                Etat.ouvrirControle("TEST", "accueil", "bottom")
                 r.etape++
                 return
             }
             if (r.etape === 1) {
-                Etat.allerControle("son")
-                if (Etat.controleSection !== "son" || ctrl.surAccueil) { console.error("sous-vue son non ouverte"); Qt.exit(5) }
-                if (!trouver(ctrl.contentItem, "nc-controle-retour")) { console.error("bouton retour absent"); Qt.exit(6) }
+                verifier(Math.abs(panneau.y + panneau.height + 56 - ctrl.height) < 1, "carte non ancrée en bas")
+                const bt = trouver(panneau, "nc-controle-tuile-bluetooth")
+                trouver(bt, "nc-controle-action").forceActiveFocus()
+                clavier.keyClick(Qt.Key_Tab)
+                verifier(trouver(bt, "nc-controle-details").activeFocus, "Tab ne mène pas aux détails Bluetooth")
+                clavier.keyClick(Qt.Key_Return)
+                verifier(Etat.controleSection === "bluetooth", "Entrée n'ouvre pas Bluetooth")
                 r.etape++
                 return
             }
             if (r.etape === 2) {
-                Etat.allerControle("systeme")
-                if (Etat.controleSection !== "systeme") { console.error("sous-vue systeme"); Qt.exit(7) }
-                Etat.allerControle("accueil")
-                if (!ctrl.surAccueil) { console.error("retour accueil échoué"); Qt.exit(8) }
-                Etat.basculer("TEST", false)
-                if (Etat.controleOuvert) { console.error("ouvrir l'île doit fermer le centre de contrôle"); Qt.exit(9) }
-                console.warn("CONTROLE_OK")
-                Qt.quit()
+                verifier(tiroir.item && tiroir.item.visible, "tiroir Bluetooth invisible")
+                clavier.keyClick(Qt.Key_Backspace)
+                verifier(ctrl.surAccueil, "Retour arrière ne revient pas à l'accueil")
+                Etat.allerControle("son")
+                r.etape++
+                return
             }
+            verifier(tiroir.item && tiroir.item.visible, "tiroir Audio invisible")
+            clavier.keyClick(Qt.Key_Escape)
+            verifier(ctrl.surAccueil && !r.ferme, "Échap doit d'abord revenir à l'accueil")
+            clavier.keyClick(Qt.Key_Escape)
+            verifier(r.ferme && !Etat.controleOuvert, "Échap ne ferme pas le panneau")
+            console.warn("CONTROLE_OK")
+            Qt.quit()
         }
     }
 }
-''')
+''', reglages="ILE_ANIM=sec\n")
         self.assertIn("CONTROLE_OK", out)
 
     def test_parametres_sidebar_et_filtre_modifies(self):
@@ -293,7 +336,7 @@ ShellRoot {
             if (r.etape === 2) {
                 if (p.visibles.length !== 2) { console.error("filtre modifiés doit montrer 2 lignes, eu " + p.visibles.length); Qt.exit(5) }
                 p.allerSection("Fenêtres")
-                if (p.filtreModifies || p.section !== "Fenêtres" || p.visibles.length !== 1) {
+                if (p.filtreModifies || p.section !== "fenetres" || p.visibles.length !== 1) {
                     console.error("allerSection doit quitter le filtre modifiés"); Qt.exit(6)
                 }
                 console.warn("PARAMETRES_REFONTE_OK")

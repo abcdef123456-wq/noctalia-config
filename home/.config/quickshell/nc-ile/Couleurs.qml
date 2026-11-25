@@ -87,15 +87,14 @@ Singleton {
         })
         return def[animNom]
     }
-
     FileView {
+        id: pal
         path: Quickshell.env("HOME") + "/.config/nc/palette-ile.json"
         watchChanges: true
         onFileChanged: reload()
         onLoaded: { try { c.p = JSON.parse(text()) } catch (e) { c.p = {} } }
         onLoadFailed: c.p = {}
     }
-
     readonly property bool terminal: style === "terminal" && p.fond !== undefined
     function v(cle, apple) { return terminal && p[cle] ? p[cle] : apple }
 
@@ -137,29 +136,82 @@ Singleton {
     readonly property bool aContour: contour !== "aucun" && (terminal || contour === "discret")
 
     // Identité visuelle dérivée du thème actif (partagée par l'île, le Centre de contrôle et les Réglages)
-    readonly property string themeActif: Reglages.val("STYLE", "noctalia")
+    readonly property string themeActif: (Reglages.style && Reglages.style["STYLE"]) || Reglages.val("STYLE", "noctalia")
     readonly property bool estCarre: rayonFinal <= 15 || forme === "rectangle" || forme === "cadre"
     readonly property bool estEditorial: /Serif/i.test(police)
     readonly property bool estTech: majuscules || /Mono|Code|Doto|Orbitron|Rajdhani/i.test(police)
     readonly property string familleTheme: {
-        if (forme === "point" || themeActif === "matrice") return "matrice"
-        if (forme === "encoche" || themeActif === "apple" || themeActif === "oled" || themeActif === "clair-neutre") return "apple"
+        if (themeActif === "matrice") return "matrice"
+        if (["retro", "pluie-verte"].includes(themeActif)) return "terminal"
+        if (["apple", "oled", "clair-neutre"].includes(themeActif)) return "apple"
+        if (["brutaliste", "cyberjaune", "gruvbox"].includes(themeActif)) return "brut"
+        if (["papier", "solarized-clair", "sakura", "kanagawa", "rose-aube", "everforest"].includes(themeActif)) return "editorial"
+        if (["synthwave", "vaporwave", "tokyo", "dracula", "ocean"].includes(themeActif)) return "neon"
+        if (forme === "point") return "matrice"
+        if (forme === "cadre" && estTech) return "terminal"
+        if (forme === "encoche") return "apple"
         if (estCarre && estTech) return "brut"
-        if (estEditorial || themeActif === "papier" || themeActif === "solarized-clair") return "editorial"
-        if (lueur || themeActif === "synthwave" || themeActif === "vaporwave" || themeActif === "tokyo" || themeActif === "dracula" || themeActif === "ocean") return "neon"
+        if (estEditorial) return "editorial"
+        if (lueur) return "neon"
         return "noctalia"
     }
-    readonly property color bordureSubtile: {
-        if (forme === "cadre" || familleTheme === "brut") return Qt.alpha(accent, sombre ? 0.38 : 0.45)
-        if (familleTheme === "editorial") return Qt.alpha(voile, sombre ? 0.14 : 0.16)
-        if (familleTheme === "neon") return Qt.alpha(accent, 0.28)
-        return Qt.alpha(voile, sombre ? 0.08 : 0.12)
+    readonly property bool styleApple: familleTheme === "apple"
+    readonly property bool styleBrut: familleTheme === "brut"
+    readonly property bool styleTerminal: familleTheme === "terminal" || familleTheme === "matrice"
+    readonly property bool styleEditorial: familleTheme === "editorial"
+    readonly property bool styleNeon: familleTheme === "neon"
+    readonly property bool styleModerne: familleTheme === "noctalia"
+
+    // Surfaces & bordures adaptées à l'archétype du thème actif
+    readonly property color surfaceDouce: {
+        if (styleBrut) return Qt.alpha(voile, sombre ? 0.05 : 0.04)
+        if (styleTerminal) return Qt.alpha(accent, sombre ? 0.07 : 0.06)
+        if (styleEditorial) return Qt.alpha(voile, sombre ? 0.04 : 0.035)
+        if (styleNeon) return Qt.alpha(accent, sombre ? 0.09 : 0.07)
+        return Qt.alpha(carte, sombre ? 0.78 : 0.88)
     }
-    readonly property real epaisseurBordureCarte: (forme === "cadre" || familleTheme === "brut") ? Math.max(1, Math.min(2, epaisseur)) : 1
-    readonly property color separateur: Qt.alpha(voile, sombre ? 0.09 : 0.12)
-    readonly property color accentDoux: Qt.alpha(accent, sombre ? 0.16 : 0.12)
-    readonly property color accentBord: Qt.alpha(accent, sombre ? 0.45 : 0.35)
+    readonly property color surfaceActive: {
+        if (styleBrut || styleTerminal) return accent
+        if (styleNeon) return Qt.alpha(accent, sombre ? 0.24 : 0.18)
+        if (styleEditorial) return Qt.alpha(accent, sombre ? 0.15 : 0.11)
+        return Qt.alpha(accent, sombre ? 0.20 : 0.14)
+    }
+    readonly property color texteSurSurfaceActive: (styleBrut || styleTerminal) ? surAccent : texte
+    readonly property color bordureSubtile: {
+        if (styleBrut) return Qt.alpha(voile, sombre ? 0.24 : 0.28)
+        if (styleTerminal || forme === "cadre") return Qt.alpha(accent, sombre ? 0.44 : 0.50)
+        if (styleNeon) return Qt.alpha(accent, 0.34)
+        if (styleEditorial) return Qt.alpha(voile, sombre ? 0.14 : 0.16)
+        if (styleApple) return Qt.alpha(voile, sombre ? 0.09 : 0.10)
+        return Qt.alpha(voile, sombre ? 0.10 : 0.13)
+    }
+    readonly property real epaisseurBordureCarte: (styleBrut || styleTerminal || forme === "cadre") ? Math.max(1, Math.min(2, epaisseur)) : 1
+    readonly property color separateur: {
+        if (styleTerminal) return Qt.alpha(accent, 0.26)
+        if (styleBrut) return Qt.alpha(voile, sombre ? 0.18 : 0.22)
+        if (styleNeon) return Qt.alpha(accent, 0.22)
+        return Qt.alpha(voile, sombre ? 0.09 : 0.12)
+    }
+    readonly property color accentDoux: Qt.alpha(accent, sombre ? 0.17 : 0.13)
+    readonly property color accentBord: Qt.alpha(accent, sombre ? 0.48 : 0.38)
     readonly property real opacitePanneau: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
-                                           ? (sombre ? Math.min(verre, 0.86) : Math.min(verre, 0.90))
-                                           : Math.max(verre, 0.96)
+                                           ? (sombre ? Math.min(verre, styleApple ? 0.84 : 0.88) : Math.min(verre, 0.92))
+                                           : Math.max(verre, 0.97)
+    // Géométrie harmonisée par archétype de thème (utilisée par l'île, le Centre de contrôle et les Réglages)
+    readonly property real rayonPanneau: styleTerminal ? 2 : (styleBrut ? 4 : (styleEditorial ? 14 : (styleNeon ? 18 : (styleApple ? 24 : 20))))
+    readonly property real rayonBloc: styleTerminal ? 2 : (styleBrut ? 3 : (styleEditorial ? 10 : (styleNeon ? 14 : (styleApple ? 16 : 14))))
+    readonly property real rayonBouton: styleTerminal ? 2 : (styleBrut ? 3 : (styleEditorial ? 8 : (styleNeon ? 10 : 12)))
+    // Libellé humain du thème actif (pour les en-têtes / page d'accueil des réglages)
+    readonly property string nomThemeAffiche: {
+        var n = String(themeActif || "noctalia")
+        return n.split("-").map(s => s ? s.charAt(0).toUpperCase() + s.slice(1) : "").join(" ")
+    }
+    readonly property string libelleArchetype: {
+        if (styleApple) return Reglages.t("Verre & capsule", "Glass & capsule")
+        if (styleBrut) return Reglages.t("Architectural", "Architectural")
+        if (styleTerminal) return Reglages.t("Terminal", "Terminal")
+        if (styleEditorial) return Reglages.t("Éditorial", "Editorial")
+        if (styleNeon) return Reglages.t("Néon", "Neon")
+        return "Noctalia"
+    }
 }

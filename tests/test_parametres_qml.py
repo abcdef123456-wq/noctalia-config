@@ -50,7 +50,7 @@ class FenetreReglages(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool sobre: false; function t(fr,en){return fr} function val(k,d){return d}}')
-            noms = ["Reglages", "Couleurs", "Raccourcis", "Gabarit", "Parametres", "ParametresBouton", "ParametresSidebar", "AssistantCommande", "Texte", "Ico"]
+            noms = ["Reglages", "Couleurs", "Raccourcis", "Gabarit", "Parametres", "ParametresBouton", "ParametresSidebar", "ParametresAccueil", "AssistantCommande", "Texte", "Ico"]
             (root / "qml/qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
@@ -75,7 +75,7 @@ ShellRoot {
  // TEST_INPUT
  function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
- function creer(){var c=Qt.createComponent("Parametres.qml");verifier(c.status===Component.Ready,c.errorString());fen=c.createObject(racine);verifier(fen!==null,"création");fen.afficher(Quickshell.screens[0].name)}
+ function creer(section){var c=Qt.createComponent("Parametres.qml");verifier(c.status===Component.Ready,c.errorString());fen=c.createObject(racine);verifier(fen!==null,"création");fen.afficher(Quickshell.screens[0].name);if(section)fen.allerSection(section)}
  Timer {interval:100;running:true;repeat:true;onTriggered:{
  if(racine.dansEtape)return
  racine.dansEtape=true
@@ -97,12 +97,12 @@ ShellRoot {
 
     def test_catalogue_recherche_bascule_et_remise(self):
         appels = self.executer('''
-if(etape===0){creer();etape++;return}
+if(etape===0){creer("Clavier et souris");etape++;return}
 if(fen.enCours)return
 if(etape===1){
  verifier(fen.catalogue.length===3,"catalogue non lu : "+fen.catalogue.length)
- verifier(fen.sections.join("|")==="Clavier et souris|Fenêtres","sections : "+fen.sections.join("|"))
- verifier(fen.section==="Clavier et souris"&&fen.visibles.length===2,"première section")
+ verifier(fen.sections.includes("clavier-souris")&&fen.sections.includes("fenetres"),"sections : "+fen.sections.join("|"))
+ verifier(fen.section==="clavier-souris"&&fen.visibles.length===2,"lien direct")
  var champ=trouver(fen.contentItem,"nc-reglages-recherche");verifier(champ!==null,"champ de recherche absent")
  champ.text="FLOU";verifier(fen.visibles.length===1&&fen.visibles[0].cle==="FENETRES_FLOU_FORCE","recherche en majuscules : "+fen.visibles.length)
  champ.text="trois doigts";verifier(fen.visibles.length===1&&fen.visibles[0].cle==="GESTES","recherche dans l'aide, hors section courante")
@@ -136,35 +136,39 @@ if(etape===3){
 
     def test_tout_au_clavier(self):
         appels = self.executer('''
-if(etape===0){creer();etape++;return}
+if(etape===0){creer("Keyboard and Mouse");etape++;return}
 if(fen.enCours)return
 var liste=trouver(fen.contentItem,"nc-reglages-liste");var champ=trouver(fen.contentItem,"nc-reglages-recherche")
 if(etape===1){verifier(liste!==null&&liste.activeFocus,"la liste n'a pas le focus à l'ouverture");verifier(fen.courant.cle==="SOURIS_VITESSE","première ligne");clavier.keyClick(Qt.Key_Right);etape++;return}
 if(etape===2){verifier(fen.reglage("SOURIS_VITESSE").valeur==="1","→ n'a pas augmenté : "+fen.reglage("SOURIS_VITESSE").valeur);clavier.keyClick(Qt.Key_Down);verifier(fen.courant.cle==="GESTES","↓");clavier.keyClick(Qt.Key_Return);etape++;return}
-if(etape===3){verifier(fen.reglage("GESTES").valeur==="non","Entrée n'a pas basculé");clavier.keyClick(Qt.Key_Tab);verifier(fen.section==="Fenêtres"&&fen.courant.cle==="FENETRES_FLOU_FORCE","Tab section : "+fen.section);clavier.keyClick(Qt.Key_Left);etape++;return}
+if(etape===3){verifier(fen.reglage("GESTES").valeur==="non","Entrée n'a pas basculé");clavier.keyClick(Qt.Key_Tab);verifier(fen.section==="fenetres"&&fen.courant.cle==="FENETRES_FLOU_FORCE","Tab section : "+fen.section);clavier.keyClick(Qt.Key_Left);etape++;return}
 if(etape===4){verifier(fen.reglage("FENETRES_FLOU_FORCE").valeur==="leger","← choix précédent : "+fen.reglage("FENETRES_FLOU_FORCE").valeur);clavier.keyClick(Qt.Key_R);etape++;return}
 if(etape===5){verifier(fen.reglage("FENETRES_FLOU_FORCE").valeur==="normal"&&!fen.reglage("FENETRES_FLOU_FORCE").modifie,"r : valeur de la config");clavier.keyClick(Qt.Key_G);verifier(champ.activeFocus&&champ.text==="g"&&fen.visibles.length===1&&fen.visibles[0].cle==="GESTES","une lettre lance la recherche : "+champ.text+" / "+fen.visibles.length);clavier.keyClick(Qt.Key_Escape);verifier(fen.recherche===""&&fen.visible,"Échap vide la recherche sans fermer");clavier.keyClick(Qt.Key_Escape);verifier(!fen.visible,"second Échap ferme");Qt.quit()}
 ''', evenements=True)
         self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [["set", "SOURIS_VITESSE", "1"], ["set", "GESTES", "non"], ["set", "FENETRES_FLOU_FORCE", "leger"], ["reset", "FENETRES_FLOU_FORCE"]])
 
-    def test_onglets_aux_fleches_depuis_le_haut(self):
+    def test_accueil_domaine_rubrique_et_retour_au_clavier(self):
         appels = self.executer('''
 if(etape===0){creer();etape++;return}
 if(fen.enCours)return
-var liste=trouver(fen.contentItem,"nc-reglages-liste"),rangee=trouver(fen.contentItem,"nc-reglages-sections"),champ=trouver(fen.contentItem,"nc-reglages-recherche")
+var liste=trouver(fen.contentItem,"nc-reglages-liste"),rail=trouver(fen.contentItem,"nc-reglages-sections")
 if(etape===1){
- verifier(liste.activeFocus&&liste.currentIndex===0,"départ sur la première ligne")
- clavier.keyClick(Qt.Key_Up);verifier(rangee.activeFocus,"↑ depuis la première ligne ne monte pas sur les onglets")
- clavier.keyClick(Qt.Key_Right);verifier(fen.section==="Fenêtres"&&rangee.activeFocus,"→ sur les onglets : "+fen.section)
- clavier.keyClick(Qt.Key_Right);verifier(fen.section==="Clavier et souris","→ revient au premier onglet après le dernier")
- clavier.keyClick(Qt.Key_Left);verifier(fen.section==="Fenêtres","← onglet précédent")
- verifier(appels_vides(),"rien n'est écrit en changeant d'onglet")
- clavier.keyClick(Qt.Key_Down);verifier(liste.activeFocus&&fen.courant.cle==="FENETRES_FLOU_FORCE","↓ redescend dans la liste de l'onglet")
- clavier.keyClick(Qt.Key_Up);clavier.keyClick(Qt.Key_Up);verifier(champ.activeFocus,"↑ depuis les onglets va à la recherche")
- clavier.keyClick(Qt.Key_Down);verifier(rangee.activeFocus,"↓ depuis une recherche vide revient aux onglets")
+ var accueil=trouver(fen.contentItem,"nc-reglages-accueil")
+ verifier(accueil&&accueil.visible&&accueil.activeFocus&&!liste.visible,"l'accueil remplace la liste au démarrage")
+ clavier.keyClick(Qt.Key_Down);clavier.keyClick(Qt.Key_Return)
+ verifier(fen.domaine==="bureau"&&fen.section==="","Entrée doit ouvrir la page du domaine Bureau")
+ etape++;return}
+if(etape===2){
+ var domaine=trouver(fen.contentItem,"nc-reglages-menu-bureau")
+ verifier(domaine&&domaine.visible&&domaine.activeFocus,"menu de domaine actif")
+ clavier.keyClick(Qt.Key_Down);clavier.keyClick(Qt.Key_Return)
+ verifier(fen.section==="fenetres"&&liste.activeFocus&&fen.courant.cle==="FENETRES_FLOU_FORCE","rubrique du domaine ouverte")
+ clavier.keyClick(Qt.Key_Up);verifier(rail.activeFocus,"↑ depuis la première préférence passe au rail")
+ clavier.keyClick(Qt.Key_Left,Qt.AltModifier);verifier(domaine.visible&&!liste.visible,"Alt+← revient au domaine")
+ clavier.keyClick(Qt.Key_Left,Qt.AltModifier);verifier(!fen.domaine&&trouver(fen.contentItem,"nc-reglages-accueil").visible,"Alt+← revient à l'accueil")
  Qt.quit()}
-'''.replace("appels_vides()", "true"), evenements=True)
-        self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [], "changer d'onglet n'écrit rien")
+''', evenements=True)
+        self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [], "naviguer n'écrit rien")
 
     def test_raccourcis_capture_desactivation_et_echap_avec_ile(self):
         appels = self.executer('''
@@ -172,11 +176,11 @@ if(etape===0){creer();etape++;return}
 if(fen.enCours)return
 var liste=trouver(fen.contentItem,"nc-reglages-liste")
 if(etape===1){
- verifier(fen.sections.indexOf("Raccourcis")>=0,"section Raccourcis absente : "+fen.sections.join("|"))
+ verifier(fen.sections.includes("raccourcis"),"section Raccourcis absente : "+fen.sections.join("|"))
  var champ=trouver(fen.contentItem,"nc-reglages-recherche");champ.text="super + t";verifier(fen.visibles.length===1&&fen.visibles[0].genre==="raccourci","recherche par les touches")
  champ.text="super+t";verifier(fen.visibles.length===1,"« super+t » : mots séparés par +")
  champ.text="t super";verifier(fen.visibles.length===1,"mots dans le désordre")
- champ.text="";fen.section="Raccourcis";liste.currentIndex=0;liste.forceActiveFocus()
+ champ.text="";fen.allerSection("Raccourcis");liste.currentIndex=0;liste.forceActiveFocus()
  clavier.keyClick(Qt.Key_Return);verifier(fen.capture!==null&&trouver(fen.contentItem,"nc-reglages-capture").activeFocus,"Entrée n'ouvre pas la capture")
  clavier.keyClick(Qt.Key_B);verifier(fen.capture!==null&&fen.captureMessage!=="","une touche sans modificateur est refusée")
  clavier.keyClick(Qt.Key_T,Qt.ControlModifier);verifier(fen.capture===null&&liste.activeFocus,"capture non terminée")
@@ -196,7 +200,7 @@ if(etape===3){
         """Liste longue défilée vers le bas : changer une option affiche la valeur aussitôt (faux nc-reglages lent),
         garde la position et la ligne courante, sans reconstruire la liste ; un changement de section remet en haut."""
         appels = self.executer('''
-if(etape===0){creer();etape++;return}
+if(etape===0){creer("Clavier et souris");etape++;return}
 if(fen.enCours)return
 var liste=trouver(fen.contentItem,"nc-reglages-liste")
 if(etape===1){
@@ -212,7 +216,7 @@ if(etape===2){
  verifier(liste.currentIndex===41,"index perdu : "+liste.currentIndex)
  verifier(trouver(liste.contentItem,"nc-reglage-LONG_39")===racine.ligne0,"le délégué a été recréé")
   verifier(fen.reglage("LONG_39").valeur==="7","valeur relue")
- fen.section="Fenêtres";verifier(liste.contentY===0&&liste.currentIndex===0,"changement de section : retour en haut");Qt.quit()}
+ fen.allerSection("Fenêtres");verifier(liste.contentY===0&&liste.currentIndex===0,"changement de section : retour en haut");Qt.quit()}
 ''', longue=True)
         self.assertEqual([a for a in appels if a[0] == "set"], [["set", "LONG_39", "7"]])
 
@@ -251,7 +255,7 @@ if(etape===2){verifier(fen.reglage("SOURIS_VITESSE").valeur==="0","valeur non r�
         appels = self.executer('''
 if(etape===0){creer();etape++;return}
 if(fen.enCours)return
-if(etape===1){fen.section="Énergie";etape++;return}
+if(etape===1){fen.allerSection("Énergie");etape++;return}
 if(etape===2){
  verifier(fen.visibles.length===2&&fen.visibles[0].genre==="info"&&fen.visibles[1].genre==="action","lignes d'Énergie : "+fen.visibles.length)
  var info=trouver(fen.contentItem,"nc-reglage-info-info:mode-graphique");if(!info)return
@@ -277,7 +281,7 @@ if(fen.enCours)return
 var liste=trouver(fen.contentItem,"nc-reglages-liste")
 var b=trouver(fen.contentItem,"nc-reglage-action-session:Dev"),ok=trouver(fen.contentItem,"nc-reglage-confirmer-session:Dev")
 var non=trouver(fen.contentItem,"nc-reglage-annuler-session:Dev"),q=trouver(fen.contentItem,"nc-reglage-question-session:Dev")
-if(etape===1){fen.section="Fenêtres";etape++;return}
+if(etape===1){fen.allerSection("Fenêtres");etape++;return}
 if(etape===2){
  verifier(fen.visibles.length===2&&fen.visibles[1].cle==="session:Dev","lignes de Fenêtres : "+fen.visibles.length)
  if(!b)return
