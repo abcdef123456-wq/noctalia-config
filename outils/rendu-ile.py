@@ -162,7 +162,7 @@ def preparer(root, etat, reglages, palette):
             t = sans_couche(t).replace("id: fen\n", "id: fen\n    readonly property Item cible: racine\n    readonly property Item ilot: ile\n", 1)
             if f.name == "Ile.qml":    # tout le dessin dans un Item de la scène : seul un Item se capture (la fenêtre, non)
                 t = t.replace("    Item {\n        id: fondClic", "    Item {\n    id: racine\n    anchors.fill: parent\n    Item {\n        id: fondClic", 1)
-                t = t.replace("radius: Couleurs.rayon(fen.ouverte", "radius: 0.01 + Couleurs.rayon(fen.ouverte", 1)    # un rayon nul fait sortir Qt software en RGB, sans alpha
+                t = t.replace("rayonTheme: Couleurs.rayon(fen.ouverte", "rayonTheme: 0.01 + Couleurs.rayon(fen.ouverte", 1)    # un rayon nul fait sortir Qt software en RGB, sans alpha
                 t = t.rstrip()
                 t = t[:t.rindex("}")] + "}\n}\n"
                 t = re.sub(r"(implicitHeight:).*", r"\1 700", t, count=1)    # fenêtre assez haute pour les pages ouvertes
