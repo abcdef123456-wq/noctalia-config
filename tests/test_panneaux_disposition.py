@@ -304,18 +304,34 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
                 const w = barres()[0];
                 verifier(w.masqueTeste.regions.length === 2 && w.visible,
                          "aucune reconfiguration de masque ou mapping pendant le ressort");
-                w.mouv.reactionBarre = "instantane";
+                // Nouvel objet : les pastilles (emprise vive) relisent le mode comme le masque (emprise stable).
+                w.mouv = Object.assign({}, w.mouv, { reactionBarre: "instantane" });
                 w.empriseStable = Qt.rect(0, 0, 2000, 2000);
             } else if (etape === 4) {
-                verifier(!barres()[0].visible && barres()[0].nombrePastillesRendues === 0,
-                         "une barre totalement occultée est démontée");
+                const w = barres()[0], panneaux = ecransIle.instances[0].panneauxTest;
+                verifier(w.visible && w.nombrePastillesRendues === 0,
+                         "une barre occultée par l'île garde son calque, sans pastille rendue");
+                verifier(w.masqueTeste.regions.length === 0, "aucune zone cliquable sous l'île");
+                verifier(!panneaux.aPastilleRendue(w.contentItem), "pastilles masquées pendant l'occultation");
                 verifier(ipcTeste.panneauxPrets("test") === "", "ne pas acquitter un écran sans pastille");
+                w.empriseLive = Qt.rect(0, 0, 0, 0);
+            } else if (etape === 5) {
+                const w = barres()[0], panneaux = ecransIle.instances[0].panneauxTest;
+                verifier(w.visible && panneaux.aPastilleRendue(w.contentItem),
+                         "les pastilles reviennent pendant le ressort de fermeture");
+                verifier(w.masqueTeste.regions.length === 0, "masque inchangé tant que l'emprise n'est pas stable");
+                w.empriseStable = Qt.rect(0, 0, 0, 0);
+            } else if (etape === 6) {
+                const w = barres()[0];
+                verifier(w.visible && w.nombrePastillesRendues === 2 && w.masqueTeste.regions.length === 2,
+                         "retour complet après occultation");
+                verifier(ipcTeste.panneauxPrets("test") === "test", "acquitter de nouveau au repos");
                 racine.modelePanneaux = { generation: "test", widgets: { a: {type: "text", text: "A"} },
                     barres: ["top", "left"].map((position, i) => ({
                         id: String(i), position, margin_edge: 6, margin_ends: 16, thickness: 34,
                         start: ["a"], reserve_space: false
                     })) };
-            } else if (etape === 5) {
+            } else if (etape === 7) {
                 verifier(barres()[0].visible && !barres()[1].visible,
                          "seule la première barre adjacente est mappée");
                 verifier(barres()[1].dispositionRepos.start[0].occulteRepos,
@@ -323,7 +339,7 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
                 racine.modelePanneaux = { generation: "test", barres: [
                     {id: "continue", position: "bottom", background_opacity: 1, start: ["inconnu"]}
                 ] };
-            } else if (etape === 6) {
+            } else if (etape === 8) {
                 verifier(ipcTeste.panneauxPrets("test") === "", "un fond continu seul ne suffit pas");
                 racine.modelePanneaux = { generation: "test", widgets: { a: {type: "text", text: "A"} },
                     barres: [{id: "continue", position: "bottom", background_opacity: 1, start: ["a"]}] };

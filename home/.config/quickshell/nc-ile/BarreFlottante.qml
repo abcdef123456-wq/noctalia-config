@@ -92,7 +92,9 @@ PanelWindow {
         }
         return regions
     }
-    visible: nombrePastillesRendues > 0
+    // Le calque existe dès qu'une pastille a sa place au repos : l'île qui les occulte un instant ne le démonte pas,
+    // sinon les pastilles ne pourraient pas revenir pendant le ressort de fermeture.
+    visible: ["start", "center", "end"].some(cote => (dispositionRepos[cote] || []).some(p => p && !p.occulteRepos))
 
     anchors {
         top: position === "top" || vertical
