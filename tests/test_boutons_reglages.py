@@ -45,7 +45,7 @@ class Source(unittest.TestCase):
             self.assertTrue(demandee(m.group(1) or m.group(2)), nom + " : section inconnue de nc-reglages")
         ile = (QML / "Ile.qml").read_text()
         self.assertIn("ReglagesIle {", ile)
-        self.assertIn("vue: Etat.vue", ile)
+        self.assertIn("vue: Etat.vueActive", ile)
         sections = re.search(r"sections: \(\{(.*?)\}\)", (QML / "ReglagesIle.qml").read_text(), re.S).group(1)
         for s in re.findall(r':\s*"([^"]+)"', sections) + ["Île"]:
             self.assertTrue(demandee(s), "ReglagesIle : section inconnue : " + s)
