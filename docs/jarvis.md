@@ -7,10 +7,10 @@ l’assistant. Les appels passent par `nc-assistant` / `nc-jarvis`, jamais direc
 ## Accès
 
 - Île : Super + C, bulle de conversation ; bouton d’agrandissement pour le cockpit.
-- Chat compact : **Super + Maj + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat ») ; le
-  même raccourci, fenêtre déjà ouverte, la ramène sur ton bureau si elle est ailleurs (ou masquée), la met devant si
-  elle est derrière, et la masque si elle est active ; masquée, elle garde sa forme (rangée avec Super + V ou libre) et
-  sa conversation. Pareil pour le cockpit et la fenêtre des réglages.
+- Chat compact : **Super + Maj + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Tiroir de chat ») ; un
+  second appui referme le tiroir (ou inverse l’animation à mi-course sans saut). Le bouton **Épingler** le garde visible
+  en calque `Top` pendant que tu travailles dans les fenêtres dessous. Le cockpit et la fenêtre des réglages gardent
+  leur bascule par raccourci.
 - Cockpit : **Super + Ctrl + A**, application **JARVIS**, `nc-jarvis tableau`, le bouton d’agrandissement
   de la fenêtre de chat ou de la page de l’île.
 - Retour au chat de l’île : `nc-jarvis ile`. F11 bascule plein écran/fenêtre ; Échap ferme le cockpit.
@@ -42,23 +42,25 @@ colonne centrée ; boutons et champs en pastilles, cartes aux coins arrondis (`C
 `AssistantCommande`). Super + F la passe en plein écran et la rend, comme toute fenêtre. Super + V la range parmi tes
 fenêtres comme les autres ; le même raccourci la ramène, la met devant ou la masque (voir plus haut). Les pages et leurs actions sont celles d’avant.
 
-## Fenêtre de chat
+## Tiroir de chat
 
-`JarvisChat.qml` est une petite fenêtre flottante Quickshell (environ 420 × 560 points, centrée par la règle Hyprland
-`jarvis-chat`, titre « JARVIS Chat »), dans le style de l’île : orbe, en-tête J.A.R.V.I.S., micro, Markdown et LaTeX.
-Le champ de saisie a le focus à l’ouverture, Entrée envoie, Échap ferme (un premier Échap masque les propositions
-de commandes). Elle s’ouvre **vierge** à chaque ouverture : les messages plus anciens restent dans l’île et le cockpit,
-qui partagent la même liste locale. L’envoi passe par `AssistantEtat` comme dans l’île, donc la fenêtre, l’île et le
-cockpit de ce PC parlent dans **la même session**. Avec AGY (révision `64523e5`), chaque PC a la sienne, Telegram et
-Discord aussi ; avec Claude Code, Codex ou OpenCode, une seule session reste partagée par tous (voir « Réglages rapides
-et moteurs »). « Nouvelle conversation » envoie le `/reset` existant (session serveur et mémoire de travail remises à
-zéro : celle de ce PC avec AGY, celle de tout le monde sinon) puis vide la fenêtre. Sans Quickshell,
-`nc-jarvis chat` ouvre le chat dans un terminal.
+`JarvisChat.qml` est un tiroir `PanelWindow` Quickshell (calque `nc-jarvis-chat`, sans animation Hyprland, pré-chauffé
+en asynchrone si l’IA est active) qui émerge de la pilule de l’île par un ressort bidirectionnel réversible à tout
+moment sans saut (`LanceurFondu.qml`, `Mouvement.qml`). Il reprend le style de l’île : orbe, en-tête J.A.R.V.I.S.,
+micro, Markdown et LaTeX. Le champ de saisie a le focus à l’ouverture, Entrée envoie, Échap ou un clic dehors referme
+(un premier Échap masque les propositions de commandes ; un second appui sur **Super + Maj + A** inverse la transition
+en cours). Il s’ouvre **vierge** à chaque ouverture : les messages plus anciens restent dans l’île et le cockpit, qui
+partagent la même liste locale. L’envoi passe par `AssistantEtat` comme dans l’île, donc le tiroir, l’île et le cockpit
+de ce PC parlent dans **la même session**. Avec AGY (révision `64523e5`), chaque PC a la sienne, Telegram et Discord
+aussi ; avec Claude Code, Codex ou OpenCode, une seule session reste partagée par tous (voir « Réglages rapides et
+moteurs »). « Nouvelle conversation » envoie le `/reset` existant (session serveur et mémoire de travail remises à zéro :
+celle de ce PC avec AGY, celle de tout le monde sinon) puis vide le tiroir. Sans Quickshell, `nc-jarvis chat` ouvre le
+chat dans un terminal.
 
-C’est une fenêtre ordinaire de Hyprland, sans épinglage forcé : **Super + Ctrl + P** l’épingle sur tous les bureaux comme
-n’importe quelle fenêtre (elle reste au-dessus et garde le clavier quand on clique dedans ; la même touche la libère).
-L’île ne la ferme pas et ne la masque pas ; Super + Maj + Q la ferme sans toucher à l’île. Le bouton d’agrandissement,
-Super + Ctrl + A, `nc-jarvis tableau`, l’application JARVIS et la page de l’île donnent toujours le cockpit complet.
+Par défaut le tiroir est éphémère (calque `Overlay`, clavier exclusif). Le bouton **Épingler** de l’en-tête le bascule
+en calque `Top` (`OnDemand`, masque limité à la carte) pour continuer à travailler dans les fenêtres dessous ; le
+sélecteur de fichier relâche aussi le focus exclusif sans refermer le tiroir. Le bouton d’agrandissement, **Super + Ctrl
++ A**, `nc-jarvis tableau`, l’application JARVIS et la page de l’île ouvrent le cockpit complet.
 
 ## Conversation dans l’île et le cockpit
 

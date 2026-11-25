@@ -66,10 +66,10 @@ def etape(c, m, f="null"):
 class LanceurFondu(unittest.TestCase):
     def lancer(self, etapes, valeurs=None, sobre=False, ecran="DP-1", partage=""):
         with tempfile.TemporaryDirectory(prefix="nq-", dir=_isolation.dossier_court()) as d:
-            root = H.preparer(d, ["LanceurFondu"], etat=ETAT + """
+            root = H.preparer(d, ["Mouvement", "LanceurFondu"], etat=ETAT + """
   function enregistrerPilule(nom, pilule) { pilules[nom] = pilule }
   function oublierPilule(nom, pilule) { if (pilules[nom] === pilule) delete pilules[nom] }
-""", extra={"Partage.qml": PARTAGE}, singletons=("Partage",))
+""", extra={"Partage.qml": PARTAGE}, singletons=("Mouvement", "Partage"))
             reglages = (root / "Reglages.qml").read_text().replace("property var valeurs: ({})", "property var valeurs: (" + json.dumps(valeurs or {}) + ")")
             if sobre:
                 reglages = reglages.replace("readonly property bool sobre: false", "readonly property bool sobre: true")

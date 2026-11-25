@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 import unittest
 
+from tests.test_ile_demarrage import sans_couche
+
 REPO=Path(__file__).resolve().parents[1]
 QML=REPO/'home/.config/quickshell/nc-ile'
 
@@ -16,11 +18,39 @@ class CockpitJarvis(unittest.TestCase):
     def executer(self,scenario,absent=False,evenements=False,avant=None):
         with tempfile.TemporaryDirectory(prefix='nc-jarvis-qml-') as d:
             root=Path(d);shutil.copytree(QML,root/'qml');(root/'runtime').mkdir(mode=0o700)
-            (root/'qml/Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool ecranVu: true}')
-            (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
+            # Hors Wayland : remplacer le PanelWindow de JarvisChat par un FloatingWindow dimensionné
+            jc=(root/'qml/JarvisChat.qml').read_text()
+            jc=sans_couche(jc).replace('FloatingWindow {\n','FloatingWindow {\n    implicitWidth: 1600; implicitHeight: 1000\n',1)
+            (root/'qml/JarvisChat.qml').write_text(jc)
+            (root/'qml/Etat.qml').write_text('''pragma Singleton
+import QtQuick
+QtObject {
+    readonly property bool ecranVu: true
+    property var pilules: ({})
+    property string lanceurFondu: ""
+    property var lanceurProprio: null
+    property var emprisesExternes: ({})
+    function definirEmpriseExterne(nom, rect) {
+        if (!nom) return
+        var t = Object.assign({}, emprisesExternes)
+        if (!rect || rect.width <= 0 || rect.height <= 0) delete t[nom]
+        else t[nom] = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        emprisesExternes = t
+    }
+    function effacerEmpriseExterne(nom) {
+        if (!nom || emprisesExternes[nom] === undefined) return
+        var t = Object.assign({}, emprisesExternes)
+        delete t[nom]
+        emprisesExternes = t
+    }
+    function empriseExterne(nom) { return emprisesExternes[nom] || Qt.rect(0, 0, 0, 0) }
+}
+''')
+            (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool sobre: false; readonly property bool iaCoupee: false; function t(fr,en){return en} function val(k,d){return d}}')
+            (root/'qml/Partage.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool silence: false; property bool indicateur: false; property int sessions: 0}')
             (root/'qml/Agents.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
-            singletons={'Etat','Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat'}
-            noms=['Etat','Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisChat','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','AssistantPieces','Texte','Ico','BoutonReglages','Etincelle','Pas','LogoAssistant','Defilement','Ligne','Rond']
+            singletons={'Etat','Reglages','Agents','Partage','Mouvement','Couleurs','AssistantEtat','JarvisEtat'}
+            noms=['Etat','Reglages','Agents','Partage','Mouvement','Couleurs','AssistantEtat','JarvisEtat','LanceurFondu','Jarvis','JarvisChat','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','AssistantPieces','Texte','Ico','BoutonReglages','Etincelle','Pas','LogoAssistant','Defilement','Ligne','Rond']
             (root/'qml/qmldir').write_text('\n'.join(('singleton ' if n in singletons else '')+n+' 1.0 '+n+'.qml' for n in noms))
             if not absent:
                 b=root/'.local/bin';b.mkdir(parents=True)

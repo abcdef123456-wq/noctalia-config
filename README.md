@@ -237,11 +237,14 @@ l'île Quickshell.
 
 **Panneaux modulaires (expérimental, île Quickshell seulement).** Dans **nc-reglages → Barre et dock → Barre
 modulaire**, ou avec `nc-reglages set BARRE_MODULAIRE oui`. Noctalia garde le fond, le verrouillage et ses menus,
-mais ne dessine plus de barre : Quickshell dessine les pastilles flottantes dans des calques ajustés à leur contenu,
-et garde une barre d'un seul tenant pour les thèmes à fond visible. Le vide entre les pastilles laisse passer les clics.
-Par défaut, chaque bord de barre réserve une marge aux fenêtres (`reserve_space = false` la désactive).
-La bande optionnelle de l'île ne s'ajoute pas à celle d'une barre haute. Si l'île s'élargit, les pastilles qu'elle
-recouvrirait s'effacent sur place au lieu de passer en dessous ou sur une deuxième rangée.
+mais ne dessine plus de barre : Quickshell dessine les pastilles flottantes dans une seule surface par bord
+(`BarreFlottante.qml`, masque sur les pastilles au repos, le vide laisse passer les clics), et garde une barre d'un
+seul tenant pour les thèmes à fond visible (`BarreContinue.qml`). Par défaut, chaque bord de barre réserve une marge
+aux fenêtres (`reserve_space = false` la désactive). La bande optionnelle de l'île ne s'ajoute pas à celle d'une
+barre haute. Quand l'île ou le tiroir JARVIS s'élargit, la barre réagit en GPU selon `BARRE_REACTION` (`glisser` par
+défaut : clip progressif du titre puis glissement latéral borné et fondu ; ou `fondu` sur place), synchronisée avec
+`Mouvement.qml` (`ILE_ANIM`, `ILE_ANIM_VITESSE`, `ILE_ANIM_BATTERIE`, `ILE_ANIM_ECRANS`). `BARRE_CONTENU` choisit
+entre la composition complète du thème (`theme`) et la barre épurée (`minimale` : bureaux, île, réseau, son, batterie).
 Les jauges CPU, RAM et disque du bureau lisent les mêmes mesures que celles de la barre, sans seconde sonde.
 Bluetooth et la zone de notification sont masqués si leurs modules Quickshell ne sont pas installés.
 
