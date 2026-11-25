@@ -34,6 +34,7 @@ Niveau 1 (sans root) :
 | `ILE_METEO`, `ILE_PRESSE`, `ILE_TELECHARGEMENTS` | `oui`, `non` | |
 | `FENETRES_FLOU`, `FENETRES_ANIMATIONS` | `oui`, `non` | |
 | `FENETRES_CARACTERE` | `auto`, `doux`, `vif`, `sec`, `rebond`, `aucun` | Caractère des animations (courbes et durée) ; `auto` = comme avant. L'Économie coupe toujours les animations. |
+| `FENETRES_GESTE` | `auto`, un geste natif (`fondu`, `apparition`, `centre`, `courant`, `debouche`, `bloc`, `rail`, `feuille`, `volet`) ou du plugin nc-gestes (`goutte`, `paravent`, `coupe`, `horizon`, `maree`, `eventail`, `rideau`, `cathodique`, `fuite`, `vantaux`, `balayage`, `averse`, `paliers`, `contour`) | Geste d'ouverture des fenêtres, un par thème ; un geste du plugin garde une animation native proche quand le plugin n'est pas chargé. `auto` = `FENETRES_OUVERTURE`, comme avant. |
 | `FENETRES_DISPOSITION` | `dwindle`, `master`, `scrolling` | Disposition des fenêtres ; un thème peut la changer, ton réglage gagne toujours. |
 | `FENETRES_MAITRE_ORIENTATION` | `auto`, `gauche`, `droite`, `haut`, `bas`, `centre` | Côté de la grande fenêtre, seulement en `master` ; `auto` = comme avant. |
 | `FENETRES_FOND` | `auto`, `noir` | Couleur derrière les fenêtres (`misc.background_color`) ; `auto` = comme avant. |

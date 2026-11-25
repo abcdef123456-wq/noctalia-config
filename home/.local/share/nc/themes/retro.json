@@ -30,6 +30,7 @@
     "TERMINAL_MARGE": "6",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "aucun",
+    "FENETRES_GESTE": "paliers",
     "FENETRES_OMBRE_DECALAGE": "dure",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "carres",

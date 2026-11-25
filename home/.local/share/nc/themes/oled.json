@@ -28,6 +28,7 @@
     "FENETRES_ARRONDI": "14",
     "FENETRES_BORDURE": "1",
     "FENETRES_CARACTERE": "sec",
+    "FENETRES_GESTE": "contour",
     "FENETRES_OMBRE_DECALAGE": "aucun",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_OMBRE": "0",

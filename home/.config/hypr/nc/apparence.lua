@@ -163,6 +163,37 @@ local duree = ({ lente = 1.5, normale = 1, rapide = 0.65 })[nc.reglage("FENETRES
 local bureaux = ({ slidefadevert = "slidefadevert 15%", slidefade = "slidefade 15%", slidevert = "slidevert", slide = "slide",
                    fade = "fade" })[nc.reglage("ANIM_BUREAUX", "slidefadevert")] or "slidefadevert 15%"
 local ouverture = ({ popin = "popin 90%", slide = "slide", gnomed = "gnomed" })[nc.reglage("FENETRES_OUVERTURE", "popin")] or "popin 90%"
+-- Geste d'ouverture du thème (nc-reglages, FENETRES_GESTE) : style de windowsIn et windowsOut, et sa courbe s'il en a
+-- une. « auto », absent ou inconnu : FENETRES_OUVERTURE, comme avant. Styles de fenêtre d'Hyprland : « popin N% »,
+-- « slide » (bord le plus proche), « slide top|bottom|left|right », « gnomed ».
+local gestes = {
+    fondu      = { style = "popin 100%" },                                         -- fondu court, sans déplacement
+    apparition = { style = "popin 97%" },                                          -- clair-neutre : à son emplacement
+    centre     = { style = "popin 82%" },                                          -- apple : grandit autour de son centre
+    courant    = { style = "slide right" },                                        -- kanagawa : dans le courant des colonnes
+    debouche   = { style = "slide" },                                              -- tokyo : débouche d'un bord, taille fixe
+    bloc       = { style = "slide left" },                                         -- brutaliste : glisse de côté, s'arrête net
+    rail       = { style = "slide", courbe = { { 0.15, 0.95 }, { 0.2, 1.04 } } },  -- cyberjaune : file sur un rail, s'enclenche
+    feuille    = { style = "slide left", courbe = { { 0.25, 0.1 }, { 0.25, 1 } } }, -- papier : glisse hors d'une pile, sans rebond
+    volet      = { style = "slide top" },                                          -- gruvbox : coulisse le long de la pile
+    -- Gestes du plugin nc-gestes (mêmes noms) : ici seulement leur repli, quand le plugin n'est pas chargé
+    goutte     = { style = "popin 85%" },
+    paravent   = { style = "popin 92%" },
+    coupe      = { style = "popin 95%" },
+    horizon    = { style = "slide bottom" },
+    maree      = { style = "slide bottom" },
+    eventail   = { style = "popin 88%" },
+    rideau     = { style = "popin 92%" },
+    cathodique = { style = "gnomed" },
+    fuite      = { style = "popin 78%" },
+    vantaux    = { style = "popin 92%" },
+    balayage   = { style = "slide left" },
+    averse     = { style = "slide top" },
+    paliers    = { style = "gnomed" },
+    contour    = { style = "popin 98%" },
+}
+local geste = gestes[nc.reglage("FENETRES_GESTE", "auto")]
+if geste then ouverture = geste.style end
 -- Caractère (nc-reglages, FENETRES_CARACTERE) : mêmes noms de courbes, autres points ; « auto » = les courbes d'origine.
 -- Les points en y hors de [0, 1] font dépasser l'animation (bezier d'Hyprland). Inconnu : auto. Le facteur s'applique à duree.
 local caracteres = {
@@ -179,10 +210,16 @@ hl.curve("emphasized",      { type = "bezier", points = car.e })
 hl.curve("emphasizedAccel", { type = "bezier", points = car.a })
 hl.curve("standard",        { type = "bezier", points = car.s })
 hl.curve("linear",          { type = "bezier", points = car.l })
+-- Courbe propre au geste (rail, feuille) : posée seulement pour lui, « auto » ne déclare rien de plus
+local courbe_ouverture = "emphasized"
+if geste and geste.courbe then
+    hl.curve("geste", { type = "bezier", points = geste.courbe })
+    courbe_ouverture = "geste"
+end
 
 hl.animation({ leaf = "global",           enabled = true, speed = 5 * duree,   bezier = "standard" })
 hl.animation({ leaf = "border",           enabled = true, speed = 5 * duree,   bezier = "standard" })
-hl.animation({ leaf = "windowsIn",        enabled = true, speed = 4 * duree,   bezier = "emphasized",      style = ouverture })
+hl.animation({ leaf = "windowsIn",        enabled = true, speed = 4 * duree,   bezier = courbe_ouverture,  style = ouverture })
 hl.animation({ leaf = "windowsOut",       enabled = true, speed = 2.5 * duree, bezier = "emphasizedAccel", style = ouverture })
 hl.animation({ leaf = "windowsMove",      enabled = true, speed = 4 * duree,   bezier = "emphasized",      style = "slide" })
 hl.animation({ leaf = "fadeIn",           enabled = true, speed = 3 * duree,   bezier = "standard" })

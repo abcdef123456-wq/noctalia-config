@@ -25,6 +25,7 @@
     "TERMINAL_MARGE": "6",
     "TERMINAL_CURSEUR": "underline",
     "FENETRES_CARACTERE": "sec",
+    "FENETRES_GESTE": "averse",
     "FENETRES_OMBRE_DECALAGE": "aucun",
     "FENETRES_DISPOSITION": "dwindle",
     "FENETRES_COINS_FORME": "carres",

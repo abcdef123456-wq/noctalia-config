@@ -14,20 +14,20 @@ using namespace NcGestes;
 // Délai maximal sans aucun rendu (fenêtre jamais affichée) avant d'abandonner le geste.
 static constexpr auto ATTENTE_PREMIER_RENDU = std::chrono::milliseconds(800);
 
-CGoutteTransformer::CGoutteTransformer(PHLWINDOWREF window, const CBox& anchor, std::chrono::milliseconds duration) :
-    m_window(window), m_anchor(anchor), m_duration(duration) {
+CGestureTransformer::CGestureTransformer(PHLWINDOWREF window, int mode, const CBox& anchor, std::chrono::milliseconds duration) :
+    m_window(window), m_mode(mode), m_anchor(anchor), m_duration(duration) {
     ;
 }
 
-bool CGoutteTransformer::active() const {
+bool CGestureTransformer::active() const {
     return m_active;
 }
 
-void CGoutteTransformer::deactivate() {
+void CGestureTransformer::deactivate() {
     m_active = false;
 }
 
-bool CGoutteTransformer::tick() {
+bool CGestureTransformer::tick() {
     if (!m_active)
         return false;
 
@@ -39,9 +39,10 @@ bool CGoutteTransformer::tick() {
     return m_t < 1.F;
 }
 
-CBox CGoutteTransformer::transformedExtents(const CBox& currentBox) const {
+CBox CGestureTransformer::transformedExtents(const CBox& currentBox) const {
     const auto PWINDOW = m_window.lock();
-    if (!m_active || !PWINDOW)
+    // Seule la goutte sort du cadre de la fenêtre ; les autres gestes n'agrandissent rien.
+    if (!m_active || !PWINDOW || m_mode != GESTE_GOUTTE)
         return currentBox;
 
     // currentBox est local au moniteur au rendu et global pour le damage : on ramène l'ancre
@@ -59,7 +60,7 @@ CBox CGoutteTransformer::transformedExtents(const CBox& currentBox) const {
     return CBox{X1, Y1, X2 - X1, Y2 - Y1}.expand(16.0);
 }
 
-Render::SWindowTransformBuffer CGoutteTransformer::transform(Render::CRenderContext& ctx, const Render::SWindowTransformBuffer& in,
+Render::SWindowTransformBuffer CGestureTransformer::transform(Render::CRenderContext& ctx, const Render::SWindowTransformBuffer& in,
                                                              const Render::SWindowTransformContext& context) {
     using namespace Render;
 
@@ -71,7 +72,7 @@ Render::SWindowTransformBuffer CGoutteTransformer::transform(Render::CRenderCont
     if (!g_pHyprRenderer || g_pHyprRenderer->type() != IHyprRenderer::RT_GL || !GL::g_pHyprOpenGL)
         return in;
 
-    const auto SHADER = goutteShader();
+    const auto SHADER = gesteShader();
     if (!SHADER)
         return in;
 
@@ -117,6 +118,7 @@ Render::SWindowTransformBuffer CGoutteTransformer::transform(Render::CRenderCont
     glUniform1f(SHADER->t, m_t);
     glUniform1f(SHADER->scale, SCALE);
     glUniform1f(SHADER->radius, PWINDOW->presentation().rounding() * SCALE);
+    glUniform1i(SHADER->mode, m_mode);
 
     GLB->setActiveTexture(GL_TEXTURE0);
     INTEX->bind();

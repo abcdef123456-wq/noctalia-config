@@ -29,6 +29,7 @@
     "TERMINAL_MARGE": "10",
     "TERMINAL_CURSEUR": "beam",
     "FENETRES_CARACTERE": "doux",
+    "FENETRES_GESTE": "horizon",
     "FENETRES_OMBRE_DECALAGE": "bas",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",

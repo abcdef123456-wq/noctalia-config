@@ -29,6 +29,7 @@
     "TERMINAL_MARGE": "12",
     "TERMINAL_CURSEUR": "underline",
     "FENETRES_CARACTERE": "doux",
+    "FENETRES_GESTE": "courant",
     "FENETRES_OMBRE_DECALAGE": "auto",
     "FENETRES_DISPOSITION": "scrolling",
     "FENETRES_COINS_FORME": "doux",

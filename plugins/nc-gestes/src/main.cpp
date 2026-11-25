@@ -1,4 +1,4 @@
-// nc-gestes : gestes d'ouverture de fenêtres de noctalia-config (phase 1 : la goutte de Rose Aube).
+// nc-gestes : gestes d'ouverture de fenêtres de noctalia-config (la goutte de Rose Aube et 13 autres gestes de thème).
 
 #include "GestureTransformer.hpp"
 #include "Shaders.hpp"
@@ -28,12 +28,28 @@
 using namespace NcGestes;
 
 namespace {
-    constexpr auto DUREE_GOUTTE = std::chrono::milliseconds(620);
-    constexpr int  TAILLE_MIN   = 80;
+    constexpr int TAILLE_MIN = 80;
+
+    struct SGeste {
+        std::string_view nom;
+        int              mode;    // u_mode du shader (Shaders.cpp)
+        int              dureeMs; // durée de base, divisée par la vitesse
+    };
+    // Noms identiques aux valeurs de FENETRES_GESTE (nc/apparence.lua), qui garde pour chacun un repli natif.
+    constexpr SGeste GESTES[] = {
+        {"goutte", GESTE_GOUTTE, 620}, {"paravent", 2, 360}, {"coupe", 3, 320},    {"horizon", 4, 340},  {"maree", 5, 380},
+        {"eventail", 6, 360},          {"rideau", 7, 320},   {"cathodique", 8, 300}, {"fuite", 9, 360},  {"vantaux", 10, 320},
+        {"balayage", 11, 280},         {"averse", 12, 300},  {"paliers", 13, 290},  {"contour", 14, 300},
+    };
+
+    const SGeste* gesteNomme(std::string_view nom) {
+        const auto IT = std::ranges::find(GESTES, nom, &SGeste::nom);
+        return IT != std::end(GESTES) ? &*IT : nullptr;
+    }
 
     struct SConfig {
         bool        enabled = true;
-        std::string mode    = "goutte"; // « goutte » ou « natif »
+        std::string mode    = "goutte"; // un nom de GESTES, ou « natif »
         float       speed   = 1.F;      // > 1 accélère
     };
 
@@ -56,7 +72,8 @@ namespace {
     }
 
     void onOpen(PHLWINDOW w) {
-        if (!w || !g_config.enabled || g_config.mode != "goutte" || !rendererGL() || !Render::GL::g_pHyprOpenGL)
+        const auto GESTE = gesteNomme(g_config.mode);
+        if (!w || !GESTE || !g_config.enabled || !rendererGL() || !Render::GL::g_pHyprOpenGL)
             return;
 
         const auto MON  = w->m_monitor.lock();
@@ -67,15 +84,15 @@ namespace {
 
         // Compilé ici plutôt qu'au premier rendu : si le programme échoue, l'animation native reste intacte.
         Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-        if (!goutteShader())
+        if (!gesteShader())
             return;
 
         // La fenêtre est posée à sa géométrie finale tout de suite ; seul le rendu est animé.
         w->finishAnimation();
         w->presentation().alpha(Desktop::View::WINDOW_ALPHA_FADE)->warp();
 
-        const auto DUREE = std::chrono::milliseconds(sc<int>(DUREE_GOUTTE.count() / std::max(g_config.speed, 0.1F)));
-        w->effects().transformers()->emplace<CGoutteTransformer>(w->m_self, anchorFor(MON), DUREE);
+        const auto DUREE = std::chrono::milliseconds(sc<int>(GESTE->dureeMs / std::max(g_config.speed, 0.1F)));
+        w->effects().transformers()->emplace<CGestureTransformer>(w->m_self, GESTE->mode, anchorFor(MON), DUREE);
         g_animated.emplace_back(w->m_self);
         g_pHyprRenderer->damageWindow(w);
     }
@@ -89,7 +106,7 @@ namespace {
             if (!W)
                 return true;
 
-            const auto T = W->effects().transformers()->get<CGoutteTransformer>();
+            const auto T = W->effects().transformers()->get<CGestureTransformer>();
             if (!T)
                 return true;
 
@@ -110,12 +127,12 @@ namespace {
             Animation::mgr()->requestTick();
     }
 
-    // Retire la goutte de toutes les fenêtres : aucune vtable du plugin ne doit survivre au dlclose.
+    // Retire les gestes de toutes les fenêtres : aucune vtable du plugin ne doit survivre au dlclose.
     void detachAll() {
         for (auto const& w : Desktop::windowState()->windows()) {
             if (!w)
                 continue;
-            const auto T = w->effects().transformers()->get<CGoutteTransformer>();
+            const auto T = w->effects().transformers()->get<CGestureTransformer>();
             if (!T)
                 continue;
             g_pHyprRenderer->damageWindow(w);
@@ -147,7 +164,7 @@ namespace {
             anchors += std::format("{}\"{}\": [{}, {}, {}, {}]", anchors.empty() ? "" : ", ", jsonEscape(name), box.x, box.y, box.w, box.h);
 
         return std::format(R"({{"version": "{}", "renderer": "{}", "shader": "{}", "enabled": {}, "mode": "{}", "speed": {}, "active": {}, "anchors": {{{}}}}})",
-                           HYPRLAND_API_VERSION, rendererGL() ? "gl" : "autre", goutteShaderFailed() ? "erreur" : "ok", g_config.enabled, g_config.mode,
+                           HYPRLAND_API_VERSION, rendererGL() ? "gl" : "autre", gesteShaderFailed() ? "erreur" : "ok", g_config.enabled, g_config.mode,
                            g_config.speed, g_animated.size(), anchors);
     }
 
@@ -175,9 +192,9 @@ namespace {
         }
 
         if (SUB == "set") {
-            // set enabled <0|1> | mode <goutte|natif> | speed <0.1..10>, paires cumulables.
+            // set enabled <0|1> | mode <geste|natif> | speed <0.1..10>, paires cumulables.
             if (args.size() < 4 || args.size() % 2 != 0)
-                return "nc-gestes : usage set enabled <0|1> | mode <goutte|natif> | speed <nombre>";
+                return "nc-gestes : usage set enabled <0|1> | mode <geste|natif> | speed <nombre>";
             SConfig next = g_config;
             for (size_t i = 2; i + 1 < args.size(); i += 2) {
                 const auto& KEY = args[i];
@@ -185,7 +202,7 @@ namespace {
                 double      num = 0;
                 if (KEY == "enabled" && (VAL == "0" || VAL == "1"))
                     next.enabled = VAL == "1";
-                else if (KEY == "mode" && (VAL == "goutte" || VAL == "natif"))
+                else if (KEY == "mode" && (VAL == "natif" || gesteNomme(VAL)))
                     next.mode = VAL;
                 else if (KEY == "speed" && parseFloat(VAL, num) && num >= 0.1 && num <= 10.0)
                     next.speed = sc<float>(num);
@@ -220,7 +237,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_listeners.emplace_back(Event::bus()->m_events.tick.listen([] { onTick(); }));
     g_command = HyprlandAPI::registerHyprCtlCommand(handle, IPC::Socket1::SCommand{.name = "nc-gestes", .match = IPC::Socket1::COMMAND_MATCH_PREFIX, .handler = onIpc});
 
-    return {"nc-gestes", "Gestes d'ouverture de fenêtres de noctalia-config (la goutte)", "noctalia-config", "0.1"};
+    return {"nc-gestes", "Gestes d'ouverture de fenêtres de noctalia-config", "noctalia-config", "0.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

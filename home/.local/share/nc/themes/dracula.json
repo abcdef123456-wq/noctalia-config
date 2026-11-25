@@ -29,6 +29,7 @@
     "TERMINAL_MARGE": "10",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "vif",
+    "FENETRES_GESTE": "vantaux",
     "FENETRES_OMBRE_DECALAGE": "bas",
     "FENETRES_DISPOSITION": "dwindle",
     "FENETRES_COINS_FORME": "rond",
