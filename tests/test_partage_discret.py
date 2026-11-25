@@ -94,7 +94,7 @@ class Source(unittest.TestCase):
         """En partage, chaque changement de page ou de taille passe par le même Behavior qu'hors partage (un cadre qui
         sautait faisait une île « trop brute » en stream) ; seule la bannière est retirée sans attendre."""
         ile = (QML / "Ile.qml").read_text()
-        self.assertEqual(len(re.findall(r"enabled: !Notifs\.enPause;", ile)), 3)                  # largeur, hauteur, rayon
+        self.assertEqual(len(re.findall(r"Behavior on (?:width|height|radius) \{ enabled: !Notifs\.enPause && fen\.mouv\.actif;", ile)), 3)  # largeur, hauteur, rayon
         # la pilule (Spotlight : suit la largeur) et le contenu du Spotlight (fondu de 120 ms vers une page, D-C et D-B)
         self.assertEqual(ile.count("enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot;"), 2)
         self.assertIn("garderBanniere.running && !Notifs.enPause && !Partage.silence", ile)

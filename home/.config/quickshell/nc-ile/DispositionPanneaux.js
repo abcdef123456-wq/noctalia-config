@@ -144,3 +144,185 @@ function placer(blocs, tailles, largeur, hauteur, ileRepos) {
     }
     return places
 }
+
+function barresFlottantes(barres) {
+    return (barres || []).filter(b => b.enabled !== false && (b.background_opacity ?? 0) <= 0)
+}
+
+// Un seul arbitrage par écran, dans l'ordre du modèle ; tous les rectangles sont en coordonnées écran.
+function placerBarres(barres, tailles, largeur, hauteur, ileRepos) {
+    const occupes = []
+    return barres.map((barre, i) => {
+        const t = tailles[i] || {}
+        return placerBarre(barre, t.start, t.center, t.end, largeur, hauteur, ileRepos, occupes)
+    })
+}
+
+function placerBarre(barre, taillesStart, taillesCenter, taillesEnd, largeur, hauteur, ileRepos, occupes = []) {
+    const resultat = {
+        start: new Array((taillesStart || []).length).fill(null),
+        center: new Array((taillesCenter || []).length).fill(null),
+        end: new Array((taillesEnd || []).length).fill(null),
+    }
+    if (!barre || largeur <= 0 || hauteur <= 0) return resultat
+
+    const pos = barre.position ?? "top"
+    const vertical = pos === "left" || pos === "right"
+    const inverse = pos === "right" || pos === "bottom"
+    const axe = vertical ? hauteur : largeur
+    const profondeur = vertical ? largeur : hauteur
+    const v = Math.round(barre.margin_edge ?? 0)
+    const margeBord = barre.margin_ends ?? 0
+    const marge = Math.max(0, Math.round(typeof margeBord === "string" ? axe * parseFloat(margeBord) / 100 : margeBord))
+    const margeSecurite = Math.min(marge, 4)
+    const ecartVoulu = Math.max(2, barre.widget_spacing ?? 6)
+    const epaisseurBarre = Math.ceil(barre.thickness ?? 34)
+    const aIle = !!ileRepos && ileRepos.width > 0 && ileRepos.height > 0
+
+    const parCote = { center: taillesCenter || [], start: taillesStart || [], end: taillesEnd || [] }
+    for (const cote of ["center", "start", "end"]) {
+        const tailles = parCote[cote]
+        const visibles = []
+        let totalLen = 0
+        let maxEp = 0
+        for (let idx = 0; idx < tailles.length; ++idx) {
+            const i = cote === "end" ? tailles.length - 1 - idx : idx
+            const t = tailles[i]
+            const longueur = t ? (vertical ? t.height : t.width) : 0
+            const epaisseur = t ? (vertical ? t.width : t.height) : 0
+            if (longueur > 0 && epaisseur > 0 && longueur <= axe && epaisseur <= profondeur) {
+                visibles.push({ i, longueur, epaisseur })
+                totalLen += longueur
+                maxEp = Math.max(maxEp, epaisseur)
+            }
+        }
+        if (!visibles.length) continue
+
+        const epaisseurLigne = Math.max(epaisseurBarre, maxEp)
+        const ileSurLigne = aIle && !vertical && !inverse && v < ileRepos.y + ileRepos.height && v + epaisseurLigne > ileRepos.y
+        const minDispo = ileSurLigne && cote === "end" ? Math.max(marge, Math.ceil(ileRepos.x + ileRepos.width + 6)) : marge
+        const maxDispo = ileSurLigne && cote === "start" ? Math.min(axe - marge, Math.floor(ileRepos.x - 6)) : axe - marge
+        const span = Math.max(0, maxDispo - minDispo)
+        let ecart = ecartVoulu
+        if (visibles.length > 1 && span > 0 && totalLen + (visibles.length - 1) * ecartVoulu > span) {
+            ecart = Math.max(4, Math.min(ecartVoulu, Math.floor((span - totalLen) / (visibles.length - 1))))
+        }
+        const ecartMin = Math.min(ecart, 2)
+        const pLigne = inverse ? profondeur - v - epaisseurLigne : v
+
+        const longueurGroupe = totalLen + (visibles.length - 1) * ecart
+        let curseur = cote === "end" ? axe - marge : (cote === "center" ? Math.floor((axe - longueurGroupe) / 2) : marge)
+        let voisin = null
+        for (const { i, longueur, epaisseur } of visibles) {
+            let u
+            if (cote === "end") {
+                u = curseur - longueur
+                curseur = u - ecart
+            } else {
+                u = curseur
+                curseur = u + longueur + ecart
+            }
+            const p = Math.round(pLigne + (epaisseurLigne - epaisseur) / 2)
+            const rect = vertical ? { x: p, y: u, width: epaisseur, height: longueur }
+                                  : { x: u, y: p, width: longueur, height: epaisseur }
+            const horsChamp = u < marge - 1 || u + longueur > axe - marge + 1
+            const toucheAutre = occupes.some(o => chevauche(rect, o, 1))
+            const occulteRepos = horsChamp || toucheAutre
+            let margeMin = 0
+            let margeMax = 0
+            if (!occulteRepos) {
+                if (cote === "start") {
+                    margeMin = voisin === null ? Math.max(0, u - margeSecurite)
+                                               : Math.max(0, u - (voisin.u + voisin.longueur) - ecartMin)
+                } else if (cote === "end") {
+                    margeMax = voisin === null ? Math.max(0, (axe - margeSecurite) - (u + longueur))
+                                               : Math.max(0, voisin.u - (u + longueur) - ecartMin)
+                }
+                voisin = { u, longueur }
+                occupes.push(rect)
+            }
+            resultat[cote][i] = {
+                x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                cote, margeMin, margeMax, occulteRepos,
+            }
+        }
+    }
+    return resultat
+}
+
+function reagirPastille(rectRepos, cote, barrePos, maxDecalage, emprise, modeReaction, bandeFondu, estTitre, minLargeurTitre) {
+    if (!rectRepos || barrePos !== "top" || !emprise || emprise.width <= 0 || emprise.height <= 0)
+        return { dx: 0, opacite: 1, largeurClip: 0 }
+    if (rectRepos.y >= emprise.y + emprise.height || rectRepos.y + rectRepos.height <= emprise.y)
+        return { dx: 0, opacite: 1, largeurClip: 0 }
+
+    const margeObs = 8
+    const obsL = emprise.x - margeObs
+    const obsR = emprise.x + emprise.width + margeObs
+    const rx = rectRepos.x
+    const rw = rectRepos.width
+    const rr = rx + rw
+    if (rx >= obsR || rr <= obsL) return { dx: 0, opacite: 1, largeurClip: 0 }
+
+    const mode = modeReaction || "glisser"
+    if (mode === "instantane") return { dx: 0, opacite: 0, largeurClip: 0 }
+
+    const bande = bandeFondu > 0 ? bandeFondu : 32
+    if (mode === "fondu" || cote === "center") {
+        const pen = cote === "start" ? rr - obsL : (cote === "end" ? obsR - rx : Math.min(rr - obsL, obsR - rx))
+        const opacite = pen <= 0 ? 1 : Math.max(0, Math.min(1, 1 - pen / bande))
+        return { dx: 0, opacite, largeurClip: 0 }
+    }
+
+    const marge = maxDecalage > 0 ? maxDecalage : 0
+    if (cote === "start") {
+        const pen = rr - obsL
+        if (pen <= 0) return { dx: 0, opacite: 1, largeurClip: 0 }
+        let largeurClip = 0
+        let reste = pen
+        if (estTitre) {
+            const minL = minLargeurTitre > 0 ? minLargeurTitre : 56
+            const reductible = Math.max(0, rw - minL)
+            if (reductible > 0) {
+                const coupe = Math.min(pen, reductible)
+                largeurClip = Math.max(minL, rw - coupe)
+                reste = pen - coupe
+            }
+        }
+        const glisse = Math.min(reste, marge)
+        const debord = reste - glisse
+        const opacite = debord > 0 ? Math.max(0, Math.min(1, 1 - debord / bande)) : 1
+        return { dx: glisse > 0 ? -glisse : 0, opacite, largeurClip }
+    }
+
+    if (cote === "end") {
+        const pen = obsR - rx
+        if (pen <= 0) return { dx: 0, opacite: 1, largeurClip: 0 }
+        const glisse = Math.min(pen, marge)
+        const debord = pen - glisse
+        const opacite = debord > 0 ? Math.max(0, Math.min(1, 1 - debord / bande)) : 1
+        return { dx: glisse, opacite, largeurClip: 0 }
+    }
+
+    return { dx: 0, opacite: 1, largeurClip: 0 }
+}
+
+// Géométrie stable des pastilles visibles, sans englober les espaces transparents.
+function rectanglesPastilles(placements, cote, position, empriseStable, mode, origineX, origineY, titres) {
+    const rectangles = []
+    for (let i = 0; i < (placements || []).length; ++i) {
+        const p = placements[i]
+        if (!p || p.occulteRepos) continue
+        const maxDec = cote === "start" ? p.margeMin : (cote === "end" ? p.margeMax : 0)
+        const r = reagirPastille(p, cote, position, maxDec, empriseStable, mode, 32, !!titres?.[i], 56)
+        if (r.opacite <= 0.005) continue
+        const width = Math.ceil(r.largeurClip > 0 ? Math.min(p.width, r.largeurClip) : p.width)
+        const height = Math.ceil(p.height)
+        if (width <= 0 || height <= 0) continue
+        rectangles.push({
+            x: Math.floor(p.x + r.dx - origineX), y: Math.floor(p.y - origineY),
+            width, height, opacite: r.opacite,
+        })
+    }
+    return rectangles
+}

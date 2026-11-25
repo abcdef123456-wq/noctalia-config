@@ -113,14 +113,15 @@ Item {
         sourceComponent: Item {
             // Garder le blanc sur noir de la vidéo, y compris avec un thème clair.
             Rectangle { anchors.fill: parent; radius: width / 2; color: "#000000" }
-            LogoAssistant { anchors.fill: parent; anime: e.tourne && !Reglages.sobre }
+            LogoAssistant { anchors.fill: parent; anime: e.tourne && !Reglages.sobre && !(UPower.onBattery && e.animBatterie === "aucune") }
         }
     }
-    // En Économie ou sans effets (Reglages.sobre) : immobile ; Hyprland n'a plus à recomposer l'écran à chaque image
-    readonly property bool bouge: e.tourne && e.visible && !Reglages.sobre
+    readonly property string animBatterie: typeof Mouvement !== "undefined" ? Mouvement.batterieMode : Reglages.val("ILE_ANIM_BATTERIE", "douces")
+    // En Économie, sans effets (Reglages.sobre) ou sans animations sur batterie : immobile ; Hyprland n'a plus à recomposer l'écran à chaque image
+    readonly property bool bouge: e.tourne && e.visible && !Reglages.sobre && !(UPower.onBattery && animBatterie === "aucune")
     // Sur batterie, avec « Animations de l'île sur batterie : douces » (par défaut) : un tour en 4 s au lieu de 2,6.
     // La durée change aussi en cours de route (le pas suivant tourne à la nouvelle vitesse).
-    readonly property int dureeTour: UPower.onBattery && Reglages.val("ILE_ANIM_BATTERIE", "douces") !== "continues" ? 4000 : 2600
+    readonly property int dureeTour: UPower.onBattery && animBatterie !== "continues" && animBatterie !== "aucune" ? 4000 : 2600
     Pas {
         running: e.bouge && e.tournante && Etat.ecranVu
         onTriggered: e.rotation = (e.rotation + 360 * interval / e.dureeTour) % 360

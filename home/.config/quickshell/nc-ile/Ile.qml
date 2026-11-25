@@ -14,6 +14,7 @@ PanelWindow {
     required property var modelData
     screen: modelData
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
+    readonly property var mouv: Mouvement.pourEcran(modelData.name)
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
@@ -43,6 +44,60 @@ PanelWindow {
                        Math.ceil(ile.y + Math.max(ile.height, ile.cibleHauteur) + contour) - y)
     }
 
+    // Emprise courante (animée image par image) de l'île ou d'une surface issue de la pilule sur cet écran.
+    readonly property rect empriseLive: {
+        const ext = Etat.emprisesExternes[modelData.name]
+        const aExt = !!ext && ext.width > 0 && ext.height > 0
+        const pilVisible = !(pilCachee && ile.opacity <= 0) && ile.width > 0 && ile.height > 0
+        let aIle = false
+        let ix = 0, iy = 0, ir = 0, ib = 0
+        if (pilVisible) {
+            const contour = 5
+            const gauche = (modelData.width - ile.width) / 2
+            const centreLocal = ile.x + ile.width / 2
+            let droite = gauche + ile.width
+            if (bulle.visible) droite = Math.max(droite, modelData.width / 2 + bulle.x + bulle.width - centreLocal)
+            if (pointPrive.visible) droite = Math.max(droite, modelData.width / 2 + pointPrive.x + pointPrive.width - centreLocal)
+            ix = gauche - contour
+            iy = Math.max(0, ile.y - contour)
+            ir = droite + contour
+            ib = ile.y + ile.height + contour
+            aIle = ir > ix && ib > iy
+        }
+        if (aExt && aIle) {
+            // Un tiroir descendu sous la bande haute ne doit pas élargir l'emprise au niveau de la pilule.
+            if (ext.y < ib && ext.y + ext.height > iy) {
+                const ux = Math.min(ix, ext.x)
+                const uy = Math.min(iy, ext.y)
+                const ur = Math.max(ir, ext.x + ext.width)
+                const ub = Math.max(ib, ext.y + ext.height)
+                return Qt.rect(ux, uy, ur - ux, ub - uy)
+            }
+            return Qt.rect(ix, iy, ir - ix, ib - iy)
+        }
+        if (aExt) return Qt.rect(ext.x, ext.y, ext.width, ext.height)
+        if (aIle) return Qt.rect(ix, iy, ir - ix, ib - iy)
+        return Qt.rect(0, 0, 0, 0)
+    }
+
+    readonly property bool empriseEnMouvement: retour.running || retourRecherche.running
+        || Math.abs(ile.width - ile.cibleLargeur) > 0.5 || Math.abs(ile.height - ile.cibleHauteur) > 0.5
+        || Etat.lanceurFondu === modelData.name
+
+    // Emprise stabilisée pour le mask Wayland des barres : jamais mise à jour pendant un ressort.
+    property rect _empriseStable: Qt.rect(0, 0, 0, 0)
+    readonly property rect empriseStable: _empriseStable
+    function synchroniserEmpriseStable() {
+        const r = empriseLive
+        if (Math.abs(_empriseStable.x - r.x) > 0.5 || Math.abs(_empriseStable.y - r.y) > 0.5
+            || Math.abs(_empriseStable.width - r.width) > 0.5 || Math.abs(_empriseStable.height - r.height) > 0.5)
+            _empriseStable = r
+    }
+    Component.onCompleted: synchroniserEmpriseStable()
+    onEmpriseEnMouvementChanged: if (!empriseEnMouvement) synchroniserEmpriseStable()
+    onObstaclePanneauxReposChanged: if (!empriseEnMouvement || !mouv.actif) synchroniserEmpriseStable()
+    onEmpriseLiveChanged: if (!empriseEnMouvement || !mouv.actif) synchroniserEmpriseStable()
+
     // Recherche : la fenêtre couvre tout l'écran (invisible) pour qu'un clic à côté la referme. L'île prend alors le
     // clavier en exclusif, et Hyprland ne laisse aucun clic arriver ailleurs : une couche séparée ne les recevait pas
     // Toujours ancrée en haut seulement : en recherche, la surface prend la taille de l'écran. Changer les ancres faisait
@@ -58,12 +113,12 @@ PanelWindow {
     // (InOutQuad : 0,5 vers 85 ms, la page est déjà partie, même pour une page de 560 px ou plus).
     // Depuis la pilule : 1 tout de suite, le fondu suit seulement la largeur (déjà validé). Sans animation en pause.
     property real fonduSpot: 1
-    NumberAnimation { id: entreeSpot; target: fen; property: "fonduSpot"; from: 0; to: 1; duration: Couleurs.anim.spot; easing.type: Easing.InOutQuad }
+    NumberAnimation { id: entreeSpot; target: fen; property: "fonduSpot"; from: 0; to: 1; duration: fen.mouv.dureeSpot; easing.type: Easing.InOutQuad }
     onRechercheChanged: {
         entreeSpot.stop(); fonduSpot = 1
         if (recherche) {
             retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + 1
-            if (!spotDepuisPilule && !Notifs.enPause) { fonduSpot = 0; entreeSpot.start() }
+            if (!spotDepuisPilule && !Notifs.enPause && fen.mouv.actif) { fonduSpot = 0; entreeSpot.start() }
         } else { retourRecherche.restart(); repos.restart() }
     }
     Timer { id: retourRecherche; interval: 900 }
@@ -183,8 +238,8 @@ PanelWindow {
         color: Etat.cameraActive ? Couleurs.vert : Couleurs.orange
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: 250 } }
-        Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
+        Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.duree; easing.type: fen.mouv.courbe } }
+        Behavior on x { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiH; epsilon: fen.mouv.epsilonPx } }
     }
 
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
@@ -202,8 +257,8 @@ PanelWindow {
         color: Couleurs.fond
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
-        Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on x { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiH; epsilon: fen.mouv.epsilonPx } }
+        Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour; easing.type: fen.mouv.courbe } }
         Canvas {
             anchors.fill: parent
             visible: bulle.minuteur
@@ -235,7 +290,7 @@ PanelWindow {
             color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
             opacity: fen.ouverte || (Couleurs.contourFermee && !fen.pilCachee) ? 1 : 0
             visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
+            Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         }
     }
 
@@ -247,7 +302,7 @@ PanelWindow {
         radius: ile.radius + e
         opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0
         visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
-        Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }
+        Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
@@ -274,7 +329,12 @@ PanelWindow {
         height: cibleHauteur
         // La page a 16 px de marge. Dans un quart de cercle, le retrait diagonal
         // minimal vaut r × (1 − 1/√2). Garder ses quatre coins dans le fond.
-        readonly property real retraitCoin: Math.ceil(radius * (1 - Math.SQRT1_2))
+        // Seulement au-delà du rayon d'origine des pages (42) : en dessous, ⚙ et la navigation gardent leur
+        // place d'avant, au pixel près (rendus de référence).
+        readonly property real retraitCoin: {
+            const retrait = Math.ceil(radius * (1 - Math.SQRT1_2))
+            return retrait > Math.ceil(42 * (1 - Math.SQRT1_2)) ? retrait : 0
+        }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
         radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
         color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
@@ -311,7 +371,7 @@ PanelWindow {
             interval: 450
             onTriggered: if (!survol.hovered && fen.ouverte && Etat.parSurvol && !Etat.recherche) Etat.fermer()
         }
-        Behavior on color { ColorAnimation { duration: 260 } }
+        Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
         clip: true
         FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
 
@@ -320,9 +380,9 @@ PanelWindow {
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
         // sont coupées (Loader plus bas, retirées sans attendre) et le contenu sensible masqué ; un cadre qui saute à
         // chaque page faisait une île « trop brute » en stream
-        Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: Couleurs.anim.raideur; damping: Couleurs.anim.amortiL; epsilon: 0.25 } }
-        Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: Couleurs.anim.raideur; damping: Couleurs.anim.amortiH; epsilon: 0.25 } }
-        Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: Couleurs.anim.duree; easing.type: Couleurs.anim.courbe } }
+        Behavior on width { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiL; epsilon: fen.mouv.epsilonPx } }
+        Behavior on height { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiH; epsilon: fen.mouv.epsilonPx } }
+        Behavior on radius { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.duree; easing.type: fen.mouv.courbe } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()
         // Spotlight : son contenu apparaît avec la largeur de l'île (0 à 300 px, 1 à 560 px), et la pilule ne s'efface qu'à
@@ -575,7 +635,7 @@ PanelWindow {
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: Math.max(0, Math.min(parent.height - 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2), Etat.vues.length * 14))
+            width: 18; height: Math.max(0, Math.min(parent.height - (ile.retraitCoin > 0 ? 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2) : 64), Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)

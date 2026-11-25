@@ -15,6 +15,7 @@ FloatingWindow {
     visible: false
     implicitWidth: 1100; implicitHeight: 820; minimumSize: Qt.size(820, 560)
     color: Couleurs.fond
+    readonly property var mouv: Mouvement.pourEcran(screen ? screen.name : "")
     property bool pret: false
     property string page: "accueil"
     property var selection: ({})
@@ -176,7 +177,7 @@ FloatingWindow {
                 width: etiq.implicitWidth + 50; height: 40; radius: Couleurs.rayon(20, width, height)
                 color: actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                 border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
-                Behavior on color { ColorAnimation { duration: 120 } }
+                Behavior on color { enabled: fen.mouv.actif; ColorAnimation { duration: fen.mouv.dureeCourte } }
                 Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: pastille.modelData.icone; taille: 17; color: pastille.actif ? Couleurs.accent : Couleurs.texteSec }
                 Texte { id: etiq; x: 36; anchors.verticalCenter: parent.verticalCenter; text: pastille.modelData.nom; font.pixelSize: 14; font.weight: Font.DemiBold }
                 MouseArea { id: zp; anchors.fill: parent; hoverEnabled: true; onClicked: fen.ouvrir(pastille.modelData.id) }

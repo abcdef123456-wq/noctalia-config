@@ -35,6 +35,8 @@ WidgetBarreLibelle {
     visuel: montreIcone && (courante || nbMasquees > 0) ? iconeFenetre : null
     libelle: montreTexte ? (barre.vertical && montreIcone ? "" : titre) : ""
     infobulle: plugin ? "" : titre
+    largeurClip: barre.largeurClip
+    fondClip: barre.fondClip
     defilement: options.title_scroll || "none"
     minimum: barre.vertical ? 0 : Math.max(0, Number(options.min_length ?? 0) - largeurIcone - espace)
     maximum: {

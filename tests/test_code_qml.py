@@ -84,7 +84,7 @@ class EspaceDeCode(unittest.TestCase):
     def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None, github=None, partage=0):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "CodeReglages.qml", "CodeReglageLigne.qml", "CodeModeles.qml", "PastilleChoix.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "CodeDepot.qml", "CodeReglages.qml", "CodeReglageLigne.qml", "CodeModeles.qml", "PastilleChoix.qml", "Couleurs.qml", "Mouvement.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -107,8 +107,8 @@ class EspaceDeCode(unittest.TestCase):
             (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
             if partage:
                 (q / "Partage.qml").write_text(FAUX_PARTAGE.replace("property int sessions: 0", "property int sessions: %d" % partage))
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeReglages", "CodeReglageLigne", "CodeModeles", "PastilleChoix", "CodeDepot", "Texte", "Ico")))
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Mouvement", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
+                                                for n in ("Reglages", "Couleurs", "Mouvement", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "CodeReglages", "CodeReglageLigne", "CodeModeles", "PastilleChoix", "CodeDepot", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-reglages").write_text(FAUX_NC_REGLAGES); (b / "nc-reglages").chmod(0o755)

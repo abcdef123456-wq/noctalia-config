@@ -59,15 +59,34 @@ Singleton {
         }
         return "Adwaita Sans"
     }
-    // Ressorts de la largeur et de la hauteur de l'île, durée et courbe du rayon, durées du contour et du Spotlight
-    readonly property var animations: ({
-        "ressort": { raideur: 3.4, amortiL: 0.34, amortiH: 0.36, duree: 280, courbe: Easing.OutCubic, contour: 220, spot: 170 },
-        "doux":    { raideur: 2.2, amortiL: 0.7,  amortiH: 0.7,  duree: 400, courbe: Easing.InOutQuad, contour: 320, spot: 240 },
-        "vif":     { raideur: 5.5, amortiL: 0.28, amortiH: 0.3,  duree: 200, courbe: Easing.OutBack,  contour: 150, spot: 120 },
-        "sec":     { raideur: 8,   amortiL: 1,    amortiH: 1,    duree: 120, courbe: Easing.Linear,   contour: 100, spot: 90 }
-    })
-    readonly property string animNom: Object.keys(animations).indexOf(Reglages.val("ILE_ANIM", "ressort")) >= 0 ? Reglages.val("ILE_ANIM", "ressort") : "ressort"
-    readonly property var anim: animations[animNom]
+    // Délègue à Mouvement quand présent (repli autonome pour les essais hors écran ne chargeant que Couleurs)
+    readonly property string animNom: {
+        if (typeof Mouvement !== "undefined") return Mouvement.profilBase
+        var v = Reglages.val("ILE_ANIM", "ressort")
+        return (v === "ressort" || v === "doux" || v === "vif" || v === "sec") ? v : "ressort"
+    }
+    readonly property var anim: {
+        if (typeof Mouvement !== "undefined") {
+            var b = Mouvement.profils[Mouvement.profilBase]
+            var f = Mouvement.vitessePct / 100
+            return {
+                raideur: f === 1 ? b.raideur : Number((b.raideur * f).toFixed(3)),
+                amortiL: b.amortiL,
+                amortiH: b.amortiH,
+                duree: Mouvement.echelonnerDuree(b.duree, f),
+                courbe: b.courbe,
+                contour: Mouvement.echelonnerDuree(b.dureeContour, f),
+                spot: Mouvement.echelonnerDuree(b.dureeSpot, f)
+            }
+        }
+        var def = ({
+            "ressort": { raideur: 3.4, amortiL: 0.34, amortiH: 0.36, duree: 280, courbe: Easing.OutCubic, contour: 220, spot: 170 },
+            "doux":    { raideur: 2.2, amortiL: 0.7,  amortiH: 0.7,  duree: 400, courbe: Easing.InOutQuad, contour: 320, spot: 240 },
+            "vif":     { raideur: 5.5, amortiL: 0.28, amortiH: 0.3,  duree: 200, courbe: Easing.OutBack,  contour: 150, spot: 120 },
+            "sec":     { raideur: 8,   amortiL: 1,    amortiH: 1,    duree: 120, courbe: Easing.Linear,   contour: 100, spot: 90 }
+        })
+        return def[animNom]
+    }
 
     FileView {
         path: Quickshell.env("HOME") + "/.config/nc/palette-ile.json"

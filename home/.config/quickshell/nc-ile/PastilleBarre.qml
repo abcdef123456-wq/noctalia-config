@@ -9,11 +9,16 @@ Item {
     required property string police
     required property var teinte
     property real limiteLargeur: 0
+    property real largeurClip: 0
+    property color fondClip: "transparent"
     property bool compact: false
     readonly property bool vertical: barre.position === "left" || barre.position === "right"
     readonly property var groupe: modele.groupe
     readonly property var widget: groupe ? ({}) : (definitions[modele.membres[0]] || {})
     readonly property bool capsule: !!groupe || (widget.capsule ?? barre.capsule ?? false)
+    readonly property color fondCapsule: Qt.alpha(teinte(groupe ? (groupe.fill ?? barre.capsule_fill ?? "surface_container")
+                          : (widget.capsule_fill ?? barre.capsule_fill ?? "surface_container"), Couleurs.carte),
+                        groupe?.opacity ?? widget.capsule_opacity ?? barre.capsule_opacity ?? 1)
     readonly property real espacement: groupe ? (groupe.spacing ?? Math.min(barre.widget_spacing ?? 6, 7))
                                               : (barre.widget_spacing ?? 6)
     readonly property real padding: capsule ? (groupe?.padding ?? widget.capsule_padding ?? barre.capsule_padding ?? 8) : 0
@@ -39,13 +44,13 @@ Item {
     visible: implicitWidth > 0
 
     Rectangle {
-        anchors.fill: parent
+        x: 0; y: 0
+        width: pastille.largeurClip > 0 && !pastille.vertical ? Math.min(pastille.width, pastille.largeurClip) : pastille.width
+        height: pastille.height
         visible: pastille.capsule
         radius: pastille.groupe?.radius ?? pastille.widget.capsule_radius ?? pastille.barre.capsule_radius
                 ?? Math.min(width, height) / 2
-        color: Qt.alpha(pastille.teinte(pastille.groupe ? (pastille.groupe.fill ?? pastille.barre.capsule_fill ?? "surface_container")
-                          : (pastille.widget.capsule_fill ?? pastille.barre.capsule_fill ?? "surface_container"), Couleurs.carte),
-                        pastille.groupe?.opacity ?? pastille.widget.capsule_opacity ?? pastille.barre.capsule_opacity ?? 1)
+        color: pastille.fondCapsule
         readonly property var cleBordure: pastille.groupe?.border ?? pastille.widget.capsule_border ?? pastille.barre.capsule_border
         border.color: pastille.teinte(cleBordure, "transparent")
         border.width: cleBordure ? (pastille.groupe?.border_width ?? pastille.widget.capsule_border_width ?? pastille.barre.capsule_border_width ?? 1) : 0
@@ -76,6 +81,8 @@ Item {
                 graisse: definition.font_weight ?? pastille.barre.font_weight ?? 400
                 police: definition.font_family ?? pastille.barre.font_family ?? pastille.police
                 limiteLargeur: pastille.limiteLargeur > 0 ? Math.max(48, pastille.limiteLargeur - pastille.padding * 2) : 0
+                largeurClip: pastille.largeurClip > 0 && !pastille.vertical ? Math.max(0, pastille.largeurClip - pastille.padding * 2) : 0
+                fondClip: pastille.capsule ? pastille.fondCapsule : pastille.fondClip
                 compact: pastille.compact
                 width: implicitWidth
                 height: implicitHeight

@@ -15,6 +15,8 @@ Item {
     property string police: Couleurs.police
     property var resoudreTeinte: null
     property real limiteLargeur: 0
+    property real largeurClip: 0
+    property color fondClip: "transparent"
     property bool compact: false
     readonly property real echelle: Math.max(0.25, Number(definition.scale ?? 1))
     property int resteMolette: 0

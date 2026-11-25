@@ -29,6 +29,34 @@ Singleton {
     property var lanceurProprio: null
     function enregistrerPilule(nom, pilule) { pilules[nom] = pilule }
     function oublierPilule(nom, pilule) { if (pilules[nom] === pilule) delete pilules[nom] }
+    // Emprises de surfaces externes issues de la pilule (JarvisChat, Code) par écran : lues par Ile.qml pour empriseLive
+    property var emprisesExternes: ({})
+    function definirEmpriseExterne(nom, rect) {
+        if (!nom) return
+        const actuel = emprisesExternes[nom]
+        if (!rect || rect.width <= 0 || rect.height <= 0) {
+            if (actuel === undefined) return
+            const copie = Object.assign({}, emprisesExternes)
+            delete copie[nom]
+            emprisesExternes = copie
+            return
+        }
+        if (actuel && Math.abs(actuel.x - rect.x) < 0.25 && Math.abs(actuel.y - rect.y) < 0.25
+            && Math.abs(actuel.width - rect.width) < 0.25 && Math.abs(actuel.height - rect.height) < 0.25) return
+        const copie = Object.assign({}, emprisesExternes)
+        copie[nom] = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        emprisesExternes = copie
+    }
+    function effacerEmpriseExterne(nom) {
+        if (!nom || emprisesExternes[nom] === undefined) return
+        const copie = Object.assign({}, emprisesExternes)
+        delete copie[nom]
+        emprisesExternes = copie
+    }
+    function empriseExterne(nom) {
+        const r = nom ? emprisesExternes[nom] : null
+        return r && r.width > 0 && r.height > 0 ? Qt.rect(r.x, r.y, r.width, r.height) : Qt.rect(0, 0, 0, 0)
+    }
     // Musique au premier plan pendant la lecture, et encore 15 min après une pause (comme l'iPhone)
     readonly property bool aMusique: lecteur !== null && titre !== ""
                                      && (joue || (lecteur === dernierLecteur && finLecture > 0
