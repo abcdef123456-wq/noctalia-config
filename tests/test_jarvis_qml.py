@@ -193,6 +193,7 @@ if(etape===0){
 if(AssistantEtat.enCours||JarvisEtat.enCours)return
 if(etape===1){
  var p=tous(dashboard.contentItem,[])
+ if(p.length===3&&p[0].parent&&p[0].parent.height<p[0].height)return
  verifier(p.length===3&&p.map(x=>x.texte).join("|")==="Oui|Non|Plus tard","pastilles de la fenêtre : "+p.map(x=>x.texte).join("|"))
  clavier.mouseMove(p[0],20,16);clavier.mouseClick(p[0],20,16,Qt.LeftButton);verifier(AssistantEtat.enCours,"le clic n'envoie pas");etape++
 }else if(etape===2){

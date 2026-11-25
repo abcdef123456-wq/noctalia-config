@@ -167,13 +167,18 @@ class LanceurFonduBidirectionnel(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class JarvisChatTiroir(unittest.TestCase):
-    def executer(self, scenario):
+    def executer(self, scenario, taille_ecran=(1600, 1000)):
         with tempfile.TemporaryDirectory(prefix="nt-", dir=_isolation.dossier_court()) as d:
             root = Path(d)
             shutil.copytree(QML, root / "qml")
             (root / "runtime").mkdir(mode=0o700)
             jc = (root / "qml/JarvisChat.qml").read_text()
-            jc = sans_couche(jc).replace("FloatingWindow {\n", "FloatingWindow {\n    implicitWidth: 1600; implicitHeight: 1000\n", 1)
+            largeur, hauteur = taille_ecran
+            jc = sans_couche(jc).replace(
+                "FloatingWindow {\n",
+                f"FloatingWindow {{\n    implicitWidth: {largeur}; implicitHeight: {hauteur}\n",
+                1,
+            )
             (root / "qml/JarvisChat.qml").write_text(jc)
             (root / "qml/Etat.qml").write_text(ETAT_STUB)
             (root / "qml/Reglages.qml").write_text(
@@ -269,10 +274,14 @@ ShellRoot {
 """
             )
             (root / "qml/shell.qml").write_text(shell)
+            config_ecran = root / "offscreen.json"
+            config_ecran.write_text(json.dumps({
+                "screens": [{"name": "hors-ecran", "width": largeur, "height": hauteur}],
+            }))
             env = dict(
                 os.environ,
                 HOME=d,
-                QT_QPA_PLATFORM="offscreen",
+                QT_QPA_PLATFORM=f"offscreen:configfile={config_ecran}",
                 QT_QUICK_BACKEND="software",
                 XDG_RUNTIME_DIR=str(root / "runtime"),
                 XDG_CACHE_HOME=str(root / "cache"),
@@ -292,6 +301,66 @@ ShellRoot {
             self.assertIn("FINI", sortie, sortie)
             p = root / "calls"
             return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+
+    def test_petit_ecran_saisie_visible_et_accueil_defilable(self):
+        self.executer(
+            """
+            var carte = trouver(tiroir.contentItem, "nc-jarvis-chat-carte")
+            var defil = trouver(carte, "nc-jarvis-chat-scroll")
+            var entree = trouver(tiroir.page, "nc-assistant-input")
+            if (etape === 0) {
+                verifier(tiroir.screen.width === 640 && tiroir.screen.height === 360, "ecran logique 640x360")
+                tiroir.basculer("DP-1")
+                etape++
+            } else if (etape === 1 || etape === 3) {
+                if (tiroir.contenuOpacite < 1 || carte.height !== tiroir.hauteurCible) return
+                verifier(tiroir.yCible === 54 && tiroir.hauteurCible <= 298, "hauteur disponible sous yCible")
+                verifier(tiroir.yCible + tiroir.hauteurCible <= 352, "carte hors ecran")
+                verifier(entree !== null && entree.visible && entree.height > 0, "saisie absente")
+                var p = entree.mapToItem(carte, 0, 0)
+                verifier(p.y >= 0 && p.y + entree.height <= carte.height, "saisie coupee par carte")
+                verifier(carte.y + p.y + entree.height <= 360, "saisie hors ecran")
+                // Vérifier aussi toute la barre de saisie, pas seulement les glyphes de TextInput.
+                var barre = entree.parent.parent
+                var b = barre.mapToItem(carte, 0, 0)
+                verifier(b.y >= 0 && b.y + barre.height <= carte.height, "barre saisie coupee")
+                if (etape === 1) {
+                    verifier(defil.clip && defil.interactive && defil.contentHeight > defil.height, "accueil non defilable")
+                    verifier(defil.contentY > 0, "accueil non positionne sur saisie")
+                    defil.contentY = 0
+                    etape++
+                } else {
+                    var historique = trouver(tiroir.page, "nc-jarvis-history")
+                    verifier(historique.visible && historique.height > 0 && historique.clip, "historique sans viewport")
+                    verifier(historique.contentHeight > historique.height, "historique non defilable")
+                    tiroir.close()
+                    console.log("FINI")
+                    Qt.exit(0)
+                }
+            } else if (etape === 2) {
+                verifier(defil.contentY === 0, "haut de l'accueil inaccessible")
+                AssistantEtat.messages = [{ num: 1, role: "assistant", texte: "Une longue reponse. ".repeat(400) }]
+                tiroir.page.historiqueOuvert = true
+                etape++
+            }
+""",
+            taille_ecran=(640, 360),
+        )
+
+    def test_hauteur_normale_et_ecran_minuscule(self):
+        for hauteur in (900, 1000, 40):
+            with self.subTest(hauteur=hauteur):
+                self.executer(
+                    """
+                    verifier(tiroir.hauteurEcran === tiroir.screen.height, "hauteur logique")
+                    verifier(tiroir.yCible >= 0 && tiroir.hauteurCible >= 0, "geometrie negative")
+                    verifier(tiroir.yCible + tiroir.hauteurCible <= tiroir.hauteurEcran - 8, "marge basse perdue")
+                    if (tiroir.hauteurEcran >= 900) verifier(tiroir.hauteurCible === 580, "hauteur normale modifiee")
+                    console.log("FINI")
+                    Qt.exit(0)
+""",
+                    taille_ecran=(640, hauteur),
+                )
 
     def test_ephemere_epingle_selecteur_et_cockpit(self):
         calls = self.executer(

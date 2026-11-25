@@ -3493,6 +3493,12 @@ def configuration_panneaux(tables, vals=None):
             panneau["center"] = []
             panneau["end"] = ["network", "volume"] + (["battery"] if _a_batterie() else [])
             panneau["capsule_group"] = []
+            # La fusion par écran doit hériter de la composition minimale, sans perdre ses styles.
+            panneau["monitor"] = {
+                ecran: {k: v for k, v in surcharge.items() if k not in (*_LISTES, "capsule_group")}
+                for ecran, surcharge in panneau.get("monitor", {}).items()
+                if isinstance(surcharge, dict)
+            }
         groupes = panneau["capsule_group"]
         if not isinstance(groupes, list) or not all(
                 isinstance(g, dict) and isinstance(g.get("id"), str) and liste_widgets(g.get("members")) for g in groupes):

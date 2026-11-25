@@ -209,3 +209,141 @@ assert.deepEqual(reagirPastille(startRect, 'start', 'top', 10, {x:255, y:4, widt
 assert.deepEqual(reagirPastille(startRect, 'start', 'top', 10, {x:256, y:4, width:400, height:43}, 'instantane'),
                  {dx:0, opacite:1, largeurClip:0});
 """)
+
+    def test_barres_adjacentes_arbitrage_en_coordonnees_ecran(self):
+        self.verifier("""
+const assert = require('node:assert/strict');
+const barres = ['top', 'left'].map((position, i) => ({
+    id: String(i), position, margin_edge: 6, margin_ends: 16, thickness: 34, reserve_space: false
+}));
+const tailles = [
+    {start: [{width: 24, height: 34}]},
+    {start: [{width: 34, height: 24}]},
+];
+const p = placerBarres(barres, tailles, 640, 360, {x: 260, y: 4, width: 120, height: 40});
+assert.deepEqual(p.map(b => [b.start[0].x, b.start[0].y, b.start[0].occulteRepos]),
+                 [[16, 6, false], [6, 16, true]]);
+assert.equal(rectanglesPastilles(p[1].start, 'start', 'left', {}, 'glisser', 0, 0).length, 0);
+// L'état occupé ne fuit jamais vers un autre écran ou un nouveau calcul.
+assert.equal(placerBarres([barres[1]], [tailles[1]], 640, 360, {}).at(0).start[0].occulteRepos, false);
+""")
+
+    def test_rectangles_individuels_et_barre_sans_rendu(self):
+        self.verifier("""
+const assert = require('node:assert/strict');
+const barre = {position: 'top', margin_edge: 6, margin_ends: 16, widget_spacing: 20, thickness: 40};
+const obstacle = {x: 260, y: 4, width: 120, height: 40};
+const p = placerBarre(barre, [{width: 15, height: 40}, {width: 15, height: 40}], [], [], 640, 360, obstacle);
+const r = rectanglesPastilles(p.start, 'start', 'top', obstacle, 'glisser', 0, 0);
+assert.deepEqual(r.map(r => [r.x, r.y, r.width, r.height]), [[16, 6, 15, 40], [51, 6, 15, 40]]);
+assert.ok(!r.some(r => r.x <= 40 && 40 < r.x + r.width), 'le vide de 20 px doit laisser passer les clics');
+const vide = placerBarre(barre, [null, {width: 0, height: 40}], [], [], 640, 360, obstacle);
+assert.deepEqual(rectanglesPastilles(vide.start, 'start', 'top', obstacle, 'glisser', 0, 0), []);
+assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
+    {x: 0, y: 0, width: 640, height: 100}, 'instantane', 0, 0), []);
+""")
+
+    @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+    def test_vrai_shell_disponibilite_et_regions_hors_ecran(self):
+        import tempfile
+        from tests.test_ile_demarrage import copie, sans_couche, environnement, lignes_en_erreur
+
+        with tempfile.TemporaryDirectory(prefix="nc-pastilles-") as d:
+            root = copie(d)
+            for f in root.glob("*.qml"):
+                texte = f.read_text()
+                if f.name == "Panneaux.qml":
+                    f.write_text(texte.replace("id: ecranPanneaux", "id: ecranPanneaux; property alias flottantesTest: flottantes"))
+                if f.name == "BarreFlottante.qml":
+                    # Conserver et instancier le VRAI Region, même sans backend layer-shell.
+                    texte = texte.replace("mask: Region", "property Region masqueTeste: Region")
+                if "PanelWindow {" in texte:
+                    f.write_text(sans_couche(texte))
+            shell = root / "shell.qml"
+            texte = shell.read_text().replace('target: "ile"', 'id: ipcTeste; target: "ile"')
+            texte = texte.replace("id: ile", "id: ile; property alias panneauxTest: panneaux", 1)
+            scenario = """
+    Timer {
+        interval: 500; running: true; repeat: true
+        property int etape: 0
+        function verifier(ok, message) { if (!ok) { console.error("ECHEC: " + message); Qt.exit(2) } }
+        function barres() {
+            const rep = ecransIle.instances[0].panneauxTest.flottantesTest;
+            const resultat = [];
+            for (let i = 0; i < rep.count; ++i) resultat.push(rep.objectAt(i));
+            return resultat;
+        }
+        onTriggered: {
+            if (etape === 0) {
+                Reglages.valeurs = { BARRE_MODULAIRE: "oui" }
+                racine.modelePanneaux = { generation: "test", barres: [
+                    {id: "vide", position: "top", start: ["inconnu"], reserve_space: false}
+                ] }
+            } else if (etape === 1) {
+                verifier(barres().length === 1, "la sonde de mesure existe");
+                verifier(barres()[0].nombrePastillesRendues === 0 && !barres()[0].visible,
+                         "aucune fenêtre visible pour un widget non pris en charge");
+                verifier(ipcTeste.panneauxPrets("test") === "", "ne pas acquitter une barre vide");
+                racine.modelePanneaux = { generation: "test", widgets: {
+                    a: {type: "text", text: "A"}, b: {type: "text", text: "B"}
+                }, barres: [
+                    {id: "haut", position: "top", margin_edge: 6, margin_ends: 16,
+                     widget_spacing: 20, start: ["a", "b"], reserve_space: false}
+                ] }
+            } else if (etape === 2) {
+                const w = barres()[0];
+                verifier(w.visible && w.nombrePastillesRendues === 2, "deux pastilles rendues");
+                verifier(ipcTeste.panneauxPrets("test") === "test", "acquitter le rendu courant");
+                verifier(ipcTeste.panneauxPrets("autre") === "", "refuser une génération périmée");
+                const regions = w.masqueTeste.regions;
+                verifier(regions.length === 2, "une Region par pastille");
+                verifier(regions[1].x - (regions[0].x + regions[0].width) === 20,
+                         "le masque ne couvre pas le vide entre les pastilles");
+                w.empriseLive = Qt.rect(0, 0, 2000, 2000);
+            } else if (etape === 3) {
+                const w = barres()[0];
+                verifier(w.masqueTeste.regions.length === 2 && w.visible,
+                         "aucune reconfiguration de masque ou mapping pendant le ressort");
+                w.mouv.reactionBarre = "instantane";
+                w.empriseStable = Qt.rect(0, 0, 2000, 2000);
+            } else if (etape === 4) {
+                verifier(!barres()[0].visible && barres()[0].nombrePastillesRendues === 0,
+                         "une barre totalement occultée est démontée");
+                verifier(ipcTeste.panneauxPrets("test") === "", "ne pas acquitter un écran sans pastille");
+                racine.modelePanneaux = { generation: "test", widgets: { a: {type: "text", text: "A"} },
+                    barres: ["top", "left"].map((position, i) => ({
+                        id: String(i), position, margin_edge: 6, margin_ends: 16, thickness: 34,
+                        start: ["a"], reserve_space: false
+                    })) };
+            } else if (etape === 5) {
+                verifier(barres()[0].visible && !barres()[1].visible,
+                         "seule la première barre adjacente est mappée");
+                verifier(barres()[1].dispositionRepos.start[0].occulteRepos,
+                         "arbitrage partagé par les vraies instances QML");
+                racine.modelePanneaux = { generation: "test", barres: [
+                    {id: "continue", position: "bottom", background_opacity: 1, start: ["inconnu"]}
+                ] };
+            } else if (etape === 6) {
+                verifier(ipcTeste.panneauxPrets("test") === "", "un fond continu seul ne suffit pas");
+                racine.modelePanneaux = { generation: "test", widgets: { a: {type: "text", text: "A"} },
+                    barres: [{id: "continue", position: "bottom", background_opacity: 1, start: ["a"]}] };
+            } else {
+                verifier(ipcTeste.panneauxPrets("test") === "test", "une pastille continue suffit");
+                console.log("PASTILLES_OK"); Qt.quit();
+            }
+            etape++;
+        }
+    }
+"""
+            shell.write_text(texte[:texte.rfind("}")] + scenario + "}\n")
+            env = environnement(root)
+            try:
+                resultat = subprocess.run(["qs", "--no-color", "-p", str(shell)], env=env, text=True,
+                                          capture_output=True, timeout=15, stdin=subprocess.DEVNULL)
+            except subprocess.TimeoutExpired as erreur:
+                self.fail(str(erreur.stdout) + str(erreur.stderr))
+            sortie = resultat.stdout + resultat.stderr
+            self.assertEqual(resultat.returncode, 0, sortie)
+            self.assertEqual(lignes_en_erreur(sortie), [], sortie)
+            self.assertNotIn("ECHEC", sortie, sortie)
+            self.assertIn("PASTILLES_OK", sortie, sortie)

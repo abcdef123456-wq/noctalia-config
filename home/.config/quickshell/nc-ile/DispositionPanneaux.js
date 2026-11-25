@@ -149,7 +149,16 @@ function barresFlottantes(barres) {
     return (barres || []).filter(b => b.enabled !== false && (b.background_opacity ?? 0) <= 0)
 }
 
-function placerBarre(barre, taillesStart, taillesCenter, taillesEnd, largeur, hauteur, ileRepos) {
+// Un seul arbitrage par écran, dans l'ordre du modèle ; tous les rectangles sont en coordonnées écran.
+function placerBarres(barres, tailles, largeur, hauteur, ileRepos) {
+    const occupes = []
+    return barres.map((barre, i) => {
+        const t = tailles[i] || {}
+        return placerBarre(barre, t.start, t.center, t.end, largeur, hauteur, ileRepos, occupes)
+    })
+}
+
+function placerBarre(barre, taillesStart, taillesCenter, taillesEnd, largeur, hauteur, ileRepos, occupes = []) {
     const resultat = {
         start: new Array((taillesStart || []).length).fill(null),
         center: new Array((taillesCenter || []).length).fill(null),
@@ -169,7 +178,6 @@ function placerBarre(barre, taillesStart, taillesCenter, taillesEnd, largeur, ha
     const ecartVoulu = Math.max(2, barre.widget_spacing ?? 6)
     const epaisseurBarre = Math.ceil(barre.thickness ?? 34)
     const aIle = !!ileRepos && ileRepos.width > 0 && ileRepos.height > 0
-    const occupes = []
 
     const parCote = { center: taillesCenter || [], start: taillesStart || [], end: taillesEnd || [] }
     for (const cote of ["center", "start", "end"]) {
@@ -297,4 +305,24 @@ function reagirPastille(rectRepos, cote, barrePos, maxDecalage, emprise, modeRea
     }
 
     return { dx: 0, opacite: 1, largeurClip: 0 }
+}
+
+// Géométrie stable des pastilles visibles, sans englober les espaces transparents.
+function rectanglesPastilles(placements, cote, position, empriseStable, mode, origineX, origineY, titres) {
+    const rectangles = []
+    for (let i = 0; i < (placements || []).length; ++i) {
+        const p = placements[i]
+        if (!p || p.occulteRepos) continue
+        const maxDec = cote === "start" ? p.margeMin : (cote === "end" ? p.margeMax : 0)
+        const r = reagirPastille(p, cote, position, maxDec, empriseStable, mode, 32, !!titres?.[i], 56)
+        if (r.opacite <= 0.005) continue
+        const width = Math.ceil(r.largeurClip > 0 ? Math.min(p.width, r.largeurClip) : p.width)
+        const height = Math.ceil(p.height)
+        if (width <= 0 || height <= 0) continue
+        rectangles.push({
+            x: Math.floor(p.x + r.dx - origineX), y: Math.floor(p.y - origineY),
+            width, height, opacite: r.opacite,
+        })
+    }
+    return rectangles
 }

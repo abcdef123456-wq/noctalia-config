@@ -39,9 +39,9 @@ PanelWindow {
     readonly property real hauteurEcran: screen ? screen.height : 1000
     readonly property var mouv: Mouvement.pourEcran(nomEcranActif)
     readonly property real largeurCible: Math.min(460, Math.max(320, largeurEcran - 32))
-    readonly property real hauteurCible: Math.min(580, Math.max(360, hauteurEcran - 80))
+    readonly property real hauteurCible: Math.max(0, Math.min(580, hauteurEcran - yCible - 12))
     readonly property real xCible: Math.round((largeurEcran - largeurCible) / 2)
-    readonly property real yCible: Math.max(54, (parseInt(Reglages.val("ILE_Y", "9")) || 9) + 45)
+    readonly property real yCible: Math.min(Math.max(0, hauteurEcran - 12), Math.max(54, (parseInt(Reglages.val("ILE_Y", "9")) || 9) + 45))
     readonly property real contenuOpacite: fondu.actif ? Math.max(0, Math.min(1, (fondu.p - 0.25) / 0.55)) : (ouvert ? 1 : 0)
 
     readonly property int coucheVoulue: epingle ? WlrLayer.Top : WlrLayer.Overlay
@@ -100,7 +100,10 @@ PanelWindow {
     onRectCarteChanged: { publierEmprise(); verifierRelachePilule() }
     onEpingleChanged: verifierRelachePilule()
     onVisibleChanged: publierEmprise()
-    onOuvertChanged: publierEmprise()
+    onOuvertChanged: {
+        publierEmprise()
+        if (ouvert) defilementChat.contentY = Math.max(0, defilementChat.contentHeight - defilementChat.height)
+    }
 
     function ouvrirSur(nom, mode) {
         var cible = resoudreEcran(nom)
@@ -290,12 +293,27 @@ PanelWindow {
                     }
                 }
             }
-            Assistant {
-                id: chat
-                fenetre: true
+            // L'accueil garde la place de l'orbe et des modèles ; sur petit écran, ouvrir au bas sur la saisie.
+            // La conversation dispose déjà de son propre défilement et garde sa saisie ancrée en bas.
+            Flickable {
+                id: defilementChat
+                objectName: "nc-jarvis-chat-scroll"
                 anchors.top: barre.bottom; anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
                 anchors.leftMargin: 14; anchors.rightMargin: 14; anchors.bottomMargin: 14
-                animationsActives: fen.visible && fen.ouvert
+                clip: true
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                contentWidth: width
+                contentHeight: chat.height
+                onContentHeightChanged: contentY = Math.max(0, contentHeight - height)
+                onHeightChanged: contentY = Math.max(0, contentHeight - height)
+                Assistant {
+                    id: chat
+                    fenetre: true
+                    width: defilementChat.width
+                    height: !historiqueOuvert && !AssistantEtat.reglagesOuverts ? Math.max(520, defilementChat.height) : defilementChat.height
+                    animationsActives: fen.visible && fen.ouvert
+                }
             }
         }
     }

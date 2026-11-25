@@ -23,6 +23,29 @@ Scope {
     readonly property var reservesListe: ["top", "bottom", "left", "right"]
         .filter(b => reservesMap[b] > 0)
         .map(b => ({ bord: b, zone: reservesMap[b] }))
+    readonly property var placesFlottantes: {
+        flottantes.revision
+        const tailles = barresFlottantes.map((_, i) => flottantes.objectAt(i)?.tailles)
+        return Disposition.placerBarres(barresFlottantes, tailles, ecran.width, ecran.height, obstacleRepos)
+    }
+    readonly property bool pret: {
+        flottantes.revision; continues.revision
+        for (let i = 0; i < flottantes.count; ++i)
+            if ((flottantes.objectAt(i)?.nombrePastillesRendues ?? 0) > 0) return true
+        for (let i = 0; i < continues.count; ++i) {
+            const barre = continues.objectAt(i)
+            if (barre && barre.visible && aPastilleRendue(barre.contentItem)) return true
+        }
+        return false
+    }
+
+    function aPastilleRendue(item) {
+        if (item instanceof PastilleBarre)
+            return item.visible && item.opacity > 0.005 && item.width > 0 && item.height > 0
+        for (const enfant of item.children)
+            if (aPastilleRendue(enfant)) return true
+        return false
+    }
 
     function teinte(role, defaut) {
         if (!role || role === "none") return defaut
@@ -47,6 +70,10 @@ Scope {
     }
 
     Instantiator {
+        id: continues
+        property int revision: 0
+        onObjectAdded: revision++
+        onObjectRemoved: revision++
         model: ecranPanneaux.barresContinues
         delegate: BarreContinue {
             required property var modelData
@@ -64,9 +91,15 @@ Scope {
     }
 
     Instantiator {
+        id: flottantes
+        property int revision: 0
+        onObjectAdded: revision++
+        onObjectRemoved: revision++
         model: ecranPanneaux.barresFlottantes
         delegate: BarreFlottante {
             required property var modelData
+            required property int index
+            dispositionRepos: ecranPanneaux.placesFlottantes[index] || ({ start: [], center: [], end: [] })
             screen: ecranPanneaux.ecran
             barre: modelData
             definitions: ecranPanneaux.modele.widgets || ({})

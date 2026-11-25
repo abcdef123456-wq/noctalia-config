@@ -1,4 +1,5 @@
 import QtQuick
+import QtQml.Models
 import Quickshell
 import Quickshell.Wayland
 import "DispositionPanneaux.js" as Disposition
@@ -59,52 +60,39 @@ PanelWindow {
         return t
     }
 
-    // Positions au repos calculées hors animation (jamais liées à empriseLive).
-    readonly property var dispositionRepos: {
-        if (!screen || screen.width <= 0 || screen.height <= 0)
-            return { start: [], center: [], end: [] }
+    // Les mesures restent disponibles même lorsque la fenêtre n'est pas mappée.
+    readonly property var tailles: {
         repStart.revision; repCenter.revision; repEnd.revision
-        return Disposition.placerBarre(
-            barre,
-            taillesPour(repStart),
-            taillesPour(repCenter),
-            taillesPour(repEnd),
-            screen.width,
-            screen.height,
-            obstacleRepos
-        )
+        return { start: taillesPour(repStart), center: taillesPour(repCenter), end: taillesPour(repEnd) }
     }
+    property var dispositionRepos: screen
+        ? Disposition.placerBarre(barre, tailles.start, tailles.center, tailles.end,
+                                 screen.width, screen.height, obstacleRepos)
+        : ({ start: [], center: [], end: [] })
 
-    // Zones de clic calculées uniquement sur empriseStable : zéro commit set_input_region pendant les ressorts.
-    function zoneMasque(placements, pastilles, cote) {
-        if (!placements || !placements.length) return Qt.rect(0, 0, 0, 0)
-        const mode = mouv ? mouv.reactionBarre : "glisser"
-        let minX = 1e9, minY = 1e9, maxR = -1e9, maxB = -1e9
-        let trouve = false
-        for (let i = 0; i < placements.length; ++i) {
-            const p = placements[i]
-            if (!p || p.occulteRepos) continue
-            const maxDec = cote === "start" ? p.margeMin : (cote === "end" ? p.margeMax : 0)
-            const estTitre = pastilles && pastilles[i] ? aTitre(pastilles[i]) : false
-            const r = Disposition.reagirPastille(p, cote, position, maxDec, empriseStable, mode, 32, estTitre, 56)
-            if (r.opacite <= 0.15) continue
-            const lx = Math.floor(p.x + r.dx - origineX)
-            const ly = Math.floor(p.y - origineY)
-            const lw = Math.ceil(r.largeurClip > 0 ? Math.min(p.width, r.largeurClip) : p.width)
-            const lh = Math.ceil(p.height)
-            if (lw <= 0 || lh <= 0) continue
-            minX = Math.min(minX, lx)
-            minY = Math.min(minY, ly)
-            maxR = Math.max(maxR, lx + lw)
-            maxB = Math.max(maxB, ly + lh)
-            trouve = true
+    // Ni le masque ni le mapping Wayland ne dépendent des frames du ressort.
+    readonly property var rectanglesRendus: {
+        const rectangles = []
+        for (const cote of ["start", "center", "end"]) {
+            const pastilles = cote === "start" ? pastillesStart : (cote === "center" ? pastillesCenter : pastillesEnd)
+            rectangles.push(...Disposition.rectanglesPastilles(
+                dispositionRepos[cote], cote, position, empriseStable,
+                mouv ? mouv.reactionBarre : "glisser", origineX, origineY, pastilles.map(p => aTitre(p))))
         }
-        return trouve ? Qt.rect(minX, minY, maxR - minX, maxB - minY) : Qt.rect(0, 0, 0, 0)
+        return rectangles
     }
-
-    readonly property rect zoneStart: zoneMasque(dispositionRepos.start, pastillesStart, "start")
-    readonly property rect zoneCenter: zoneMasque(dispositionRepos.center, pastillesCenter, "center")
-    readonly property rect zoneEnd: zoneMasque(dispositionRepos.end, pastillesEnd, "end")
+    readonly property int nombrePastillesRendues: rectanglesRendus.length
+    readonly property var rectanglesMasque: rectanglesRendus.filter(r => r.opacite > 0.15)
+    readonly property var regionsMasque: {
+        morceauxMasque.revision
+        const regions = []
+        for (let i = 0; i < morceauxMasque.count; ++i) {
+            const region = morceauxMasque.objectAt(i)
+            if (region) regions.push(region)
+        }
+        return regions
+    }
+    visible: nombrePastillesRendues > 0
 
     anchors {
         top: position === "top" || vertical
@@ -118,11 +106,22 @@ PanelWindow {
     color: "transparent"
     WlrLayershell.namespace: "nc-panneau-" + barre.id
     WlrLayershell.layer: barre.layer === "overlay" ? WlrLayer.Overlay : WlrLayer.Top
-    mask: Region { item: masqueStart; Region { item: masqueCenter } Region { item: masqueEnd } }
+    mask: Region { regions: fen.regionsMasque }
 
-    Item { id: masqueStart; x: fen.zoneStart.x; y: fen.zoneStart.y; width: fen.zoneStart.width; height: fen.zoneStart.height }
-    Item { id: masqueCenter; x: fen.zoneCenter.x; y: fen.zoneCenter.y; width: fen.zoneCenter.width; height: fen.zoneCenter.height }
-    Item { id: masqueEnd; x: fen.zoneEnd.x; y: fen.zoneEnd.y; width: fen.zoneEnd.width; height: fen.zoneEnd.height }
+    Instantiator {
+        id: morceauxMasque
+        property int revision: 0
+        onObjectAdded: revision++
+        onObjectRemoved: revision++
+        model: fen.rectanglesMasque
+        delegate: Region {
+            required property var modelData
+            x: modelData.x
+            y: modelData.y
+            width: modelData.width
+            height: modelData.height
+        }
+    }
 
     Repeater {
         id: repStart

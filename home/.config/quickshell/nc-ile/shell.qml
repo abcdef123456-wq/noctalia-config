@@ -52,11 +52,13 @@ ShellRoot {
     }
     readonly property bool panneauxActifs: (modelePanneaux.barres?.length ?? 0) > 0
     readonly property bool bandeIle: Reglages.val("ILE_BANDE", "non") === "oui"
-    Variants {
+    readonly property Variants ecransIle: Variants {
         model: Quickshell.screens
         Ile {
             id: ile
+            readonly property bool panneauxRendus: panneaux.pret
             Panneaux {
+                id: panneaux
                 ecran: ile.modelData
                 modele: racine.modelePanneaux
                 palette: racine.palettePanneaux
@@ -381,6 +383,8 @@ ShellRoot {
         function panneauxPrets(generation: string): string {
             return racine.panneauxActifs && Quickshell.screens.length > 0
                 && Reglages.val("BARRE_MODULAIRE", "non") === "oui"
+                && ecransIle.instances.length === Quickshell.screens.length
+                && ecransIle.instances.every(ile => ile.panneauxRendus)
                 && racine.modelePanneaux.generation === generation ? generation : ""
         }
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
