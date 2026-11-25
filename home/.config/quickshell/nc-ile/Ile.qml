@@ -274,7 +274,12 @@ PanelWindow {
         height: cibleHauteur
         // La page a 16 px de marge. Dans un quart de cercle, le retrait diagonal
         // minimal vaut r × (1 − 1/√2). Garder ses quatre coins dans le fond.
-        readonly property real retraitCoin: Math.ceil(radius * (1 - Math.SQRT1_2))
+        // Seulement au-delà du rayon d'origine des pages (42) : en dessous, ⚙ et la navigation gardent leur
+        // place d'avant, au pixel près (rendus de référence).
+        readonly property real retraitCoin: {
+            const retrait = Math.ceil(radius * (1 - Math.SQRT1_2))
+            return retrait > Math.ceil(42 * (1 - Math.SQRT1_2)) ? retrait : 0
+        }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
         radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
         color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
@@ -575,7 +580,7 @@ PanelWindow {
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: Math.max(0, Math.min(parent.height - 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2), Etat.vues.length * 14))
+            width: 18; height: Math.max(0, Math.min(parent.height - (ile.retraitCoin > 0 ? 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2) : 64), Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)
