@@ -145,6 +145,12 @@ class Reglages(unittest.TestCase):
         with self.assertRaises(ValueError):
             reg._verifier_theme("essai", d)
 
+    def test_themes_livres_deux_fenetres_cote_a_cote(self):
+        """Issue #53 : un thème livré en colonnes qui défilent laisse deux fenêtres tenir à l'écran (0.5 au plus)."""
+        for f in sorted((REPO / "home/.local/share/nc/themes").glob("*.json")):
+            largeur = json.loads(f.read_text(encoding="utf-8")).get("reglages", {}).get("FENETRES_COLONNE_LARGEUR", "auto")
+            self.assertTrue(largeur == "auto" or float(largeur) <= 0.5, (f.name, largeur))
+
 
 if __name__ == "__main__":
     unittest.main()
