@@ -1,15 +1,20 @@
-# Pages de l’île
+# Île essentielle et Centre de contrôle
 
-Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces pages)
-permet d’activer ou désactiver chacune des 19 pages :
-Musique, Agents IA, Minuteur, Recharge, Jeu, Centre de contrôle, JARVIS, Notifications, Son, Réseau, Bluetooth,
-Système, Santé, Calendrier, Météo, Presse-papiers, Fenêtres, Appel et Terminal. La page Santé (températures,
-ventilateurs, profil d'énergie, alerte de surchauffe) n'existe que sur une machine qui a des capteurs
-(`nc-ile-etat capteurs`).
+L’île Quickshell se concentre désormais sur **l’extrême essentiel**, avec un dessin adapté à chaque thème (forme,
+contour, police, accents, repères) :
+- **Pilule fermée** : heure, date optionnelle, météo brève, point de notifications non lues, et réactions en direct
+  (musique, volume, luminosité, minuteur, appel, enregistrement vidéo, agents actifs).
+- **Île ouverte** : un bandeau d’onglets nommés en haut avec par défaut uniquement **Essentiel**, **Notifications**, et
+  **Musique** (lorsqu’un lecteur est actif), plus un accès direct au **Centre de contrôle** et à la **Recherche**.
 
-Les choix sont conservés dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Huit pages sont coupées par
-défaut (JARVIS, Agents IA, Santé, Jeu, Appel, Terminal, Fenêtres, Minuteur) ; les autres sont activées. Un « oui »
-déjà réglé est gardé. Les pages d’activité n’apparaissent que lorsqu’elles ont du contenu. Exemple :
+Tous les réglages rapides et panneaux détaillés (Wi-Fi/Ethernet, Bluetooth, VPN, Concentration, Lumière nocturne,
+Caféine, Mode jeu, Volume, Luminosité, Profils d’énergie, Système, Batterie, Santé, Météo, Agenda, Presse-papiers,
+Minuteur, Fenêtres) vivent dans le **panneau Centre de contrôle dédié** (`Super + C`, icônes de la barre, ou bouton
+« Centre de contrôle » sur l’île ; `qs -c nc-ile ipc call ile controle`).
+
+Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces
+pages) permet tout de même de réactiver ou masquer à la carte chacune des 20 pages sur l’île. Les choix sont conservés
+dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Un « oui » déjà réglé est gardé. Exemple :
 
 ```sh
 nc-settings set ILE_PAGE_ASSISTANT oui
@@ -17,11 +22,9 @@ nc-settings set ILE_PAGE_MUSIQUE non
 nc-settings reset ILE_PAGE_ASSISTANT
 ```
 
-Désactiver une page masque son accès, y compris via la commande IPC `page`. Cela ne désactive pas sa fonction :
-un minuteur continue, les notifications de fin d’un agent restent actives, et le cockpit JARVIS reste accessible.
-Si la page ouverte est désactivée, l’île choisit une page encore disponible. Si elles sont toutes désactivées,
-elle se referme et reste en pilule ; le Spotlight reste disponible. Il suffit de réactiver une page pour la rouvrir.
-
+Désactiver une page masque son accès sur l’île. Les réglages rapides restent disponibles dans le panneau Centre de
+contrôle (`Super + C`). Si la page ouverte est désactivée, l’île choisit une page encore disponible. Si elles sont
+toutes désactivées, elle se referme et reste en pilule ; le Spotlight reste disponible.
 Les points de navigation restent dans une zone avec 32 px de marge verticale et une gouttière séparée du contenu.
 Le point actif reste visible ; les voisins s’estompent avec la distance et disparaissent avant de dépasser.
 La molette et les flèches permettent toujours d’atteindre les pages hors de cette zone.

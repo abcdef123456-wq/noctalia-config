@@ -162,7 +162,13 @@ if nc.reglage("FENETRES_FLOU", "oui") ~= "non" then
     jarvis_chat.ignore_alpha = 0.2
 end
 hl.layer_rule(jarvis_chat)
--- Fenêtre VPN de l'île (Super + Alt + V ; Vpn.qml) : une vraie fenêtre, titre exact « VPN » (stable, pas traduit), flottante.
+-- Panneau Centre de contrôle dédié (Super + C ; PanneauControle.qml) : anime sa propre glissade, verre flouté dessous.
+local controle = { name = "nc-controle", match = { namespace = "^nc-controle$" }, no_anim = true }
+if nc.reglage("FENETRES_FLOU", "oui") ~= "non" then
+    controle.blur = true
+    controle.ignore_alpha = 0.2
+end
+hl.layer_rule(controle)
 -- Règle limitée à ce titre ET à la classe de Quickshell (« VPN » seul est un titre courant). Sa taille et sa place (centrée sous la barre) sont posées à l'ouverture par nc/automatismes.lua :
 -- la mémoire des fenêtres flottantes écraserait une règle size/move, et cette fenêtre en est exclue.
 hl.window_rule({ name = "nc-vpn-fenetre", match = { class = "^(org.quickshell)$", title = "^(VPN)$" }, float = true })

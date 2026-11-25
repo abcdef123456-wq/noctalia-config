@@ -79,57 +79,83 @@ Item {
         }
     }
 
-    // ── Repos : heure et date ──
+    // ── Repos : l'essentiel pur (heure, date optionnelle, météo brève, point notifs, icônes actives compactes) ──
     Fondu {
         id: repos
         montre: c.mode === "repos"
-        // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : notre bouclier à cadenas (shield_lock, pas l'icône de tray d'un client) et « Fournisseur · 🇫🇷 FR » (+1 si plusieurs) ;
-        // pendant un partage d'écran : « VPN » seul. Un clic ouvre le panneau VPN complet.
+        // Repère d'accent discret dans la pilule pour les thèmes architecturaux / terminal / cadre
+        Rectangle {
+            objectName: "nc-pilule-repere-theme"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: Couleurs.familleTheme === "brut" || Couleurs.forme === "cadre"
+            width: 3; height: 12
+            radius: Couleurs.rayon(2, width, height)
+            color: Couleurs.accent
+        }
+        // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : bouclier à cadenas discret ; clic ouvre le panneau VPN.
         Row {
             id: pastilleVpn
             objectName: "nc-vpn-pill"
             anchors.verticalCenter: parent.verticalCenter; spacing: 4
             visible: VpnEtat.indicateur
-            Ico { objectName: "nc-vpn-pill-glyphe"; anchors.verticalCenter: parent.verticalCenter; nom: "shield_lock"; taille: 15; color: Couleurs.vert }
+            Ico { objectName: "nc-vpn-pill-glyphe"; anchors.verticalCenter: parent.verticalCenter; nom: "shield_lock"; taille: 14; color: Couleurs.vert }
             Texte { objectName: "nc-vpn-pill-texte"; anchors.verticalCenter: parent.verticalCenter; text: VpnEtat.libelle; secondaire: true
-                    font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 150) }
+                    font.pixelSize: 11; elide: Text.ElideRight; width: Math.min(implicitWidth, 96) }
             Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle
         }
-        // Cloud JARVIS (CLOUD_JARVIS=oui et ce PC associé) : un petit nuage ; pendant un envoi, la flèche d'envoi en
-        // couleur d'accent, fixe (aucune animation sans fin dans la pilule : test_ile_cadence).
+        // Cloud JARVIS (CLOUD_JARVIS=oui et ce PC associé) : petit nuage discret ; flèche en couleur d'accent pendant un envoi.
         Ico {
             id: pastilleCloud
             objectName: "nc-cloud-pill"
             anchors.verticalCenter: parent.verticalCenter
             visible: CloudEtat.actif && CloudEtat.associe
-            nom: CloudEtat.envoie ? "cloud_upload" : "cloud"; taille: 15
+            nom: CloudEtat.envoie ? "cloud_upload" : "cloud"; taille: 14
             color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec
             Accessible.role: Accessible.Button
             Accessible.name: CloudEtat.envoie ? Reglages.t("Cloud JARVIS : envoi en cours", "JARVIS Cloud: uploading") : "Cloud JARVIS"
         }
-        // Un mode Concentration actif (Modes.qml) : son icône et son nom court ; le nom est caché pendant un partage d'écran
+        // Un mode Concentration actif (Modes.qml) : icône compacte
         Row {
             objectName: "nc-mode-pill"
             anchors.verticalCenter: parent.verticalCenter; spacing: 4
             visible: Modes.pastille
-            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Modes.actifIcone; taille: 15; color: Couleurs.accentClair }
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Modes.actifIcone; taille: 14; color: Couleurs.accentClair }
             Texte { anchors.verticalCenter: parent.verticalCenter; visible: Modes.nomVisible !== ""; text: Modes.nomVisible; secondaire: true
-                    font.pixelSize: 12; width: Math.min(implicitWidth, 90) }
+                    font.pixelSize: 11; width: Math.min(implicitWidth, 72) }
             Accessible.role: Accessible.StaticText
             Accessible.name: Reglages.t("Mode Concentration actif", "Focus mode on")
         }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            text: Etat.heure
+            font.weight: Font.DemiBold
+            font.features: ({ "tnum": 1 })
+            color: (Couleurs.familleTheme === "brut" || Couleurs.familleTheme === "matrice") ? Couleurs.accent : Couleurs.texte
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: Reglages.val("ILE_DATE", "oui") !== "non"
+            text: Couleurs.estTech ? "/" : "·"
+            secondaire: true; opacity: 0.55; font.pixelSize: 11
+        }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
                 visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages
-        // Météo (nc-reglages, ILE_METEO)
+        // Météo brève (nc-reglages, ILE_METEO)
         Row {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3
             visible: Etat.meteoPilule
-            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.meteo.icone || "cloud"; taille: 15; color: Couleurs.texteSec }
-            Texte { anchors.verticalCenter: parent.verticalCenter; text: (Etat.meteo.temp !== undefined ? Etat.meteo.temp : "") + "°"; secondaire: true }
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.meteo.icone || "cloud"; taille: 14; color: Couleurs.texteSec }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: (Etat.meteo.temp !== undefined ? Etat.meteo.temp : "") + "°"; secondaire: true; font.features: ({ "tnum": 1 }) }
+        }
+        // Point discret de notifications non lues (l'essentiel sans bruit)
+        Rectangle {
+            objectName: "nc-notifs-pill-point"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: Notifs.nonLues > 0 && !Partage.silence
+            width: 6; height: 6; radius: width / 2
+            color: Couleurs.accent
         }
     }
-
     // ── Musique : pochette | heure (et titre en pause) | onde ──
     Fondu {
         id: musique

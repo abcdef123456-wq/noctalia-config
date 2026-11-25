@@ -135,4 +135,31 @@ Singleton {
     // Contour : dégradé des fenêtres, filet de l'accent, ou rien
     readonly property var degrade: terminal && p.bordure ? p.bordure : [accent, accent, accent]
     readonly property bool aContour: contour !== "aucun" && (terminal || contour === "discret")
+
+    // Identité visuelle dérivée du thème actif (partagée par l'île, le Centre de contrôle et les Réglages)
+    readonly property string themeActif: Reglages.val("STYLE", "noctalia")
+    readonly property bool estCarre: rayonFinal <= 15 || forme === "rectangle" || forme === "cadre"
+    readonly property bool estEditorial: /Serif/i.test(police)
+    readonly property bool estTech: majuscules || /Mono|Code|Doto|Orbitron|Rajdhani/i.test(police)
+    readonly property string familleTheme: {
+        if (forme === "point" || themeActif === "matrice") return "matrice"
+        if (forme === "encoche" || themeActif === "apple" || themeActif === "oled" || themeActif === "clair-neutre") return "apple"
+        if (estCarre && estTech) return "brut"
+        if (estEditorial || themeActif === "papier" || themeActif === "solarized-clair") return "editorial"
+        if (lueur || themeActif === "synthwave" || themeActif === "vaporwave" || themeActif === "tokyo" || themeActif === "dracula" || themeActif === "ocean") return "neon"
+        return "noctalia"
+    }
+    readonly property color bordureSubtile: {
+        if (forme === "cadre" || familleTheme === "brut") return Qt.alpha(accent, sombre ? 0.38 : 0.45)
+        if (familleTheme === "editorial") return Qt.alpha(voile, sombre ? 0.14 : 0.16)
+        if (familleTheme === "neon") return Qt.alpha(accent, 0.28)
+        return Qt.alpha(voile, sombre ? 0.08 : 0.12)
+    }
+    readonly property real epaisseurBordureCarte: (forme === "cadre" || familleTheme === "brut") ? Math.max(1, Math.min(2, epaisseur)) : 1
+    readonly property color separateur: Qt.alpha(voile, sombre ? 0.09 : 0.12)
+    readonly property color accentDoux: Qt.alpha(accent, sombre ? 0.16 : 0.12)
+    readonly property color accentBord: Qt.alpha(accent, sombre ? 0.45 : 0.35)
+    readonly property real opacitePanneau: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
+                                           ? (sombre ? Math.min(verre, 0.86) : Math.min(verre, 0.90))
+                                           : Math.max(verre, 0.96)
 }

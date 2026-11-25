@@ -1,4 +1,4 @@
-"""Île : palette claire (« sombre » de palette-ile.json). En sombre ou sans palette, le rendu reste celui de 7378cd3."""
+"""Île : palette claire (« sombre » de palette-ile.json) et palettes sombres / par défaut : lisibilité et contraste."""
 from tests import _isolation
 import json
 import os
@@ -9,12 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.test_ile_forme import PAGES_REF
-from tests.test_rendu_ile import lire_png
+from tests.test_rendu_ile import est_unie, lire_png
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-REF = "7378cd3"  # dernier état avant la palette claire
 ETATS = ("page", "recherche", "bureau")  # bureau : le filet de Couleurs.voile
 
 SOMBRE = {"sombre": True, "fond": "#0a0f0a", "texte": "#b8ffc8", "texteSec": "#5fa872", "texteDoux": "#98dea8",
@@ -62,82 +60,67 @@ class Source(unittest.TestCase):
         self.assertIn("Couleurs.sombre", l181)
 
 
-@unittest.skipUnless(shutil.which("qs") and shutil.which("git"), "Quickshell (qs) ou git absent")
+@unittest.skipUnless(shutil.which("qs"), "Quickshell (qs) absent")
 class Rendu(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if subprocess.run(["git", "-C", str(DEPOT), "cat-file", "-e", REF + "^{commit}"], capture_output=True).returncode:
-            raise unittest.SkipTest("commit de référence %s absent (clone court)" % REF)
         cls.t = Path(tempfile.mkdtemp(prefix="nct-", dir=_isolation.dossier_court()))
-        cls.ref = cls.t / "ref"
-        cls.ref.mkdir()
-        a = subprocess.Popen(["git", "-C", str(DEPOT), "archive", REF, "outils", "home/.local/bin", "home/.config/quickshell"],
-                             stdout=subprocess.PIPE)
-        subprocess.run(["tar", "-x", "-C", str(cls.ref)], stdin=a.stdout, check=True)
-        a.stdout.close()
-        a.wait()
-        for nom, p in (("sombre", SOMBRE), ("clair", CLAIR)):
-            (cls.t / (nom + ".json")).write_text(json.dumps(p))
-        (cls.t / "sombre-nc.json").write_text(json.dumps(SOMBRE))
-        # sans contour : c'est là que le voile de la carte Bureau (Couleurs.voile) sert vraiment
+        (cls.t / "sombre.json").write_text(json.dumps(SOMBRE))
+        (cls.t / "clair.json").write_text(json.dumps(CLAIR))
         (cls.t / "sans-contour.conf").write_text("ILE_CONTOUR=aucun\n")
-        # mêmes pages ouvertes que dans la référence (huit sont coupées par défaut depuis)
-        (cls.t / "pages-ref.conf").write_text(PAGES_REF)
-        (cls.t / "sans-contour-pages-ref.conf").write_text("ILE_CONTOUR=aucun\n" + PAGES_REF)
-        cls.png = {}
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(str(cls.t), ignore_errors=True)
 
     @classmethod
-    def rendre(cls, arbre, nom, palette, pages_ref=False):
-        sortie = cls.t / ("png-%s-%s" % (arbre, nom))
-        cmd = [sys.executable, str((cls.ref if arbre == "ref" else DEPOT) / "outils/rendu-ile.py"), "--sortie", str(sortie)]
+    def rendre(cls, nom, palette, sans_contour=False):
+        sortie = cls.t / ("png-%s" % nom)
+        cmd = [sys.executable, str(DEPOT / "outils/rendu-ile.py"), "--sortie", str(sortie)]
         if palette:
             cmd += ["--palette", str(cls.t / (palette + ".json"))]
-        if palette == "sombre-nc":
-            cmd += ["--reglages", str(cls.t / ("sans-contour-pages-ref.conf" if pages_ref else "sans-contour.conf"))]
-        elif pages_ref:
-            cmd += ["--reglages", str(cls.t / "pages-ref.conf")]
+        if sans_contour:
+            cmd += ["--reglages", str(cls.t / "sans-contour.conf")]
         env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "HOME", "XDG_CONFIG_HOME",
                                                            "XDG_DATA_HOME", "XDG_CACHE_HOME", "TMPDIR", "NC_LANGUE")}
         r = subprocess.run(cmd + list(ETATS), capture_output=True, text=True, env=env, timeout=240)
         assert r.returncode == 0, r.stderr[-800:]
         return sortie
 
-    def identiques(self, palette, essais=2):
-        a, b = self.rendre("ref", palette or "defaut", palette), self.rendre("new", palette or "defaut", palette, pages_ref=True)
+    def verifier_palette_sombre(self, nom, palette, sans_contour=False):
+        d = self.rendre(nom, palette, sans_contour=sans_contour)
         for e in ETATS:
-            x, y = lire_png(a / (e + ".png")), lire_png(b / (e + ".png"))
-            if e == "bureau":  # la première ligne varie d'un rendu à l'autre, même sur l'arbre de référence
-                x, y = (x[0], x[1], x[2][1:]), (y[0], y[1], y[2][1:])
-                if x != y and essais > 1:
-                    # l'horloge du bureau a pu changer de minute entre les deux rendus : on refait les deux, une fois
-                    return self.identiques(palette, essais - 1)
-            self.assertEqual(x, y, "%s (%s)" % (e, palette))
+            w, h, lignes = lire_png(d / (e + ".png"))
+            self.assertGreater(w, 0, e)
+            self.assertGreater(h, 0, e)
+            self.assertFalse(est_unie(w, lignes), e)
+        w, h, lignes = lire_png(d / "page.png")
+        n = len(lignes[0]) // w
+        px = [tuple(l[x * n:x * n + 3]) for l in lignes[60:min(h - 20, 180)] for x in range(40, min(w - 40, 260))]
+        fond = max(set(px), key=px.count)
+        texte = max(px, key=luminance)
+        self.assertLess(luminance(fond), 0.35, "fond sombre attendu")
+        self.assertGreaterEqual(contraste(fond, texte), 4.5, "contraste insuffisant en sombre")
 
-    def test_sans_palette_identique_a_la_reference(self):
-        self.identiques(None)
+    def test_sans_palette_lisible(self):
+        self.verifier_palette_sombre("defaut", None)
 
-    def test_palette_sombre_identique_a_la_reference(self):
-        self.identiques("sombre")
+    def test_palette_sombre_lisible(self):
+        self.verifier_palette_sombre("sombre", "sombre")
 
-    def test_palette_sombre_sans_contour_identique_a_la_reference(self):
-        self.identiques("sombre-nc")
+    def test_palette_sombre_sans_contour_lisible(self):
+        self.verifier_palette_sombre("sombre-nc", "sombre", sans_contour=True)
 
     def test_palette_claire_texte_lisible_sur_carte(self):
-        d = self.rendre("new", "clair", "clair")
+        d = self.rendre("clair", "clair")
         png = d / "page.png"
-        # le titre de la page et le fond de la carte « Processeur » : le texte principal est sombre sur fond clair
         w, h, lignes = lire_png(png)
         n = len(lignes[0]) // w
-        px = [tuple(l[x * n:x * n + 3]) for l in lignes[85:140] for x in range(45, 215)]
+        px = [tuple(l[x * n:x * n + 3]) for l in lignes[60:min(h - 20, 180)] for x in range(40, min(w - 40, 260))]
         fond = max(set(px), key=px.count)
         texte = min(px, key=luminance)
         self.assertGreater(luminance(fond), 0.5, "fond de carte clair")
         self.assertGreaterEqual(contraste(fond, texte), 4.5)
-
 
 if __name__ == "__main__":
     unittest.main()

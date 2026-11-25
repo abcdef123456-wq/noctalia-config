@@ -57,6 +57,7 @@ ShellRoot {
         Ile {
             id: ile
             readonly property bool panneauxRendus: panneaux.pret
+            onOuvrirThemes: { Hyprland.refreshMonitors(); racine.themesOuvert = true }
             Panneaux {
                 id: panneaux
                 ecran: ile.modelData
@@ -278,6 +279,20 @@ ShellRoot {
         target: GarminEtat
         function onOuvrirPanneau() { if (!racine.garminOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.garminOuvert = true } }
     }
+    // Panneau Centre de contrôle dédié (Super + C ; icônes de la barre ; bouton de l'île) : chargé à l'ouverture seulement
+    LazyLoader {
+        id: chargeurControle
+        active: Etat.controleOuvert
+        PanneauControle {
+            screen: Quickshell.screens.find(s => s.name === Etat.controleEcran)
+                    || Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name)
+                    || Quickshell.screens[0]
+            hautReserve: { var m = Hyprland.focusedMonitor, r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
+                           return r && r.length > 1 ? r[1] : Gabarit.barre }
+            onFermer: Etat.fermerControle()
+            onOuvrirThemes: { Etat.fermerControle(); Hyprland.refreshMonitors(); racine.themesOuvert = true }
+        }
+    }
     // Carrousel des thèmes (Super + Alt + T, recherche « Thèmes ») : créé à l'ouverture seulement
     property bool themesOuvert: false
     LazyLoader {
@@ -288,7 +303,6 @@ ShellRoot {
             onFermer: racine.themesOuvert = false
         }
     }
-    // Capture épinglée (nc-capture epingler) : une seule à la fois, la nouvelle remplace l'ancienne. Sa copie vit dans
     // $XDG_RUNTIME_DIR/nc-epingles ; elle est effacée à la fermeture, au remplacement et au démarrage de l'île.
     property string epingleChemin: ""
     readonly property string epingleDossier: (Quickshell.env("XDG_RUNTIME_DIR") || "") + "/nc-epingles"
@@ -389,15 +403,23 @@ ShellRoot {
         }
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), false) }
-        function fermer(): void { Etat.fermer(); Etat.projection = false }
+        function controle(): void {
+            Hyprland.refreshMonitors()
+            Etat.basculerControle(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), "accueil")
+        }
+        function controlePage(nom: string): void {
+            Hyprland.refreshMonitors()
+            Etat.basculerControle(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), nom)
+        }
+        function fermer(): void { Etat.fermer(); Etat.fermerControle(); Etat.projection = false }
         function fiche(): void {                                                            // Super + /
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // comme Échap
             else { Hyprland.refreshMonitors(); Raccourcis.relire(); racine.ficheOuverte = !racine.ficheOuverte }
         }
         // Espace de code (Super + X, par nc-code) : ouvre le sélecteur de projets ; déjà ouvert, le referme
         function code(): void {
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             // Déjà ouvert : il se referme comme Échap (en rétrécissant vers la pilule si ILE_LANCEUR_FONDU)
             if (racine.codeOuvert && chargeurCode.item) { chargeurCode.item.quitter(); return }
             if (!racine.codeOuvert) Hyprland.refreshMonitors()
@@ -405,13 +427,13 @@ ShellRoot {
         }
         // Panneau VPN (Super + Alt + V, nc-vpn) : ouvre ; déjà ouvert, le referme
         function vpn(): void {
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             if (!racine.vpnOuvert) Hyprland.refreshMonitors()
             racine.vpnOuvert = !racine.vpnOuvert
         }
         // Panneau Santé Garmin (Super + Alt + S) : ouvre ; déjà ouvert, le referme
         function garmin(): void {
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             if (!racine.garminOuvert) Hyprland.refreshMonitors()
             racine.garminOuvert = !racine.garminOuvert
         }
@@ -419,16 +441,16 @@ ShellRoot {
         function epingler(chemin: string): void { racine.epingler(chemin) }
         // Carrousel des thèmes (Super + Alt + T) : ouvre ; déjà ouvert, le referme
         function themes(): void {
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             if (!racine.themesOuvert) Hyprland.refreshMonitors()
             racine.themesOuvert = !racine.themesOuvert
         }
         // Panneau Cloud JARVIS (nc-cloud fenetre, recherche) : sans argument, ouvre (déjà ouvert : rien ; il ne se ferme que
         // par l'utilisateur) ; rien si CLOUD_JARVIS n'est pas à oui
-        function cloud(): void { racine.ouvrirCloud() }
+        function cloud(): void { Etat.fermerControle(); racine.ouvrirCloud() }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
-        function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
+        function vueOuvrir(): void { Etat.fermer(); Etat.fermerControle(); Etat.vueFenetres = true }
         function vuePause(oui: bool): void { Etat.vuePause = oui }      // nc-capture, le temps de choisir une zone
         // nc-session, le temps de capturer l'aperçu d'une session : aucune bannière dessus (reprise seule après 3 s)
         function bannieresPause(oui: bool): string { Notifs.pauseBannieres(oui); return "oui" }
@@ -437,7 +459,7 @@ ShellRoot {
         // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, la referme
         function projection(): void {
             if (Etat.projection) { Etat.projection = false; return }
-            Etat.fermer()
+            Etat.fermer(); Etat.fermerControle()
             Etat.projection = true
         }
         function rechercher(texte: string): void {
@@ -484,13 +506,17 @@ ShellRoot {
         function concentrationEtat(): string { return Notifs.concentration ? "oui" : "non" }
         function cafeRegler(actif: bool): void { Etat.cafeRegler(actif) }   // mode Présentation
         function cafeEtat(): string { return Etat.cafe ? "oui" : "non" }
-        // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
+        // Ouvre une page : sur l'île si elle y est activée, sinon dans le panneau Centre de contrôle si c'est un outil rapide
         function page(nom: string): void {
-            if (Etat.vues.indexOf(nom) < 0) return
-            if (nom === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
-            if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }
-            if (Etat.ecranOuvert === "") basculer()
-            Etat.aller(nom)
+            var cible = nom === "wifi" ? "reseau" : nom
+            if (Etat.vues.indexOf(cible) >= 0) {
+                if (cible === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
+                if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === cible) { Etat.fermer(); return }
+                if (Etat.ecranOuvert === "") basculer()
+                Etat.aller(cible)
+                return
+            }
+            if (Etat.estPageControle(cible)) { controlePage(cible); return }
         }
         // Notification d'un agent qui t'attend, cliquée (« Voir », nc-claude) : l'île sur sa question, jamais refermée
         // (sa demande avec ses choix, sinon sa session en tête de la page des agents, avec le texte entier)
@@ -502,8 +528,11 @@ ShellRoot {
             return "oui"
         }
         // La même, avec une page de repli si celle-ci n'existe pas (coupée dans les réglages, PC sans batterie…)
-        function pageOu(nom: string, repli: string): void { page(Etat.pageOu(nom, repli)) }
-        // Cockpit : déjà ouvert, le même raccourci le ramène ici, le met devant ou le range (basculerOutil)
+        function pageOu(nom: string, repli: string): void {
+            if (nom === "charge" && !Etat.batteriePc) { page(repli); return }
+            if (Etat.vues.indexOf(nom) >= 0 || Etat.estPageControle(nom)) { page(nom); return }
+            page(Etat.pageOu(nom, repli))
+        }
         function jarvis(): void {
             if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible && !racine.jarvisChatFenetre.epingle)
                 racine.jarvisChatFenetre.fermerTiroir()

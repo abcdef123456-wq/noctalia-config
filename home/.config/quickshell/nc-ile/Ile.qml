@@ -13,6 +13,7 @@ PanelWindow {
     id: fen
     required property var modelData
     screen: modelData
+    signal ouvrirThemes()
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
 
@@ -175,18 +176,21 @@ PanelWindow {
     }
     onOuverteChanged: { prise.prete = false; if (ouverte) prise.restart() }
 
-    // Taille de chaque page
-    function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32))) }
+    // Hauteur réservée à l'en-tête lisible (EnteteIle) quand l'île est ouverte hors recherche
+    readonly property int hauteurEntete: 42
+    // Taille de chaque page (hauteur + en-tête)
+    function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32)) + hauteurEntete) }
+    readonly property int hauteurEssentiel: Etat.aMusique ? 248 : (Notifs.nonLues > 0 ? 236 : 186)
     readonly property var tailles: ({
-        musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: adaptee("charge", 140),
-        jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
-        claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
+        essentiel: Qt.size(424, hauteurEssentiel + hauteurEntete),
+        musique: Qt.size(430, 214 + hauteurEntete), minuteur: Qt.size(430, (Etat.minuteurFin > 0 ? 150 : 334) + hauteurEntete), charge: adaptee("charge", 140),
+        jeu: Qt.size(432, 250 + hauteurEntete), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
+        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600 + hauteurEntete), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
+        claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330 + hauteurEntete), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170), concentration: adaptee("concentration", 260)
     })
-    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
-    readonly property bool points: Etat.vues.length > 1 && !recherche
-    // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
+    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.essentiel)
+    readonly property bool points: Etat.vues.length > 4 && !recherche
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
     readonly property bool confirmGpu: !ouverte && ModeGraphique.demande
@@ -570,6 +574,22 @@ PanelWindow {
             Timer { id: verrou; interval: 300 }
         }
 
+        // En-tête lisible des vues de l'île (onglets nommés + accès Centre de contrôle)
+        EnteteIle {
+            id: barreEntete
+            objectName: "nc-ile-entete"
+            x: 16; y: 10
+            width: Math.max(0, ile.width - 32)
+            pages: Etat.vues
+            active: Etat.vueActive
+            nonLues: Notifs.nonLues
+            opacity: fen.ouverte && !fen.recherche && ile.height > fen.taille.height * 0.65 ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
+            onChoisir: nom => Etat.aller(nom)
+            onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
+        }
+
         // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
         Repeater {
             id: pages
@@ -579,7 +599,7 @@ PanelWindow {
                 readonly property var contenu: chargeur.item
                 required property string modelData
                 required property int index
-                readonly property size t: fen.tailles[modelData] || fen.tailles.centre
+                readonly property size t: fen.tailles[modelData] || fen.tailles.essentiel
                 readonly property bool active: modelData === Etat.vueActive
                 // Une page visitée reste prête tant que l'île est ouverte, et les deux voisines de la page affichée sont
                 // préparées à l'avance, sans bloquer (asynchrone) : glisser vers elles ne fige plus l'île le temps de les
@@ -590,8 +610,8 @@ PanelWindow {
                 Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
                 x: (ile.width - t.width) / 2 + 16
                 width: Math.max(0, t.width - 32 - (fen.points ? Math.max(22, boutonPage.width + boutonPage.anchors.rightMargin - 16 + 4) : 0))
-                height: t.height - 32
-                y: 16 + (index - Etat.vue) * (ile.height * 0.6)
+                height: Math.max(0, t.height - 32 - fen.hauteurEntete)
+                y: 16 + fen.hauteurEntete + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
                 opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
@@ -602,11 +622,19 @@ PanelWindow {
                     anchors.fill: parent
                     asynchronous: true
                     active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
-                    sourceComponent: ({ concentration: pConcentration, musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
+                    sourceComponent: ({ essentiel: pEssentiel, concentration: pConcentration, musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres,
-                                        appel: pAppel, terminal: pTerminal, resume: pResume })[pageIle.modelData] || pCentre
+                                        appel: pAppel, terminal: pTerminal, resume: pResume })[pageIle.modelData] || pEssentiel
                 }
+            }
+        }
+        Component {
+            id: pEssentiel
+            EssentielIle {
+                onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
+                onOuvrirRecherche: Etat.chercher(fen.modelData.name)
+                onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
             }
         }
         Component { id: pAppel; PageAppel {} }
@@ -631,7 +659,7 @@ PanelWindow {
         Component { id: pPresse; Presse {} }
         Component { id: pFenetres; Fenetres {} }
 
-        // Points de page sur le bord droit (comme le Centre de contrôle de l'iPhone)
+        // Points de page sur le bord droit quand plus de 4 pages sont activées
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
@@ -646,7 +674,7 @@ PanelWindow {
             id: boutonPage
             anchors.right: parent.right; anchors.rightMargin: Math.max(5, ile.retraitCoin)
             anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(8, ile.retraitCoin)
-            visible: fen.ouverte && fen.points
+            visible: fen.ouverte && !fen.recherche && Etat.vueActive !== "essentiel"
             vue: Etat.vueActive
             onOuvert: Etat.fermer()
         }
@@ -655,7 +683,8 @@ PanelWindow {
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)
         Keys.onDownPressed: Etat.changerVue(1)
-    
+        Keys.onLeftPressed: Etat.changerVue(-1)
+        Keys.onRightPressed: Etat.changerVue(1)
         // Clic dans l'île ouverte au survol : elle reste ouverte comme après un clic. Au-dessus de tout, le clic est
         // seulement noté puis laissé aux boutons en dessous.
         MouseArea {

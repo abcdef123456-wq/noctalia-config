@@ -47,19 +47,18 @@ case "${1:-}" in
   session)         nmsg session lock-and-suspend ;;
   lock)            nmsg session lock ;;
   power-cycle)     nmsg power-cycle ;;
-  control-center)                             # centre de contrôle de l'île dynamique : ouverture, ou fermeture animée
-    # Île Quickshell (au-dessus de la barre), sinon île du plugin Noctalia
-    ile_prete && exec qs -c nc-ile ipc call ile basculer
+  control-center)                             # panneau Centre de contrôle dédié : ouverture, ou fermeture
+    # Centre de contrôle Quickshell (panneau dédié), sinon île du plugin Noctalia
+    ile_prete && exec qs -c nc-ile ipc call ile controle
     if noctalia msg status 2>/dev/null | grep -q '"activePanelId": *"nc/ile:centre"'; then
       nmsg plugin nc/ile:centre all fermer
     fi
     nmsg panel-toggle nc/ile:centre ;;
-  ile)                                        # icônes de la barre : page de l'île Quickshell, sinon centre de Noctalia
-    # ile PAGE [REPLI] : REPLI si l'île n'a pas cette page (coupée dans les réglages, PC sans batterie…) ; sans l'île,
-    # le centre de Noctalia s'ouvre sur l'onglet du repli
+  ile)                                        # icônes de la barre : page de l'île ou du Centre de contrôle Quickshell, sinon Noctalia
+    # ile PAGE [REPLI] : REPLI si la page n'existe pas (PC sans batterie…) ; sans Quickshell, le centre de Noctalia
     page="${2:-centre}"; repli="${3:-}"
     if ile_prete; then
-      [ "$page" = centre ] && exec qs -c nc-ile ipc call ile basculer
+      [ "$page" = centre ] && exec qs -c nc-ile ipc call ile controle
       [ -n "$repli" ] && exec qs -c nc-ile ipc call ile pageOu "$page" "$repli"
       exec qs -c nc-ile ipc call ile page "$page"
     fi

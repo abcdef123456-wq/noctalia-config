@@ -434,8 +434,8 @@ class SourcesDuRendu(unittest.TestCase):
                     self.assertTrue(permis.search(bloc), f"{f.name} : {bloc[:80]}")
                     self.assertIsNotNone(texte, f.name)
         self.assertGreaterEqual(vus, 5, "le motif ne voit plus les surfaces")
-        # Sans format, Qt devine (<img src="U"> parle) : ces cinq-là n'affichent que des textes fixes ; un nouveau doit nommer son format
-        self.assertEqual(sans_format, {"Assistant.qml": 3, "AssistantOrbe.qml": 1, "Parametres.qml": 1})
+        # Sans format, Qt devine (<img src="U"> parle) : ces quatre-là n'affichent que des textes fixes ; un nouveau doit nommer son format
+        self.assertEqual(sans_format, {"Assistant.qml": 3, "AssistantOrbe.qml": 1})
         self.assertIn("textFormat: Text.PlainText", (QML / "Texte.qml").read_text())
         recherche = (QML / "Recherche.qml").read_text()
         self.assertIn('text: AssistantEtat.sansReseau(r.reponseAide !== "" ? r.reponseAide', recherche, "filtré quel que soit le format")

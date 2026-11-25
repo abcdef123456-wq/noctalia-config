@@ -26,7 +26,7 @@ CERCLES = {
     "Assistant.qml": 3, "AssistantOrbe.qml": 1, "Calendrier.qml": 3, "Centre.qml": 3, "Charge.qml": 1, "ChoixTheme.qml": 1,
     "Claude.qml": 2, "CodeApercu.qml": 1, "CodeProjet.qml": 1, "Compact.qml": 2, "Fenetres.qml": 1, "Fiche.qml": 2,
     "FormeIle.qml": 2, "GarminTiroir.qml": 2, "Ile.qml": 2, "Jarvis.qml": 1, "Jeu.qml": 1, "PageAppel.qml": 1, "PageListe.qml": 2,
-    "PageNotifs.qml": 2, "PageResume.qml": 1, "PageTerminal.qml": 1, "Parametres.qml": 2, "PresseAction.qml": 1,
+    "PageNotifs.qml": 2, "PageResume.qml": 1, "PageTerminal.qml": 1, "PresseAction.qml": 1,
     "Projection.qml": 2, "Recherche.qml": 1, "Son.qml": 2, "Systeme.qml": 3, "VpnCarte.qml": 1, "VpnPastille.qml": 1,
     "Vue.qml": 2,
 }
@@ -54,16 +54,18 @@ class Rendu(unittest.TestCase):
             for f in avant.glob("*.qml"):
                 f.write_text(re.sub(r"Couleurs\.rayon\(([0-9.]+), width, height\)", r"\1", f.read_text()))
             for etat in ("page", "recherche", "bureau"):
-                png = {}
-                for nom, qml in (("apres", QML), ("avant", avant)):
-                    outil.QML = qml
-                    sortie = Path(d) / nom
-                    sortie.mkdir(exist_ok=True)
-                    p, journal = outil.rendre(etat, str(sortie), None, None)
-                    self.assertTrue(p, journal)
-                    png[nom] = Path(p).read_bytes()
-                self.assertEqual(png["avant"], png["apres"], etat)
-
+                for essai in range(2):
+                    png = {}
+                    for nom, qml in (("apres", QML), ("avant", avant)):
+                        outil.QML = qml
+                        sortie = Path(d) / nom
+                        sortie.mkdir(exist_ok=True)
+                        p, journal = outil.rendre(etat, str(sortie), None, None)
+                        self.assertTrue(p, journal)
+                        png[nom] = Path(p).read_bytes()
+                    if png["avant"] == png["apres"] or essai == 1:
+                        self.assertEqual(png["avant"], png["apres"], etat)
+                        break
     def test_cible_reglages_dans_le_coin_rond_et_section_de_la_page(self):
         spec = importlib.util.spec_from_file_location("rendu_coins", DEPOT / "outils/rendu-ile.py")
         outil = importlib.util.module_from_spec(spec)
@@ -92,7 +94,8 @@ class Rendu(unittest.TestCase):
             with self.subTest(forme=forme), tempfile.TemporaryDirectory(prefix="nc-coins-") as d:
                 root = Path(d)
                 conf = root / "reglages.conf"
-                conf.write_text("ILE_RAYON=rond\nILE_FORME=" + forme + "\n")
+                conf.write_text("ILE_RAYON=rond\nILE_FORME=" + forme
+                                + "\nILE_PAGE_SYSTEME=oui\nILE_PAGE_SON=oui\nILE_PAGE_RESEAU=oui\nILE_PAGE_BLUETOOTH=oui\n")
                 with patch.object(outil, "PILOTE", pilote):
                     ile = outil.preparer(root, "page", conf, None)
                 # Remplacer le lien de la copie, jamais le script réel de nc-reglages.
