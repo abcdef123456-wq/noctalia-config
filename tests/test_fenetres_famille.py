@@ -30,7 +30,8 @@ local function ser(x)
   else return tostring(x) end
 end
 cfg = {}
-hl = { config = function(t) cfg[#cfg + 1] = ser(t) end, curve = function() end, animation = function() end }
+hl = { config = function(t) cfg[#cfg + 1] = ser(t) end, curve = function() end, animation = function() end,
+       exec_cmd = function() end }
 nc = { reglage = function(k, d) if REG[k] ~= nil then return REG[k] end return d end, hypr_min = function() return false end,
        profil = { profil = PROFIL or "balanced" } }
 '''
