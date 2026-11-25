@@ -47,6 +47,13 @@ Niveau 1 (sans root) :
 | `HZ_PERFORMANCE`, `HZ_BALANCED_AC` | `max` | écran |
 | `HZ_BALANCED_BAT`, `HZ_ECO` | `max` ; `60` seulement dans un profil marqué « film sur batterie » (écran de plus de 60 Hz) | écran |
 
+Avec Matrice, une fenêtre seule occupe la zone utile. À deux, les fenêtres sont côte à côte ; à partir de trois,
+la principale est au centre. Le réglage personnel `FENETRES_MAITRE_CENTRE_AIR=oui` permet toujours de la centrer dès
+la première fenêtre.
+
+Avec Kanagawa et Papier, maximiser par aimantation ne déplace pas les colonnes. En quittant le plein écran demandé
+par une application, les deux colonnes de largeur standard (50 % chacune) reprennent leur place côte à côte.
+
 Niveau 2 (matériel, par `nc-energie-root`, sauf `limite_charge` par `nc-limite-charge`) :
 
 | Clé | Valeurs | Capacité |

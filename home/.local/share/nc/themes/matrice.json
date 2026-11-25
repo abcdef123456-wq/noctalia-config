@@ -38,8 +38,7 @@
     "ILE_BANDE": "oui",
     "ILE_FORME": "point",
     "WIDGETS_BUREAU": "oui",
-    "WIDGETS_POLICE": "Doto, JetBrains Mono",
-    "FENETRES_MAITRE_CENTRE_AIR": "oui"
+    "WIDGETS_POLICE": "Doto, JetBrains Mono"
   },
   "noctalia": {
     "bar.default": {
