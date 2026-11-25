@@ -10,6 +10,11 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
+from unittest.mock import patch
+
+from tests import _ile_hors_ecran as H
+from tests.test_ile_demarrage import lignes_en_erreur
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
@@ -58,6 +63,52 @@ class Rendu(unittest.TestCase):
                     self.assertTrue(p, journal)
                     png[nom] = Path(p).read_bytes()
                 self.assertEqual(png["avant"], png["apres"], etat)
+
+    def test_cible_reglages_dans_le_coin_rond_et_section_de_la_page(self):
+        spec = importlib.util.spec_from_file_location("rendu_coins", DEPOT / "outils/rendu-ile.py")
+        outil = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(outil)
+        pilote = H.OUTILS + """
+    Timer { interval: 1500; running: true; onTriggered: {
+        var nom = vs.instances[0].modelData.name || "ecran-rendu"
+        Etat.basculer(nom, true); Etat.aller("systeme"); controle.start()
+    } }
+    Timer { id: controle; interval: 2000; onTriggered: {
+        var fen = vs.instances[0], fond = fen.ilot
+        var bouton = trouver(fond, "nc-ile-reglages")
+        verifier(fen.ouverte && fen.points && bouton && bouton.visible, "page Système avec navigation")
+        verifier(fond.radius > 50 && fond.radius <= 16 / (1 - Math.SQRT1_2), "rayon rond borné")
+        var p = bouton.mapToItem(fond, bouton.width, bouton.height), r = fond.radius
+        var dx = Math.max(0, p.x - (fond.width - r)), dy = Math.max(0, p.y - (fond.height - r))
+        verifier(p.x <= fond.width && p.y <= fond.height && dx * dx + dy * dy <= r * r,
+                 "coin extérieur de la cible dans le fond : " + p)
+        verifier(bouton.vue === "systeme" && bouton.section === "Mises à jour", "section choisie par nom de page")
+        trouver(bouton, "bouton-reglages-zone").clicked(null)
+        verifier(!fen.ouverte, "clic ferme la page"); fin.start()
+    } }
+    Timer { id: fin; interval: 300; onTriggered: { console.log("FINI"); Qt.quit() } }
+"""
+        for forme in ("pilule", "encoche"):
+            with self.subTest(forme=forme), tempfile.TemporaryDirectory(prefix="nc-coins-") as d:
+                root = Path(d)
+                conf = root / "reglages.conf"
+                conf.write_text("ILE_RAYON=rond\nILE_FORME=" + forme + "\n")
+                with patch.object(outil, "PILOTE", pilote):
+                    ile = outil.preparer(root, "page", conf, None)
+                # Remplacer le lien de la copie, jamais le script réel de nc-reglages.
+                faux = root / "home/.local/bin/nc-reglages"
+                faux.unlink()
+                faux.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(root / "journal") + '"\n')
+                faux.chmod(0o755)
+                resultat = subprocess.run(["qs", "--no-color", "-p", str(ile / "shell.qml")],
+                                          env=outil.environnement(root, root / "inutile.png"),
+                                          capture_output=True, text=True, timeout=15)
+                sortie = resultat.stdout + resultat.stderr
+                self.assertEqual(resultat.returncode, 0, sortie)
+                self.assertEqual(lignes_en_erreur(sortie), [], sortie)
+                self.assertIn("FINI", sortie)
+                self.assertEqual([l for l in H.journal(root).splitlines() if l.startswith("fenetre ")],
+                                 ["fenetre Mises à jour"])
 
 
 if __name__ == "__main__":
