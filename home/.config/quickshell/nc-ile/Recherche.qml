@@ -48,13 +48,16 @@ Item {
     readonly property int hauteurVoulue: 95 + (zoneReponse.visible ? zoneReponse.height + 10 : 0)
                                          + (resultats.length > 0 ? 8 + resultats.length * (hauteurLigne + 2) - 2 + 11 : 0) + pied.height
 
-    // Les trois espaces ; espaceManuel : choisi au clavier ou à la souris (un calcul ne le change plus)
-    readonly property var espaces: ["applis", "fichiers", "actions"]
+    // Les espaces (Fichiers seulement avec SPOTLIGHT_FICHIERS) ; espaceManuel : choisi au clavier ou à la souris,
+    // espaceChoisi : lequel (retrouvé dès qu'un préfixe passager, « note » de « notebook », est dépassé)
+    readonly property bool fichiersActifs: Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non"
+    readonly property var espaces: fichiersActifs ? ["applis", "fichiers", "actions"] : ["applis", "actions"]
     property string espace: "applis"
     property bool espaceManuel: false
+    property string espaceChoisi: "applis"
     function changerEspace(nom) {
         if (espaces.indexOf(nom) < 0) return
-        espace = nom; espaceManuel = true; sel = 0; annulerSuppr()
+        espace = nom; espaceChoisi = nom; espaceManuel = true; sel = 0; annulerSuppr()
         attente.restart(); attentePaquets.restart()     // fichiers ou logiciels : cherchés seulement dans leur espace
         chercher()
     }
@@ -65,7 +68,18 @@ Item {
                || !!Saisies.lienWeb(t, liensWeb) || !!Saisies.demandeProcessus(t) || Saisies.villeHeure(t) !== ""
                || Saisies.demandeHorloges(t) || Aide.estQuestion(t) || estDiag(t)
     }
-    function routerEspace() { if (estPrefixeAction(q)) espace = "actions"; else if (!espaceManuel) espace = "applis" }
+    // Une saisie que qalc peut calculer (« 2+2 », « 1,5 h en min », « jours jusqu'au 25/12 »)
+    function estCalcul(t) {
+        return Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non"
+               && (Saisies.dateQalc(t, Date.now()) !== "" || /\d/.test(t) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(t))
+    }
+    // Préfixe : Actions ; sinon l'espace choisi à la main ; sinon Applis, sauf un calcul déjà passé dans les Actions
+    // (il y reste pendant qu'on le tape : pas d'aller-retour des onglets à chaque touche)
+    function routerEspace() {
+        if (estPrefixeAction(q)) espace = "actions"
+        else if (espaceManuel) espace = espaces.indexOf(espaceChoisi) >= 0 ? espaceChoisi : "applis"
+        else if (!(espace === "actions" && estCalcul(q))) espace = "applis"
+    }
 
     // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
     property var execs: ({})                 // programmes du PATH (saisie qui commence par une commande)
@@ -399,7 +413,7 @@ Item {
         demandeur.running = false; agent.running = false
         reponse = ""; questionPosee = ""; plan = null; choixIA = []; erreurIA = ""; modeAgent = false; modeTexte = false
         commandeIA = ""; reponseAide = ""; confirmer = -1
-        espaceManuel = false
+        espaceManuel = false; espaceChoisi = "applis"
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
         routerEspace()      // saisie inchangée depuis la dernière ouverture : onQChanged ne passe pas
         retourDock = null
@@ -808,7 +822,7 @@ Item {
                 // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
                 r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
                 // Un calcul sans appli qui commence par la saisie : il est dans les Actions
-                if (r.calcul !== "" && !r.espaceManuel && r.espace === "applis" && !r.resultats.some(x => x.s >= 80)) r.espace = "actions"
+                if (r.calcul !== "" && !r.espaceManuel && r.espace === "applis" && !r.resultats.some(x => x.s >= 80)) { r.espace = "actions"; r.sel = 0 }
                 r.chercher()
             }
         }
@@ -872,7 +886,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (r.espace === "fichiers" && q.length >= 3 && !/^(>|!|@|;|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (r.espace === "fichiers" && q.length >= 3 && !r.estPrefixeAction(q) && r.fichiersActifs) {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -904,7 +918,7 @@ Item {
                 }
             }
             let date = Saisies.dateQalc(q, Date.now())      // « jours jusqu'au 25/12 », « dans 45 jours » : réécrits pour qalc
-            if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && (date !== "" || /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q))) {
+            if (r.estCalcul(q)) {
                 calculer.pour = q
                 calculer.command = ["qalc", "-t", date !== "" ? date : q.replace(/\s+en\s+/g, " to ")]      // pas d'option « mix » : inconnue de qalc 5.5 à 5.13
                 calculer.running = true
@@ -1542,6 +1556,7 @@ Item {
         anchors.top: barre.bottom
         width: parent.width
         espace: r.espace
+        espaces: r.espaces
         onChoisir: nom => { r.changerEspace(nom); champ.forceActiveFocus() }
     }
 
@@ -1550,7 +1565,8 @@ Item {
         id: zoneReponse
         objectName: "nc-spotlight-reponse"
         readonly property bool enDiag: r.modeDiag && r.q === r.diagPour && r.reponseAide === ""
-        visible: r.reponseAide !== "" || (enDiag && diag.resume !== "") || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
+        // Seulement dans les Actions : Tab vers Applis ou Fichiers la cache (la réponse reste pour le retour)
+        visible: r.espace === "actions" && (r.reponseAide !== "" || (enDiag && diag.resume !== "") || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== "")))
         readonly property bool attend: !enDiag && r.reflechit && r.reponse === ""
         // Plan de rangement en zones (« me montrer le plan d'abord ») : une mini-carte de l'écran plutôt qu'une liste
         readonly property var zones: !enDiag && r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []

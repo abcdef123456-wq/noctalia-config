@@ -60,11 +60,51 @@ ShellRoot {
   if (etape === 4) {
    if (spot.espace !== "actions" || titres().indexOf("= 4") < 0) { attente++; verifier(attente < 50, "calcul : " + spot.espace + " " + JSON.stringify(titres())); return }
    verifier(seul("actions"), "calcul seul en Actions")
+   champ.text = "2+23"; verifier(spot.espace === "actions", "calcul en cours de frappe : reste dans Actions (pas de clignotement)")
    // Espace choisi à la main : le calcul ne l'en sort pas
    spot.changerEspace("applis"); champ.text = "3+3"; attente = 0; etape++; return }
   if (etape === 5) {
    attente++; if (attente < 10) return
    verifier(spot.espace === "applis" && titres().indexOf("= 6") < 0, "manuel : reste en Applis : " + JSON.stringify(titres()))
+   // Un préfixe passager (« note » de « notebook », « ? » effacé) ne fait pas perdre l'espace choisi
+   spot.changerEspace("fichiers")
+   var mots = ["n", "no", "not", "note", "noteb", "notebook"]
+   for (var j = 0; j < mots.length; j++) {
+    champ.text = mots[j]
+    verifier(spot.espace === (mots[j] === "note" ? "actions" : "fichiers"), mots[j] + " : " + spot.espace)
+   }
+   champ.text = "?"; verifier(spot.espace === "actions", "« ? » : Actions")
+   champ.text = ""; verifier(spot.espace === "fichiers", "« ? » effacé : retour à Fichiers")
+   champ.text = "notebook"; attente = 0; etape++; return }
+  if (etape === 6) { attente++; if (attente < 4) return
+   // La réponse (aide, IA, bilan) n'existe que dans les Actions
+   champ.text = "? quelle heure"; verifier(spot.espace === "actions", "« ? » : Actions")
+   spot.reponseAide = "Réponse de la config"
+   var zone = trouver(spot, "nc-spotlight-reponse")
+   verifier(zone.visible, "réponse visible dans Actions")
+   var h = spot.hauteurVoulue
+   spot.changerEspace("fichiers")
+   verifier(!zone.visible && spot.hauteurVoulue < h, "réponse cachée en Fichiers, hauteur sans elle : " + spot.hauteurVoulue + " / " + h)
+   spot.changerEspace("applis"); verifier(!zone.visible, "réponse cachée en Applis")
+   spot.changerEspace("fichiers")       // nc-apps files ne part pas pour une saisie d'action
+   attente = 0; etape++; return }
+  if (etape === 7) { attente++; if (attente < 4) return
+   // Bascule automatique d'un calcul : la sélection revient en tête (Entrée ne lance pas une ligne sans rapport)
+   champ.text = ""; spot.espaceManuel = false; champ.text = "7*8"
+   verifier(spot.espace === "applis" && spot.resultats.length === 2, "deux applis faibles : " + JSON.stringify(titres()))
+   spot.sel = 1; attente = 0; etape++; return }
+  if (etape === 8) {
+   if (spot.espace !== "actions" || titres().indexOf("= 56") < 0) { attente++; verifier(attente < 50, "7*8 : " + spot.espace + " " + JSON.stringify(titres())); return }
+   verifier(spot.resultats.length >= 2 && spot.sel === 0, "sélection en tête après la bascule : " + spot.sel + " " + JSON.stringify(titres()))
+   // SPOTLIGHT_FICHIERS=non : plus d'espace Fichiers
+   Reglages.v = { SPOTLIGHT_FICHIERS: "non" }
+   verifier(JSON.stringify(spot.espaces) === '["applis","actions"]', "espaces : " + JSON.stringify(spot.espaces))
+   spot.changerEspace("applis"); spot.espaceSuivant(1); verifier(spot.espace === "actions", "Tab saute Fichiers")
+   spot.espaceSuivant(1); verifier(spot.espace === "applis", "Tab revient à Applis")
+   spot.changerEspace("fichiers"); verifier(spot.espace === "applis", "Fichiers refusé")
+   etape++; return }
+  if (etape === 9) {
+   verifier(trouver(spot, "nc-lanceur-onglet-fichiers") === null && trouver(spot, "nc-lanceur-onglet-actions") !== null, "onglet Fichiers caché")
    Qt.quit() }
  } }
  Timer { interval: 40000; running: true; onTriggered: Qt.exit(9) }
@@ -73,7 +113,7 @@ ShellRoot {
 FAUX_APPS = r'''#!/bin/sh
 printf '%s\n' "$*" >> "$HOME/appels"
 case "$1" in
-  list) printf '%s\n' '[{"id": "firefox", "name": "Firefox", "generic": "Navigateur", "icon": "", "exe": "firefox"}]' ;;
+  list) printf '%s\n' '[{"id": "firefox", "name": "Firefox", "generic": "Navigateur", "icon": "", "exe": "firefox"}, {"id": "o1", "name": "Outil7*8a", "generic": "", "icon": "", "exe": "o1"}, {"id": "o2", "name": "Outil7*8b", "generic": "", "icon": "", "exe": "o2"}]' ;;
   files) printf '%s\n' '[{"name": "firefox-notes.txt", "path": "/home/user/firefox-notes.txt", "dir": false, "parent": "~"}]' ;;
   *) printf '%s\n' '[]' ;;
 esac
@@ -82,6 +122,7 @@ FAUX_QALC = r'''#!/bin/sh
 case "$2" in
   2+2) echo 4 ;;
   3+3) echo 6 ;;
+  7\*8) echo 56 ;;
 esac
 '''
 
@@ -126,7 +167,9 @@ class EspacesHorsEcran(unittest.TestCase):
             b.mkdir(parents=True)
             scripts = {"nc-apps": FAUX_APPS, "qalc": FAUX_QALC, "hyprctl": "#!/bin/sh\nprintf '%s\\n' '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                        "nc-demander": '#!/bin/sh\ncase "$1" in --ia) printf \'%s\\n\' \'{"nom": "-", "agent": "claude", "coupee": true}\' ;; esac\n',
-                       "nc-logiciels": "#!/bin/sh\nprintf '%s\\n' '[]'\n", "nc-processus": "#!/bin/sh\nprintf '%s\\n' '{\"ss\": true, \"lignes\": []}'\n"}
+                       "nc-logiciels": "#!/bin/sh\nprintf '%s\\n' '[]'\n", "nc-processus": "#!/bin/sh\nprintf '%s\\n' '{\"ss\": true, \"lignes\": []}'\n",
+                       # une session qui répond aussi à « 7*8 » : les Actions ont deux lignes après la bascule du calcul
+                       "nc-session": "#!/bin/sh\nprintf '%s\\n' '[{\"nom\": \"Plan7*8\", \"fenetres\": 1, \"applis\": []}]'\n"}
             for nom, code in scripts.items():
                 (b / nom).write_text(code)
                 (b / nom).chmod(0o755)
@@ -144,8 +187,9 @@ class EspacesHorsEcran(unittest.TestCase):
             for erreur in ("ReferenceError", "TypeError", "is not a type", "Binding loop"):
                 self.assertNotIn(erreur, sortie)
             appels = (root / "appels").read_text(encoding="utf-8").splitlines()
-            # nc-apps files : seulement pour « fire », une fois dans l'espace Fichiers ; jamais pour un préfixe ni un calcul
-            self.assertEqual([a for a in appels if a.startswith("files")], ["files fire"], appels)
+            # nc-apps files : seulement dans l'espace Fichiers (« fire », puis « notebook » retrouvé après « note ») ; jamais
+            # pour un préfixe (« ? quelle heure » passé en Fichiers), un calcul, ni dans Applis
+            self.assertEqual([a for a in appels if a.startswith("files")], ["files fire", "files notebook"], appels)
 
 
 if __name__ == "__main__":

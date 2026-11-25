@@ -154,7 +154,7 @@ capture, notifications, réglages, verrouillage, extinction. **Appui long (ou cl
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
 se referme dans la pilule.
 
-Horloges mondiales : le réglage `HORLOGES_VILLES` (8 villes au plus, sans réseau) fait afficher, par « heure » ou « horloges » dans la recherche, une carte par ville devant les résultats.
+Horloges mondiales : le réglage `HORLOGES_VILLES` (8 villes au plus, sans réseau) fait afficher, par « heure » ou « horloges » dans la recherche, une carte par ville dans l'espace Actions du lanceur.
 
 **Super + R** ouvre le lanceur, qui sort de l'île. Il a trois espaces dont les résultats ne se mélangent jamais :
 **Applis** (applis et fenêtres ouvertes, l'espace de départ), **Fichiers** et **Actions** (tout le reste). `Tab` /

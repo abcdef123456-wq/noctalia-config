@@ -4,10 +4,11 @@ import QtQuick
 Item {
     id: o
     property string espace: "applis"
+    property var espaces: ["applis", "fichiers", "actions"]      // ceux qui existent (Fichiers coupé : pas d'onglet)
     signal choisir(string nom)
     height: 31
     readonly property var noms: [["applis", Reglages.t("Applis", "Apps")], ["fichiers", Reglages.t("Fichiers", "Files")],
-                                 ["actions", Reglages.t("Actions", "Actions")]]
+                                 ["actions", Reglages.t("Actions", "Actions")]].filter(n => espaces.indexOf(n[0]) >= 0)
 
     Row {
         id: rangee
