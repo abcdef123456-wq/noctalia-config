@@ -16,7 +16,6 @@
     "ILE_VERRE": "94",
     "ILE_LUEUR": "non",
     "ILE_CONTOUR_FERMEE": "oui",
-    "WIDGETS_PLAQUE": "non",
     "FENETRES_BORDURE": "1",
     "FENETRES_OMBRE": "16",
     "ILE_STYLE": "terminal",
@@ -103,6 +102,5 @@
   },
   "fonds": "nord",
   "fond_de_depart": "nord-fjord.jpg",
-  "credits": [],
-  "widgets": []
+  "credits": []
 }

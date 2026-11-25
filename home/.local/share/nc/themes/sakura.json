@@ -38,8 +38,7 @@
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "oui",
     "DOCK_TAILLE": "48",
-    "THEME_MODE": "light",
-    "WIDGETS_BUREAU": "oui"
+    "THEME_MODE": "light"
   },
   "noctalia": {
     "bar.default": {
@@ -110,27 +109,5 @@
   },
   "fonds": "sakura",
   "fond_de_depart": "sakura-branche.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-geante",
-      "coin": "haut-gauche",
-      "taille": "moyen",
-      "style": "carte",
-      "variante": "empilee"
-    },
-    {
-      "type": "meteo",
-      "coin": "haut-gauche",
-      "taille": "moyen",
-      "style": "carte",
-      "variante": "phrase"
-    },
-    {
-      "type": "calendrier",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte"
-    }
-  ]
+  "credits": []
 }

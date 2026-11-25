@@ -27,7 +27,6 @@
     "TERMINAL_LOGO": "macOS",
     "ILE_POLICE": "Inter",
     "FENETRES_OMBRE": "30",
-    "WIDGETS_PLAQUE": "non",
     "ILE_CONTOUR_EPAISSEUR": "0",
     "ILE_CONTOUR_FERMEE": "non",
     "ILE_RAYON": "rond",
@@ -48,7 +47,6 @@
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "non",
     "ILE_FORME": "encoche",
-    "WIDGETS_BUREAU": "oui",
     "FENETRES_SEULE_CENTREE": "16:10"
   },
   "noctalia": {
@@ -80,26 +78,5 @@
   },
   "fonds": "apple",
   "fond_de_depart": "apple-collines.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-geante",
-      "coin": "haut-droite",
-      "taille": "petit",
-      "style": "carte",
-      "chiffres": "aiguille"
-    },
-    {
-      "type": "calendrier",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte"
-    },
-    {
-      "type": "musique",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte"
-    }
-  ]
+  "credits": []
 }

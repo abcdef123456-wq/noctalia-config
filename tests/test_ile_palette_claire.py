@@ -15,7 +15,7 @@ from tests.test_rendu_ile import lire_png
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
 REF = "7378cd3"  # dernier état avant la palette claire
-ETATS = ("page", "recherche", "bureau")  # bureau : le filet de Couleurs.voile
+ETATS = ("page", "recherche")
 
 SOMBRE = {"sombre": True, "fond": "#0a0f0a", "texte": "#b8ffc8", "texteSec": "#5fa872", "texteDoux": "#98dea8",
           "carte": "#121712", "carteSurvol": "#151a15", "gris2": "#181e18", "gris3": "#232823", "gris4": "#2d322d",
@@ -55,9 +55,8 @@ class Source(unittest.TestCase):
         self.assertIn("readonly property color voile: sombre", t)
 
     def test_blancs_traites_ne_sont_plus_en_dur(self):
-        for f in ("Code.qml", "Fiche.qml", "Bureau.qml"):
+        for f in ("Code.qml", "Fiche.qml"):
             self.assertIn("Couleurs.voile", (QML / f).read_text(), f)
-        self.assertNotIn("Qt.rgba(1, 1, 1, 0.14)", (QML / "Bureau.qml").read_text())
         l181 = (QML / "Claude.qml").read_text().splitlines()[180]
         self.assertIn("Couleurs.sombre", l181)
 
@@ -79,7 +78,7 @@ class Rendu(unittest.TestCase):
         for nom, p in (("sombre", SOMBRE), ("clair", CLAIR)):
             (cls.t / (nom + ".json")).write_text(json.dumps(p))
         (cls.t / "sombre-nc.json").write_text(json.dumps(SOMBRE))
-        # sans contour : c'est là que le voile de la carte Bureau (Couleurs.voile) sert vraiment
+        # Même palette, avec les contours des cartes désactivés.
         (cls.t / "sans-contour.conf").write_text("ILE_CONTOUR=aucun\n")
         # mêmes pages ouvertes que dans la référence (huit sont coupées par défaut depuis)
         (cls.t / "pages-ref.conf").write_text(PAGES_REF)
@@ -106,15 +105,10 @@ class Rendu(unittest.TestCase):
         assert r.returncode == 0, r.stderr[-800:]
         return sortie
 
-    def identiques(self, palette, essais=2):
+    def identiques(self, palette):
         a, b = self.rendre("ref", palette or "defaut", palette), self.rendre("new", palette or "defaut", palette, pages_ref=True)
         for e in ETATS:
             x, y = lire_png(a / (e + ".png")), lire_png(b / (e + ".png"))
-            if e == "bureau":  # la première ligne varie d'un rendu à l'autre, même sur l'arbre de référence
-                x, y = (x[0], x[1], x[2][1:]), (y[0], y[1], y[2][1:])
-                if x != y and essais > 1:
-                    # l'horloge du bureau a pu changer de minute entre les deux rendus : on refait les deux, une fois
-                    return self.identiques(palette, essais - 1)
             self.assertEqual(x, y, "%s (%s)" % (e, palette))
 
     def test_sans_palette_identique_a_la_reference(self):
