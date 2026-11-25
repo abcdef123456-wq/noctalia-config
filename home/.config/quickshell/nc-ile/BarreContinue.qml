@@ -24,6 +24,9 @@ PanelWindow {
         const axe = screen ? (vertical ? screen.height : screen.width) : 0
         return Math.round(typeof m === "string" ? axe * parseFloat(m) / 100 : m)
     }
+    readonly property point origine: Qt.point(
+        vertical ? (position === "right" && screen ? screen.width - margeBord - epaisseur : margeBord) : margeBouts,
+        vertical ? margeBouts : (position === "bottom" && screen ? screen.height - margeBord - epaisseur : margeBord))
     readonly property real pad: Math.round(barre.padding ?? 12)
     readonly property real espacement: barre.capsule ? Math.max(2, barre.widget_spacing ?? 6)
                                                      : Math.max(8, barre.widget_spacing ?? 8)
@@ -100,7 +103,8 @@ PanelWindow {
                 Actions.lancerDepuisBarre(actions[cle], (nom, repli) => {
                     const cible = repli ? Etat.pageOu(nom, repli) : nom
                     if (!Etat.estPageControle(cible)) return false
-                    Etat.basculerControle(fen.screen.name, cible, fen.position)
+                    Etat.basculerControle(fen.screen.name, cible, fen.position,
+                        Qt.rect(fen.origine.x + e.x, fen.origine.y + e.y, 1, 1))
                     return true
                 })
             }
@@ -129,6 +133,7 @@ PanelWindow {
                     barre: fen.barre
                     definitions: fen.definitions
                     ecran: fen.screen
+                    origine: fen.origine
                     police: fen.police
                     teinte: fen.teinte
                     limiteLargeur: {
@@ -170,6 +175,7 @@ PanelWindow {
                     barre: fen.barre
                     definitions: fen.definitions
                     ecran: fen.screen
+                    origine: fen.origine
                     police: fen.police
                     teinte: fen.teinte
                     fondClip: fond.color
@@ -203,6 +209,7 @@ PanelWindow {
                     definitions: fen.definitions
                     ecran: fen.screen
                     police: fen.police
+                    origine: fen.origine
                     teinte: fen.teinte
                     compact: fen.compactEnd
                     fondClip: fond.color

@@ -1,5 +1,5 @@
 """Fenêtre graphique des réglages (Parametres.qml) hors écran, avec un faux nc-reglages : lecture du catalogue, recherche
-sans accent dans toutes les sections, bascule oui/non et remise à la config par « set » / « reset », relecture après."""
+sans accent, écritures de réglages, confirmation en ligne et résultats des actions."""
 import json
 import os
 from pathlib import Path
@@ -26,12 +26,25 @@ if a[0]=='catalogue':
         dict(cle="action:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Changer de mode graphique…",genre="action",defaut="",aide="Une confirmation s'ouvre dans l'île.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Passer en Dédiée…",modifie=False,groupe="",commande=["nc-reglages","mode-graphique"])] if (H/'gpu').exists() else [])
      +([dict(cle="LONG_%d"%i,section="Clavier et souris",sectionNom="Clavier et souris",nom="Réglage long %d"%i,genre="entier",defaut="0",aide="Ligne de remplissage.",choix=[],mini=0,maxi=100,pas=1,unite=" s".strip(),zero="",valeur=d.get("LONG_%d"%i,"0"),affiche=d.get("LONG_%d"%i,"0"),modifie=d.get("LONG_%d"%i,"0")!="0",groupe="hypr") for i in range(40)] if (H/'long').exists() else [])
      +([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else [])
-     +([dict(cle="session:Dev",section="Fenêtres",sectionNom="Fenêtres",nom="Session « Dev »",genre="action",defaut="",aide="3 fenêtres : firefox, kitty",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Supprimer…",modifie=False,groupe="",commande=["nc-session","supprimer","Dev"],confirmer="Supprimer la session « Dev » ?",bouton="Supprimer",relire=True)] if (H/'sessions').exists() else []),ensure_ascii=False))
+     +([dict(cle="session:Dev",section="Fenêtres",sectionNom="Fenêtres",nom="Session « Dev »",genre="action",defaut="",aide="3 fenêtres : firefox, kitty",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Supprimer…",modifie=False,groupe="",commande=["nc-session","supprimer","Dev"],confirmer="Supprimer la session « Dev » ?",bouton="Supprimer",relire=True)] if (H/'sessions').exists() else [])
+     +([dict(cle="rapport:"+id,section="Cloud JARVIS",sectionNom="Cloud JARVIS",nom=nom,genre="action",defaut="",aide="",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Vérifier",modifie=False,groupe="",commande=commande,relire=relire)
+        for id,nom,commande,relire in (
+          ("avertissement", "Tester la connexion", ["nc-reglages","action-test","avertissement"], False),
+          ("echec", "Vérifier le Cloud JARVIS", ["nc-reglages","action-test","echec"], True),
+          ("absent", "Vérifier un composant", ["nc-absent"], True),
+        )] if (H/'resultats').exists() else []),ensure_ascii=False))
 elif a[0] in ('raccourci','capture'): print("ok")
 elif a[0]=='set':
     if a[2]=='refuse': print("Valeur refusée par le test.",file=sys.stderr); sys.exit(1)
     import time; time.sleep(0.3); d[a[1]]=a[2]; etat.write_text(json.dumps(d)); print(a[1]+" : "+a[2])
 elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_FORCE":"normal"}[a[1]]; etat.write_text(json.dumps(d)); print("Valeur de la config remise.")
+elif a[0]=='action-test':
+    if a[1]=='avertissement':
+        print("Avertissement conservé.",file=sys.stderr)
+    elif a[1]=='echec':
+        print("\nAnalyse <cloud>\n" + "\n".join("Point %02d"%i for i in range(40)))
+        print("Détail 1\nDétail 2",file=sys.stderr)
+        sys.exit(7)
 '''
 # Faux nc-session : son dossier vient de son propre chemin (<home>/.local/bin), jamais de $HOME ; « supprimer » note
 # l'appel et retire la session du faux catalogue
@@ -46,7 +59,7 @@ if sys.argv[1:2]==['supprimer']: (H/'sessions').unlink(missing_ok=True); print("
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class FenetreReglages(unittest.TestCase):
-    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False, sessions=False, longue=False):
+    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False, sessions=False, longue=False, resultats=False):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool sobre: false; function t(fr,en){return fr} function val(k,d){return d}}')
@@ -63,6 +76,8 @@ class FenetreReglages(unittest.TestCase):
             if sessions:
                 (root / "sessions").write_text("")
                 (b / "nc-session").write_text(FAUX_SESSION); (b / "nc-session").chmod(0o755)
+            if resultats:
+                (root / "resultats").touch()
             (root / "qml/shell.qml").write_text((('import QtTest\n' if evenements else '') + '''import QtQuick
 import Quickshell
 ShellRoot {
@@ -74,6 +89,7 @@ ShellRoot {
  property var ligne0:null
  // TEST_INPUT
  function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function dansFenetre(nom){var item=fen.contentItem;while(item.parent)item=item.parent;return trouver(item,nom)}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
  function creer(section){var c=Qt.createComponent("Parametres.qml");verifier(c.status===Component.Ready,c.errorString());fen=c.createObject(racine);verifier(fen!==null,"création");fen.afficher(Quickshell.screens[0].name);if(section)fen.allerSection(section)}
  Timer {interval:100;running:true;repeat:true;onTriggered:{
@@ -110,7 +126,7 @@ if(etape===1){
  champ.text="";verifier(fen.visibles.length===2,"retour à la section")
  fen.regler("GESTES","non");etape++;return}
 if(etape===2){verifier(fen.reglage("GESTES").valeur==="non"&&fen.reglage("GESTES").modifie,"bascule non relue");fen.regler("SOURIS_VITESSE",5);fen.remettre("GESTES");etape++;return}
-if(etape===3){verifier(fen.reglage("SOURIS_VITESSE").valeur==="5","entier non écrit");verifier(fen.reglage("GESTES").valeur==="oui"&&!fen.reglage("GESTES").modifie,"remise à la config");verifier(fen.message!=="","message de confirmation");etape++;return}
+if(etape===3){verifier(fen.reglage("SOURIS_VITESSE").valeur==="5","entier non écrit");verifier(fen.reglage("GESTES").valeur==="oui"&&!fen.reglage("GESTES").modifie,"remise à la config");verifier(fen.message!=="","message de confirmation");verifier(!dansFenetre("nc-reglages-resultat-titre"),"un réglage ordinaire n'ouvre pas de modale");etape++;return}
 if(etape===4){fen.close();verifier(!fen.visible,"fermeture");Qt.quit()}
 ''')
         sets = [a for a in appels if a[0] in ("set", "reset")]
@@ -266,6 +282,7 @@ if(etape===2){
  verifier(b&&b.visible&&b.texte==="Passer en Dédiée…","bouton de l'action : "+(b?b.texte:"absent"))
  b.clic();etape++;return}
 if(etape<8){etape++;return}
+verifier(!dansFenetre("nc-reglages-resultat-titre"),"l'action réussie sans sortie n'ouvre pas de modale")
 Qt.quit()
 ''', gpu=True)
         self.assertIn(["mode-graphique"], appels, "le bouton lance nc-reglages mode-graphique")
@@ -299,13 +316,59 @@ if(etape===2){
  b.clic();ok.clic();etape++;return}
 if(etape===3){
  verifier(fen.reglage("session:Dev")===null,"catalogue non relu après la suppression")
- verifier(fen.message==="Session « Dev » supprimée.","message : "+fen.message)
+ var titre=dansFenetre("nc-reglages-resultat-titre");if(!titre||!titre.visible)return
+ verifier(titre.text==="Session « Dev »"&&dansFenetre("nc-reglages-resultat-texte").text==="Session « Dev » supprimée.\\n",
+          "la confirmation de suppression s'affiche dans le résultat")
  Qt.quit()}
 ''', evenements=True, sessions=True)
         self.assertEqual([a for a in appels if a[0] == "nc-session"], [["nc-session", "supprimer", "Dev"]],
                          "une seule suppression, après la confirmation")
         i = next(k for k, a in enumerate(appels) if a[0] == "nc-session")
         self.assertIn(["catalogue"], appels[i + 1:], "le catalogue est relu après")
+
+    def test_resultats_actions_multilignes_et_sorties_isolees(self):
+        appels = self.executer(r'''
+if(etape===0){creer("Cloud JARVIS");etape++;return}
+if(fen.enCours)return
+var titre=dansFenetre("nc-reglages-resultat-titre"),corps=dansFenetre("nc-reglages-resultat-texte")
+var statut=dansFenetre("nc-reglages-resultat-statut"),liste=trouver(fen.contentItem,"nc-reglages-liste")
+if(etape===1){
+ var b=trouver(fen.contentItem,"nc-reglage-action-rapport:avertissement");if(!b)return
+ b.clic();etape++;return}
+if(etape===2){
+ if(!titre||!titre.visible||!corps.activeFocus)return
+ verifier(titre.text==="Tester la connexion","titre de l'action hors file")
+ verifier(statut.text==="Action réussie"&&corps.text==="Avertissement conservé.\n","stderr ne change pas le succès")
+ clavier.keyClick(Qt.Key_Escape);etape++;return}
+if(etape===3){
+ if(titre&&titre.visible)return
+ verifier(fen.visible&&liste.activeFocus,"Échap ferme le résultat et rend le focus aux réglages")
+ trouver(fen.contentItem,"nc-reglage-action-rapport:echec").clic()
+ trouver(fen.contentItem,"nc-reglage-action-rapport:absent").clic()
+ fen.regler("GESTES","non");etape++;return}
+if(etape===4){
+ if(!titre||!titre.visible||!corps.activeFocus)return
+ var attendu="\nAnalyse <cloud>\n"
+ for(var i=0;i<40;i++)attendu+="Point "+String(i).padStart(2,"0")+"\n"
+ attendu+="Détail 1\nDétail 2\n"
+ verifier(titre.text==="Vérifier le Cloud JARVIS"&&statut.text==="Échec de l’action (code 7)","nom et code de l'action échouée")
+ verifier(corps.text===attendu,"stdout et stderr complets : "+corps.text)
+ var defilement=dansFenetre("nc-reglages-resultat-defilement")
+ verifier(defilement.contentHeight>defilement.height,"le rapport long défile")
+ verifier(corps.readOnly&&corps.selectByMouse,"le texte reste sélectionnable")
+ clavier.keyClick(Qt.Key_A,Qt.ControlModifier)
+ verifier(corps.selectionStart===0&&corps.selectionEnd===attendu.length,"sélection de tout le rapport")
+ clavier.keyClick(Qt.Key_Escape);etape++;return}
+if(etape===5){
+ if(!titre||!titre.visible||!corps.activeFocus||titre.text==="Vérifier le Cloud JARVIS")return
+ verifier(titre.text==="Vérifier un composant"&&statut.text==="Échec de l’action","une commande introuvable a son propre résultat")
+ verifier(corps.text==="Impossible de démarrer la commande.","pas de résidu du résultat précédent")
+ verifier(!fen.erreur&&fen.reglage("GESTES").valeur==="non","la file continue après l'échec de démarrage")
+ clavier.keyClick(Qt.Key_Escape);etape++;return}
+if(etape===6&&(!titre||!titre.visible)){verifier(fen.visible,"la fenêtre des réglages reste ouverte");Qt.quit()}
+''', evenements=True, resultats=True)
+        self.assertEqual([a for a in appels if a[0] in ("action-test", "set")],
+                         [["action-test", "avertissement"], ["action-test", "echec"], ["set", "GESTES", "non"]])
 
 
 if __name__ == "__main__":

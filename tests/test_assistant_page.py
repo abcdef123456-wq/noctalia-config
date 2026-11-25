@@ -25,7 +25,8 @@ class PageAssistant(unittest.TestCase):
             noms = ["Assistant.qml", "AssistantEtat.qml", "Defilement.qml", "Texte.qml", "Ico.qml",
                     "Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml", "AssistantPieces.qml", "JarvisResultat.qml", "JarvisEtat.qml"]
             if compact:
-                noms.append("Compact.qml")
+                noms.extend(["Compact.qml", "HorlogeIle.qml"])
+                shutil.copy2(QML / "IdentitesIle.js", root / "IdentitesIle.js")
             for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous"; readonly property bool sobre: effets==="aucun"; function t(fr,en){return en} function val(k,d){return k==="EFFETS"?effets:d}}')
@@ -35,7 +36,8 @@ class PageAssistant(unittest.TestCase):
                 champs.update({k:'false' for k in ('aMusique','enregistre','telecharge','pomodoro','pomoPause','muet','joue','branche','cameraActive','meteoPilule','jeu')})
                 champs.update({k:'0' for k in ('minuteurFin','minuteurReste','volume','luminosite','pourcent','profil','debutVideo')})
                 champs.update(meteo='({})',bandes='[0,0,0,0,0]',telechargements='[]',maintenant='new Date()')
-                (root/'Partage.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool indicateur: false}')
+                (root/'Partage.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool indicateur: false; property bool silence: false}')
+                (root/'Notifs.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property int nonLues: 0}')
                 (root/'VpnEtat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool indicateur: false}')
                 (root/'Chaleur.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool alerte: false; function titre(){return "CPU"}}')
                 (root/'Appel.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false; property bool muet: false; property real niveau: 0; property string icone: ""; property string appli: ""; property string dureeTexte: "0:00"; property string derniereAppli: ""; property int derniereDuree: 0}')
@@ -45,8 +47,8 @@ class PageAssistant(unittest.TestCase):
                 (root/'Terminal.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false; property string commande: ""; property string dureeTexte: "0:00"; property var fini: null}')
                 (root/'Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {\n'+ '\n'.join('property var '+k+':'+v for k,v in champs.items())+'\nfunction duree(n){return "0:00"} function nomJoli(s){return s} function octets(n){return "0"}\n}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if nom in ("AssistantEtat.qml", "JarvisEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml", "CloudEtat.qml") else "")
-                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml", "CloudEtat.qml"] if compact else [])))
+                ("singleton " if nom in ("AssistantEtat.qml", "JarvisEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Notifs.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml", "CloudEtat.qml") else "")
+                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml", "Notifs.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml", "VpnEtat.qml", "Modes.qml", "CloudEtat.qml"] if compact else [])))
             if not absent:
                 bin = root / ".local/bin"
                 bin.mkdir(parents=True)

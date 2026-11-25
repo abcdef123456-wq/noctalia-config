@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Widgets
 import Quickshell.Services.UPower
+import "DispositionPanneaux.js" as Disposition
 
 PanelWindow {
     id: fen
@@ -14,6 +15,9 @@ PanelWindow {
     property real hautReserve: Gabarit.barre
     property real droiteReserve: 0
     property real basReserve: 0
+    property var ancre: null
+    property var ancreInterne: null
+    property Item boutonRetour: null
     signal fermer()
     signal ouvrirThemes()
 
@@ -84,7 +88,24 @@ PanelWindow {
         entree = 1
         panneau.forceActiveFocus()
     }
-    onSectionChanged: panneau.forceActiveFocus()
+    onAncreChanged: { ancreInterne = null; boutonRetour = null }
+    onSectionChanged: {
+        if (section === "accueil") {
+            ancreInterne = null
+            const bouton = boutonRetour
+            boutonRetour = null
+            if (bouton) {
+                Qt.callLater(() => { if (fen.surAccueil && bouton && bouton.visible) bouton.forceActiveFocus() })
+                return
+            }
+        }
+        panneau.forceActiveFocus()
+    }
+    function ouvrirWidget(section, bouton) {
+        boutonRetour = bouton
+        ancreInterne = Etat.ancreControle(bouton)
+        Etat.allerControle(section)
+    }
     Behavior on entree {
         enabled: !Reglages.sobre && fen.mouv.actif
         NumberAnimation { duration: Math.min(220, fen.mouv.duree); easing.type: Easing.OutCubic }
@@ -105,19 +126,19 @@ PanelWindow {
             ? Math.min(hauteurMax, Math.max(410, blocAccueil.implicitHeight + entete.height + 44))
             : Math.min(hauteurMax, 520)
 
-        width: largeurCible
-        height: hauteurVoulue
+        readonly property var placement: Disposition.placerControle(
+            fen.surAccueil ? fen.ancre : fen.ancreInterne ?? fen.ancre,
+            !fen.surAccueil && fen.ancreInterne ? "" : fen.bord, largeurCible, hauteurVoulue,
+            margeGauche, margeHaute, fen.width - margeDroite, fen.height - margeBasse, fen.surAccueil)
+        // La hauteur naturelle du tableau de bord dépend de sa grille ; ne pas reboucler via sa largeur.
+        width: fen.surAccueil ? largeurCible : placement.largeur
+        height: placement.hauteur
 
         readonly property real decalage: (1 - fen.entree) * 16
-        readonly property real xBase: fen.bord === "left" ? margeGauche : fen.width - margeDroite - width
-        readonly property real yBase: fen.bord === "top" ? margeHaute : fen.height - margeBasse - height
 
-        x: xBase + (fen.bord === "left" ? -decalage : (fen.bord === "right" ? decalage : 0))
-        y: yBase + (fen.bord === "bottom" ? decalage : (fen.bord === "top" ? -decalage : 0))
+        x: placement.x + (placement.bord === "left" ? -decalage : (placement.bord === "right" ? decalage : 0))
+        y: placement.y + (placement.bord === "bottom" ? decalage : (placement.bord === "top" ? -decalage : 0))
         opacity: fen.entree
-        scale: 0.98 + 0.02 * fen.entree
-
-        Behavior on height { enabled: !Reglages.sobre && fen.mouv.actif; NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
 
         // Raccourcis clavier immédiats (focus exclusif Wayland)
         Keys.priority: Keys.AfterItem
@@ -358,11 +379,11 @@ PanelWindow {
                                 : (fen.wifiActif ? (fen.s.reseau || Reglages.t("Activé", "On")) : Reglages.t("Désactivé", "Off"))
                             actif: fen.wifiActif
                             aDetails: !fen.filaire
-                            onBasculer: {
-                                if (fen.filaire) Etat.allerControle("reseau")
+                            onBasculer: bouton => {
+                                if (fen.filaire) fen.ouvrirWidget("reseau", bouton)
                                 else Etat.inverser("wifi", ["noctalia", "msg", "wifi-toggle"])
                             }
-                            onOuvrirDetails: Etat.allerControle("reseau")
+                            onOuvrirDetails: bouton => fen.ouvrirWidget("reseau", bouton)
                         }
 
                         ControleTuile {
@@ -375,7 +396,7 @@ PanelWindow {
                             couleurActive: Couleurs.bleu
                             aDetails: true
                             onBasculer: Etat.inverser("bluetooth", ["noctalia", "msg", "bluetooth-toggle"])
-                            onOuvrirDetails: Etat.allerControle("bluetooth")
+                            onOuvrirDetails: bouton => fen.ouvrirWidget("bluetooth", bouton)
                         }
 
                         ControleTuile {
@@ -389,7 +410,7 @@ PanelWindow {
                             couleurActive: Couleurs.violet
                             aDetails: true
                             onBasculer: Notifs.basculerConcentration()
-                            onOuvrirDetails: Etat.allerControle("concentration")
+                            onOuvrirDetails: bouton => fen.ouvrirWidget("concentration", bouton)
                         }
 
                         ControleTuile {
@@ -580,7 +601,7 @@ PanelWindow {
                                 aDetails: true
                                 onChanger: v => Etat.reglerVolume(v)
                                 onBasculerMuet: Etat.basculerMuet()
-                                onOuvrirDetails: Etat.allerControle("son")
+                                onOuvrirDetails: bouton => fen.ouvrirWidget("son", bouton)
                             }
 
                             Rectangle {
@@ -678,7 +699,7 @@ PanelWindow {
                                 }
                                 ControleAction {
                                     id: zO; anchors.fill: parent; text: Reglages.t(modelData.fr, modelData.en)
-                                    onClicked: Etat.allerControle(modelData.id)
+                                    onClicked: fen.ouvrirWidget(modelData.id, zO)
                                 }
                             }
                         }

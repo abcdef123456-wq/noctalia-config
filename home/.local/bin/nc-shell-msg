@@ -58,6 +58,9 @@ case "${1:-}" in
     # ile PAGE [REPLI] : REPLI si la page n'existe pas (PC sans batterie…) ; sans Quickshell, le centre de Noctalia
     page="${2:-centre}"; repli="${3:-}"
     if ile_prete; then
+      if pointeur=$(hyprctl -j cursorpos 2>/dev/null) && [ -n "$pointeur" ]; then
+        exec qs -c nc-ile ipc call ile controleWidget "$page" "$repli" "$pointeur"
+      fi
       [ "$page" = centre ] && exec qs -c nc-ile ipc call ile controle
       [ -n "$repli" ] && exec qs -c nc-ile ipc call ile pageOu "$page" "$repli"
       exec qs -c nc-ile ipc call ile page "$page"

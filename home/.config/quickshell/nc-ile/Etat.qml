@@ -26,6 +26,7 @@ Singleton {
     property string controleEcran: ""
     property string controleSection: "accueil"
     property string controleBord: ""        // "" = détection auto (barre active / réserves), sinon "top"|"bottom"|"left"|"right"
+    property var controleAncre: null      // Rectangle du déclencheur dans le repère logique de l'écran.
     readonly property bool controleOuvert: controleEcran !== ""
     readonly property var pagesControle: ["centre", "reseau", "wifi", "bluetooth", "son", "systeme", "sante",
                                           "charge", "meteo", "presse", "fenetres", "concentration", "jeu", "calendrier", "minuteur"]
@@ -38,22 +39,24 @@ Singleton {
         return ["top", "bottom", "left", "right"].indexOf(bord) >= 0 ? bord : ""
     }
     function estPageControle(nom) { return pagesControle.indexOf(nom) >= 0 }
-    function basculerControle(ecran, section, bord) {
-        var cible = normaliserSectionControle(section)
-        fermer()
+    // Wayland ne fournit pas la position globale des surfaces : chacun connaît son origine sur l'écran.
+    function ancreControle(item, origine = Qt.point(0, 0)) {
+        if (!item) return null
+        const debut = item.mapToItem(null, 0, 0)
+        const fin = item.mapToItem(null, item.width, item.height)
+        return Qt.rect(origine.x + debut.x, origine.y + debut.y, fin.x - debut.x, fin.y - debut.y)
+    }
+    function basculerControle(ecran, section, bord, ancre) {
+        const cible = normaliserSectionControle(section)
         if (controleEcran === ecran && (section === undefined || section === "" || controleSection === cible)) {
             fermerControle(); return
         }
-        controleBord = normaliserBordControle(bord)
-        controleSection = cible
-        controleEcran = ecran
-        lire()
-        lireLuminosite(false)
-        lirePage()
+        ouvrirControle(ecran, cible, bord, ancre)
     }
-    function ouvrirControle(ecran, section, bord) {
-        var cible = normaliserSectionControle(section)
+    function ouvrirControle(ecran, section, bord, ancre) {
+        const cible = normaliserSectionControle(section)
         fermer()
+        controleAncre = ancre ?? null
         controleBord = normaliserBordControle(bord)
         controleSection = cible
         controleEcran = ecran
@@ -66,7 +69,7 @@ Singleton {
         lire()
         lirePage()
     }
-    function fermerControle() { controleEcran = ""; controleSection = "accueil"; controleBord = "" }
+    function fermerControle() { controleEcran = ""; controleSection = "accueil"; controleBord = ""; controleAncre = null }
     property var pilules: ({})
     property string lanceurFondu: ""
     property var lanceurProprio: null

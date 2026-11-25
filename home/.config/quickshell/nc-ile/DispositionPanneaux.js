@@ -43,9 +43,11 @@ function barreControle(barres, definitions, bord) {
 }
 
 // hyprctl -j layers donne des coordonnées globales en pixels logiques.
-function barreNativeControle(calques, x, y, largeur, hauteur) {
+function barreNativeControle(calques, x, y, largeur, hauteur, ancre) {
     const barres = Object.values(calques?.levels ?? {}).flat().filter(c => c.namespace?.startsWith("noctalia-bar-") && c.w > 1 && c.h > 1)
-    const barre = barres.find(c => c.namespace === "noctalia-bar-default") ?? barres[0]
+    const barre = (ancre && barres.find(c => x + ancre.x >= c.x && x + ancre.x < c.x + c.w
+                                        && y + ancre.y >= c.y && y + ancre.y < c.y + c.h))
+        || barres.find(c => c.namespace === "noctalia-bar-default") || barres[0]
     if (!barre) return null
     if (barre.w >= barre.h) {
         const haut = barre.y - y, bas = y + hauteur - barre.y - barre.h
@@ -53,6 +55,39 @@ function barreNativeControle(calques, x, y, largeur, hauteur) {
     }
     const gauche = barre.x - x, droite = x + largeur - barre.x - barre.w
     return gauche <= droite ? { bord: "left", emprise: gauche + barre.w } : { bord: "right", emprise: droite + barre.w }
+}
+
+// « top » désigne un déclencheur au-dessus de la carte, « bottom » en dessous, etc.
+function placerControle(ancre, bord, largeur, hauteur, gauche, haut, droite, bas, largeurFixe = false) {
+    if (!ancre) return { x: bord === "left" ? gauche : droite - largeur,
+                         y: bord === "top" ? haut : bas - hauteur, largeur, hauteur, bord }
+    const gap = 8
+    const ax = ancre.x + ancre.width / 2, ay = ancre.y + ancre.height / 2
+    const apresX = Math.max(gauche, ancre.x + ancre.width + gap)
+    const avantX = Math.min(droite, ancre.x - gap)
+    const apresY = Math.max(haut, ancre.y + ancre.height + gap)
+    const avantY = Math.min(bas, ancre.y - gap)
+    const dessus = Math.max(0, avantY - haut)
+    const dessous = Math.max(0, bas - apresY)
+    const aGauche = Math.max(0, avantX - gauche)
+    const aDroite = Math.max(0, droite - apresX)
+    const place = { top: dessous, bottom: dessus, left: aDroite, right: aGauche }
+    const vertical = dessous >= dessus ? ["top", "bottom"] : ["bottom", "top"]
+    const horizontal = aDroite >= aGauche ? ["left", "right"] : ["right", "left"]
+    const ordre = bord ? [bord, ...vertical, ...horizontal] : [...vertical, ...horizontal]
+    const besoin = b => b === "top" || b === "bottom" ? hauteur : largeur
+    // Un widget de bord garde son côté tant qu'il y tient ; sinon on essaie les trois autres côtés.
+    // S'il n'y a pas de place à taille entière, donner la plus grande zone utilisable (le contenu défile).
+    const direction = ordre.find(b => place[b] >= besoin(b))
+        ?? (largeurFixe ? vertical : ordre).reduce((a, b) => place[b] / Math.max(1, besoin(b)) > place[a] / Math.max(1, besoin(a)) ? b : a)
+    const horizontalement = direction === "left" || direction === "right"
+    const l = horizontalement ? Math.min(largeur, place[direction]) : largeur
+    const h = horizontalement ? hauteur : Math.min(hauteur, place[direction])
+    const x = direction === "left" ? apresX : direction === "right" ? avantX - l
+        : Math.max(gauche, Math.min(droite - l, ax - l / 2))
+    const y = direction === "top" ? apresY : direction === "bottom" ? avantY - h
+        : Math.max(haut, Math.min(bas - h, ay - h / 2))
+    return { x: Math.round(x), y: Math.round(y), largeur: l, hauteur: h, bord: direction }
 }
 
 function blocs(barres) {

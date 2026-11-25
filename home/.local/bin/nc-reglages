@@ -5386,7 +5386,7 @@ def catalogue(vals):
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)
     # Fonds d'écran : juste après le dossier des fonds, « Créer les dossiers jour et nuit » (mkdir -p de « jour » et « nuit » dans ce
-    # dossier, qui doit exister, puis ouverture dans le gestionnaire de fichiers ; rien d'autre). Le message s'affiche en bas.
+    # dossier, qui doit exister, puis ouverture dans le gestionnaire de fichiers ; le résultat figure dans le dialogue.
     k = next((k for k, x in enumerate(res) if x["cle"] == "FONDS_DOSSIER"), None)
     if k is not None:
         res.insert(k + 1, dict(cle="action:fonds-jour-nuit-dossiers", section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"),
@@ -5509,7 +5509,7 @@ def catalogue(vals):
 
 def catalogue_cloud():
     """Cloud JARVIS : l'association lue sur ce PC (aucun appel réseau à la lecture du catalogue), puis les actions de
-    nc-cloud, argv fixes ; leur dernière ligne s'affiche en bas de la fenêtre, puis le catalogue est relu."""
+    nc-cloud, argv fixes ; leur résultat est affiché dans un dialogue et le catalogue est relu."""
     sec = "Cloud JARVIS"
     base = dict(section=sec, sectionNom=nom_section(sec), defaut="", choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
                 valeur="", modifie=False, groupe="")

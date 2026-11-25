@@ -28,12 +28,14 @@ FloatingWindow {
     property bool erreur: false
     property bool lectureIllisible: false
     property var file: []
+    property bool commandeEnCours: false
+    property var resultats: []
     readonly property var capture: Raccourcis.capture
     property string captureMessage: ""
     property bool ileOuverte: false
     signal fermerIle()
     property bool relire: false
-    readonly property bool enCours: lecture.running || ecriture.running || relire || file.length > 0
+    readonly property bool enCours: lecture.running || commandeEnCours || relire || file.length > 0
     property var navigation: ({ sections: [], domaines: [] })
     readonly property var sections: navigation.sections.map(s => s.id)
     readonly property var sectionCourante: navigation.sections.find(s => s.id === section) || null
@@ -243,6 +245,7 @@ FloatingWindow {
     }
 
     function focaliserScene() {
+        if (resultat.visible || capture) return
         if (vueListe) liste.forceActiveFocus()
         else accueil.forceActiveFocus()
     }
@@ -312,13 +315,13 @@ FloatingWindow {
     onClosed: close()
     function close() { visible = false }
     function charger() { if (lecture.running) relire = true; else lecture.running = true }
-    function commande(args) { file.push([bin + "nc-reglages"].concat(args)); file = file; suivant() }
+    function enfiler(c) { file = file.concat([c]); suivant() }
+    function commande(args, entree) { enfiler({ argv: [bin + "nc-reglages"].concat(args), entree: entree, relire: true }) }
     function regler(cle, valeur) {
         localement(cle, String(valeur))
-        if (cle === "SNIPPET_AJOUTER") { entrees.push(String(valeur)); commande(["set", cle, "-"]) }
+        if (cle === "SNIPPET_AJOUTER") commande(["set", cle, "-"], String(valeur))
         else commande(["set", cle, String(valeur)])
     }
-    property var entrees: []
     function remettre(cle) { var r = reglage(cle); if (r) localement(cle, r.defaut); commande(["reset", cle]) }
     function localement(cle, v) {
         var r = reglage(cle)
@@ -333,19 +336,49 @@ FloatingWindow {
         catalogue = catalogue.map(x => x.cle === cle ? n : x)
     }
     function suivant() {
-        if (ecriture.running || !file.length) return
-        var c = file.shift(); file = file
-        ecriture.stdinEnabled = c[2] === "SNIPPET_AJOUTER" && c[3] === "-"
-        ecriture.entree = ecriture.stdinEnabled ? (entrees.shift() || "") : ""
-        ecriture.command = c
-        ecriture.parti = false
-        ecriture.running = true
+        if (commandeEnCours || !file.length) return
+        const c = file[0]
+        commandeEnCours = true
+        file = file.slice(1)
+        demarrerCommande(c, true)
+    }
+    function demarrerCommande(c, serie) {
+        const p = execution.createObject(fen, { operation: c, serie: serie })
+        p.running = true
     }
     function lancerAction(r, confirme) {
-        var c = r && r.commande ? Array.prototype.slice.call(r.commande).map(String) : []
-        if (!c.length || (r.confirmer && !confirme)) return
-        if (r.relire) { file.push([bin + c[0]].concat(c.slice(1))); file = file; suivant() }
-        else Quickshell.execDetached([bin + c[0]].concat(c.slice(1)))
+        const argv = r && r.commande ? Array.from(r.commande, String) : []
+        if (!argv.length || (r.confirmer && !confirme)) return
+        // Le catalogue donne des chemins absolus pour les terminaux : leur fenêtre
+        // peut rester ouverte, sans bloquer la file d'écriture des réglages.
+        const externe = argv[0].startsWith("/")
+        if (!externe) argv[0] = bin + argv[0]
+        const c = { argv: argv, titre: r.nom || r.commande[0], relire: !!r.relire }
+        if (c.relire && !externe) enfiler(c)
+        else demarrerCommande(c, false)
+    }
+    function finirCommande(c, serie, sortie, diagnostic, echec, code, detail) {
+        if (c.titre) {
+            let texte = sortie.trim() ? sortie : ""
+            if (diagnostic.trim()) texte += (texte && !texte.endsWith("\n") ? "\n" : "") + diagnostic
+            if (texte || echec) {
+                resultats.push({ titre: c.titre, echec: echec, code: code,
+                    texte: texte || detail || Reglages.t("La commande n’a fourni aucun détail.", "The command provided no details.") })
+                presenterResultat()
+            }
+        } else {
+            erreur = echec
+            const resume = (echec ? diagnostic.trim() || sortie.trim() : sortie.trim()).split("\n").pop()
+            message = resume || detail || (echec ? Reglages.t("Valeur refusée.", "Value rejected.") : "")
+        }
+        if (serie) commandeEnCours = false
+        if (c.relire) charger()
+        if (serie) Qt.callLater(suivant)
+    }
+    function presenterResultat() {
+        if (!visible || capture || resultat.courant || !resultats.length) return
+        resultat.courant = resultats.shift()
+        resultat.open()
     }
     function demanderAction(r) {
         if (!r || !r.confirmer) { lancerAction(r); return }
@@ -359,7 +392,7 @@ FloatingWindow {
     Connections {
         target: Raccourcis
         function onEcrit() { if (Raccourcis.message) { fen.message = Raccourcis.message; fen.erreur = Raccourcis.erreur }; fen.charger() }
-        function onCaptureFinie() { if (fen.visible) fen.focaliserScene() }
+        function onCaptureFinie() { if (fen.visible) { fen.focaliserScene(); fen.presenterResultat() } }
     }
     function remettreLigne(r) {
         if (!r || !r.modifie) return
@@ -425,7 +458,7 @@ FloatingWindow {
                 try {
                     let d = JSON.parse(text)
                     if (!Array.isArray(d)) throw new Error("catalogue")
-                    if (ecriture.running || fen.file.length > 0) return
+                    if (fen.commandeEnCours || fen.file.length > 0) return
                     var avant = {}
                     fen.catalogue.forEach(r => avant[r.cle] = r)
                     d = d.map(r => { var o = avant[r.cle]; return o && JSON.stringify(o) === JSON.stringify(r) ? o : r })
@@ -448,20 +481,34 @@ FloatingWindow {
         }
         stderr: StdioCollector {}
     }
-    Process {
-        id: ecriture
-        property string entree: ""
-        property bool parti: false
-        onStarted: { parti = true; if (stdinEnabled) { write(entree); entree = ""; stdinEnabled = false } }
-        onRunningChanged: if (!running && !parti) { entree = ""; stdinEnabled = false; fen.message = Reglages.t("Commande introuvable.", "Command not found."); fen.erreur = true; fen.suivant() }
-        stdout: StdioCollector { onStreamFinished: { fen.message = text.trim().split("\n").pop() || ""; fen.erreur = false } }
-        stderr: StdioCollector { onStreamFinished: if (text.trim()) { fen.message = text.trim().split("\n").pop(); fen.erreur = true } }
-        onExited: (code, status) => { if (code !== 0 && !fen.erreur) { fen.message = Reglages.t("Valeur refusée.", "Value rejected."); fen.erreur = true }; fen.charger(); fen.suivant() }
+    Component {
+        id: execution
+        Process {
+            id: proc
+            property var operation: null
+            property bool serie: false
+            command: operation ? operation.argv : []
+            stdinEnabled: !!operation && operation.entree !== undefined
+            stdout: StdioCollector { id: sortieCommande }
+            stderr: StdioCollector { id: diagnosticCommande }
+            onStarted: if (stdinEnabled) { write(operation.entree); stdinEnabled = false }
+            // Quickshell termine les deux flux avant exited ; un démarrage raté
+            // ne signale que runningChanged.
+            onExited: (code, status) => terminer(code !== 0 || status !== 0, status === 0 ? code : null, "")
+            onRunningChanged: if (!running && operation)
+                terminer(true, null, Reglages.t("Impossible de démarrer la commande.", "Could not start the command."))
+            function terminer(echec, code, detail) {
+                const c = operation
+                operation = null
+                fen.finirCommande(c, serie, sortieCommande.text, diagnosticCommande.text, echec, code, detail)
+                proc.destroy()
+            }
+        }
     }
     Timer { id: effaceMessage; interval: fen.dureeMessage; running: fen.message !== "" && !fen.erreur; onTriggered: fen.message = "" }
 
     Shortcut {
-        sequence: "Escape"; enabled: !fen.capture
+        sequence: "Escape"; enabled: !fen.capture && !resultat.visible
         onActivated: {
             if (fen.confirmation) liste.currentItem.aConfirmer = false
             else if (fen.ileOuverte) fen.fermerIle()
@@ -469,12 +516,15 @@ FloatingWindow {
             else fen.close()
         }
     }
-    Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; enabled: !fen.capture; onActivated: { sidebar.champRecherche.forceActiveFocus(); sidebar.champRecherche.selectAll() } }
+    Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; enabled: !fen.capture && !resultat.visible; onActivated: { sidebar.champRecherche.forceActiveFocus(); sidebar.champRecherche.selectAll() } }
     Shortcut {
-        sequence: "Alt+Left"; enabled: !fen.capture && !fen.vueRecherche && !fen.filtreModifies && !!fen.domaineCourant
+        sequence: "Alt+Left"; enabled: !fen.capture && !resultat.visible && !fen.vueRecherche && !fen.filtreModifies && !!fen.domaineCourant
         onActivated: if (fen.sectionCourante) fen.allerDomaine(fen.domaineCourant.id); else fen.allerAccueil()
     }
-    onVisibleChanged: if (!visible && capture) finCapture("")
+    onVisibleChanged: {
+        if (visible) Qt.callLater(presenterResultat)
+        else if (capture) finCapture("")
+    }
 
     // ── Contenu principal : deux volets (rail gauche + scène droite) ──
     Item {
@@ -1159,7 +1209,7 @@ FloatingWindow {
                 }
             }
 
-            // ── Pied de scène : retour d'action + repères clavier concis ──
+            // ── Pied de scène : état des réglages + repères clavier concis ──
             Item {
                 id: pied
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -1198,6 +1248,104 @@ FloatingWindow {
                                   : Reglages.t("↑↓ Naviguer · ←→ Modifier · Entrée Basculer · Tab Rubrique · r Défaut",
                                                "↑↓ Navigate · ←→ Change · Enter Toggle · Tab Section · r Reset")))))
                     }
+                }
+            }
+        }
+
+        Popup {
+            id: resultat
+            property var courant: null
+            readonly property color teinte: courant && courant.echec ? Couleurs.rouge : Couleurs.vert
+            parent: tout
+            anchors.centerIn: tout
+            width: Math.min(620, tout.width - 48)
+            height: Math.min(480, tout.height - 48, 2 * padding + enteteResultat.height
+                             + Math.max(44, sortieResultat.implicitHeight) + fermerResultat.height + 28)
+            padding: 22
+            modal: true
+            focus: true
+            closePolicy: Popup.CloseOnEscape
+            onOpened: {
+                sortieResultat.cursorPosition = 0
+                sortieResultat.forceActiveFocus()
+            }
+            onClosed: {
+                courant = null
+                fen.focaliserScene()
+                Qt.callLater(fen.presenterResultat)
+            }
+            Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.58) }
+            background: Rectangle {
+                radius: Couleurs.rayonPanneau
+                color: Couleurs.carte
+                border.width: Couleurs.epaisseurBordureCarte
+                border.color: resultat.courant && resultat.courant.echec ? Couleurs.rouge : Couleurs.accent
+            }
+            contentItem: Item {
+                Row {
+                    id: enteteResultat
+                    width: parent.width; spacing: 10
+                    Ico {
+                        id: iconeResultat
+                        taille: 24; color: resultat.teinte
+                        nom: resultat.courant && resultat.courant.echec ? "error" : "check_circle"
+                    }
+                    Column {
+                        width: parent.width - iconeResultat.width - parent.spacing
+                        spacing: 3
+                        Texte {
+                            objectName: "nc-reglages-resultat-titre"
+                            width: parent.width
+                            wrapMode: Text.Wrap; elide: Text.ElideNone
+                            font.pixelSize: 17; font.weight: Font.Bold
+                            text: resultat.courant ? resultat.courant.titre : ""
+                        }
+                        Texte {
+                            objectName: "nc-reglages-resultat-statut"
+                            width: parent.width
+                            wrapMode: Text.Wrap; elide: Text.ElideNone
+                            color: resultat.teinte
+                            text: !resultat.courant ? ""
+                                : !resultat.courant.echec ? Reglages.t("Action réussie", "Action succeeded")
+                                : resultat.courant.code === null ? Reglages.t("Échec de l’action", "Action failed")
+                                : Reglages.t("Échec de l’action (code %1)", "Action failed (exit code %1)").arg(resultat.courant.code)
+                        }
+                    }
+                }
+                ScrollView {
+                    objectName: "nc-reglages-resultat-defilement"
+                    anchors.top: enteteResultat.bottom; anchors.topMargin: 14
+                    anchors.bottom: fermerResultat.top; anchors.bottomMargin: 14
+                    width: parent.width
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    background: Rectangle { color: Couleurs.fond; radius: Couleurs.rayonBouton }
+                    TextArea {
+                        id: sortieResultat
+                        objectName: "nc-reglages-resultat-texte"
+                        padding: 12; rightPadding: 20
+                        text: resultat.courant ? resultat.courant.texte : ""
+                        readOnly: true; selectByMouse: true
+                        KeyNavigation.priority: KeyNavigation.BeforeItem
+                        KeyNavigation.tab: fermerResultat
+                        textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap
+                        font.family: Couleurs.police; font.pixelSize: 13
+                        color: Couleurs.texte
+                        selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
+                        background: null
+                    }
+                }
+                ParametresBouton {
+                    id: fermerResultat
+                    anchors.right: parent.right; anchors.bottom: parent.bottom
+                    texte: Reglages.t("Fermer", "Close")
+                    actif: true; clavier: activeFocus; activeFocusOnTab: true
+                    onClic: resultat.close()
+                    Keys.onReturnPressed: resultat.close()
+                    Keys.onEnterPressed: resultat.close()
+                    Keys.onSpacePressed: resultat.close()
                 }
             }
         }

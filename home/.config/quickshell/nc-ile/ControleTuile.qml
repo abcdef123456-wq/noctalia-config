@@ -11,8 +11,8 @@ Rectangle {
     property bool aDetails: false
     property bool compact: false
     property color couleurActive: Couleurs.accent
-    signal basculer()
-    signal ouvrirDetails()
+    signal basculer(Item bouton)
+    signal ouvrirDetails(Item bouton)
 
     readonly property bool estBrut: Couleurs.styleBrut || Couleurs.styleTerminal
     readonly property bool estEditorial: Couleurs.styleEditorial
@@ -43,7 +43,7 @@ Rectangle {
         anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.left: parent.left
         anchors.right: tuile.aDetails ? btnDetails.left : parent.right
         text: tuile.titre + (tuile.sousTitre ? " · " + tuile.sousTitre : "")
-        onClicked: tuile.basculer()
+        onClicked: tuile.basculer(zm)
     }
 
     // Pastille d'icône (cercle translucide sur Apple/Noctalia, bloc net sur Brutaliste/Terminal)
@@ -123,7 +123,7 @@ Rectangle {
             objectName: "nc-controle-details"
             anchors.fill: parent
             text: Reglages.t("Détails : ", "Details: ") + tuile.titre
-            onClicked: tuile.ouvrirDetails()
+            onClicked: tuile.ouvrirDetails(zd)
         }
     }
 

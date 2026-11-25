@@ -207,7 +207,7 @@ ShellRoot {
                 console.error("pages du centre de contrôle encore sur l'île par défaut: " + v); Qt.exit(3)
             }
             if (ess.height > ess.parent.height - entete.height) { console.error("les actions sont rognées"); Qt.exit(4) }
-            ess.ouvrirControle()
+            ess.ouvrirControle(null)
             ess.ouvrirRecherche()
             ess.ouvrirThemes()
             if (!r.controleDemande || !r.rechercheDemandee || !r.themesDemandes) { console.error("signaux manquants"); Qt.exit(5) }
@@ -227,6 +227,7 @@ ShellRoot {
     id: r
     property bool ferme: false
     property int etape: 0
+    property rect ancreBluetooth
     TestCase { id: clavier; name: "ClavierControle"; when: false }
     function verifier(ok, message) {
         if (!ok) { console.error(message); Qt.exit(2); throw new Error(message) }
@@ -244,6 +245,7 @@ ShellRoot {
         id: ctrl
         visible: true; implicitWidth: 900; implicitHeight: 720
         bord: Etat.controleBord || "top"
+        ancre: Etat.controleAncre
         basReserve: 44
         onFermer: { r.ferme = true; Etat.fermerControle() }
     }
@@ -253,16 +255,19 @@ ShellRoot {
             const panneau = trouver(ctrl.contentItem, "nc-controle-panneau")
             const tiroir = trouver(ctrl.contentItem, "nc-controle-tiroir")
             if (r.etape === 0) {
-                Etat.ouvrirControle("TEST", "accueil", "bottom")
+                Etat.ouvrirControle("TEST", "accueil", "bottom", Qt.rect(296, 684, 36, 28))
                 r.etape++
                 return
             }
             if (r.etape === 1) {
                 verifier(Math.abs(panneau.y + panneau.height + 56 - ctrl.height) < 1, "carte non ancrée en bas")
+                verifier(Math.abs(panneau.x + panneau.width / 2 - 314) < 1, "carte non centrée sur le bouton")
                 const bt = trouver(panneau, "nc-controle-tuile-bluetooth")
                 trouver(bt, "nc-controle-action").forceActiveFocus()
                 clavier.keyClick(Qt.Key_Tab)
-                verifier(trouver(bt, "nc-controle-details").activeFocus, "Tab ne mène pas aux détails Bluetooth")
+                const details = trouver(bt, "nc-controle-details")
+                verifier(details.activeFocus, "Tab ne mène pas aux détails Bluetooth")
+                r.ancreBluetooth = Etat.ancreControle(details)
                 clavier.keyClick(Qt.Key_Return)
                 verifier(Etat.controleSection === "bluetooth", "Entrée n'ouvre pas Bluetooth")
                 r.etape++
@@ -270,8 +275,13 @@ ShellRoot {
             }
             if (r.etape === 2) {
                 verifier(tiroir.item && tiroir.item.visible, "tiroir Bluetooth invisible")
+                const a = r.ancreBluetooth
+                verifier(panneau.y + panneau.height <= a.y - 7 || panneau.y >= a.y + a.height + 7
+                      || panneau.x + panneau.width <= a.x - 7 || panneau.x >= a.x + a.width + 7,
+                    `le tiroir (${panneau.x}, ${panneau.y}, ${panneau.width}, ${panneau.height}) couvre Bluetooth (${a}); ancre retenue : ${ctrl.ancreInterne}`)
                 clavier.keyClick(Qt.Key_Backspace)
                 verifier(ctrl.surAccueil, "Retour arrière ne revient pas à l'accueil")
+                verifier(Math.abs(panneau.x + panneau.width / 2 - 314) < 1, "le retour ne retrouve pas l'ancrage de l'accueil")
                 Etat.allerControle("son")
                 r.etape++
                 return

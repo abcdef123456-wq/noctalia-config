@@ -24,7 +24,7 @@ Item {
     }
     readonly property real progresMusique: Etat.lecteur && Etat.lecteur.length > 0
         ? Math.max(0, Math.min(1, Etat.lecteur.position / Etat.lecteur.length)) : 0
-    signal ouvrirControle()
+    signal ouvrirControle(Item bouton)
     signal ouvrirRecherche()
     signal ouvrirThemes()
 
@@ -400,6 +400,7 @@ Item {
 
             // Bouton principal : ouvrir le Centre de contrôle dédié
             Rectangle {
+                id: boutonControle
                 objectName: "nc-essentiel-controle"
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                 width: rowCtrl.implicitWidth + 22; height: 32
@@ -430,7 +431,7 @@ Item {
                 }
                 MouseArea {
                     id: zc; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: vue.ouvrirControle()
+                    onClicked: vue.ouvrirControle(boutonControle)
                 }
                 Accessible.role: Accessible.Button
                 Accessible.name: Reglages.t("Centre de contrôle", "Control Center")

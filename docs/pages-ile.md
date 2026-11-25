@@ -1,16 +1,23 @@
 # Île essentielle et Centre de contrôle
 
-L’île Quickshell se concentre désormais sur **l’extrême essentiel**, avec un dessin adapté à chaque thème (forme,
-contour, police, accents, repères) :
-- **Pilule fermée** : heure, date optionnelle, météo brève, point de notifications non lues, et réactions en direct
+L’île Quickshell se concentre sur **l’essentiel**. Chacun des thèmes fournis a son propre dessin : silhouette,
+composition de l’heure et de la date, et habillage de l’île ouverte. Changer de thème suffit, sans redémarrer l’île.
+Par exemple : une cassette pour Gruvbox, un afficheur CRT pour Rétro et un feuillet à coin replié pour Papier.
+- **Île fermée** : heure, date optionnelle, météo brève, notifications non lues et réactions en direct
   (musique, volume, luminosité, minuteur, appel, enregistrement vidéo, agents actifs).
-- **Île ouverte** : un bandeau d’onglets nommés en haut avec par défaut uniquement **Essentiel**, **Notifications**, et
-  **Musique** (lorsqu’un lecteur est actif), plus un accès direct au **Centre de contrôle** et à la **Recherche**.
+- **Île ouverte** : par défaut **Essentiel**, **Notifications** et **Musique** (lorsqu’un lecteur est actif),
+  plus un accès direct au **Centre de contrôle** et à la **Recherche**.
 
 Tous les réglages rapides et panneaux détaillés (Wi-Fi/Ethernet, Bluetooth, VPN, Concentration, Lumière nocturne,
 Caféine, Mode jeu, Volume, Luminosité, Profils d’énergie, Système, Batterie, Santé, Météo, Agenda, Presse-papiers,
 Minuteur, Fenêtres) vivent dans le **panneau Centre de contrôle dédié** (`Super + C`, icônes de la barre, ou bouton
 « Centre de contrôle » sur l’île ; `qs -c nc-ile ipc call ile controle`).
+Les widgets s’ouvrent près du bouton qui les lance, sur le même écran : sous une barre haute, au-dessus d’une barre
+basse et vers l’intérieur pour une barre latérale. Si la place manque, la carte cherche un autre côté. Depuis la barre
+native Noctalia, l’ancre est le point du clic. Le raccourci clavier sans bouton conserve le placement au bord de la barre.
+
+Dans **Réglages**, une action qui retourne des informations ou qui échoue affiche son résultat dans une boîte de
+dialogue nommée, avec un texte sélectionnable. Une édition ordinaire continue d’afficher un statut discret.
 
 Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces
 pages) permet tout de même de réactiver ou masquer à la carte chacune des 20 pages sur l’île. Les choix sont conservés
@@ -38,10 +45,11 @@ Une ville saisie n'envoie que son nom à Open-Meteo. Ville introuvable : message
 Validation isolée : `python3 -B -m unittest tests.test_island_pages tests.test_assistant_page -q`.
 Les essais QML nécessitent Quickshell et QtTest (dépendance de test uniquement).
 
-## Centre de contrôle personnalisable
+## Ancienne page Centre de contrôle (optionnelle)
 
-Le crayon en haut à droite du centre de contrôle ouvre le mode édition : chaque module (connexions, musique, nuit,
-mode jeu, luminosité, volume, énergie) montre un œil (masquer) et deux flèches (monter, descendre) ; les modules masqués
+Dans cette page réactivable depuis les réglages de l’île, le crayon en haut à droite ouvre le mode édition.
+Chaque module (connexions, musique, nuit, mode jeu, luminosité, volume, énergie) montre un œil (masquer) et
+deux flèches (monter, descendre) ; les modules masqués
 sont listés en dessous, un clic les remontre ; « Réinitialiser » rend la disposition de départ, « Terminer » ferme le
 mode. Au moins un module reste visible. Clavier : ↑ ↓ choisissent un module, Maj + ↑ ↓ le déplacent, Espace ou Entrée
 le masquent ou le remontrent, Échap termine ; les boutons portent un nom d’accessibilité et une infobulle s’affiche

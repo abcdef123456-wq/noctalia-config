@@ -22,6 +22,7 @@ PanelWindow {
     readonly property real epaisseurFenetre: epaisseurBarre + margeBord
     readonly property real origineX: position === "right" && screen ? screen.width - epaisseurFenetre : 0
     readonly property real origineY: position === "bottom" && screen ? screen.height - epaisseurFenetre : 0
+    readonly property point origine: Qt.point(origineX, origineY)
     readonly property var pastillesStart: Disposition.pastillesCote(barre, "start")
     readonly property var pastillesCenter: Disposition.pastillesCote(barre, "center")
     readonly property var pastillesEnd: Disposition.pastillesCote(barre, "end")
@@ -138,6 +139,7 @@ PanelWindow {
             barre: fen.barre
             definitions: fen.definitions
             ecran: fen.screen
+            origine: fen.origine
             police: fen.police
             teinte: fen.teinte
             limiteLargeur: fen.limiteLargeurStart
@@ -171,6 +173,7 @@ PanelWindow {
             definitions: fen.definitions
             ecran: fen.screen
             police: fen.police
+            origine: fen.origine
             teinte: fen.teinte
             x: place ? place.x - fen.origineX : 0
             y: place ? place.y - fen.origineY : 0
@@ -201,6 +204,7 @@ PanelWindow {
             definitions: fen.definitions
             ecran: fen.screen
             police: fen.police
+            origine: fen.origine
             teinte: fen.teinte
             compact: fen.compactEnd
             x: place ? place.x - fen.origineX : 0

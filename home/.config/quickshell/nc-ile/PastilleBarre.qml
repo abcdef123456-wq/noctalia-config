@@ -8,6 +8,7 @@ Item {
     required property var ecran
     required property string police
     required property var teinte
+    property point origine: Qt.point(0, 0)
     property real limiteLargeur: 0
     property real largeurClip: 0
     property color fondClip: "transparent"
@@ -74,6 +75,7 @@ Item {
                 ecran: pastille.ecran
                 vertical: pastille.vertical
                 position: pastille.barre.position ?? "top"
+                origine: pastille.origine
                 resoudreTeinte: pastille.teinte
                 premierPlan: pastille.teinte(definition.color ?? pastille.groupe?.foreground ?? definition.capsule_foreground
                                              ?? pastille.barre.capsule_foreground ?? pastille.barre.color ?? "on_surface", Couleurs.texte)

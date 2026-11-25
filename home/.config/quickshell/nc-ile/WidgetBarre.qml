@@ -9,6 +9,7 @@ Item {
     required property var ecran
     property bool vertical: false
     property string position: vertical ? "left" : "top"
+    property point origine: Qt.point(0, 0)
     property color premierPlan: Couleurs.texte
     property int tailleTexte: 12
     property int graisse: 600
@@ -74,7 +75,7 @@ Item {
         const cible = repli ? Etat.pageOu(nom, repli) : nom
         const sortie = ecran ? ecran.name : ""
         if (Etat.estPageControle(cible)) {
-            Etat.basculerControle(sortie, cible, position)
+            Etat.basculerControle(sortie, cible, position, Etat.ancreControle(racine, origine))
             return true
         }
         if (Etat.vues.indexOf(cible) >= 0) {

@@ -8,7 +8,7 @@ Item {
     property string active: ""
     property int nonLues: 0
     signal choisir(string nom)
-    signal ouvrirControle()
+    signal ouvrirControle(Item bouton)
 
     readonly property bool multiPages: (pages ? pages.length : 0) > 1
     implicitHeight: multiPages ? 34 : 0
@@ -183,7 +183,7 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: entete.ouvrirControle()
+            onClicked: entete.ouvrirControle(boutonControle)
         }
         Accessible.role: Accessible.Button
         Accessible.name: Reglages.t("Centre de contrôle", "Control Center")

@@ -111,6 +111,28 @@ assert.equal(barreControle(barres, widgets, 'top').id, 'haut');
 const calques = {levels:{2:[{namespace:'noctalia-dock', x:-1600, y:0, w:50, h:900},
     {namespace:'noctalia-bar-default', x:-1594, y:852, w:1588, h:42}]}};
 assert.deepEqual(barreNativeControle(calques, -1600, 0, 1600, 900), {bord:'bottom', emprise:48});
+calques.levels[2].push({namespace:'noctalia-bar-aux', x:-1600, y:4, w:40, h:640});
+assert.deepEqual(barreNativeControle(calques, -1600, 0, 1600, 900, {x:24,y:300}), {bord:'left', emprise:40});
+""")
+
+    def test_controle_ancre_au_bouton_sur_quatre_bords(self):
+        self.verifier("""
+const assert = require('node:assert/strict');
+const popover = (a, b) => placerControle(a, b, 390, 500, 12, 48, 988, 720);
+assert.deepEqual(popover({x:380,y:8,width:40,height:24}, 'top'),
+    {x:205,y:48,largeur:390,hauteur:500,bord:'top'});
+assert.deepEqual(popover({x:640,y:742,width:40,height:32}, 'bottom'),
+    {x:465,y:220,largeur:390,hauteur:500,bord:'bottom'});
+assert.deepEqual(popover({x:32,y:340,width:28,height:40}, 'left'),
+    {x:68,y:110,largeur:390,hauteur:500,bord:'left'});
+assert.deepEqual(popover({x:950,y:105,width:40,height:40}, 'right'),
+    {x:552,y:48,largeur:390,hauteur:500,bord:'right'});
+// Un bouton au milieu d'une carte utilise l'espace latéral si les deux zones verticales sont trop basses.
+assert.deepEqual(popover({x:720,y:332,width:28,height:40}, ''),
+    {x:322,y:102,largeur:390,hauteur:500,bord:'right'});
+// Sur un petit écran, le panneau rétrécit au lieu de recouvrir le bouton.
+assert.deepEqual(placerControle({x:130,y:171,width:20,height:20}, '', 280, 320, 10, 10, 290, 350),
+    {x:10,y:10,largeur:280,hauteur:153,bord:'bottom'});
 """)
 
     def test_barres_flottantes_et_placer_barre(self):

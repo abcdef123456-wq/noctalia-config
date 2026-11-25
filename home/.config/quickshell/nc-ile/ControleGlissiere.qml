@@ -13,7 +13,7 @@ Item {
     property bool compact: false
     signal changer(real v)
     signal basculerMuet()
-    signal ouvrirDetails()
+    signal ouvrirDetails(Item bouton)
 
     readonly property bool estBrut: Couleurs.styleBrut || Couleurs.styleTerminal
     readonly property bool estEditorial: Couleurs.styleEditorial
@@ -150,7 +150,7 @@ Item {
             id: zDet
             anchors.fill: parent
             text: Reglages.t("Détails : ", "Details: ") + glissiere.titre
-            onClicked: glissiere.ouvrirDetails()
+            onClicked: glissiere.ouvrirDetails(zDet)
         }
     }
 }

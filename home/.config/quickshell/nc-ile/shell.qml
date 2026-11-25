@@ -312,11 +312,13 @@ ShellRoot {
             readonly property var _moniteur: _ecranCible ? Hyprland.monitorFor(_ecranCible)?.lastIpcObject : null
             property var _calques: ({})
             readonly property var _barreNative: !_barre && _moniteur
-                ? Disposition.barreNativeControle(_calques[_ecranCible.name], _moniteur.x, _moniteur.y, _ecranCible.width, _ecranCible.height) : null
+                ? Disposition.barreNativeControle(_calques[_ecranCible.name], _moniteur.x, _moniteur.y,
+                    _ecranCible.width, _ecranCible.height, Etat.controleAncre) : null
             readonly property real _empriseBarre: _barre ? Math.ceil(_barre.thickness ?? 36) + Math.round(_barre.margin_edge ?? 0)
                 : _barreNative?.emprise ?? 0
             bord: Etat.controleBord || (_barre ? _barre.position ?? "top" : _barreNative?.bord ?? racine.bordControlePourReserves(_reserves))
             gaucheReserve: Math.max(_reserves.gauche, bord === "left" ? _empriseBarre : 0)
+            ancre: Etat.controleAncre
             hautReserve: Math.max(_reserves.haut, bord === "top" ? _empriseBarre : 0)
             droiteReserve: Math.max(_reserves.droite, bord === "right" ? _empriseBarre : 0)
             basReserve: Math.max(_reserves.bas, bord === "bottom" ? _empriseBarre : 0)
@@ -451,6 +453,18 @@ ShellRoot {
         function controlePage(nom: string): void {
             Hyprland.refreshMonitors()
             Etat.basculerControle(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), nom)
+        }
+        // Noctalia ne transmet pas le rectangle d'un bouton IPC ; le point cliqué reste en pixels logiques globaux.
+        function controleWidget(nom: string, repli: string, pointeur: string): void {
+            const cible = repli ? Etat.pageOu(nom, repli) : nom
+            if (!Etat.estPageControle(cible)) { page(cible); return }
+            let pos
+            try { pos = JSON.parse(pointeur) } catch (_) { controlePage(cible); return }
+            const ecran = Quickshell.screens.find(s => pos && pos.x >= s.x && pos.x < s.x + s.width
+                                                         && pos.y >= s.y && pos.y < s.y + s.height)
+            if (!ecran) { controlePage(cible); return }
+            Hyprland.refreshMonitors()
+            Etat.basculerControle(ecran.name, cible, "", Qt.rect(pos.x - ecran.x, pos.y - ecran.y, 1, 1))
         }
         function fermer(): void { Etat.fermer(); Etat.fermerControle(); Etat.projection = false }
         function fiche(): void {                                                            // Super + /

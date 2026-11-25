@@ -19,23 +19,24 @@ Item {
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur"
                                    : (Terminal.enCours ? "terminal" : "repos")))))
-    readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
+    readonly property int margeDroite: horloge.plan.dessin === "obturateur" ? 10 : 0
+    readonly property real largeur: Math.max(110, actif.implicitWidth + 32 + margeDroite)
     implicitHeight: 30
     // Le point (x, y) de l'île tombe-t-il sur l'indicateur VPN de la pilule au repos ? (le clic ouvre alors le panneau VPN)
     function surVpn(x, y) {
-        if (!VpnEtat.indicateur || mode !== "repos") return false
-        var p = c.mapToItem(pastilleVpn, x, y)
+        if (!c.visible || !pastilleVpn.visible || mode !== "repos") return false
+        const p = c.parent.mapToItem(pastilleVpn, x, y)
         return p.x >= -4 && p.x <= pastilleVpn.width + 4 && p.y >= -6 && p.y <= pastilleVpn.height + 6
     }
     function surEnvoiTelechargement(x, y) {
-        if (!envoiTelechargement.visible || mode !== "telechargement-fini") return false
-        var p = c.mapToItem(envoiTelechargement, x, y)
+        if (!c.visible || !envoiTelechargement.visible || mode !== "telechargement-fini") return false
+        const p = c.parent.mapToItem(envoiTelechargement, x, y)
         return p.x >= -6 && p.x <= envoiTelechargement.width + 6 && p.y >= -8 && p.y <= envoiTelechargement.height + 8
     }
     // Sur l'indicateur Cloud JARVIS ? Le clic bascule le panneau ; le survol n'ouvre pas l'île.
     function surCloud(x, y) {
-        if (!pastilleCloud.visible || mode !== "repos") return false
-        var p = c.mapToItem(pastilleCloud, x, y)
+        if (!c.visible || !pastilleCloud.visible || mode !== "repos") return false
+        const p = c.parent.mapToItem(pastilleCloud, x, y)
         return p.x >= -4 && p.x <= pastilleCloud.width + 4 && p.y >= -6 && p.y <= pastilleCloud.height + 6
     }
 
@@ -50,6 +51,7 @@ Item {
     component Fondu: Row {
         property bool montre: false
         anchors.centerIn: parent
+        anchors.horizontalCenterOffset: -c.margeDroite / 2
         spacing: 9
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
@@ -83,24 +85,6 @@ Item {
     Fondu {
         id: repos
         montre: c.mode === "repos"
-        // Signature visuelle discrète selon l'archétype du thème actif
-        Rectangle {
-            objectName: "nc-pilule-repere-theme"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: Couleurs.styleBrut || Couleurs.styleEditorial || Couleurs.styleNeon || Couleurs.forme === "cadre"
-            width: Couleurs.styleNeon ? 5 : (Couleurs.styleEditorial ? 2 : 3)
-            height: Couleurs.styleNeon ? 5 : (Couleurs.styleEditorial ? 10 : 12)
-            radius: Couleurs.rayon(Couleurs.styleNeon ? 3 : 1, width, height)
-            color: Couleurs.accent
-            opacity: Couleurs.styleEditorial ? 0.78 : 1.0
-        }
-        Texte {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: Couleurs.styleTerminal
-            text: ">"
-            font.pixelSize: 12; font.weight: Font.Bold
-            color: Couleurs.accent
-        }
         // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : bouclier à cadenas discret ; clic ouvre le panneau VPN.
         Row {
             id: pastilleVpn
@@ -134,21 +118,10 @@ Item {
             Accessible.role: Accessible.StaticText
             Accessible.name: Reglages.t("Mode Concentration actif", "Focus mode on")
         }
-        Texte {
+        HorlogeIle {
+            id: horloge
             anchors.verticalCenter: parent.verticalCenter
-            text: Etat.heure
-            font.weight: Couleurs.styleEditorial ? Font.Medium : Font.DemiBold
-            font.features: ({ "tnum": 1 })
-            color: (Couleurs.styleBrut || Couleurs.styleTerminal) ? Couleurs.accent : Couleurs.texte
         }
-        Texte {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: Reglages.val("ILE_DATE", "oui") !== "non"
-            text: (Couleurs.styleBrut || Couleurs.styleTerminal) ? "/" : "·"
-            secondaire: true; opacity: 0.55; font.pixelSize: 11
-        }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
-                visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages
         // Météo brève (nc-reglages, ILE_METEO)
         Row {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3

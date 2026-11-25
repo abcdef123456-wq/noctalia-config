@@ -1,5 +1,5 @@
-// Une île par écran : pilule noire posée sur la barre de Noctalia (couche au-dessus), qui se déploie avec un ressort,
-// comme l'île dynamique de l'iPhone. Ouverte, ses pages se suivent verticalement : d'abord les activités en cours
+// Une île par écran, au-dessus de la barre de Noctalia. La silhouette et le cartouche suivent le thème ;
+// la forme s'ouvre avec un ressort. Ouverte, ses pages se suivent verticalement : d'abord les activités en cours
 // (musique, minuteur, recharge, mode jeu), puis le centre de contrôle, Son, Wi-Fi, Bluetooth, Système, Calendrier.
 // Points sur le bord droit, molette ou deux doigts pour descendre ; l'île prend la taille de chaque page.
 // Deux activités en même temps (musique + minuteur) : la seconde dans une petite bulle à côté de la pilule.
@@ -8,6 +8,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import "IdentitesIle.js" as Identites
 
 PanelWindow {
     id: fen
@@ -16,6 +17,11 @@ PanelWindow {
     signal ouvrirThemes()
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
+    readonly property var identite: Identites.pour(Couleurs.themeActif)
+    function ouvrirControle(bouton) {
+        const origine = Qt.point((modelData.width - contentItem.width) / 2, 0)
+        Etat.ouvrirControle(modelData.name, "accueil", "top", Etat.ancreControle(bouton, origine))
+    }
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
@@ -178,6 +184,7 @@ PanelWindow {
 
     // Hauteur réservée à l'en-tête lisible (EnteteIle) : 0 quand une seule vue est active (zéro chrome inutile)
     readonly property int hauteurEntete: Etat.vues.length > 1 ? 38 : 0
+    readonly property int hauteurIdentite: 32
     // Taille de chaque page (hauteur + en-tête)
     function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32)) + hauteurEntete) }
     readonly property int hauteurEssentiel: Math.max(152, (Etat.hauteurs.essentiel ?? 120) + 32)
@@ -189,7 +196,9 @@ PanelWindow {
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330 + hauteurEntete), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170), concentration: adaptee("concentration", 260)
     })
-    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.essentiel)
+    readonly property size taillePage: tailles[Etat.vueActive] || tailles.essentiel
+    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue)
+                                             : Qt.size(taillePage.width, taillePage.height + hauteurIdentite)
     readonly property bool points: Etat.vues.length > 4 && !recherche
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
@@ -293,7 +302,7 @@ PanelWindow {
             radius: ile.radius + modelData
             color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
             opacity: fen.ouverte || (Couleurs.contourFermee && !fen.pilCachee) ? 1 : 0
-            visible: opacity > 0.01
+            visible: !ile.fondDessine && opacity > 0.01
             Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         }
     }
@@ -305,7 +314,7 @@ PanelWindow {
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
         opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0
-        visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
+        visible: !ile.fondDessine && opacity > 0.01
         Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -315,7 +324,38 @@ PanelWindow {
         }
     }
 
+    // L'encoche et les formes choisies à la main restent prioritaires dans les modes spéciaux ou personnalisés.
     Rectangle {
+        anchors.fill: ile
+        radius: ile.radius
+        color: ile.color
+        opacity: ile.opacity
+        visible: !ile.fondDessine && (ile.pointFerme || Couleurs.forme !== "encoche")
+        border.width: Couleurs.forme === "cadre" ? 1 : 0
+        border.color: Couleurs.accent
+    }
+    FormeIle {
+        anchors.fill: ile
+        visible: !ile.fondDessine && Couleurs.forme === "encoche"
+        opacity: ile.opacity
+        rayon: ile.radius
+        couleur: ile.color
+    }
+    Loader {
+        anchors.fill: ile
+        active: ile.fondDessine || ile.pageIdentite
+        opacity: ile.opacity
+        sourceComponent: HabillageIle {
+            plan: fen.identite
+            page: ile.pageIdentite
+            dessinerFond: ile.fondDessine
+            fond: ile.color
+            contour: cadre.opacity * cadre.e
+            lueur: Couleurs.lueur && (fen.ouverte || Couleurs.contourFermee)
+        }
+    }
+
+    Item {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         // Encoche : collée au bord haut. Sinon centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 =
@@ -325,6 +365,13 @@ PanelWindow {
         // Forme « point » : fermée, l'île n'est qu'un point plein d'accent de 10 px (ouverte, bannière ou carte : comme d'habitude)
         readonly property bool pointFerme: Couleurs.forme === "point" && !fen.ouverte && !fen.enCarte && !fen.banniere && !fen.confirmGpu
                                            && !fen.confirmNoeud && !fen.demandeClaude && !fen.sessionNoeud && !fen.recherche
+        readonly property bool pageIdentite: fen.ouverte && !fen.recherche && width >= 240 && height >= 76
+        readonly property bool geometrieManuelle: {
+            const rayon = Reglages.valeurs["ILE_RAYON"]
+            return !!Reglages.valeurs["ILE_FORME"] || (!!rayon && rayon !== "auto")
+        }
+        readonly property bool fondDessine: !geometrieManuelle && (pageIdentite
+            || (!fen.grandeVoulue && !pointFerme && width >= 100 && height >= 24 && height <= 36))
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
@@ -340,10 +387,9 @@ PanelWindow {
             return retrait > Math.ceil(42 * (1 - Math.SQRT1_2)) ? retrait : 0
         }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
-        radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
-        color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
-        border.width: Couleurs.forme === "cadre" ? 1 : 0
-        border.color: Couleurs.accent
+        property real radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
+        property color color: pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
+            ? Qt.alpha(Couleurs.fond, 0.72) : Qt.alpha(Couleurs.fond, Couleurs.verre)
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
@@ -377,32 +423,6 @@ PanelWindow {
         }
         Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
         clip: true
-        FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
-        // Finitions d'archétype du thème actif sur l'île ouverte (purs rectangles statiques : coût GPU nul)
-        Rectangle {
-            objectName: "nc-ile-accent-haut"
-            visible: fen.ouverte && !fen.recherche && (Couleurs.styleNeon || Couleurs.styleEditorial || Couleurs.styleApple || Couleurs.styleModerne)
-            anchors.top: parent.top
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Couleurs.styleEditorial ? 36 : (Couleurs.styleNeon ? parent.width : Math.max(0, parent.width - ile.radius * 2))
-            height: (Couleurs.styleNeon || Couleurs.styleEditorial) ? 2 : 1
-            opacity: Couleurs.styleApple || Couleurs.styleModerne ? (Couleurs.sombre ? 0.14 : 0.28) : 0.92
-            color: (Couleurs.styleApple || Couleurs.styleModerne) ? Couleurs.voile : Couleurs.accent
-        }
-        // Repères d'angle CRT / Terminal sur les 4 coins de l'île ouverte
-        Repeater {
-            model: fen.ouverte && !fen.recherche && Couleurs.styleTerminal ? 4 : 0
-            Item {
-                required property int index
-                readonly property bool droite: index % 2 === 1
-                readonly property bool bas: index >= 2
-                x: droite ? parent.width - 14 : 4
-                y: bas ? parent.height - 14 : 4
-                width: 10; height: 10
-                Rectangle { width: 10; height: 2; y: bas ? 8 : 0; color: Couleurs.accent }
-                Rectangle { width: 2; height: 10; x: droite ? 8 : 0; color: Couleurs.accent }
-            }
-        }
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
@@ -602,7 +622,7 @@ PanelWindow {
         EnteteIle {
             id: barreEntete
             objectName: "nc-ile-entete"
-            x: 16; y: 10
+            x: 16; y: 10 + fen.hauteurIdentite
             width: Math.max(0, ile.width - 32)
             pages: Etat.vues
             active: Etat.vueActive
@@ -611,7 +631,7 @@ PanelWindow {
             visible: opacity > 0.01 && Etat.vues.length > 1
             Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
             onChoisir: nom => Etat.aller(nom)
-            onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
+            onOuvrirControle: bouton => fen.ouvrirControle(bouton)
         }
 
         // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
@@ -635,7 +655,7 @@ PanelWindow {
                 x: (ile.width - t.width) / 2 + 16
                 width: Math.max(0, t.width - 32 - (fen.points ? Math.max(22, boutonPage.width + boutonPage.anchors.rightMargin - 16 + 4) : 0))
                 height: Math.max(0, t.height - 32 - fen.hauteurEntete)
-                y: 16 + fen.hauteurEntete + (index - Etat.vue) * (ile.height * 0.6)
+                y: 16 + fen.hauteurIdentite + fen.hauteurEntete + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
                 opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
@@ -658,7 +678,7 @@ PanelWindow {
             EssentielIle {
                 Component.onCompleted: Etat.annoncerHauteur("essentiel", implicitHeight)
                 onImplicitHeightChanged: Etat.annoncerHauteur("essentiel", implicitHeight)
-                onOuvrirControle: Etat.ouvrirControle(fen.modelData.name, "accueil")
+                onOuvrirControle: bouton => fen.ouvrirControle(bouton)
                 onOuvrirRecherche: Etat.chercher(fen.modelData.name)
                 onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
             }
