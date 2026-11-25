@@ -661,7 +661,7 @@ QtObject {
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
             (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
-            noms = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
             b = root / ".local/bin"
             b.mkdir(parents=True)

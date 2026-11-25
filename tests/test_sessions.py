@@ -485,7 +485,7 @@ class SpotlightSessions(unittest.TestCase):
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -546,7 +546,7 @@ ShellRoot {
    verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Mon travail » enregistrée (4 fenêtres)", "Session « Mon travail »"]),
             "liste relue : " + JSON.stringify(titres()))
    verifier(spot.resultats[0].glyphe === "check_circle" && Etat.fermetures === 0, "retour réussi")
-   champ.text = "dev"; etape++; return }
+   spot.changerEspace("actions"); champ.text = "dev"; etape++; return }      // les sessions vivent dans les Actions
   if (etape === 4) { verifier(titres().indexOf("Session « Dev »") >= 0 && titres().every(t => t.indexOf("enregistrée") < 0),
                               "par son nom : " + JSON.stringify(titres()))
    Qt.quit() }
@@ -578,7 +578,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')

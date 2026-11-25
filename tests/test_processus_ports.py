@@ -245,7 +245,7 @@ ShellRoot {
  Timer { interval: 100; running: true; repeat: true; onTriggered: {
   var champ = trouver(spot, "nc-spotlight-champ")
   if (etape === 0) { if (spot.nomIA === "") return
-   champ.text = "process monitor"; etape++; return }
+   champ.text = "process monitor"; spot.changerEspace("fichiers"); etape++; return }      // une recherche ordinaire de fichiers
   if (etape === 1) {
    if (titres().indexOf("process-notes.txt") < 0) { attente++; verifier(attente < 60, "process monitor : recherche ordinaire : " + JSON.stringify(titres())); return }
    verifier(spot.demandeProc === null, "process monitor : pas une demande")
@@ -260,8 +260,8 @@ ShellRoot {
    champ.text = "processus nc-x"; attente = 0; etape++; return }
   if (etape === 4) {
    var i = titres().indexOf("nc-x · pid 4242"), f = titres().indexOf("process-notes.txt")
-   if (i < 0 || f < 0) { attente++; verifier(attente < 60, "processus nc-x : la ligne ET le fichier : " + JSON.stringify(titres())); return }
-   verifier(i < f, "la ligne du processus en tête")
+   if (i < 0) { attente++; verifier(attente < 60, "processus nc-x : la ligne : " + JSON.stringify(titres())); return }
+   verifier(spot.espace === "actions" && f < 0, "la ligne du processus, dans les Actions, sans les fichiers : " + JSON.stringify(titres()))
    var x = spot.resultats[i]
    verifier(x.suppr === undefined && x.sous.indexOf("nc-x --option") === 0, "lecture seule : " + JSON.stringify(x))
    spot.valider(i, false)
@@ -319,7 +319,7 @@ class RechercheHorsEcran(unittest.TestCase):
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
             (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) '
                                            '{ return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
-            noms = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml"
                                                 for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
             b = root / ".local/bin"

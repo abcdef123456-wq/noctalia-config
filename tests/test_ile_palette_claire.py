@@ -15,7 +15,8 @@ from tests.test_rendu_ile import lire_png
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
 REF = "7378cd3"  # dernier état avant la palette claire
-ETATS = ("page", "recherche", "bureau")  # bureau : le filet de Couleurs.voile
+# bureau : le filet de Couleurs.voile ; plus « recherche » : le lanceur de 438 px a changé de dessin (test_lanceur_espaces)
+ETATS = ("page", "bureau")
 
 SOMBRE = {"sombre": True, "fond": "#0a0f0a", "texte": "#b8ffc8", "texteSec": "#5fa872", "texteDoux": "#98dea8",
           "carte": "#121712", "carteSurvol": "#151a15", "gris2": "#181e18", "gris3": "#232823", "gris4": "#2d322d",

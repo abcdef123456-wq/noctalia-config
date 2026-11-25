@@ -1,5 +1,9 @@
-// Spotlight de l'île (Super + R) : la pilule s'étire en une longue capsule de recherche ; en tapant, quelques
-// résultats compacts s'ajoutent dessous. ↑ ↓ pour choisir, Entrée pour lancer, Échap pour refermer.
+// Lanceur de l'île (Super + R) : la pilule s'étire en un lanceur de 438 px ; en tapant, quelques résultats compacts
+// s'ajoutent dessous. ↑ ↓ pour choisir, Entrée pour lancer, Échap pour refermer.
+// Trois espaces stricts, jamais mêlés : Applis (applis, fenêtres ouvertes, dock), Fichiers (nc-apps files, lancé
+// seulement dans cet espace), Actions (tout le reste : préfixes, calculs, pages, réglages, IA…). Tab / Maj + Tab ou un
+// clic changent d'espace ; ← → aussi quand la saisie est vide (ou avec Ctrl). Un préfixe tapé mène aux Actions, un
+// calcul aussi quand aucune appli ne correspond vraiment (sauf espace choisi à la main).
 // Appli déjà ouverte : Entrée en ouvre une nouvelle fenêtre, Ctrl + Entrée amène sur celle qui est ouverte (inversé avec
 // SPOTLIGHT_ENTREE=aller dans nc-reglages).
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
@@ -26,7 +30,7 @@
 // bureau (nc-diag --json --rapide), expliqué par l'IA si elle est permise (nc-ia diagnostic --json), et des réparations
 // tirées de la table de nc-diag, chacune faite seulement avec Entrée ou un clic (nc-diag reparer ID) : Diagnostic.qml.
 // « port 8080 » (qui écoute, TCP et UDP) et « processus firefox » (tes processus) : nc-processus, en lecture seule ;
-// leurs lignes s'ajoutent en tête des résultats ordinaires (applis, fichiers, calculs restent dessous).
+// leurs lignes s'ajoutent en tête des actions ordinaires (calculs, réglages restent dessous).
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -39,9 +43,29 @@ import "Saisies.js" as Saisies
 Item {
     id: r
     property bool actif: false
-    readonly property int hauteurLigne: 46
-    readonly property int hauteurVoulue: 56 + (zoneReponse.visible ? zoneReponse.height + 10 : 0)
-                                         + (resultats.length > 0 ? 6 + resultats.length * hauteurLigne + 8 : 0)
+    readonly property int hauteurLigne: 42
+    // Saisie 64 + onglets 31 ; liste (8 au-dessus, 11 dessous, 2 entre les lignes) ; pied 41
+    readonly property int hauteurVoulue: 95 + (zoneReponse.visible ? zoneReponse.height + 10 : 0)
+                                         + (resultats.length > 0 ? 8 + resultats.length * (hauteurLigne + 2) - 2 + 11 : 0) + pied.height
+
+    // Les trois espaces ; espaceManuel : choisi au clavier ou à la souris (un calcul ne le change plus)
+    readonly property var espaces: ["applis", "fichiers", "actions"]
+    property string espace: "applis"
+    property bool espaceManuel: false
+    function changerEspace(nom) {
+        if (espaces.indexOf(nom) < 0) return
+        espace = nom; espaceManuel = true; sel = 0; annulerSuppr()
+        attente.restart(); attentePaquets.restart()     // fichiers ou logiciels : cherchés seulement dans leur espace
+        chercher()
+    }
+    function espaceSuivant(d) { changerEspace(espaces[(espaces.indexOf(espace) + d + espaces.length) % espaces.length]) }
+    // Une saisie qui ne vit que dans les Actions : préfixes, raccourcis web, note, mdp, session, heure, port, question…
+    function estPrefixeAction(t) {
+        return /^([?!@>+;:]|(g|yt|w)\s|(notes?|rappels?|reminders?|sessions?|mdp|password)(\s|$))/i.test(t)
+               || !!Saisies.lienWeb(t, liensWeb) || !!Saisies.demandeProcessus(t) || Saisies.villeHeure(t) !== ""
+               || Saisies.demandeHorloges(t) || Aide.estQuestion(t) || estDiag(t)
+    }
+    function routerEspace() { if (estPrefixeAction(q)) espace = "actions"; else if (!espaceManuel) espace = "applis" }
 
     // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
     property var execs: ({})                 // programmes du PATH (saisie qui commence par une commande)
@@ -375,7 +399,9 @@ Item {
         demandeur.running = false; agent.running = false
         reponse = ""; questionPosee = ""; plan = null; choixIA = []; erreurIA = ""; modeAgent = false; modeTexte = false
         commandeIA = ""; reponseAide = ""; confirmer = -1
+        espaceManuel = false
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
+        routerEspace()      // saisie inchangée depuis la dernière ouverture : onQChanged ne passe pas
         retourDock = null
         applisLues = false
         lireApplis.running = true
@@ -725,7 +751,7 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 if (lireFichiers.pour !== r.q) return
-                try { r.fichiers = JSON.parse(text).slice(0, 3) } catch (e) { r.fichiers = [] }
+                try { r.fichiers = JSON.parse(text).slice(0, r.nbResultats) } catch (e) { r.fichiers = [] }
                 r.chercher()
             }
         }
@@ -781,6 +807,8 @@ Item {
                 var t = text.trim().split("\n").pop().replace(/^"(\d{4}-\d{2}-\d{2})"$/, "$1")      // date de qalc : sans guillemets
                 // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
                 r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
+                // Un calcul sans appli qui commence par la saisie : il est dans les Actions
+                if (r.calcul !== "" && !r.espaceManuel && r.espace === "applis" && !r.resultats.some(x => x.s >= 80)) r.espace = "actions"
                 r.chercher()
             }
         }
@@ -811,7 +839,7 @@ Item {
         interval: 320
         onTriggered: {
             var t = r.termePaquets()
-            if (t.length < 2 || chercheurPaquets.running || t === r.paquetsPour) return
+            if (r.espace !== "actions" || t.length < 2 || chercheurPaquets.running || t === r.paquetsPour) return
             chercheurPaquets.pour = t
             chercheurPaquets.command = [Etat.bin + "nc-logiciels", "chercher", t].concat(r.q.startsWith("+") ? ["--max", "12"] : ["--rapide", "--max", "6"])
             chercheurPaquets.running = true
@@ -844,7 +872,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|;|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (r.espace === "fichiers" && q.length >= 3 && !/^(>|!|@|;|g |yt |w |sessions? |(rappels?|reminders?|notes?|mdp|password)(\s|$))/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -987,12 +1015,13 @@ Item {
     }
 
     onQChanged: { if (modeDiag && q !== diagPour) { modeDiag = false; diag.annuler() }
+                  routerEspace()
                   sel = 0; annulerSuppr(); retourSession = null; retourMdp = null; retourSnippet = false; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
-        var q = r.q, qa = sansAccents(q), out = []
+        var q = r.q, qa = sansAccents(q), out = [], act = espace === "actions"     // act : préfixes et cartes, Actions seulement
         if (q === "") { resultats = []; return }
-        if (modeDiag && q === diagPour) {
+        if (act && modeDiag && q === diagPour) {
             resultats = lignesDiag()
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
@@ -1007,7 +1036,7 @@ Item {
         var web = [["g ", moteur[0], moteur[1]], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
                    ["w ", Reglages.t("Wikipédia", "Wikipedia"), Reglages.t("https://fr.wikipedia.org/w/index.php?search=", "https://en.wikipedia.org/w/index.php?search=")]]
         for (let w = 0; w < web.length; w++) {
-            if (q.startsWith(web[w][0]) && q.length > web[w][0].length) {
+            if (act && q.startsWith(web[w][0]) && q.length > web[w][0].length) {
                 let terme = q.slice(web[w][0].length)
                 let url = web[w][2] + encodeURIComponent(terme)
                 resultats = [{ titre: terme, sous: Reglages.t("Rechercher sur ", "Search ") + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
@@ -1015,11 +1044,11 @@ Item {
             }
         }
         let lienUtil = Saisies.lienWeb(q, liensWeb)
-        if (lienUtil) {
+        if (act && lienUtil) {
             resultats = [{ titre: lienUtil.terme, sous: Reglages.t("Rechercher sur ", "Search ") + lienUtil.nom, glyphe: "travel_explore", f: () => Qt.openUrlExternally(lienUtil.url) }]
             return
         }
-        if (q.startsWith(";")) {
+        if (act && q.startsWith(";")) {
             let cartes = Saisies.cartesSnippets(q, snippets, Reglages.t("secret", "secret"))
             resultats = retourSnippet ? [{ titre: Reglages.t("Copie impossible", "Copy failed"), sous: "Snippets", glyphe: "error", garder: true, f: () => { r.retourSnippet = false; r.chercher() } }]
                       : cartes.length ? cartes.map(c => ({ titre: Reglages.t("Copier : ", "Copy: ") + c.titre, sous: c.sous, glyphe: "content_paste", garder: true, f: () => r.copierSnippet(c.mot) }))
@@ -1028,7 +1057,7 @@ Item {
             sel = 0
             return
         }
-        if (q.startsWith("?")) {
+        if (act && q.startsWith("?")) {
             let question = q.slice(1).trim()
             // D'abord les réponses de la config (instantanées), puis l'IA en dernier
             let deLaConfig = question.length >= 2 ? reponsesAide(question, nbResultats - 1).map(e => itemAide(e, 0)) : []
@@ -1066,7 +1095,7 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
-        if (q.startsWith("!")) {
+        if (act && q.startsWith("!")) {
             let consigneT = q.slice(1).trim()
             if (!texteActif) {
                 resultats = [{ titre: Reglages.iaCoupee ? r.motifCoupee : Reglages.t("L'IA sur le texte est désactivée", "AI on text is turned off"),
@@ -1100,7 +1129,7 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
-        if (q.startsWith("@")) {
+        if (act && q.startsWith("@")) {
             let demandeA = q.slice(1).trim()
             if (Reglages.iaCoupee) {
                 resultats = [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
@@ -1138,7 +1167,7 @@ Item {
             return
         }
         // « note acheter du pain » : une ligne dans le fichier local des notes ; « note » ou « notes » seul : les dernières
-        if (/^\s*notes?(\s|$)/i.test(champ.text)) {
+        if (act && /^\s*notes?(\s|$)/i.test(champ.text)) {
             let texteN = champ.text.replace(/^\s*notes?\s*/i, "").trim()
             let lignesN = noteErreur !== "" ? [{ titre: noteErreur, sous: "", glyphe: "error", garder: true, f: () => {} }] : []
             if (texteN !== "") {
@@ -1158,7 +1187,7 @@ Item {
             return
         }
         // « rappel 15h appeler le garage » / « rappels » : l'heure comprise est montrée AVANT Entrée ; texte brut, jamais interprété
-        if (/^\s*(rappels?|reminders?)(\s|$)/i.test(champ.text)) {
+        if (act && /^\s*(rappels?|reminders?)(\s|$)/i.test(champ.text)) {
             let saisie = champ.text.replace(/^\s*(rappels?|reminders?)\s*/i, "")
             let lignesR = []
             if (saisie === "" || /^(rappels|reminders)$/i.test(champ.text.trim())) {
@@ -1188,7 +1217,7 @@ Item {
         }
         // « mdp 20 » / « mdp » (20) / « password 20 » : une seule ligne, la copie se fait à la validation
         let mm = /^\s*(mdp|password)(?:\s+(\d+))?\s*$/i.exec(champ.text)
-        if (mm) {
+        if (act && mm) {
             let nm = mm[2] === undefined ? 20 : parseInt(mm[2])
             resultats = [retourMdp ? { titre: retourMdp.titre, sous: Reglages.t("Mot de passe", "Password"), glyphe: retourMdp.ok ? "check_circle" : "error",
                                        garder: true, f: () => { r.retourMdp = null; r.chercher() } }
@@ -1202,7 +1231,7 @@ Item {
             return
         }
         // « session NOM » : ouvrir une disposition enregistrée, ou enregistrer celle d'aujourd'hui sous ce nom
-        if (/^\s*sessions?\s/i.test(champ.text)) {          // le texte brut : « session » seul reste la recherche (déconnexion…)
+        if (act && /^\s*sessions?\s/i.test(champ.text)) {          // le texte brut : « session » seul reste la recherche (déconnexion…)
             let nomS = q.replace(/^sessions?\s*/i, "").trim(), qs = sansAccents(nomS)
             let lignesS = sessions.filter(x => qs === "" || sansAccents(x.nom).indexOf(qs) >= 0).map(x => itemSession(x, 0))
             if (nomS !== "" && nomSessionValide(nomS) && !sessions.some(x => x.nom === nomS) && !enregistrementEnCours) {
@@ -1222,7 +1251,7 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
-        if (q.startsWith("+") && modePaquets !== "non") {
+        if (act && q.startsWith("+") && modePaquets !== "non") {
             let tp = q.slice(1).trim()
             if (tp.length < 2) resultats = [{ titre: Reglages.t("Tape le nom d'un logiciel à installer", "Type the name of an app to install"),
                                               sous: Reglages.t("Dépôts, AUR et Flatpak", "Repos, AUR and Flatpak"), glyphe: "download", garder: true, f: () => {} }]
@@ -1232,7 +1261,7 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
-        if (q.startsWith(">")) {
+        if (act && q.startsWith(">")) {
             let c = q.slice(1).trim()
             resultats = c === "" ? [] : [{ titre: c, sous: Reglages.t("Commande dans le terminal", "Command in Terminal"), glyphe: "terminal",
                                           f: () => r.lancerCommande(c) }]
@@ -1261,7 +1290,7 @@ Item {
             let sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
             if (sa > 0) {
                 let id = ap.id, fen = fenetreDe(ap)
-                let item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0) }
+                let item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0), e: "applis" }
                 if (fen) {
                     let adresse = fen.address
                     prises[adresse] = true
@@ -1297,7 +1326,7 @@ Item {
                 out.push({ titre: fe.title, sous: fe.workspace.name === "special:reduites" ? Reglages.t("Fenêtre réduite · Entrée pour la ramener", "Minimized window · Enter to bring it back")
                                                                   : Reglages.t("Fenêtre ouverte · bureau ", "Open window · Desktop ") + fe.workspace.name,
                            icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
-                           glyphe: "select_window", s: sf + 30, f: () => r.allerA(adr) })
+                           glyphe: "select_window", s: sf + 30, e: "applis", f: () => r.allerA(adr) })
             }
         }
         // Pages de l'île et actions
@@ -1324,20 +1353,21 @@ Item {
             let fi = fichiers[n], chemin = fi.path
             out.push({ titre: fi.name, sous: (fi.dir ? Reglages.t("Dossier · ", "Folder · ") : Reglages.t("Fichier · ", "File · ")) + fi.parent,
                        icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
-                       s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)),   // jamais devant une appli qui commence par la saisie
+                       s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)), e: "fichiers",
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
         }
         // Une question en langage naturel (« comment changer le fond d'écran ») : les réponses de la config en tête
         if (Aide.estQuestion(q)) reponsesAide(q, 3).forEach(e => out.push(itemAide(e, 500 + e.score)))
         // « Que se passe-t-il ? », « ça marche pas »… : le bilan du bureau en tête (même l'IA coupée : nc-diag suffit)
         if (estDiag(q)) out.push(Object.assign({ s: 1000 }, ligneDiag))
+        out = out.filter(x => (x.e || "actions") === espace)     // jamais deux espaces mêlés
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
         // « port 8080 » / « processus firefox » : leurs lignes en tête, les résultats ordinaires gardés dessous (3 au moins)
-        let cartes = demandeProc ? lignesProc(demandeProc).slice(0, Math.max(2, nbResultats - 3)) : []
+        let cartes = act && demandeProc ? lignesProc(demandeProc).slice(0, Math.max(2, nbResultats - 3)) : []
         if (cartes.length) out = cartes.concat(out.slice(0, Math.max(3, nbResultats - cartes.length)))
         // « heure », « horloges » : une carte par ville du réglage HORLOGES_VILLES, devant les résultats ordinaires (« Horloges » l'appli reste)
-        if (horloges) {
+        if (act && horloges) {
             let zh = Saisies.zonesHorloges(Saisies.villesHorloges(Reglages.val("HORLOGES_VILLES", "")), zonesHeure)
             let cartesH = []
             if (zh.length && zh.map(x => x.zone).join(",") === horlogesCle)
@@ -1349,7 +1379,7 @@ Item {
             if (cartesH.length) out = cartesH.concat(out.slice(0, Math.max(3, nbResultats - cartesH.length)))
         }
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
-        if (q.startsWith(":") && emojiActif) {
+        if (act && q.startsWith(":") && emojiActif) {
             emojis.demander()
             let motE = q.slice(1).trim()
             let trouves = emojis.pret ? emojis.chercher(motE).slice(0, Math.max(8, nbResultats)) : []     // 24 au plus trouvés, 8 à 10 montrés
@@ -1363,22 +1393,22 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
-        if (modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
+        if (act && modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
             let noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
             let aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
             if (aInstaller.length) out = out.slice(0, nbResultats - aInstaller.length).concat(aInstaller.map(p => itemPaquet(p, 0)))
         }
         // Saisie qui commence par un programme (« htop », « ping google.fr ») : la lancer dans le terminal
         var prog = q.split(/\s+/)[0]
-        if (execs[prog] && !q.startsWith("/")) {
+        if (act && execs[prog] && !q.startsWith("/")) {
             let commande = q
             out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? nbResultats - 1 : nbResultats - 2)
             let lancerItem = { titre: commande, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
             // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
         }
-        if (retourSession) out.unshift(ligneRetour())     // une session supprimée depuis la recherche ordinaire
-        if (retourDock) out.unshift(ligneRetourDock())    // une appli épinglée (ou retirée) à l'instant
+        if (act && retourSession) out.unshift(ligneRetour())     // une session supprimée depuis la recherche ordinaire
+        if (espace === "applis" && retourDock) out.unshift(ligneRetourDock())    // une appli épinglée (ou retirée) à l'instant
         // Sources arrivées après coup (fichiers, calcul) : la ligne choisie reste la même, même si elle change de rang
         let choisie = sel > 0 ? resultats[sel] : null
         resultats = out
@@ -1445,7 +1475,7 @@ Item {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if (!applisLues && !/^([?>+!@:;]|sessions? |(mdp|password)(\s|$))/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+        if (!applisLues && espace === "applis" && !/^([?>+!@:;]|sessions? |(mdp|password)(\s|$))/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
             && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
@@ -1464,18 +1494,18 @@ Item {
         acceptedButtons: Qt.AllButtons
         onClicked: champ.forceActiveFocus()
     }
-    // Barre de recherche
+    // Saisie : loupe, texte de 27 px, touche Échap (cliquable)
     Item {
         id: barre
-        width: parent.width; height: 56
-        Ico { id: loupe; x: 22; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 22; color: Couleurs.texteSec }
+        width: parent.width; height: 64
+        Ico { id: loupe; x: 20; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 20; color: Couleurs.texteSec }
         TextInput {
             id: champ
             objectName: "nc-spotlight-champ"
-            anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
+            anchors.left: loupe.right; anchors.leftMargin: 18; anchors.right: echapTouche.left; anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
-            font.family: Couleurs.police; font.pixelSize: 19
+            font.family: Couleurs.police; font.pixelSize: 27; font.weight: Font.Medium
             clip: true
             cursorVisible: activeFocus
             Keys.onPressed: e => r.toucheDock(e)       // Alt + P : épingler au dock (ou retirer)
@@ -1483,15 +1513,36 @@ Item {
             Keys.onDeletePressed: e => { e.accepted = r.toucheSuppr((e.modifiers & Qt.ShiftModifier) !== 0) }
             Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
             Keys.onUpPressed: r.sel = Math.max(0, r.sel - 1)
-            Keys.onTabPressed: r.sel = r.resultats.length > 0 ? (r.sel + 1) % r.resultats.length : 0
+            Keys.onTabPressed: r.espaceSuivant(1)
+            Keys.onBacktabPressed: r.espaceSuivant(-1)
+            // ← → : changent d'espace sans texte à parcourir, ou avec Ctrl ; sinon le curseur bouge
+            Keys.onLeftPressed: e => { if (champ.text === "" || (e.modifiers & Qt.ControlModifier)) r.espaceSuivant(-1); else e.accepted = false }
+            Keys.onRightPressed: e => { if (champ.text === "" || (e.modifiers & Qt.ControlModifier)) r.espaceSuivant(1); else e.accepted = false }
             Keys.onReturnPressed: e => r.valider(r.sel, (e.modifiers & Qt.ControlModifier) !== 0)
             Keys.onEnterPressed: e => r.valider(r.sel, (e.modifiers & Qt.ControlModifier) !== 0)
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: Reglages.t("Rechercher  ·  ? question  ·  > commande  ·  + installer", "Search  ·  ? question  ·  > command  ·  + install"); secondaire: true; font.pixelSize: 19
+                text: Reglages.t("Rechercher", "Search"); secondaire: true; font.pixelSize: 27
             }
         }
+        Rectangle {
+            id: echapTouche
+            objectName: "nc-lanceur-echap"
+            anchors.right: parent.right; anchors.rightMargin: 18; anchors.verticalCenter: parent.verticalCenter
+            width: 49; height: 21; radius: Couleurs.rayon(5, width, height)
+            color: Qt.alpha(Couleurs.voile, 0.06); border.width: 1; border.color: Qt.alpha(Couleurs.voile, 0.22)
+            Texte { anchors.centerIn: parent; text: Reglages.t("Échap", "Esc"); font.pixelSize: 11; secondaire: true }
+            MouseArea { anchors.fill: parent; onClicked: r.echap() }
+        }
+    }
+    LanceurOnglets {
+        id: onglets
+        objectName: "nc-lanceur-onglets"
+        anchors.top: barre.bottom
+        width: parent.width
+        espace: r.espace
+        onChoisir: nom => { r.changerEspace(nom); champ.forceActiveFocus() }
     }
 
     // Réponse de l'IA (« ? … »), ou le résumé du bilan (« Que se passe-t-il ? » : celui de nc-diag, puis celui de l'IA)
@@ -1503,8 +1554,8 @@ Item {
         readonly property bool attend: !enDiag && r.reflechit && r.reponse === ""
         // Plan de rangement en zones (« me montrer le plan d'abord ») : une mini-carte de l'écran plutôt qu'une liste
         readonly property var zones: !enDiag && r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []
-        anchors.top: barre.bottom; anchors.topMargin: 4
-        x: 14; width: parent.width - 28; radius: Couleurs.rayon(16, width, height); color: Couleurs.gris2
+        anchors.top: onglets.bottom; anchors.topMargin: 10
+        x: 18; width: parent.width - 36; radius: Couleurs.rayon(16, width, height); color: Couleurs.gris2
         height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0)
                          + (miniCarte.visible ? 10 + miniCarte.height : 0) + 14, 420)
         clip: true
@@ -1568,108 +1619,23 @@ Item {
         }
     }
 
-    // Résultats
+    // Résultats : un seul espace à la fois
     Column {
         id: liste
-        anchors.top: zoneReponse.visible ? zoneReponse.bottom : barre.bottom; anchors.topMargin: 6
-        x: 8; width: parent.width - 16
+        anchors.top: zoneReponse.visible ? zoneReponse.bottom : onglets.bottom; anchors.topMargin: 8
+        x: 18; width: parent.width - 36; spacing: 2
         Repeater {
             model: r.resultats
-            Rectangle {
-                id: ligne
-                required property var modelData
-                required property int index
-                readonly property bool choisi: index === r.sel
-                readonly property bool confirme: index === r.confirmer
-                readonly property bool supprimable: !!modelData.suppr
-                width: liste.width; height: r.hauteurLigne; radius: Couleurs.rayon(14, width, height)
-                // En confirmation : le fond de l'île à peine teinté de rouge (le texte rouge y garde son contraste, ce
-                // qu'il ne ferait pas sur gris2)
-                color: confirme ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.14)) : choisi ? Couleurs.gris2 : "transparent"
-                Item {
-                    id: ic
-                    x: 12; anchors.verticalCenter: parent.verticalCenter
-                    width: 28; height: 28
-                    Image {
-                        id: img
-                        anchors.fill: parent
-                        source: (ligne.modelData.icone || "").toLowerCase().endsWith(".jxl") ? "" : (ligne.modelData.icone || "")
-                        sourceSize: Qt.size(56, 56)
-                        visible: status === Image.Ready
-                    }
-                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: Couleurs.texteDoux; visible: img.status !== Image.Ready && !ligne.modelData.emoji }
-                    Texte { objectName: "nc-spotlight-emoji"; anchors.centerIn: parent; visible: !!ligne.modelData.emoji; text: ligne.modelData.emoji || ""; font.pixelSize: 24 }
-                }
-                Texte {
-                    visible: !ligne.confirme
-                    anchors.left: ic.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 12 - 28 - 12 - sous.width - 40 - (moins.visible ? 32 : 0)
-                    textFormat: Text.PlainText      // titres et sous-titres viennent du bilan, de systemctl, des fenêtres : jamais du HTML
-                    text: ligne.modelData.titre; font.pixelSize: 15; font.weight: ligne.choisi ? Font.DemiBold : Font.Normal
-                }
-                Texte {
-                    id: sous
-                    visible: !ligne.confirme
-                    anchors.right: parent.right; anchors.rightMargin: moins.visible ? 14 + 22 + 10 : 14; anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, 320)
-                    textFormat: Text.PlainText
-                    text: ligne.modelData.sous + (ligne.choisi ? "  ·  " + (ligne.modelData.aide || "↵") : ""); secondaire: true; font.pixelSize: 13
-                    horizontalAlignment: Text.AlignRight
-                }
-                // Suppression demandée : la question sur la ligne même, en rouge
-                Texte {
-                    objectName: "nc-spotlight-confirmation"
-                    visible: ligne.confirme
-                    anchors.left: ic.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: ligne.confirme ? ligne.modelData.suppr.libelle + "  " + Reglages.t("↵ oui · Échap non", "↵ yes · Esc no") : ""
-                    color: Couleurs.rouge; font.pixelSize: 15; font.weight: Font.DemiBold
-                }
-                // Clic droit sur une appli : l'épingler au dock, ou l'en retirer
-                MouseArea {
-                    id: zoneLigne
-                    objectName: "nc-spotlight-zone"
-                    anchors.fill: parent; hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    // pas onEntered, et seulement si le pointeur a bougé dans la fenêtre : la souris immobile sous une liste
-                    // qui bouge ne vole pas la sélection (le 1er événement note la position)
-                    onPositionChanged: e => r.survol(ligne.index, zoneLigne.mapToItem(null, e ? e.x : 0, e ? e.y : 0))
-                    onClicked: e => {
-                        if (e.button === Qt.RightButton) r.actionDock(ligne.index)
-                        else r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
-                    }
-                }
-                // − : la même suppression, à la souris (au survol ou sur la ligne choisie). En verre, comme celui de la
-                // fiche des raccourcis ; rouge seulement au survol
-                Rectangle {
-                    id: moins
-                    objectName: "nc-spotlight-moins"
-                    readonly property bool montre: ligne.supprimable && !ligne.confirme && (ligne.choisi || zoneLigne.containsMouse || zMoins.containsMouse)
-                    opacity: montre ? 1 : 0
-                    visible: opacity > 0
-                    Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: 120 } }
-                    anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                    width: 22; height: 22; radius: 11
-                    color: zMoins.containsMouse ? Qt.alpha(Couleurs.carteSurvol, 0.75) : Qt.alpha(Couleurs.carte, 0.55)
-                    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.28)
-                    // Reflet du verre : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
-                    Rectangle {
-                        anchors.fill: parent; anchors.margins: 1; radius: height / 2
-                        gradient: Gradient {
-                            GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
-                            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
-                        }
-                    }
-                    Texte { anchors.centerIn: parent; text: "−"; font.pixelSize: 16; font.weight: Font.Bold
-                            color: zMoins.containsMouse ? Couleurs.rouge : Couleurs.texte }
-                    MouseArea {
-                        id: zMoins
-                        anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
-                        enabled: moins.montre
-                        onClicked: r.demanderSuppr(ligne.index)
-                    }
-                }
+            LanceurLigne {
+                width: liste.width; height: r.hauteurLigne
+                choisi: index === r.sel
+                confirme: index === r.confirmer
+                onSurvol: p => r.survol(index, p)
+                onValider: nouveau => r.valider(index, nouveau)
+                onClicDroit: r.actionDock(index)
+                onSupprimer: r.demanderSuppr(index)
             }
         }
     }
+    LanceurPied { id: pied; y: r.hauteurVoulue - height; width: parent.width; total: r.resultats.length }
 }
