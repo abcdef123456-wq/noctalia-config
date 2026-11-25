@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.test_ile_forme import PAGES_REF
 from tests.test_rendu_ile import lire_png
 
 DEPOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,9 @@ class Rendu(unittest.TestCase):
         (cls.t / "sombre-nc.json").write_text(json.dumps(SOMBRE))
         # sans contour : c'est là que le voile de la carte Bureau (Couleurs.voile) sert vraiment
         (cls.t / "sans-contour.conf").write_text("ILE_CONTOUR=aucun\n")
+        # mêmes pages ouvertes que dans la référence (huit sont coupées par défaut depuis)
+        (cls.t / "pages-ref.conf").write_text(PAGES_REF)
+        (cls.t / "sans-contour-pages-ref.conf").write_text("ILE_CONTOUR=aucun\n" + PAGES_REF)
         cls.png = {}
 
     @classmethod
@@ -87,13 +91,15 @@ class Rendu(unittest.TestCase):
         shutil.rmtree(str(cls.t), ignore_errors=True)
 
     @classmethod
-    def rendre(cls, arbre, nom, palette):
+    def rendre(cls, arbre, nom, palette, pages_ref=False):
         sortie = cls.t / ("png-%s-%s" % (arbre, nom))
         cmd = [sys.executable, str((cls.ref if arbre == "ref" else DEPOT) / "outils/rendu-ile.py"), "--sortie", str(sortie)]
         if palette:
             cmd += ["--palette", str(cls.t / (palette + ".json"))]
         if palette == "sombre-nc":
-            cmd += ["--reglages", str(cls.t / "sans-contour.conf")]
+            cmd += ["--reglages", str(cls.t / ("sans-contour-pages-ref.conf" if pages_ref else "sans-contour.conf"))]
+        elif pages_ref:
+            cmd += ["--reglages", str(cls.t / "pages-ref.conf")]
         env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "HOME", "XDG_CONFIG_HOME",
                                                            "XDG_DATA_HOME", "XDG_CACHE_HOME", "TMPDIR", "NC_LANGUE")}
         r = subprocess.run(cmd + list(ETATS), capture_output=True, text=True, env=env, timeout=240)
@@ -101,7 +107,7 @@ class Rendu(unittest.TestCase):
         return sortie
 
     def identiques(self, palette, essais=2):
-        a, b = self.rendre("ref", palette or "defaut", palette), self.rendre("new", palette or "defaut", palette)
+        a, b = self.rendre("ref", palette or "defaut", palette), self.rendre("new", palette or "defaut", palette, pages_ref=True)
         for e in ETATS:
             x, y = lire_png(a / (e + ".png")), lire_png(b / (e + ".png"))
             if e == "bureau":  # la première ligne varie d'un rendu à l'autre, même sur l'arbre de référence
