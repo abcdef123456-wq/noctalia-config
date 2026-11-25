@@ -83,15 +83,9 @@ PanelWindow {
     }
     readonly property int nombrePastillesRendues: rectanglesRendus.length
     readonly property var rectanglesMasque: rectanglesRendus.filter(r => r.opacite > 0.15)
-    readonly property var regionsMasque: {
-        morceauxMasque.revision
-        const regions = []
-        for (let i = 0; i < morceauxMasque.count; ++i) {
-            const region = morceauxMasque.objectAt(i)
-            if (region) regions.push(region)
-        }
-        return regions
-    }
+    // Tenue à la main par morceauxMasque : une Region détruite sort de la liste de Quickshell sans signal, et le
+    // compositeur gardait l'ancienne zone d'entrée. Chaque retrait est donc écrit avant la destruction.
+    property var regionsMasque: []
     // Le calque existe dès qu'une pastille a sa place au repos : l'île qui les occulte un instant ne le démonte pas,
     // sinon les pastilles ne pourraient pas revenir pendant le ressort de fermeture.
     visible: ["start", "center", "end"].some(cote => (dispositionRepos[cote] || []).some(p => p && !p.occulteRepos))
@@ -112,9 +106,8 @@ PanelWindow {
 
     Instantiator {
         id: morceauxMasque
-        property int revision: 0
-        onObjectAdded: revision++
-        onObjectRemoved: revision++
+        onObjectAdded: (index, region) => fen.regionsMasque = fen.regionsMasque.concat([region])
+        onObjectRemoved: (index, region) => fen.regionsMasque = fen.regionsMasque.filter(r => r !== region)
         model: fen.rectanglesMasque
         delegate: Region {
             required property var modelData

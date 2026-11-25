@@ -266,6 +266,7 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
     Timer {
         interval: 500; running: true; repeat: true
         property int etape: 0
+        property int signaux: 0   // « changed » du masque : ce que la fenêtre Quickshell écoute pour poser la zone d'entrée
         function verifier(ok, message) { if (!ok) { console.error("ECHEC: " + message); Qt.exit(2) } }
         function barres() {
             const rep = ecransIle.instances[0].panneauxTest.flottantesTest;
@@ -304,6 +305,7 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
                 const w = barres()[0];
                 verifier(w.masqueTeste.regions.length === 2 && w.visible,
                          "aucune reconfiguration de masque ou mapping pendant le ressort");
+                w.masqueTeste.changed.connect(() => signaux++);
                 // Nouvel objet : les pastilles (emprise vive) relisent le mode comme le masque (emprise stable).
                 w.mouv = Object.assign({}, w.mouv, { reactionBarre: "instantane" });
                 w.empriseStable = Qt.rect(0, 0, 2000, 2000);
@@ -312,6 +314,8 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
                 verifier(w.visible && w.nombrePastillesRendues === 0,
                          "une barre occultée par l'île garde son calque, sans pastille rendue");
                 verifier(w.masqueTeste.regions.length === 0, "aucune zone cliquable sous l'île");
+                verifier(signaux > 0, "le masque vidé est signalé à la fenêtre");
+                signaux = 0;
                 verifier(!panneaux.aPastilleRendue(w.contentItem), "pastilles masquées pendant l'occultation");
                 verifier(ipcTeste.panneauxPrets("test") === "", "ne pas acquitter un écran sans pastille");
                 w.empriseLive = Qt.rect(0, 0, 0, 0);
@@ -325,6 +329,7 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
                 const w = barres()[0];
                 verifier(w.visible && w.nombrePastillesRendues === 2 && w.masqueTeste.regions.length === 2,
                          "retour complet après occultation");
+                verifier(signaux > 0, "le masque rendu est signalé à la fenêtre");
                 verifier(ipcTeste.panneauxPrets("test") === "test", "acquitter de nouveau au repos");
                 racine.modelePanneaux = { generation: "test", widgets: { a: {type: "text", text: "A"} },
                     barres: ["top", "left"].map((position, i) => ({
@@ -363,3 +368,98 @@ assert.deepEqual(rectanglesPastilles(p.start, 'start', 'top',
             self.assertEqual(lignes_en_erreur(sortie), [], sortie)
             self.assertNotIn("ECHEC", sortie, sortie)
             self.assertIn("PASTILLES_OK", sortie, sortie)
+
+    @unittest.skipUnless(shutil.which("qs") and shutil.which("sway"),
+                         "Quickshell et sway requis (compositeur sans écran qui connaît layer-shell)")
+    def test_zone_d_entree_wayland_videe_sous_l_ile_puis_rendue(self):
+        """Côté Wayland (WAYLAND_DEBUG), le calque de la barre pose : deux pastilles, puis aucune zone quand Spotlight
+        les couvre, puis les deux mêmes au retour. Le vrai shell.qml, 1280×720 à l'échelle 2."""
+        import re
+        import tempfile
+        import time
+        from tests.test_ile_demarrage import copie, environnement
+
+        with tempfile.TemporaryDirectory(prefix="nc-masque-") as d:
+            root = copie(d)
+            panneaux = root / "Panneaux.qml"
+            panneaux.write_text(panneaux.read_text().replace(
+                "id: ecranPanneaux", "id: ecranPanneaux; property alias flottantesTest: flottantes"))
+            shell = root / "shell.qml"
+            texte = shell.read_text().replace('target: "ile"', 'id: ipcTeste; target: "ile"')
+            texte = texte.replace("id: ile", "id: ile; property alias panneauxTest: panneaux", 1)
+            scenario = """
+    Timer {
+        interval: 100; running: true; repeat: true
+        property int phase: 0
+        property int tenu: 0
+        property int tours: 0
+        function rendues() {
+            const rep = ecransIle.instances[0].panneauxTest.flottantesTest;
+            return rep.count ? rep.objectAt(0).nombrePastillesRendues : -1;
+        }
+        // Trois tours de suite dans l'état attendu : la zone d'entrée a eu le temps de partir.
+        function atteint(n) { tenu = rendues() === n ? tenu + 1 : 0; if (tenu < 3) return false; tenu = 0; return true }
+        onTriggered: {
+            if (++tours > 150) { console.error("ECHEC: phase " + phase + " jamais atteinte"); Qt.exit(2) }
+            if (phase === 0) {
+                Reglages.valeurs = { BARRE_MODULAIRE: "oui" };
+                racine.modelePanneaux = { generation: "test", widgets: {
+                    a: {type: "text", text: "A"}, b: {type: "text", text: "B"}
+                }, barres: [
+                    {id: "revue", position: "top", margin_edge: 6, margin_ends: 16, thickness: 40,
+                     widget_spacing: 20, start: ["a", "b"], reserve_space: false}
+                ] };
+                phase = 1;
+            } else if (phase === 1 && atteint(2)) { ipcTeste.recherche(); phase = 2 }
+            else if (phase === 2 && atteint(0)) { Etat.fermer(); phase = 3 }
+            else if (phase === 3 && atteint(2)) Qt.quit()
+        }
+    }
+"""
+            shell.write_text(texte[:texte.rfind("}")] + scenario + "}\n")
+            env = environnement(root, WLR_BACKENDS="headless", WLR_LIBINPUT_NO_DEVICES="1", WLR_RENDERER="pixman")
+            for cle in ("QT_QPA_PLATFORM", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY"):
+                env.pop(cle, None)
+            conf = root / "sway.conf"
+            conf.write_text("output HEADLESS-1 resolution 1280x720 scale 2\n")
+            sway = subprocess.Popen(["sway", "-c", str(conf)], env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                prises = []
+                for _ in range(100):
+                    prises = [p.name for p in Path(env["XDG_RUNTIME_DIR"]).glob("wayland-*") if not p.name.endswith(".lock")]
+                    if prises or sway.poll() is not None:
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(prises, "sway sans écran n'a pas démarré")
+                resultat = subprocess.run(
+                    ["qs", "--no-color", "-p", str(shell)], text=True, timeout=40, stdin=subprocess.DEVNULL,
+                    env=dict(env, WAYLAND_DISPLAY=prises[0], WAYLAND_DEBUG="1", QT_QPA_PLATFORM="wayland"),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            finally:
+                sway.terminate()
+                try:
+                    sway.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    sway.kill()
+            sortie = resultat.stdout
+            self.assertEqual(resultat.returncode, 0, sortie[-3000:])
+            calque = re.search(r'get_layer_surface\(new id zwlr_layer_surface_v1#\d+, wl_surface#(\d+),[^\n]*"nc-panneau-revue"\)',
+                               sortie)
+            self.assertIsNotNone(calque, sortie[-3000:])
+            regions, zones = {}, []
+            for ligne in sortie.splitlines():
+                creee = re.search(r"create_region\(new id wl_region#(\d+)\)", ligne)
+                if creee:
+                    regions[creee.group(1)] = []            # les identifiants Wayland sont réutilisés
+                ajout = re.search(r"wl_region#(\d+)\.add\(([-\d, ]+)\)", ligne)
+                if ajout:
+                    regions[ajout.group(1)].append(ajout.group(2))
+                # « nil » (toute la surface) n'est qu'un état d'attente avant la vraie zone du même commit : ignoré ici
+                pose = re.search(r"wl_surface#%s\.set_input_region\(wl_region#(\d+)\)" % calque.group(1), ligne)
+                if pose:
+                    zones.append(regions.get(pose.group(1), []))
+            self.assertTrue(zones and len(zones[0]) == 2, zones)
+            self.assertIn([], zones[1:-1], "aucune zone vide envoyée pendant que Spotlight couvre les pastilles : %r" % zones)
+            self.assertEqual(zones[-1], zones[0], zones)
+            self.assertEqual(len(re.findall(r'"nc-panneau-revue"', sortie)), 1, "le calque ne doit pas être recréé")
