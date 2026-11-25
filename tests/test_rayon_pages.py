@@ -100,7 +100,8 @@ class Rendu(unittest.TestCase):
                 faux.unlink()
                 faux.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(root / "journal") + '"\n')
                 faux.chmod(0o755)
-                resultat = subprocess.run(["qs", "--no-color", "-p", str(ile / "shell.qml")],
+                # Même option que rendu-ile.py : sans elle, certains qs (0.3.2 du COPR Fedora) filtrent console.log.
+                resultat = subprocess.run(["qs", "--no-color", "--log-rules", "qml.debug=true", "-p", str(ile / "shell.qml")],
                                           env=outil.environnement(root, root / "inutile.png"),
                                           capture_output=True, text=True, timeout=15)
                 sortie = resultat.stdout + resultat.stderr
