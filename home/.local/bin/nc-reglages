@@ -387,6 +387,18 @@ class R:
                         raise ValueError(T("des noms de ville de 2 à 40 caractères, sans chiffre ni caractère de contrôle, séparés par des virgules",
                                            "city names of 2 to 40 characters, no digit or control character, separated by commas"))
                 v = ", ".join(villes)
+            if self.cle == "ILE_ANIM_ECRANS":
+                if not v:
+                    return ""
+                entrees = []
+                for part in v.split(","):
+                    ecran, sep, profil = part.partition(":")
+                    ecran, profil = ecran.strip(), profil.strip()
+                    if not sep or ":" in profil or not re.fullmatch(r"[A-Za-z0-9._*-]+", ecran) or profil not in ("ressort", "doux", "vif", "sec", "aucun"):
+                        raise ValueError(T("des couples écran:profil séparés par des virgules (ex. DP-1:vif,eDP-1:doux,HDMI-A-1:aucun)",
+                                           "comma-separated screen:profile pairs (e.g. DP-1:vif,eDP-1:doux,HDMI-A-1:aucun)"))
+                    entrees.append(f"{ecran}:{profil}")
+                return ",".join(entrees)
             if not v:
                 raise ValueError(T("une valeur", "a value"))
             return v
@@ -526,6 +538,11 @@ REGLAGES = [
       L("Allure des ouvertures et fermetures.", "Feel of the opening and closing."),
       [("ressort", L("Ressort (d'origine)", "Spring (original)")), ("doux", L("Doux", "Smooth")),
        ("vif", L("Vif", "Snappy")), ("sec", L("Sec, sans rebond", "Crisp, no bounce"))]),
+    R("ILE_ANIM_VITESSE", "Île", L("Vitesse des animations", "Animation speed"), "entier", "100",
+      L("Vitesse des animations de l'île, de la barre et du tiroir JARVIS (100 % : allure d'origine, plus haut : plus rapide, "
+        "plus bas : plus posé).",
+        "Speed of island, bar and JARVIS drawer animations (100%: original pace, higher: faster, lower: calmer)."),
+      mini=50, maxi=200, pas=10, unite="%"),
     R("ILE_LUEUR", "Île", L("Lueur autour de l'île ouverte", "Glow around the open island"), "ouinon", "non",
       L("Un halo doux de la couleur d'accent.", "A soft halo in the accent color.")),
     R("ILE_CONTOUR_FERMEE", "Île", L("Contour et lueur aussi sur l'île fermée", "Outline and glow on the closed island too"), "ouinon", "non",
@@ -556,9 +573,17 @@ REGLAGES = [
         "island is on another screen. Spotlight (Super + R) already is the pill growing."), groupe="hypr"),
     R("ILE_DATE", "Île", L("Date à côté de l'heure", "Date next to the time"), "ouinon", "oui"),
     R("ILE_ANIM_BATTERIE", "Île", L("Animations de l'île sur batterie", "Island animations on battery"), "choix", "douces",
-      L("Douces : sur batterie, l'étincelle d'une IA qui travaille tourne plus lentement (un tour en 4 s au lieu de 2,6).",
-        "Gentle: on battery, the spark of a working AI turns more slowly (one turn in 4 s instead of 2.6)."),
-      [("douces", L("Douces", "Gentle")), ("continues", L("Comme sur secteur", "Same as plugged in"))]),
+      L("Douces : sur batterie, amortit les ressorts, raccourcit les transitions secondaires et ralentit l'étincelle (un tour en 4 s au lieu de 2,6). "
+        "Aucune sur batterie : coupe les animations de l'île, de la barre et de l'étincelle sur batterie.",
+        "Gentle: on battery, damps springs, shortens secondary transitions and slows the spark (one turn in 4 s instead of 2.6). "
+        "None on battery: disables island, bar and spark animations on battery."),
+      [("douces", L("Douces", "Gentle")), ("aucune", L("Aucune sur batterie", "None on battery")),
+       ("continues", L("Comme sur secteur", "Same as plugged in"))]),
+    R("ILE_ANIM_ECRANS", "Île", L("Animations par écran", "Per-screen animations"), "texte", "",
+      L("Surcharge le profil d'animation pour certains écrans, séparés par des virgules : ex. DP-1:vif,eDP-1:doux,HDMI-A-1:aucun "
+        "(profils : ressort, doux, vif, sec, aucun ; le caractère * est accepté).",
+        "Override the animation profile for specific screens, comma-separated: e.g. DP-1:vif,eDP-1:doux,HDMI-A-1:aucun "
+        "(profiles: ressort, doux, vif, sec, aucun; * wildcard supported).")),
     R("ILE_BANNIERES", "Notifications", L("Notifications en bannière", "Notification banners"), "ouinon", "oui",
       L("Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours.",
         "No: notifications arrive without showing (they stay in the Notifications page). Urgent ones always show.")),
@@ -933,6 +958,20 @@ REGLAGES = [
     R("BARRE_MODULAIRE", "Barre et dock", L("Barre modulaire (expérimentale)", "Modular bar (experimental)"), "ouinon", "non",
       L("Remplace les barres Noctalia par des panneaux modulaires. Nécessite l'île Quickshell. Ne change pas le dock.",
         "Replace Noctalia's bars with modular panels. Requires the Quickshell island. Does not change the dock."), groupe="noctalia"),
+    R("BARRE_REACTION", "Barre et dock", L("Réaction de la barre devant l'île", "Bar reaction around the island"), "choix", "glisser",
+      L("Glisser sur les côtés : les pastilles de la barre s'écartent physiquement devant l'île ou le tiroir JARVIS. "
+        "Fondu sur place : les pastilles recouvertes s'effacent sur place.",
+        "Slide aside: bar pills physically slide aside around the island or JARVIS drawer. "
+        "Fade in place: covered pills fade out in place."),
+      [("glisser", L("Glisser sur les côtés", "Slide aside")), ("fondu", L("Fondu sur place", "Fade in place"))]),
+    R("BARRE_CONTENU", "Barre et dock", L("Contenu de la barre modulaire", "Modular bar content"), "choix", "theme",
+      L("Composition du thème : garde tous les widgets et options du thème actif. "
+        "Minimale : bureaux à gauche, île au centre, réseau, volume et batterie à droite sur la barre principale.",
+        "Theme layout: keeps all widgets and options from the active theme. "
+        "Minimal: workspaces on the left, island in the center, network, volume and battery on the right of the main bar."),
+      [("theme", L("Composition du thème", "Theme layout")),
+       ("minimale", L("Minimale (bureaux, île, réseau, son, batterie)", "Minimal (workspaces, island, network, volume, battery)"))],
+      groupe="noctalia"),
     # Fenêtres
     R("NAVIGATEURS_XWAYLAND", "Fenêtres", L("Glisser les onglets entre fenêtres (Chrome, Brave…)", "Drag tabs between windows (Chrome, Brave…)"),
       "ouinon", "non",
@@ -1949,8 +1988,9 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
-    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_FORME", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "WIDGETS_POLICE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ")},
+    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_FORME", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_ANIM_VITESSE", "ILE_ANIM_ECRANS", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
+                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "WIDGETS_POLICE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ",
+                          "BARRE_REACTION", "BARRE_CONTENU")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
@@ -3400,7 +3440,13 @@ TRAY_VPN = ("nordvpn-tray-white", "nordvpn-tray-black", "nordvpn-tray", "nordvpn
             "mullvad-vpn", "Mullvad VPN", "mullvad-gui")
 
 
-def configuration_panneaux(tables):
+def _a_batterie():
+    import glob
+    sys_ = os.environ.get("NC_SYSFS") or "/sys"
+    return bool(glob.glob(sys_ + "/class/power_supply/BAT*"))
+
+
+def configuration_panneaux(tables, vals=None):
     """Instantané de la barre installée et de ses réglages composés, avant de masquer les barres natives."""
     if not tomllib:
         return None                  # le lecteur de repli des listes ne conserve pas les styles ni les widgets
@@ -3425,6 +3471,7 @@ def configuration_panneaux(tables):
         return None
     noms = dict.fromkeys([*ordre, *barres])
     panneaux, utilises = [], set()
+    minimale = (vals or {}).get("BARRE_CONTENU") == "minimale"
 
     def liste_widgets(liste):
         return isinstance(liste, list) and all(isinstance(w, str) and w for w in liste)
@@ -3441,6 +3488,17 @@ def configuration_panneaux(tables):
         panneau = {"position": "top", "start": [], "center": [], "end": [], "capsule_group": [], **options, "id": nom}
         if panneau["position"] not in ("top", "bottom", "left", "right") or not all(liste_widgets(panneau[k]) for k in _LISTES):
             return None
+        if nom == "default" and minimale:
+            panneau["start"] = ["workspaces"]
+            panneau["center"] = []
+            panneau["end"] = ["network", "volume"] + (["battery"] if _a_batterie() else [])
+            panneau["capsule_group"] = []
+            # La fusion par écran doit hériter de la composition minimale, sans perdre ses styles.
+            panneau["monitor"] = {
+                ecran: {k: v for k, v in surcharge.items() if k not in (*_LISTES, "capsule_group")}
+                for ecran, surcharge in panneau.get("monitor", {}).items()
+                if isinstance(surcharge, dict)
+            }
         groupes = panneau["capsule_group"]
         if not isinstance(groupes, list) or not all(
                 isinstance(g, dict) and isinstance(g.get("id"), str) and liste_widgets(g.get("members")) for g in groupes):
@@ -3776,7 +3834,7 @@ def _appliquer_noctalia(vals, bascule_explicite):
     ancien_json = lire_sortie_barre(PANNEAUX_OUT)
     ancien_modele = lire_modele_barre(ancien_json)
     veut_modulaire = vals.get("BARRE_MODULAIRE") == "oui"
-    panneaux = configuration_panneaux(tables) if veut_modulaire else None
+    panneaux = configuration_panneaux(tables, vals) if veut_modulaire else None
     if veut_modulaire and not panneaux and (bascule_explicite or ancien_modele):
         raise ValueError(T("Impossible de préparer des panneaux pour cette configuration.",
                            "Cannot prepare modular panels for this configuration."))
@@ -3797,7 +3855,7 @@ def _appliquer_noctalia(vals, bascule_explicite):
         else:
             # Une installation ou réapplication hors session peut mettre à jour les réglages sans changer de barre.
             if native_masquee:
-                panneaux = configuration_panneaux(tables) or ancien_modele
+                panneaux = configuration_panneaux(tables, vals) or ancien_modele
             else:
                 panneaux = None
     # Même un JSON posé lors d'une bascule interrompue n'est retiré qu'en présence de la barre native.

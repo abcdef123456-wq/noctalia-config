@@ -20,10 +20,6 @@ hl.window_rule({ name = "nc-cles-ia", match = { title = "^(Clés des IA|AI keys)
 -- nc/automatismes.lua à la taille d'une fenêtre rangée seule sous la barre
 hl.window_rule({ name = "nc-reglages-fenetre", match = { title = "^(Réglages du bureau|Desktop settings)$" }, float = true })
 
--- Petite fenêtre de chat JARVIS (Super + Maj + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
--- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.
-hl.window_rule({ name = "jarvis-chat", match = { title = "^(JARVIS Chat)$" }, float = true, center = true, size = { "420", "560" } })
-
 -- Les applis ne se maximisent pas toutes seules
 hl.window_rule({ name = "pas-de-maximisation", match = { class = ".*" }, suppress_event = "maximize" })
 -- Fenêtres sans nom ni classe (glisser-déposer XWayland, menus fantômes) : ne prennent pas le focus en apparaissant
@@ -158,6 +154,14 @@ hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blu
 if nc.reglage("ILE_LANCEUR_FONDU", "non") == "oui" then
     hl.layer_rule({ name = "nc-code-sans-anim", match = { namespace = "^nc-code$" }, no_anim = true })
 end
+-- Tiroir de chat JARVIS (Super + Maj + A ; JarvisChat.qml) : il anime lui-même sa sortie de la pilule (ressort
+-- bidirectionnel), donc jamais d'animation Hyprland en plus ; verre flouté sous la carte seulement.
+local jarvis_chat = { name = "nc-jarvis-chat", match = { namespace = "^nc-jarvis-chat$" }, no_anim = true }
+if nc.reglage("FENETRES_FLOU", "oui") ~= "non" then
+    jarvis_chat.blur = true
+    jarvis_chat.ignore_alpha = 0.2
+end
+hl.layer_rule(jarvis_chat)
 -- Fenêtre VPN de l'île (Super + Alt + V ; Vpn.qml) : une vraie fenêtre, titre exact « VPN » (stable, pas traduit), flottante.
 -- Règle limitée à ce titre ET à la classe de Quickshell (« VPN » seul est un titre courant). Sa taille et sa place (centrée sous la barre) sont posées à l'ouverture par nc/automatismes.lua :
 -- la mémoire des fenêtres flottantes écraserait une règle size/move, et cette fenêtre en est exclue.

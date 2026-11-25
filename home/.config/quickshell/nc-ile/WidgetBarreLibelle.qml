@@ -11,6 +11,8 @@ Item {
     property string infobulle: libelle
     property real maximum: barre.vertical ? 34 : 240
     property real minimum: 0
+    property real largeurClip: 0
+    property color fondClip: "transparent"
     property bool iconeApres: barre.definition.glyph_position === "after"
     property bool interagir: barre.definition.interactive !== false
     property bool texteVisible: barre.definition.peek !== true || !aGlyphe && !visuel || revele
@@ -38,6 +40,10 @@ Item {
     readonly property real espace: largeurIcone > 0 && aTexte ? (barre.vertical ? 2 : 4) : 0
     readonly property real largeurContenu: barre.vertical ? Math.max(largeurIcone, largeurTexte) : largeurIcone + espace + largeurTexte
     readonly property real hauteurContenu: barre.vertical ? hauteurIcone + espace + hauteurTexte : Math.max(hauteurIcone, hauteurTexte)
+    readonly property real largeurTexteClip: !barre.vertical && largeurClip > 0
+        ? Math.min(largeurTexte, Math.max(0, largeurClip - largeurIcone - espace))
+        : largeurTexte
+    readonly property bool estClippe: !barre.vertical && largeurClip > 0 && largeurTexteClip < largeurTexte - 0.5
     readonly property bool anime: !Reglages.sobre && aTexte && texte.implicitWidth > largeurTexte && !barre.vertical
                                   && (defilement === "always" || (defilement === "on_hover" && survol))
     implicitWidth: largeurContenu
@@ -47,7 +53,7 @@ Item {
         id: icon
         width: l.largeurIcone; height: l.hauteurIcone
         visible: width > 0 && height > 0
-        x: l.barre.vertical ? (l.width - width) / 2 : l.iconeApres ? l.largeurTexte + l.espace : 0
+        x: l.barre.vertical ? (l.width - width) / 2 : l.iconeApres ? l.largeurTexteClip + l.espace : 0
         y: l.barre.vertical ? (l.iconeApres ? l.hauteurTexte + l.espace : 0) : (l.height - height) / 2
         Ico {
             visible: !l.visuel && l.aGlyphe
@@ -58,14 +64,15 @@ Item {
     }
     Item {
         id: vueTexte
-        width: l.largeurTexte; height: l.hauteurTexte
-        visible: l.aTexte
+        // Clip GPU seul pendant les animations : texte.width reste figé à l.largeurTexte (zéro ré-élision QTextLayout).
+        width: l.largeurTexteClip; height: l.hauteurTexte
+        visible: l.aTexte && width > 0
         clip: true
         x: l.barre.vertical ? (l.width - width) / 2 : l.iconeApres ? 0 : l.largeurIcone + l.espace
         y: l.barre.vertical ? (l.iconeApres ? 0 : l.hauteurIcone + l.espace) : (l.height - height) / 2
         Text {
             id: texte
-            width: l.anime ? implicitWidth : parent.width
+            width: l.anime ? implicitWidth : l.largeurTexte
             text: l.libelle
             textFormat: Text.PlainText
             elide: l.anime ? Text.ElideNone : Text.ElideRight
@@ -75,6 +82,18 @@ Item {
             font.pixelSize: Math.max(5, Math.round(l.barre.tailleTexte * l.barre.echelle))
             font.weight: l.barre.graisse
             onTextChanged: if (l.anime) glissement.restart()
+        }
+        Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            width: Math.min(20, parent.width * 0.45)
+            visible: l.estClippe && l.fondClip.a > 0.05
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: Qt.alpha(l.fondClip, 0) }
+                GradientStop { position: 1; color: l.fondClip }
+            }
         }
         SequentialAnimation {
             id: glissement

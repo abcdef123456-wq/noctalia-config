@@ -220,3 +220,118 @@ class ExportPanneaux(unittest.TestCase):
                     widgets = json.loads(panneaux.read_text(encoding="utf-8"))["widgets"]
                     self.assertEqual(widgets["raccourcis"]["pinned"], json.loads(epingles))
                     self.assertEqual(widgets["prive"]["pinned"], ["org.gnome.Console"])
+
+    def test_minimal_neutralise_seulement_la_composition_des_ecrans_de_la_barre_principale(self):
+        with tb.nc_isole(install="quickshell", style="essai", themes={"essai": tb.theme(tb.COMPOSE)}) as (nc, sortie):
+            base = sortie.with_name("config.toml")
+            base.write_text(config_quickshell(sortie) + """
+[bar.default.monitor.DP-1]
+start = ["logo"]
+center = ["clock"]
+end = ["network", "clock"]
+capsule_group = [{ id = "perso", members = ["network", "clock"] }]
+position = "left"
+thickness = 48
+margin_edge = 12
+capsule_opacity = 0.45
+enabled = false
+
+[bar.default.monitor.HDMI-A-1]
+end = ["network", "clock"]
+
+[bar.bas]
+position = "bottom"
+start = []
+center = ["clock"]
+end = []
+
+[bar.bas.monitor.DP-1]
+end = ["clock"]
+position = "right"
+thickness = 42
+""", encoding="utf-8")
+            panneaux = Path(nc["PANNEAUX_OUT"])
+            with SessionBarres(nc, sortie):
+                tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui"})
+            normales = {b["id"]: b for b in json.loads(panneaux.read_text(encoding="utf-8"))["barres"]}
+            self.assertEqual(normales["default"]["monitor"]["DP-1"]["end"], ["network", "clock"])
+            for batterie in (True, False):
+                with self.subTest(batterie=batterie):
+                    with patch.dict(nc["configuration_panneaux"].__globals__,
+                                    _a_batterie=lambda batterie=batterie: batterie), SessionBarres(nc, sortie):
+                        tb.barre(nc, sortie, {"BARRE_MODULAIRE": "oui", "BARRE_CONTENU": "minimale"})
+                    barres = {b["id"]: b for b in json.loads(panneaux.read_text(encoding="utf-8"))["barres"]}
+                    principale = barres["default"]
+                    self.assertEqual(principale["start"], ["workspaces"])
+                    self.assertEqual(principale["center"], [])
+                    self.assertEqual(principale["end"], ["network", "volume"] + (["battery"] if batterie else []))
+                    self.assertEqual(principale["monitor"], {
+                        "DP-1": {"position": "left", "thickness": 48, "margin_edge": 12,
+                                 "capsule_opacity": 0.45, "enabled": False},
+                        "HDMI-A-1": {},
+                    })
+                    self.assertEqual(barres["bas"], normales["bas"])
+                    self.assertEqual(barres["bas"]["monitor"]["DP-1"],
+                                     {"end": ["clock"], "position": "right", "thickness": 42})
+
+    def test_contenu_minimal_avec_et_sans_batterie_preserve_theme_et_ignore_pilules(self):
+        composition = {
+            **tb.COMPOSE,
+            "bar.default": {
+                **tb.COMPOSE["bar.default"],
+                "position": "bottom",
+                "capsule_radius": 6,
+                "background_opacity": 0.0,
+            },
+            "bar.bas": {
+                **tb.COMPOSE["bar.bas"],
+                "position": "top",
+            },
+        }
+        with tb.nc_isole(install="quickshell", style="essai", themes={"essai": tb.theme(composition)}) as (nc, sortie):
+            base = sortie.with_name("config.toml")
+            base.write_text(config_quickshell(sortie), encoding="utf-8")
+            panneaux = sortie.parent.parent / "nc/panneaux.json"
+            vals = {
+                "BARRE_MODULAIRE": "oui",
+                "BARRE_CONTENU": "minimale",
+                "BARRE_OPACITE": "70",
+                "BARRE_SYSTEME": "oui",
+                "VPN_PILULE_BARRE": "oui",
+                "GARMIN_ACTIF": "oui",
+                "GARMIN_PILULE_BARRE": "oui",
+            }
+            for a_bat, fin_attendue in ((True, ["network", "volume", "battery"]), (False, ["network", "volume"])):
+                with self.subTest(a_bat=a_bat):
+                    sysfs = sortie.parent.parent / ("sys-bat" if a_bat else "sys-fixe")
+                    if a_bat:
+                        (sysfs / "class/power_supply/BAT0").mkdir(parents=True, exist_ok=True)
+                    else:
+                        (sysfs / "class/power_supply").mkdir(parents=True, exist_ok=True)
+                    with patch.dict(os.environ, {"NC_SYSFS": str(sysfs)}), SessionBarres(nc, sortie):
+                        tb.barre(nc, sortie, vals)
+                    export = json.loads(panneaux.read_text(encoding="utf-8"))
+                    barres = {b["id"]: b for b in export["barres"]}
+                    principale = barres["default"]
+                    self.assertEqual(principale["position"], "bottom")
+                    self.assertEqual((principale["capsule_radius"], principale["capsule_opacity"]), (6, 0.7))
+                    self.assertEqual(principale["start"], ["workspaces"])
+                    self.assertEqual(principale["center"], [])
+                    self.assertEqual(principale["end"], fin_attendue)
+                    self.assertEqual(principale["capsule_group"], [])
+                    # Barre secondaire intacte
+                    self.assertEqual(barres["bas"]["center"], ["t-taches"])
+                    # Définitions présentes pour les widgets utilisés
+                    for w in ["workspaces", *fin_attendue]:
+                        self.assertIn(w, export["widgets"])
+                    self.assertNotIn("nc/vpn:vpn", principale["end"])
+                    self.assertNotIn("nc/garmin:garmin", principale["end"])
+                    self.assertNotIn("group:sys", principale["end"])
+
+            # BARRE_MODULAIRE=non reste intact même si BARRE_CONTENU=minimale
+            with SessionBarres(nc, sortie) as session:
+                session.natif_cache = True
+                natif = tb.barre(nc, sortie, {"BARRE_MODULAIRE": "non", "BARRE_CONTENU": "minimale"})["bar"]
+            self.assertFalse(panneaux.exists())
+            self.assertNotIn("enabled", natif["default"])
+            self.assertNotIn("enabled", natif["bas"])

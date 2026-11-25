@@ -12,6 +12,9 @@ PanelWindow {
     required property var teinte
     required property rect obstacle
     required property rect obstacleRepos
+    property rect empriseLive: obstacle
+    property rect empriseStable: obstacle
+    property var mouv: Mouvement.pourEcran(screen ? screen.name : "")
     readonly property string position: barre.position ?? "top"
     readonly property bool vertical: position === "left" || position === "right"
     readonly property real epaisseur: Math.ceil(barre.thickness ?? 36)
@@ -24,10 +27,12 @@ PanelWindow {
     readonly property real pad: Math.round(barre.padding ?? 12)
     readonly property real espacement: barre.capsule ? Math.max(2, barre.widget_spacing ?? 6)
                                                      : Math.max(8, barre.widget_spacing ?? 8)
+    readonly property real glisseBord: Math.max(0, pad - Math.min(pad, 4))
+    readonly property real glisseVoisin: Math.max(0, espacement - Math.min(espacement, 2))
     readonly property var pastillesStart: Disposition.pastillesCote(barre, "start")
     readonly property var pastillesCenter: Disposition.pastillesCote(barre, "center")
     readonly property var pastillesEnd: Disposition.pastillesCote(barre, "end")
-    readonly property bool bloqueParIle: partageLigne(obstacle)
+    readonly property var reactionNeutre: ({ dx: 0, opacite: 1, largeurClip: 0 })
     readonly property real disponibleStart: {
         if (!screen || vertical) return 0
         const bord = partageLigne(obstacleRepos) ? Math.min(screen.width / 2 - 120, obstacleRepos.x - 10) : screen.width * 0.45
@@ -52,10 +57,12 @@ PanelWindow {
             return t === "nc/fenetres:titre" || t === "active_window" || t === "active-window"
         })
     }
-    function estOcculte(conteneurX, itemX, itemW) {
-        if (!bloqueParIle || itemW <= 0) return false
-        const gx = margeBouts + conteneurX + itemX
-        return gx < obstacle.x + obstacle.width && gx + itemW > obstacle.x
+    function reagir(lx, ly, w, h, cote, maxDec, estTitre) {
+        if (position !== "top" || w <= 0 || h <= 0) return reactionNeutre
+        return Disposition.reagirPastille(
+            { x: margeBouts + lx, y: margeBord + ly, width: w, height: h },
+            cote, position, maxDec, empriseLive, mouv ? mouv.reactionBarre : "glisser", 32, estTitre, 56
+        )
     }
 
     anchors {
@@ -109,6 +116,10 @@ PanelWindow {
                     id: itemStart
                     required property var modelData
                     required property int index
+                    readonly property bool estTitre: fen.aTitre(modelData)
+                    readonly property var reaction: fen.reagir(startFlow.x + itemStart.x, startFlow.y + itemStart.y,
+                        itemStart.width, itemStart.height, "start",
+                        index === 0 ? fen.glisseBord : fen.glisseVoisin, estTitre)
                     modele: modelData
                     barre: fen.barre
                     definitions: fen.definitions
@@ -116,7 +127,7 @@ PanelWindow {
                     police: fen.police
                     teinte: fen.teinte
                     limiteLargeur: {
-                        if (fen.vertical || !fen.disponibleStart || !fen.aTitre(modelData)) return 0
+                        if (fen.vertical || !fen.disponibleStart || !estTitre) return 0
                         let autres = 0
                         for (let i = 0; i < repStart.count; ++i) {
                             if (i === index || fen.aTitre(fen.pastillesStart[i])) continue
@@ -125,10 +136,11 @@ PanelWindow {
                         }
                         return Math.max(64, fen.disponibleStart - autres)
                     }
-                    readonly property bool masque: fen.estOcculte(startFlow.x, itemStart.x, itemStart.width)
-                    opacity: masque ? 0 : 1
-                    enabled: !masque
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                    largeurClip: reaction.largeurClip
+                    fondClip: fond.color
+                    opacity: reaction.opacite
+                    enabled: reaction.opacite > 0.15
+                    transform: Translate { x: itemStart.reaction.dx }
                 }
             }
         }
@@ -147,16 +159,18 @@ PanelWindow {
                 delegate: PastilleBarre {
                     id: itemCenter
                     required property var modelData
+                    readonly property var reaction: fen.reagir(centerFlow.x + itemCenter.x, centerFlow.y + itemCenter.y,
+                        itemCenter.width, itemCenter.height, "center", 0, false)
                     modele: modelData
                     barre: fen.barre
                     definitions: fen.definitions
                     ecran: fen.screen
                     police: fen.police
                     teinte: fen.teinte
-                    readonly property bool masque: fen.estOcculte(centerFlow.x, itemCenter.x, itemCenter.width)
-                    opacity: masque ? 0 : 1
-                    enabled: !masque
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                    fondClip: fond.color
+                    opacity: reaction.opacite
+                    enabled: reaction.opacite > 0.15
+                    transform: Translate { x: itemCenter.reaction.dx }
                 }
             }
         }
@@ -175,6 +189,10 @@ PanelWindow {
                 delegate: PastilleBarre {
                     id: itemEnd
                     required property var modelData
+                    required property int index
+                    readonly property var reaction: fen.reagir(endFlow.x + itemEnd.x, endFlow.y + itemEnd.y,
+                        itemEnd.width, itemEnd.height, "end",
+                        index === repEnd.count - 1 ? fen.glisseBord : fen.glisseVoisin, false)
                     modele: modelData
                     barre: fen.barre
                     definitions: fen.definitions
@@ -182,10 +200,10 @@ PanelWindow {
                     police: fen.police
                     teinte: fen.teinte
                     compact: fen.compactEnd
-                    readonly property bool masque: fen.estOcculte(endFlow.x, itemEnd.x, itemEnd.width)
-                    opacity: masque ? 0 : 1
-                    enabled: !masque
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                    fondClip: fond.color
+                    opacity: reaction.opacite
+                    enabled: reaction.opacite > 0.15
+                    transform: Translate { x: itemEnd.reaction.dx }
                 }
             }
         }

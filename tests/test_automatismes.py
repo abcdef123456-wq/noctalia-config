@@ -184,30 +184,38 @@ print("ok")''', d)
         fenêtres flottantes les ignore, et nc-session ne les range pas dans une session."""
         qml = REPO / "home/.config/quickshell/nc-ile"
         titres = {}
-        for fichier in ("Parametres.qml", "ConnexionJarvis.qml", "JarvisChat.qml", "Jarvis.qml", "ClesIA.qml"):
+        for fichier in ("Parametres.qml", "ConnexionJarvis.qml", "Jarvis.qml", "ClesIA.qml"):
             m = re.search(r'^\s*title:\s*Reglages\.t\("([^"]+)",\s*"([^"]+)"\)', (qml / fichier).read_text(), re.M)
             self.assertIsNotNone(m, fichier)
             titres[fichier] = set(m.groups())
         regles_lua = (REPO / "home/.config/hypr/nc/regles.lua").read_text()
-        # Faux hl : les motifs de titre de chaque règle sont notés
+        # Faux hl : les motifs de titre des règles de fenêtre et les règles de calque sont notés
         harness = r'''
-motifs = {}
-hl = setmetatable({ window_rule = function(r) motifs[r.name] = r.match.title end },
-                  { __index = function() return function() end end })
+motifs, couches = {}, {}
+hl = setmetatable({
+    window_rule = function(r) motifs[r.name] = r.match.title end,
+    layer_rule = function(r) couches[r.name] = (r.match.namespace or "") .. "|" .. tostring(r.no_anim == true) end,
+}, { __index = function() return function() end end })
 nc = setmetatable({ reglage = function(c, d) if c == "SAISIE" then return "souris" end return d end },
                   { __index = function() return function() return "" end end })
 dofile(FICHIER)
-for n, p in pairs(motifs) do print(n .. "\t" .. p) end
+for n, p in pairs(motifs) do print("W\t" .. n .. "\t" .. p) end
+for n, p in pairs(couches) do print("L\t" .. n .. "\t" .. p) end
 '''.replace("FICHIER", json.dumps(str(REPO / "home/.config/hypr/nc/regles.lua")))
         r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=10,
                            env=dict(PATH="/usr/bin:/bin"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        motifs = dict(l.split("\t", 1) for l in r.stdout.splitlines())
+        motifs, couches = {}, {}
+        for l in r.stdout.splitlines():
+            k, n, p = l.split("\t", 2)
+            (motifs if k == "W" else couches)[n] = p
         attendu = {"nc-connexion-jarvis": "ConnexionJarvis.qml", "nc-reglages-fenetre": "Parametres.qml",
-                   "nc-cles-ia": "ClesIA.qml", "jarvis-chat": "JarvisChat.qml", "jarvis-cockpit": "Jarvis.qml"}
+                   "nc-cles-ia": "ClesIA.qml", "jarvis-cockpit": "Jarvis.qml"}
         for regle, fichier in attendu.items():
             for titre in titres[fichier]:
                 self.assertRegex(titre, motifs[regle], f"{regle} ne reconnaît pas « {titre} »")
+        self.assertNotIn("jarvis-chat", motifs, "JarvisChat est désormais un calque Wayland, plus une window_rule")
+        self.assertEqual(couches.get("nc-jarvis-chat"), "^nc-jarvis-chat$|true")
         libres = motifs["souris-libres"].replace("negative:", "")
         for fichier in ("Parametres.qml", "Jarvis.qml"):
             for titre in titres[fichier]:
@@ -222,7 +230,7 @@ for n, p in pairs(motifs) do print(n .. "\t" .. p) end
         # nc-session
         session = (REPO / "home/.local/bin/nc-session").read_text()
         exclus = re.search(r"EXCLUS_TITRES = \{(.*?)\}", session)[1]
-        for fichier in ("Parametres.qml", "ConnexionJarvis.qml", "JarvisChat.qml", "Jarvis.qml", "ClesIA.qml"):
+        for fichier in ("Parametres.qml", "ConnexionJarvis.qml", "Jarvis.qml", "ClesIA.qml"):
             for titre in titres[fichier]:
                 self.assertIn(json.dumps(titre, ensure_ascii=False), exclus, titre)
 

@@ -11,19 +11,40 @@ Scope {
     required property var palette
     required property rect obstacle
     required property rect obstacleRepos
+    property rect empriseLive: obstacle
+    property rect empriseStable: obstacle
     property int reserveIleHaut: 0
+    readonly property var mouv: Mouvement.pourEcran(ecran ? ecran.name : "")
     readonly property string descriptionEcran: Hyprland.monitorFor(ecran)?.lastIpcObject?.description ?? ""
     readonly property var barresActives: Disposition.barresPourEcran(modele.barres || [], ecran.name, descriptionEcran)
     readonly property var barresContinues: barresActives.filter(b => b.enabled !== false && (b.background_opacity ?? 0) > 0)
-    readonly property var blocs: Disposition.blocs(barresActives)
+    readonly property var barresFlottantes: Disposition.barresFlottantes(barresActives)
     readonly property var reservesMap: Disposition.reserves(barresActives, reserveIleHaut)
     readonly property var reservesListe: ["top", "bottom", "left", "right"]
         .filter(b => reservesMap[b] > 0)
         .map(b => ({ bord: b, zone: reservesMap[b] }))
-    readonly property var places: {
-        panneaux.revision
-        const tailles = blocs.map((_, i) => panneaux.objectAt(i)?.mesure)
-        return Disposition.placer(blocs, tailles, ecran.width, ecran.height, obstacleRepos)
+    readonly property var placesFlottantes: {
+        flottantes.revision
+        const tailles = barresFlottantes.map((_, i) => flottantes.objectAt(i)?.tailles)
+        return Disposition.placerBarres(barresFlottantes, tailles, ecran.width, ecran.height, obstacleRepos)
+    }
+    readonly property bool pret: {
+        flottantes.revision; continues.revision
+        for (let i = 0; i < flottantes.count; ++i)
+            if ((flottantes.objectAt(i)?.nombrePastillesRendues ?? 0) > 0) return true
+        for (let i = 0; i < continues.count; ++i) {
+            const barre = continues.objectAt(i)
+            if (barre && barre.visible && aPastilleRendue(barre.contentItem)) return true
+        }
+        return false
+    }
+
+    function aPastilleRendue(item) {
+        if (item instanceof PastilleBarre)
+            return item.visible && item.opacity > 0.005 && item.width > 0 && item.height > 0
+        for (const enfant of item.children)
+            if (aPastilleRendue(enfant)) return true
+        return false
     }
 
     function teinte(role, defaut) {
@@ -49,6 +70,10 @@ Scope {
     }
 
     Instantiator {
+        id: continues
+        property int revision: 0
+        onObjectAdded: revision++
+        onObjectRemoved: revision++
         model: ecranPanneaux.barresContinues
         delegate: BarreContinue {
             required property var modelData
@@ -59,41 +84,31 @@ Scope {
             teinte: ecranPanneaux.teinte
             obstacle: ecranPanneaux.obstacle
             obstacleRepos: ecranPanneaux.obstacleRepos
+            empriseLive: ecranPanneaux.empriseLive
+            empriseStable: ecranPanneaux.empriseStable
+            mouv: ecranPanneaux.mouv
         }
     }
 
     Instantiator {
-        id: panneaux
+        id: flottantes
         property int revision: 0
-        model: ecranPanneaux.blocs
         onObjectAdded: revision++
         onObjectRemoved: revision++
-        delegate: Panneau {
+        model: ecranPanneaux.barresFlottantes
+        delegate: BarreFlottante {
             required property var modelData
             required property int index
-            bloc: modelData
+            dispositionRepos: ecranPanneaux.placesFlottantes[index] || ({ start: [], center: [], end: [] })
             screen: ecranPanneaux.ecran
+            barre: modelData
             definitions: ecranPanneaux.modele.widgets || ({})
             police: ecranPanneaux.modele.police || ""
             teinte: ecranPanneaux.teinte
-            placement: ecranPanneaux.places[index] || null
-            obstacle: ecranPanneaux.obstacle
-            limiteLargeur: {
-                if (modelData.cote !== "start" || modelData.barre.position !== "top") return 0
-                const axe = ecranPanneaux.ecran.width
-                const marge = Math.round(typeof modelData.barre.margin_ends === "string"
-                    ? axe * parseFloat(modelData.barre.margin_ends) / 100 : (modelData.barre.margin_ends ?? 0))
-                const bordIle = Math.min(axe / 2 - 120, ecranPanneaux.obstacleRepos.x - 10)
-                return Math.max(80, Math.min(240, bordIle - marge - 130))
-            }
-            compact: {
-                if (modelData.cote !== "end" || modelData.barre.position !== "top") return false
-                if (ecranPanneaux.ecran.width < 1450) return true
-                const pastilles = Disposition.pastillesCote(modelData.barre, "end")
-                let nb = 0
-                for (const p of pastilles) nb += p.membres.length
-                return nb >= 9
-            }
+            empriseLive: ecranPanneaux.empriseLive
+            empriseStable: ecranPanneaux.empriseStable
+            obstacleRepos: ecranPanneaux.obstacleRepos
+            mouv: ecranPanneaux.mouv
         }
     }
 }

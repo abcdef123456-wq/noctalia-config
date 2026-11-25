@@ -5,6 +5,7 @@ import "WidgetBarreFenetres.js" as Fenetres
 Item {
     id: w
     required property Item barre
+    readonly property var mouv: Mouvement.pourEcran(barre.ecran ? barre.ecran.name : "")
     readonly property var options: barre.definition
     readonly property var moniteur: barre.ecran ? Hyprland.monitorFor(barre.ecran) : Hyprland.focusedMonitor
     readonly property var sorties: options.monitors || (options.show_all_outputs ? ["*"] : [])
@@ -76,8 +77,8 @@ Item {
                     radius: Math.min(width / 2, height / 2, w.style === "regular" ? Number(w.options.capsule_radius ?? 100) : 100)
                     color: w.style === "minimal" ? "transparent" : cel.actif || cel.modelData.urgent || cel.point ? cel.fond
                         : Qt.alpha(cel.fond, cel.occupe ? 0.2 : 0.33)
-                    Behavior on width { NumberAnimation { duration: 120 } }
-                    Behavior on height { NumberAnimation { duration: 120 } }
+                    Behavior on width { enabled: w.mouv.actif; NumberAnimation { duration: w.mouv.dureeCourte; easing.type: w.mouv.courbe } }
+                    Behavior on height { enabled: w.mouv.actif; NumberAnimation { duration: w.mouv.dureeCourte; easing.type: w.mouv.courbe } }
                     Grid {
                         id: contenu
                         anchors.centerIn: parent

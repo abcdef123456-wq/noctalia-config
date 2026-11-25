@@ -80,9 +80,9 @@ class Spotlight(unittest.TestCase):
     def test_entree_depuis_une_page_le_contenu_part_de_zero(self):
         """D-A : page -> Spotlight. La page sort en 80 ms, le contenu monte en 170 ms depuis 0 ; calcul image par image."""
         sortie_page = self.lire_duree(r"duration: fen\.ouverte && !fen\.recherche \? 200 : (\d+);")
-        self.assertRegex(self.src, r"id: entreeSpot;[^\n]*duration: Couleurs\.anim\.spot;")   # 170 ms par défaut (test_ile_allure)
+        self.assertRegex(self.src, r"id: entreeSpot;[^\n]*duration: fen\.mouv\.dureeSpot;")   # 170 ms par défaut (Mouvement)
         entree = 170
-        self.assertIn("if (!spotDepuisPilule && !Notifs.enPause) { fonduSpot = 0; entreeSpot.start() }", self.src)
+        self.assertIn("if (!spotDepuisPilule && !Notifs.enPause && fen.mouv.actif) { fonduSpot = 0; entreeSpot.start() }", self.src)
         self.assertIn("entreeSpot.stop(); fonduSpot = 1", self.src)   # Échap, Super + R deux fois, pilule : retour à 1
         self.assertIn('id: entreeSpot;', self.src)
         self.assertRegex(self.src, r"id: entreeSpot;[^\n]*easing\.type: Easing\.InOutQuad")
@@ -122,7 +122,7 @@ class Spotlight(unittest.TestCase):
                       " || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0", cadre)
         self.assertIn("visible: opacity > 0.01", cadre)
         self.assertIn("readonly property real e: Couleurs.aContour ? Couleurs.epaisseur : 0", cadre)
-        self.assertIn("Behavior on opacity { NumberAnimation { duration: Couleurs.anim.contour } }", cadre)
+        self.assertIn("Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }", cadre)
 
     def test_point_et_bulle_attendent_la_fin_du_retour(self):
         for nom in ("pointPrive", "bulle"):

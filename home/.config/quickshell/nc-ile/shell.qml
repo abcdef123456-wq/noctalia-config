@@ -52,16 +52,20 @@ ShellRoot {
     }
     readonly property bool panneauxActifs: (modelePanneaux.barres?.length ?? 0) > 0
     readonly property bool bandeIle: Reglages.val("ILE_BANDE", "non") === "oui"
-    Variants {
+    readonly property Variants ecransIle: Variants {
         model: Quickshell.screens
         Ile {
             id: ile
+            readonly property bool panneauxRendus: panneaux.pret
             Panneaux {
+                id: panneaux
                 ecran: ile.modelData
                 modele: racine.modelePanneaux
                 palette: racine.palettePanneaux
                 obstacle: ile.obstaclePanneaux
                 obstacleRepos: ile.obstaclePanneauxRepos
+                empriseLive: ile.empriseLive
+                empriseStable: ile.empriseStable
                 reserveIleHaut: racine.panneauxActifs && racine.bandeIle ? 42 : 0
             }
         }
@@ -83,9 +87,51 @@ ShellRoot {
     // Cockpit chargé seulement à la demande ; aucune capture ni connexion de backend au démarrage.
     property var jarvisFenetre: null
     property Component composantJarvis: null
-    // Petite fenêtre de chat JARVIS (Super + Maj + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
+    // Tiroir de chat JARVIS (Super + Maj + A, nc-jarvis chat) : pré-chauffé en asynchrone sans bloquer l'interface
     property var jarvisChatFenetre: null
     property Component composantJarvisChat: null
+    property var incubateurJarvisChat: null
+    property var jarvisChatEnAttente: null
+    Timer {
+        id: prechauffeJarvisChat
+        interval: 2500
+        running: Reglages.val("IA_MODE", "auto") !== "non"
+        repeat: false
+        onTriggered: racine.preparerJarvisChat()
+    }
+    function preparerJarvisChat() {
+        if (racine.jarvisChatFenetre || racine.incubateurJarvisChat) return
+        if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
+        if (racine.composantJarvisChat.status !== Component.Ready) {
+            console.warn("Chat JARVIS indisponible : " + racine.composantJarvisChat.errorString())
+            racine.jarvisChatEnAttente = null
+            return
+        }
+        const inc = racine.composantJarvisChat.incubateObject(racine, {}, Qt.Asynchronous)
+        if (!inc) return
+        const finaliser = function () {
+            if (inc.status === Component.Ready) {
+                racine.jarvisChatFenetre = inc.object
+                racine.incubateurJarvisChat = null
+                racine.brancherIle(racine.jarvisChatFenetre)
+                const attente = racine.jarvisChatEnAttente
+                racine.jarvisChatEnAttente = null
+                if (attente && racine.jarvisChatFenetre) {
+                    if (attente.action === "echange") racine.jarvisChatFenetre.montrerEchange(attente.ecran)
+                    else racine.jarvisChatFenetre.basculer(attente.ecran)
+                }
+            } else if (inc.status === Component.Error) {
+                racine.incubateurJarvisChat = null
+                racine.jarvisChatEnAttente = null
+            }
+        }
+        if (inc.status !== Component.Loading) {
+            finaliser()
+        } else {
+            racine.incubateurJarvisChat = inc
+            inc.onStatusChanged = finaliser
+        }
+    }
     // Fenêtre « Connexion JARVIS » (nc-assistant configurer) : créée à la demande
     property var connexionFenetre: null
     property Component composantConnexion: null
@@ -337,6 +383,8 @@ ShellRoot {
         function panneauxPrets(generation: string): string {
             return racine.panneauxActifs && Quickshell.screens.length > 0
                 && Reglages.val("BARRE_MODULAIRE", "non") === "oui"
+                && ecransIle.instances.length === Quickshell.screens.length
+                && ecransIle.instances.every(ile => ile.panneauxRendus)
                 && racine.modelePanneaux.generation === generation ? generation : ""
         }
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
@@ -457,6 +505,8 @@ ShellRoot {
         function pageOu(nom: string, repli: string): void { page(Etat.pageOu(nom, repli)) }
         // Cockpit : déjà ouvert, le même raccourci le ramène ici, le met devant ou le range (basculerOutil)
         function jarvis(): void {
+            if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible && !racine.jarvisChatFenetre.epingle)
+                racine.jarvisChatFenetre.fermerTiroir()
             if (racine.jarvisFenetre && racine.jarvisFenetre.visible) { racine.basculerOutil(racine.jarvisFenetre, "JARVIS"); return }
             Etat.fermer()
             if (!racine.jarvisFenetre) {
@@ -473,34 +523,26 @@ ShellRoot {
             }
         }
         function jarvisFermer(): void { if (racine.jarvisFenetre) racine.jarvisFenetre.close() }
-        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, le même raccourci la ramène ici, la met devant ou la
-        // range (basculerOutil : la conversation reste)
+        // Tiroir de chat JARVIS : bascule réversible depuis la pilule de l'île (ou mis en attente pendant le pré-chauffage)
         function jarvisChat(): void {
-            if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible) { racine.basculerOutil(racine.jarvisChatFenetre, "JARVIS Chat"); return }
-            if (!racine.jarvisChatFenetre) {
-                if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
-                if (racine.composantJarvisChat.status !== Component.Ready) {
-                    console.warn("Chat JARVIS indisponible : " + racine.composantJarvisChat.errorString())
-                    return
-                }
-                racine.jarvisChatFenetre = racine.composantJarvisChat.createObject(racine)
-                racine.brancherIle(racine.jarvisChatFenetre)
-            }
-            if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+            const ecran = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+            if (racine.jarvisChatFenetre) { racine.jarvisChatFenetre.basculer(ecran); return }
+            racine.jarvisChatEnAttente = { action: "basculer", ecran: ecran }
+            racine.preparerJarvisChat()
         }
         // Une réponse de l'IA du bureau (nc-ia : fichier d'échange privé), versée dans la conversation
         function iaReponse(chemin: string): void { AssistantEtat.recevoirReponse(chemin) }
-        // Notification de cette réponse cliquée : la fenêtre de chat, sur l'échange
+        // Notification de cette réponse cliquée : le tiroir de chat, sur l'échange
         function chatReponse(): void {
-            if (!racine.jarvisChatFenetre) {
-                if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
-                if (racine.composantJarvisChat.status !== Component.Ready) return
-                racine.jarvisChatFenetre = racine.composantJarvisChat.createObject(racine)
-                racine.brancherIle(racine.jarvisChatFenetre)
-            }
-            racine.jarvisChatFenetre.montrerEchange(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+            const ecran = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+            if (racine.jarvisChatFenetre) { racine.jarvisChatFenetre.montrerEchange(ecran); return }
+            racine.jarvisChatEnAttente = { action: "echange", ecran: ecran }
+            racine.preparerJarvisChat()
         }
-        function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
+        function jarvisChatFermer(): void {
+            racine.jarvisChatEnAttente = null
+            if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close()
+        }
         // Réglages en fenêtre : déjà ouverte, le même appel la ramène ici, la met devant ou la range (basculerOutil)
         function reglages(): void {
             if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.basculerOutil(racine.reglagesFenetre, Reglages.t("Réglages du bureau", "Desktop settings")); return }

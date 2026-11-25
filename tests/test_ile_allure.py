@@ -158,7 +158,7 @@ class Source(unittest.TestCase):
     def test_ile_lit_les_reglages(self):
         ile = (QML / "Ile.qml").read_text()
         for attendu in ("Couleurs.rayon(", "Qt.alpha(Couleurs.fond, Couleurs.verre)", "Couleurs.epaisseur",
-                        "Couleurs.anim.raideur", "Couleurs.anim.duree", "Couleurs.anim.spot", "Couleurs.lueur"):
+                        "Mouvement.pourEcran", "fen.mouv.raideur", "fen.mouv.duree", "fen.mouv.dureeSpot", "Couleurs.lueur"):
             self.assertIn(attendu, ile)
         texte = (QML / "Texte.qml").read_text()
         self.assertIn("Couleurs.majuscules", texte)

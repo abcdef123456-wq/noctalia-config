@@ -30,7 +30,7 @@ Niveau 1 (sans root) :
 | `ECO_AUTO` | 0, 10, 15, 20, 30 | batterie |
 | `ECO_BRIGHTNESS_MAX` | 0, 30, 40, 50, 60 | rétroéclairage |
 | `FOND_ANIME` | `non`, `aurore`, `vivant` | |
-| `ILE_ANIM_BATTERIE` | `douces`, `continues` | batterie |
+| `ILE_ANIM_BATTERIE` | `douces`, `aucune`, `continues` | batterie |
 | `ILE_METEO`, `ILE_PRESSE`, `ILE_TELECHARGEMENTS` | `oui`, `non` | |
 | `FENETRES_FLOU`, `FENETRES_ANIMATIONS` | `oui`, `non` | |
 | `FENETRES_CARACTERE` | `auto`, `doux`, `vif`, `sec`, `rebond`, `aucun` | Caractère des animations (courbes et durée) ; `auto` = comme avant. L'Économie coupe toujours les animations. |
