@@ -38,8 +38,7 @@
     "DOCK_POSITION": "bottom",
     "DOCK_AUTO": "non",
     "DOCK_TAILLE": "44",
-    "BARRE_SYSTEME": "non",
-    "WIDGETS_BUREAU": "oui"
+    "BARRE_SYSTEME": "non"
   },
   "noctalia": {
     "bar.default": {
@@ -95,25 +94,5 @@
   },
   "fonds": "vaporwave",
   "fond_de_depart": "vaporwave-mer.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-geante",
-      "coin": "haut-gauche",
-      "taille": "grand",
-      "style": "carte"
-    },
-    {
-      "type": "anneau",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte-ronde"
-    },
-    {
-      "type": "musique",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte"
-    }
-  ]
+  "credits": []
 }

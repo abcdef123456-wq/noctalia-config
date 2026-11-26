@@ -27,7 +27,7 @@ A7 = {"apple": {"FENETRES_ARRONDI": "20", "FENETRES_BORDURE": "0", "DOCK_TAILLE"
 # Lignes ajoutées après l'ancien style.conf à la réapplication, EXACTES et dans l'ordre, thème par thème (relevées
 # sur la tranche B ; un thème qui change ses réglages met ce fichier à jour, sinon le test le signale)
 AJOUTS = json.loads((REPO / "tests/donnees/style-conf-reapplique.json").read_text(encoding="utf-8"))
-CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits", "widgets"}
+CLES = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits"}
 
 
 def tous():
@@ -127,9 +127,6 @@ class Equivalence(Base):
                 # Seul ajout voulu depuis les anciens styles : le dossier de fonds du thème, s'il en a un
                 self.assertEqual(vals.pop("FONDS_DOSSIER", ""),
                                  str(self.home / "Pictures/Wallpapers" / d["fonds"]) if d["fonds"] else "")
-                # et ses widgets (champ « widgets ») en une ligne WIDGETS_THEME, s'il en a (contenu : Reapplication)
-                self.assertEqual("WIDGETS_THEME" in vals, bool(d["widgets"]))
-                vals.pop("WIDGETS_THEME", None)
                 attendu = dict(styles.get(nom, {}), **d["reglages"]) if nom in ENRICHIS else styles.get(nom, {})
                 self.assertEqual(vals, attendu)
 
@@ -179,6 +176,37 @@ class Reapplication(Base):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.style_conf(), avant)
 
+    def test_anciens_reglages_ignores(self):
+        """Les clés retirées d'une ancienne configuration n'empêchent ni lecture ni réapplication."""
+        r = self.nc("set", "STYLE", "nord")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        config = self.home / ".config/nc/reglages.conf"
+        avant = "STYLE=nord\nWIDGETS_BUREAU=oui\nWIDGETS_PLAQUE=non\n"
+        config.write_text(avant, encoding="utf-8")
+        r = self.nc("get", "FENETRES_ARRONDI")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip().split()[-1], "6")
+        r = self.nc("appliquer")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(config.read_text(encoding="utf-8"), avant)
+        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "6")
+        self.assertFalse(any(k.startswith("WIDGETS_") for k in self.lignes_style()))
+
+    def test_ancien_theme_perso_garde_ses_autres_reglages(self):
+        """Un thème perso copié d'un ancien thème (clés WIDGETS_*) s'applique ; une autre clé inconnue reste refusée."""
+        self.ecrire_theme("ancien", reglages={"FENETRES_ARRONDI": "9", "WIDGETS_BUREAU": "oui",
+                                              "WIDGETS_POLICE": "Doto, JetBrains Mono", "WIDGETS_PLAQUE": "non"})
+        r = self.nc("set", "STYLE", "ancien")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.nc("appliquer")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "9")
+        self.assertFalse(any(k.startswith("WIDGETS_") for k in self.lignes_style()))
+        self.ecrire_theme("mauvais", reglages={"WIDGETS_BUREAU": "oui", "WIDGETS_AUTRE": "oui"})
+        r = self.nc("set", "STYLE", "mauvais")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("WIDGETS_AUTRE", r.stdout + r.stderr)
+
     def test_dossier_de_fonds_au_choix_puis_garde(self):
         """Choisir le thème pose son dossier de fonds ; une réapplication ensuite le garde."""
         self.nc("set", "STYLE", "dracula")
@@ -219,7 +247,6 @@ class Validation(Base):
                 self.assertEqual(d["nom"], f.stem)
                 self.assertEqual(set(d["libelle"]), {"fr", "en"})
                 self.assertIn(d["palette"]["source"], ("builtin", "custom", "fond"))
-                self.assertIsInstance(d["widgets"], list)      # leur contenu : test_widgets_theme.ThemesDuDepot
                 self.assertIn(d["theme_sync"]["bordure"], ("degrade", "gris"))
                 self.assertIn(d["theme_sync"]["ombre"], ("coloree", "noire"))
                 if d["fonds"]:
