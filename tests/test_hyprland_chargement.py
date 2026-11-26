@@ -235,7 +235,7 @@ class PleinEcranEpinglee(unittest.TestCase):
             "  bind = function(k, f) touches = touches or {}; touches[k] = f\n").replace(
             "dsp = proxy, dispatch = function() end,",
             "dsp = setmetatable({ window = setmetatable({"
-            " fullscreen_state = function(t) return { 'plein', t.action } end,"
+            " fullscreen_state = function(t) return { 'plein', t.internal, t.client, tostring(t.layout_aware) } end,"
             " resize = function(t) return { 'taille', t.x, t.y } end,"
             " move = function(t) return { 'place', t.x, t.y } end }, { __index = function() return proxy end }) },"
             " { __index = function() return proxy end }),"
@@ -248,6 +248,11 @@ local fen = { address = "0xabc", floating = true, pinned = true, fullscreen = 0,
 hl.get_active_window = function() return fen end
 f()
 fen.fullscreen = 2; fen.at = { x = 0, y = 0 }; fen.size = { x = 3840, y = 2160 }
+f()
+for _, l in ipairs(faits) do print(l) end
+-- Partir d'un maximisé (aimantation ou application) doit sortir, pas entrer en plein écran.
+faits = {}
+fen.floating = false; fen.pinned = false; fen.fullscreen = 1
 f()
 for _, l in ipairs(faits) do print(l) end
 for _, h in ipairs(handlers["window.close"] or {}) do h({ address = "0xabc" }) end
@@ -264,7 +269,8 @@ print("reste", nc.places_plein_ecran["0xabc"] == nil)
                                capture_output=True, timeout=30, env=e)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         lignes = r.stdout.strip().splitlines()
-        self.assertEqual(lignes[-5:], ["plein toggle", "plein toggle", "taille 800 500", "place 300 200", "reste\ttrue"])
+        self.assertEqual(lignes[-6:], ["plein 2 0 false", "plein 0 0 false", "taille 800 500", "place 300 200",
+                                       "plein 0 0 false", "reste\ttrue"])
         self.assertIn("allow_pin_fullscreen = true", (HYPR / "nc/apparence.lua").read_text())
 
 

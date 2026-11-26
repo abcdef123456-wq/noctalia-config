@@ -249,6 +249,33 @@ class AutomatismesPlein(unittest.TestCase):
         out = self.lancer('emettre("window.close", { address = "0x1a\\n0x1a; rm" })\n' + self.COMMANDES, plein="0x1a 1 0x2\n")
         self.assertEqual(out, "")
 
+    def test_sortie_du_plein_ecran_defilant_recale_seulement_deux_demi_colonnes(self):
+        out = self.lancer(r'''
+local function fenetre(a, colonne, largeur)
+    return { address = a, mapped = true, fullscreen = 0,
+             layout = { column = { index = colonne, width = largeur } } }
+end
+hl.dsp = { layout = function(cmd) return cmd end }
+hl.dispatch = print
+local function aller_retour(autre, en_plus, gestionnaire)
+    local active = fenetre("0x1", 1, 0.5)
+    active.workspace = { get_windows = function() return { active, autre, en_plus } end }
+    hl.get_active_window = function() return active end
+    active.fullscreen, active.fullscreen_handler = 2, gestionnaire
+    emettre("window.fullscreen", active)
+    active.fullscreen = 0
+    emettre("window.fullscreen", active)
+    for _, t in ipairs(timers) do t.f() end
+    timers = {}
+end
+aller_retour(fenetre("0x2", 0, 0.6), nil, "scrolling")               -- largeur personnelle
+aller_retour(fenetre("0x2", 1, 0.5), nil, "scrolling")               -- même colonne
+aller_retour(fenetre("0x2", 0, 0.5), fenetre("0x3", 2, 0.5), "scrolling") -- trois colonnes
+aller_retour(fenetre("0x2", 0, 0.5), nil, "default")                 -- Super + F
+aller_retour(fenetre("0x2", 0, 0.5), nil, "scrolling")
+''')
+        self.assertEqual(out, "fit all")
+
 
 if __name__ == "__main__":
     unittest.main()
