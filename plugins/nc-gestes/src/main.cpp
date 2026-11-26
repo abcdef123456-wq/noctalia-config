@@ -37,7 +37,7 @@ namespace {
     };
     // Noms identiques aux valeurs de FENETRES_GESTE (nc/apparence.lua), qui garde pour chacun un repli natif.
     constexpr SGeste GESTES[] = {
-        {"goutte", GESTE_GOUTTE, 620}, {"paravent", 2, 360}, {"coupe", 3, 320},    {"horizon", 4, 340},  {"maree", 5, 380},
+        {"goutte", GESTE_GOUTTE, 680}, {"paravent", 2, 360}, {"coupe", 3, 320},    {"horizon", 4, 340},  {"maree", 5, 380},
         {"eventail", 6, 360},          {"rideau", 7, 320},   {"cathodique", 8, 300}, {"fuite", 9, 360},  {"vantaux", 10, 320},
         {"balayage", 11, 280},         {"averse", 12, 300},  {"paliers", 13, 290},  {"contour", 14, 300},
     };

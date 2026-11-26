@@ -2,12 +2,12 @@
 
 Plugin Hyprland 0.57.2 des gestes d'ouverture de fenêtres de noctalia-config : quatorze gestes de thème dessinés
 sur la vraie texture de la fenêtre, par un seul programme GL. La signature d'Émail (Rose Aube) est **la goutte** :
-la vraie fenêtre naît sous la pilule de l'île, gonfle jusqu'aux deux tiers de sa largeur finale en pendant au bout
-d'un col liquide, le col s'amincit et cède, puis la fenêtre tombe à sa place.
+la vraie fenêtre naît sous la pilule de l'île, gonfle jusqu'aux quatre cinquièmes de sa largeur finale en pendant au
+bout d'un col liquide, s'alourdit et s'étire pendant que le col s'amincit et cède, puis la fenêtre tombe à sa place.
 
 | Geste | Thème | Durée | Ce qu'on voit |
 |---|---|---:|---|
-| `goutte` | rose-aube | 620 ms | gonfle sous l'île, col, rupture, chute |
+| `goutte` | rose-aube | 680 ms | gonfle sous l'île (60 % du temps), col, rupture, chute |
 | `paravent` | sakura | 360 ms | deux volets se déplient depuis la ligne médiane |
 | `coupe` | solarized-clair | 320 ms | deux repères en L tracent le cadre, puis le remplissent |
 | `horizon` | nord | 340 ms | remonte de derrière la ligne de son bord bas |

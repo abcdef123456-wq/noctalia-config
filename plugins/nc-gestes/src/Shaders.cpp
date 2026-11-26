@@ -33,8 +33,10 @@ uniform int   u_mode;       // geste : 1 goutte, 2..14 voir geste()
 out vec4 fragColor;
 
 const float PI        = 3.14159265;
-const float T_RUPTURE = 0.5;
-const float LARGEUR_RUPTURE = 0.66; // part de la largeur finale atteinte avant la rupture
+const float T_RUPTURE = 0.6;
+const float LARGEUR_RUPTURE = 0.8;  // part de la largeur finale atteinte avant la rupture
+const float ETIREMENT   = 0.18;     // hauteur gagnée sous son poids juste avant la rupture
+const float AFFAISSEMENT = 0.3;     // le col s'allonge d'autant pendant que la goutte s'alourdit
 
 float sdBox(vec2 p, vec2 b, float r) {
     r = min(r, min(b.x, b.y));
@@ -94,21 +96,23 @@ vec4 goutte(vec2 p, float t) {
     float dw, dh, cx, haut, rr, vol;
     float dCol = 1e5, dCap = 1e5, k = 0.0;
 
-    // Collerette sous la pilule ; en grande partie cachée par l'île, au-dessus des fenêtres.
+    // Collerette sous la pilule ; en grande partie cachée par l'île, au-dessus des fenêtres. Elle s'enfle avec la goutte.
     float retrait = 1.0 - smoothstep(T_RUPTURE, T_RUPTURE + 0.12, t);
-    float capDemi = min(u_anchor.z * 0.5 - 4.0 * s, 46.0 * s) * retrait;
+    float enfle   = 1.0 + 0.22 * sin(PI * clamp(t / T_RUPTURE, 0.0, 1.0));
+    float capDemi = min(u_anchor.z * 0.5 - 4.0 * s, 46.0 * s) * enfle * retrait;
     if (capDemi > 0.5)
         dCap = sdBox(p - vec2(aC.x, bordIle - dir * 4.0 * s), vec2(capDemi, 8.0 * s * max(retrait, 0.2)), 6.0 * s);
 
     if (t <= T_RUPTURE) {
-        // Gonflement : la vraie fenêtre grossit sous l'île, avec du volume avant toute rupture.
+        // Gonflement : la vraie fenêtre grossit sous l'île, puis pend en s'alourdissant pendant que le col s'amincit.
         float g       = t / T_RUPTURE;
         float bud     = 1.0 - pow(1.0 - g, 3.0);
-        float tension = smoothstep(0.24, T_RUPTURE, t);
+        float poids   = smoothstep(0.35, 1.0, g);
+        float tension = smoothstep(0.3, T_RUPTURE, t);
         k             = pow(tension, 1.35);
         dw   = mix(0.14, LARGEUR_RUPTURE, bud) * ww;
-        dh   = dw * (wh / ww) * (1.0 + 0.075 * sin(PI * g));
-        float ecart = mix(4.0 * s, ecartMax, bud);
+        dh   = dw * (wh / ww) * (1.0 + ETIREMENT * poids);
+        float ecart = mix(4.0 * s, ecartMax, bud) * (1.0 + AFFAISSEMENT * poids);
         cx   = centreCorps(mix(aC.x, winC.x, 0.18 * bud), dw, innerPos.x, ww);
         haut = bordIle + dir * ecart;
         rr   = mix(min(dw, dh) * 0.44, rondFin, bud);
@@ -121,9 +125,9 @@ vec4 goutte(vec2 p, float t) {
         float vol0   = 1.0 - pow(1.0 - f, 4.0);
         float dw0    = LARGEUR_RUPTURE * ww;
         dw   = mix(dw0, ww, vol0);
-        dh   = mix(dw0 * wh / ww, wh, vol0) * (1.0 + 0.05 * sin(PI * vol0));
+        dh   = mix(dw0 * wh / ww * (1.0 + ETIREMENT), wh, vol0) * (1.0 + 0.05 * sin(PI * vol0));
         cx   = mix(centreCorps(mix(aC.x, winC.x, 0.18), dw0, innerPos.x, ww), winC.x, vol0);
-        haut = mix(bordIle + dir * ecartMax, bordFen, vol0);
+        haut = mix(bordIle + dir * ecartMax * (1.0 + AFFAISSEMENT), bordFen, vol0);
         rr   = mix(rondFin, u_radius, vol0);
         vol  = 1.0 - vol0;
         // Ménisque resté sous l'île et queue du corps qui se résorbent.
