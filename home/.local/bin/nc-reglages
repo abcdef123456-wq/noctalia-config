@@ -561,9 +561,11 @@ REGLAGES = [
       [("texte", L("Couleur du texte", "Text color")), ("accent", L("Couleur d'accent", "Accent color"))]),
     R("ILE_HEURE", "Île", L("Format de l'heure", "Time format"), "choix", "24", "",
       [("24", L("24 h  (14:05)", "24-hour  (14:05)")), ("12", L("12 h  (2:05 PM)", "12-hour  (2:05 PM)"))]),
-    R("ILE_SURVOL", "Île", L("Ouvrir au survol", "Open on hover"), "ouinon", "oui",
-      L("L'île s'ouvre quand le curseur s'attarde dessus, et se referme quand il en sort (sauf si tu as cliqué dedans).",
-        "The island opens when the pointer rests on it, and closes when it leaves (unless you clicked inside).")),
+    R("ILE_SURVOL", "Île", L("Agrandir au survol", "Grow on hover"), "ouinon", "oui",
+      L("Au survol, l'île s'agrandit un peu : la loupe de la recherche et, pendant une musique, la progression du morceau. "
+        "Elle se replie quand le curseur sort ; le survol seul n'ouvre rien.",
+        "On hover, the island grows a little: the search magnifier and, while music plays, the track progress. "
+        "It folds back when the pointer leaves; hovering alone never opens anything.")),
     R("ILE_LANCEUR_FONDU", "Île", L("Le lanceur sort de la pilule", "Launcher grows out of the pill"), "ouinon", "non",
       L("Super + X (espace de code) : le panneau part exactement de la pilule de l'île, grandit avec un ressort, puis rétrécit vers elle "
         "à la fermeture ; la pilule se cache le temps de l'animation. Ouverture directe avec les animations réduites, pendant un "
@@ -3899,9 +3901,23 @@ def appliquer_curseur(vals):
 _style_choisi = [""]       # thème que la personne vient de choisir (regler STYLE), pas une simple réapplication
 
 
+def ile_ligne(theme):
+    """Hauteur de l'île fermée, sur une seule ligne : celle des pastilles de la barre du haut du thème (épaisseur ×
+    capsule_thickness, 0,86 dans config.toml), arrondie vers le bas pour ne jamais dépasser les pastilles, entre 24 et
+    40 px. La barre de config.toml (36 de haut) donne 30 ; sans barre en haut, 30 (l'île est seule dans sa bande)."""
+    try:
+        pos = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))["position"]
+    except (OSError, KeyError, ValueError):
+        pos = "top"
+    b = theme.get("noctalia", {}).get("bar.default", {})
+    if b.get("position", pos) != "top":
+        return 30
+    return max(24, min(40, int(round(b.get("thickness", 36) * b.get("capsule_thickness", 0.86), 6))))
+
+
 def ile_y(theme):
-    """Hauteur de l'île fermée (30 px) depuis le haut de l'écran, centrée dans la barre du haut du thème ; la barre de
-    config.toml (6 du bord, 36 de haut) donne 9. Sans barre en haut, l'île garde 9 (la bande ILE_BANDE, elle, est
+    """Hauteur de l'île fermée (ile_ligne) depuis le haut de l'écran, centrée dans la barre du haut du thème ; la barre
+    de config.toml (6 du bord, 36 de haut) donne 9. Sans barre en haut, l'île garde 9 (la bande ILE_BANDE, elle, est
     traitée par l'île : centrée dans ses 42 px)."""
     try:
         cfg = barre_config(os.path.join(NOCTALIA_DIR, "config.toml"))
@@ -3911,7 +3927,7 @@ def ile_y(theme):
     b = theme.get("noctalia", {}).get("bar.default", {})
     if b.get("position", pos) != "top":
         return 9
-    return int(b.get("margin_edge", 6) + (b.get("thickness", 36) - 30) // 2)
+    return int(b.get("margin_edge", 6) + (b.get("thickness", 36) - ile_ligne(theme)) // 2)
 
 
 def appliquer_style(vals):
@@ -3935,6 +3951,8 @@ def appliquer_style(vals):
     y = ile_y(theme)
     if y != 9:                                     # 9 : barre de base (6 du bord, 36 de haut), rien d'écrit
         prereglage["ILE_Y"] = str(y)
+    if ile_ligne(theme) != 30:                     # 30 : barre de base, rien d'écrit
+        prereglage["ILE_LIGNE"] = str(ile_ligne(theme))
     texte += "".join(f"{k}={v}\n" for k, v in prereglage.items())
     if texte != ancien:
         os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)

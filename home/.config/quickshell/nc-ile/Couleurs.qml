@@ -135,4 +135,9 @@ Singleton {
     // Contour : dégradé des fenêtres, filet de l'accent, ou rien
     readonly property var degrade: terminal && p.bordure ? p.bordure : [accent, accent, accent]
     readonly property bool aContour: contour !== "aucun" && (terminal || contour === "discret")
+
+    // Émail (île fermée, Ile.qml) : surface mate du fond du thème, une lumière douce en haut et un reflet fin sur
+    // l'arête ; du blanc posé sur le fond, donc teinté par chaque thème. Pas de flou, pas de contour
+    readonly property color emailLumiere: Qt.rgba(1, 1, 1, sombre ? 0.06 : 0.3)
+    readonly property color emailReflet: Qt.tint(fond, Qt.rgba(1, 1, 1, sombre ? 0.4 : 0.85))
 }

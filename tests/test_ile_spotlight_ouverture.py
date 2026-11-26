@@ -62,8 +62,9 @@ class Spotlight(unittest.TestCase):
         self.assertEqual(self.compact(500, retour_spot=False, repos=0), 0.0)
 
     def test_super_r_sur_une_page_ouverte_pas_de_clignotement(self):
-        # Comparée à la largeur de la pilule : une pilule à titre et artiste dépasse 300 px, et reste une pilule
-        self.assertIn("spotDepuisPilule = ile.width <= compact.largeur + 1", self.src)
+        # Comparée à la largeur de la pilule : une pilule à titre et artiste dépasse 300 px, et reste une pilule ;
+        # survolée, elle a la place de la loupe en plus (SurvolIle.qml), loin des 432 px d'une page
+        self.assertIn("spotDepuisPilule = ile.width <= compact.largeur + survolIle.largeurEnPlus + 1", self.src)
         for largeur in (432, 440, 460):
             for l in range(largeur, 481, 10):
                 self.assertEqual(self.compact(l, recherche=True, depuis_pilule=False), 0.0, f"{l} px : l'heure ne revient pas")

@@ -113,10 +113,7 @@ Singleton {
     }
 
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
-    // Ouverte en passant le curseur dessus (Ile.qml) : se referme quand il en sort, tant qu'on n'a pas cliqué dedans
-    property bool parSurvol: false
     function basculer(ecran, versCentre) {
-        parSurvol = false
         if (ecranOuvert === ecran) { fermer(); return }
         if (!vues.length) return
         recherche = false
@@ -128,7 +125,7 @@ Singleton {
         lireLuminosite(false)
         lirePage()
     }
-    function fermer() { ecranOuvert = ""; recherche = false; parSurvol = false }
+    function fermer() { ecranOuvert = ""; recherche = false }
 
     // Spotlight (Super + R) : l'île s'ouvre en longue capsule de recherche
     property bool recherche: false
@@ -790,11 +787,9 @@ Singleton {
     property var bandes: [0, 0, 0, 0, 0]
     // Économie ou sans effets : l'onde se pose sur une forme calme au lieu de rester figée au milieu d'un mouvement
     Connections { target: Reglages; function onSobreChanged() { if (Reglages.sobre) etat.bandes = [0.3, 0.45, 0.55, 0.45, 0.3] } }
-    // Barres réellement affichées : pilule fermée en mode musique (même règle que « mode » de Compact.qml), ou île
-    // ouverte sur la page Musique. Écran éteint ou session verrouillée : jamais.
-    readonly property bool barresAffichees: joue && ecranVu && (ecranOuvert === "" ? (aMusique && activiteType === "" && !enregistre
-                                                                                          && !Partage.indicateur && AssistantEtat.activitePilule === "" && !Agents.attendTerminal)
-                                                                                    : vueActive === "musique")
+    // Barres réellement affichées : île ouverte sur la page Musique (la pilule n'a plus d'onde). Écran éteint ou session
+    // verrouillée : jamais.
+    readonly property bool barresAffichees: joue && ecranVu && ecranOuvert !== "" && vueActive === "musique"
     property real dernierSon: 0
     // 30 images/s, sans animation entre deux pas (une animation de 70 ms à chaque pas faisait redessiner l'île à 165 Hz)
     Timer {
