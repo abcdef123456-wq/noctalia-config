@@ -127,10 +127,12 @@ ShellRoot {
    champ.text = "horloges"; etape++; return }
   if (etape === 1) { attente++
    var t = titres()
-   if (t.length < 3 || t[0].indexOf("Tokyo") < 0 || t[1].indexOf("Paris") < 0) { if (attente > 60) verifier(false, "cartes : " + JSON.stringify(t)); return }
-   verifier(t.indexOf("Horloges") >= 0, "l'appli Horloges reste : " + JSON.stringify(t))
-   verifier(t.indexOf("Horloges") > 1, "les cartes sont devant : " + JSON.stringify(t))
+   if (t.length < 2 || t[0].indexOf("Tokyo") < 0 || t[1].indexOf("Paris") < 0) { if (attente > 60) verifier(false, "cartes : " + JSON.stringify(t)); return }
+   // Espaces stricts : les cartes dans Actions, l'appli Horloges dans Applis, jamais ensemble
+   verifier(spot.espace === "actions" && t.indexOf("Horloges") < 0, "cartes seules en Actions : " + JSON.stringify(t))
    verifier(spot.resultats[0].sous.indexOf("Heure") === 0, "sous de la carte : " + spot.resultats[0].sous)
+   spot.changerEspace("applis")
+   verifier(titres().indexOf("Horloges") === 0 && titres().every(x => x.indexOf("Tokyo") < 0), "l'appli Horloges dans Applis : " + JSON.stringify(titres()))
    attente = 0; champ.text = "heure tokyo"; etape++; return }
   if (etape === 2) { attente++
    var u = titres()

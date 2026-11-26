@@ -43,7 +43,7 @@ QtObject {
 }''')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -113,7 +113,7 @@ ShellRoot {
    verifier(titres()[0] === "L'IA est désactivée" && titres().length === 1, "« ! » coupé : " + JSON.stringify(titres()))
    champ.text = "? comment faire"
    verifier(titres().indexOf("L'IA est désactivée") >= 0, "« ? » coupé : " + JSON.stringify(titres()))
-   champ.text = "jarvis"
+   spot.changerEspace("actions"); champ.text = "jarvis"      // pages et actions : l'espace Actions
    verifier(titres().indexOf("JARVIS") < 0, "page JARVIS cachée : " + JSON.stringify(titres()))
    champ.text = "traduire"
    verifier(titres().indexOf("IA sur le texte copié") < 0, "actions d'IA cachées : " + JSON.stringify(titres()))
@@ -171,7 +171,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -254,7 +254,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -328,7 +328,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -411,7 +411,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -529,7 +529,7 @@ class SpotlightLot(unittest.TestCase):
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -580,7 +580,7 @@ ShellRoot {
    verifier(titres().indexOf("Veille de l'écran") === 1, "config après l'IA : " + JSON.stringify(titres()))
    verifier(spot.resultats[1].aide.indexOf("↓") < 0, "pas de rappel sans titre exact")
    // Aucune IA à qui demander : les réponses de la config d'abord, sans rappel, la ligne sans issue après
-   spot.iaCoupee = true; champ.text = "? veille"; etape = 10; return }
+   spot.iaCoupee = true; champ.text = "? veille"; spot.chercher(); etape = 10; return }
   if (etape === 10 || etape === 11) {
    verifier(titres()[0] === "Veille de l'écran", "partielle, sans IA : config d'abord : " + JSON.stringify(titres()))
    verifier(spot.resultats[0].aide.indexOf("↓") < 0, "pas de rappel sans IA : " + spot.resultats[0].aide)
@@ -627,8 +627,10 @@ _SCEN_SELECTION = ("""
   champ.text = "alpha"; etape++; return }
  if (etape === 1) { verifier(spot.resultats.length >= 3, "3 applis : " + JSON.stringify(titres()))
   spot.sel = 2; var t = spot.resultats[2].titre
-  spot.calcul = "42"; spot.chercher()
-  verifier(spot.resultats[0].titre.indexOf("= ") === 0, "le calcul arrive en tête : " + JSON.stringify(titres()))
+  // une appli très utilisée qui arrive après coup en tête (liste relue) : la ligne choisie reste la même
+  spot.usage = {"a0.desktop": {n: 30, t: Date.now() / 1000}}
+  spot.applis = [{id: "a0.desktop", name: "Alpha zero", generic: "", keywords: "", icon: ""}].concat(spot.applis); spot.chercher()
+  verifier(spot.resultats[0].titre === "Alpha zero", "la nouvelle appli arrive en tête : " + JSON.stringify(titres()))
   verifier(spot.resultats[spot.sel].titre === t, "la sélection suit sa ligne : " + spot.sel + " " + JSON.stringify(titres()))
   Qt.quit() }
 """, 0)
@@ -691,7 +693,7 @@ def _lancer(corps, delai, extra=None, mutations=()):
         (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
         (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
         (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
-        noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+        noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
         # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
         (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
         (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
@@ -748,9 +750,10 @@ class SpotlightAudit(unittest.TestCase):
     def test_souris_immobile_ne_vole_pas_la_selection(self):
         self._jouer(_SCEN_SOURIS)
         src = (QML / "Recherche.qml").read_text()
-        self.assertIn("r.survol(ligne.index, zoneLigne.mapToItem(null,", src)
-        self.assertIn("r.valider(ligne.index,", src)
-        self.assertIn("r.actionDock(ligne.index)", src)
+        self.assertIn("onSurvol: p => r.survol(index, p)", src)
+        self.assertIn("onValider: nouveau => r.valider(index, nouveau)", src)
+        self.assertIn("onClicDroit: r.actionDock(index)", src)
+        self.assertIn("ligne.survol(zoneLigne.mapToItem(null,", (QML / "LanceurLigne.qml").read_text())
 
     def test_reouverture_sans_restes_d_ia(self):
         self._jouer(_SCEN_REOUVERTURE)
@@ -767,12 +770,12 @@ class SpotlightSource(unittest.TestCase):
     """Lecture du source (pas besoin de Quickshell) : ce que le bilan (constats, sortie de systemctl) met à l'écran n'est
     jamais interprété comme du HTML, et l'icône de l'en-tête est celle de l'IA du bilan."""
     def test_lignes_en_texte_brut(self):
-        src = (QML / "Recherche.qml").read_text()
+        src = (QML / "LanceurLigne.qml").read_text()
         for champ in ("text: ligne.modelData.titre", "text: ligne.modelData.sous"):
             i = src.index(champ)
             bloc = src[src.rindex("Texte {", 0, i):i + len(champ)]
             self.assertIn("textFormat: Text.PlainText", bloc, champ)
-        self.assertIn("textFormat: r.reponseAide !== \"\" || zoneReponse.enDiag ? Text.PlainText", src)
+        self.assertIn("textFormat: r.reponseAide !== \"\" || zoneReponse.enDiag ? Text.PlainText", (QML / "Recherche.qml").read_text())
 
     def test_ia_affichee_sous_point_d_exclamation_et_arobase_est_celle_sans_outils(self):
         """« ! » et « @ » passent par l'usage texte de nc-ia (jamais une IA avec outils) : l'île montre celle qui répondra

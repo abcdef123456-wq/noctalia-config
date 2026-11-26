@@ -97,7 +97,9 @@ class Branchement(unittest.TestCase):
     def test_date_reecrite_avant_qalc(self):
         self.assertIn('import "Saisies.js" as Saisies', RECHERCHE)
         self.assertIn('let date = Saisies.dateQalc(q, Date.now())', RECHERCHE)
-        self.assertIn('(date !== "" || /\\d/.test(q)', RECHERCHE)            # « dans 45 jours » n'a pas d'opérateur
+        # estCalcul (partagé par la recherche de qalc et le choix de l'espace) : « dans 45 jours » n'a pas d'opérateur
+        self.assertIn('(Saisies.dateQalc(t, Date.now()) !== "" || /\\d/.test(t)', RECHERCHE)
+        self.assertIn("if (r.estCalcul(q)) {", RECHERCHE)
         self.assertIn('date !== "" ? date : q.replace(', RECHERCHE)
         self.assertIn('.replace(/^"(\\d{4}-\\d{2}-\\d{2})"$/, "$1")', RECHERCHE)
 

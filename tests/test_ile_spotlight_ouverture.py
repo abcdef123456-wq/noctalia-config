@@ -38,22 +38,23 @@ class Spotlight(unittest.TestCase):
         self.assertNotIn("ile.width > 560", self.src)
 
     def test_ouverture_jamais_vide(self):
-        # Le ressort part de la pilule (110 à 260 px), dépasse la cible de 680 px puis y revient
-        for largeur in list(range(110, 721, 5)) + list(range(720, 679, -5)):
+        # Le ressort part de la pilule (110 à 260 px), dépasse la cible de 438 px puis y revient
+        for largeur in list(range(110, 481, 5)) + list(range(480, 437, -2)):
             compact, recherche = self.compact(largeur, recherche=True), self.contenu(largeur, recherche=True)
             self.assertAlmostEqual(compact + recherche, 1.0, msg=f"{largeur} px")
             self.assertGreaterEqual(max(compact, recherche), 0.5, f"{largeur} px : forme presque vide")
-        self.assertEqual(self.contenu(680, recherche=True), 1.0, "Spotlight entier à sa taille")
+        self.assertEqual(self.contenu(438, recherche=True), 1.0, "lanceur entier à sa taille")
         self.assertEqual(self.contenu(200, recherche=True), 0.0, "pilule entière au départ")
-        self.assertLessEqual(self.debut + self.etendue, 600, "le Spotlight est entier avant sa taille finale")
+        self.assertLessEqual(self.debut + self.etendue, 420, "le lanceur est entier avant sa taille finale (438 px)")
+        self.assertIn("Qt.size(438, spot.hauteurVoulue)", self.src)
 
     def test_fermeture_jamais_vide(self):
-        # Fermeture : l'île rétrécit de 680 vers la pilule ; pilule et Spotlight suivent la largeur, comme à l'ouverture
-        for largeur in list(range(680, 109, -5)) + list(range(110, 261, 5)):
+        # Fermeture : l'île rétrécit de 438 vers la pilule ; pilule et lanceur suivent la largeur, comme à l'ouverture
+        for largeur in list(range(438, 109, -2)) + list(range(110, 261, 5)):
             compact, recherche = self.compact(largeur, retour_spot=True), self.contenu(largeur, retour_spot=True)
             self.assertGreaterEqual(max(compact, recherche), 0.5, f"{largeur} px : capsule noire vide")
         self.assertEqual(self.compact(200, retour_spot=True), 1.0, "pilule entière à l'arrivée (aucun saut au repos)")
-        self.assertEqual(self.compact(680, retour_spot=True), 0.0)
+        self.assertEqual(self.compact(438, retour_spot=True), 0.0)
 
     def test_retour_spot_seulement_vers_la_pilule(self):
         self.assertIn("readonly property bool retourSpot: retourRecherche.running && !fen.ouverte", self.src)
@@ -64,7 +65,7 @@ class Spotlight(unittest.TestCase):
         # Comparée à la largeur de la pilule : une pilule à titre et artiste dépasse 300 px, et reste une pilule
         self.assertIn("spotDepuisPilule = ile.width <= compact.largeur + 1", self.src)
         for largeur in (432, 440, 460):
-            for l in range(largeur, 721, 10):
+            for l in range(largeur, 481, 10):
                 self.assertEqual(self.compact(l, recherche=True, depuis_pilule=False), 0.0, f"{l} px : l'heure ne revient pas")
 
     @staticmethod

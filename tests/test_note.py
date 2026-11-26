@@ -114,7 +114,7 @@ class Spotlight(unittest.TestCase):
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
             (q / "Rappels.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml" for n in noms) + "\nsingleton CloudEtat 1.0 CloudEtat.qml\nsingleton Rappels 1.0 Rappels.qml")
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
@@ -157,16 +157,16 @@ ShellRoot {
    champ.text = "note " + "x".repeat(1001); spot.valider(0, false); etape = 11; return }
   if (etape === 11) { if (spot.noteErreur === "") return
    verifier(titres()[0] === "Note trop longue (1000 caractères au plus) : rien n'est noté.", "refus dit : " + JSON.stringify(titres()))
-   champ.text = "notepad"
+   champ.text = "notepad"; spot.changerEspace("fichiers")      // les fichiers ne sont cherchés que dans leur espace
    verifier(titres().every(t => t !== "Ouvrir mes notes" && t.indexOf("Noter") !== 0), "« notepad » reste une recherche : " + JSON.stringify(titres()))
    // Une note ajoutée hors du Spotlight : relue à la réouverture
    Quickshell.execDetached(["sh", "-c", "printf '%s\\n' '- 2026-01-01 10:00  externe' >> \\"$XDG_DATA_HOME/nc/notes.md\\""])
    etape = 12; return }
-  if (etape < 16) { etape++; return }
-  if (etape === 16) { Etat.saisie = "notes"; spot.demarrer(); etape++; return }
-  if (etape === 17) { if (!spot.notesLues) return
+  if (etape < 19) { if (etape === 13) spot.changerEspace("actions"); etape++; return }      // puis les logiciels, dans les Actions
+  if (etape === 19) { Etat.saisie = "notes"; spot.demarrer(); etape++; return }
+  if (etape === 20) { if (!spot.notesLues) return
    verifier(titres()[1] === "externe", "relue à la réouverture : " + JSON.stringify(titres()))
-   etape = 18; return }
+   etape = 21; return }
   if (etape < 24) { etape++; return }
   Qt.quit()
  } }
