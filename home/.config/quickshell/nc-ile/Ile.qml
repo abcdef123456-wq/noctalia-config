@@ -1,7 +1,5 @@
-// Une île par écran, au-dessus de la barre de Noctalia. La silhouette et le cartouche suivent le thème ;
-// la forme s'ouvre avec un ressort. Ouverte, ses pages se suivent verticalement : d'abord les activités en cours
-// (musique, minuteur, recharge, mode jeu), puis le centre de contrôle, Son, Wi-Fi, Bluetooth, Système, Calendrier.
-// Points sur le bord droit, molette ou deux doigts pour descendre ; l'île prend la taille de chaque page.
+// Une île par écran, au-dessus de la barre de Noctalia. Ouverte, la navigation et la composition des pages
+// suivent le thème ; la molette et les flèches passent entre les vues et l'île prend la taille du contenu.
 // Deux activités en même temps (musique + minuteur) : la seconde dans une petite bulle à côté de la pilule.
 // Seule la forme de l'île capte la souris ; un clic ailleurs, Échap, Super + C ou un clic sur la pilule la referment.
 import QtQuick
@@ -9,6 +7,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import "IdentitesIle.js" as Identites
+import "CompositionIle.js" as Composition
 
 PanelWindow {
     id: fen
@@ -18,10 +17,8 @@ PanelWindow {
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
     readonly property var identite: Identites.pour(Couleurs.themeActif)
-    function ouvrirControle(bouton) {
-        const origine = Qt.point((modelData.width - contentItem.width) / 2, 0)
-        Etat.ouvrirControle(modelData.name, "accueil", "top", Etat.ancreControle(bouton, origine))
-    }
+    readonly property var plan: Composition.pour(Couleurs.themeActif)
+    function ouvrirControle() { Etat.ouvrirControle(modelData.name, "accueil") }
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
@@ -182,24 +179,27 @@ PanelWindow {
     }
     onOuverteChanged: { prise.prete = false; if (ouverte) prise.restart() }
 
-    // Hauteur réservée à l'en-tête lisible (EnteteIle) : 0 quand une seule vue est active (zéro chrome inutile)
-    readonly property int hauteurEntete: Etat.vues.length > 1 ? 38 : 0
-    readonly property int hauteurIdentite: 32
-    // Taille de chaque page (hauteur + en-tête)
-    function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32)) + hauteurEntete) }
-    readonly property int hauteurEssentiel: Math.max(152, (Etat.hauteurs.essentiel ?? 120) + 32)
-    readonly property var tailles: ({
-        essentiel: Qt.size(408, hauteurEssentiel + hauteurEntete),
-        musique: Qt.size(430, 214 + hauteurEntete), minuteur: Qt.size(430, (Etat.minuteurFin > 0 ? 150 : 334) + hauteurEntete), charge: adaptee("charge", 140),
-        jeu: Qt.size(432, 250 + hauteurEntete), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600 + hauteurEntete), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
-        claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330 + hauteurEntete), presse: adaptee("presse", 200),
-        fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170), concentration: adaptee("concentration", 260)
+    // Le bandeau décoratif reste au-dessus des pages. La navigation occupe un autre bord selon le thème.
+    readonly property bool multiPages: Etat.vues.length > 1
+    readonly property bool reglagesPage: Etat.vueActive !== "essentiel"
+    readonly property var disposition: Composition.cadre(plan, modelData.width, multiPages, reglagesPage)
+    function adaptee(nom, mini) { return Math.max(mini, Math.min(548, Etat.hauteurs[nom] || mini)) }
+    readonly property var hauteurs: ({
+        essentiel: Math.max(152, Etat.hauteurs.essentiel ?? 0),
+        musique: plan.media === "portrait" || plan.media === "scene" ? 234 : 190,
+        minuteur: Etat.minuteurFin > 0 ? 118 : 302, charge: adaptee("charge", 108),
+        jeu: 218, centre: adaptee("centre", 462), son: adaptee("son", 268), reseau: adaptee("reseau", 228),
+        bluetooth: adaptee("bluetooth", 188), notifications: adaptee("notifications", 168),
+        systeme: 568, sante: adaptee("sante", 268), calendrier: adaptee("calendrier", 378),
+        claude: adaptee("claude", 148), assistant: 530, meteo: 298, presse: adaptee("presse", 168),
+        fenetres: adaptee("fenetres", 128), appel: adaptee("appel", 118), terminal: adaptee("terminal", 118),
+        resume: adaptee("resume", 138), concentration: adaptee("concentration", 228)
     })
-    readonly property size taillePage: tailles[Etat.vueActive] || tailles.essentiel
-    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue)
-                                             : Qt.size(taillePage.width, taillePage.height + hauteurIdentite)
-    readonly property bool points: Etat.vues.length > 4 && !recherche
+    readonly property real hauteurPage: Math.min(hauteurs[Etat.vueActive] ?? hauteurs.essentiel,
+        Math.max(0, Math.min(680, modelData.height - ile.y - 8) - disposition.surHauteur))
+    readonly property size taille: recherche ? Qt.size(Math.min(modelData.width, 680), spot.hauteurVoulue)
+                                             : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur)
+    readonly property bool points: Etat.vues.length > 4 && !recherche && !disposition.lateral
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
     readonly property bool confirmGpu: !ouverte && ModeGraphique.demande
@@ -591,7 +591,7 @@ PanelWindow {
         // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)
         MouseArea {
             anchors.fill: parent
-            enabled: fen.ouverte && fen.points && !fen.recherche
+            enabled: fen.ouverte && fen.multiPages && !fen.recherche
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             property real dernier: 0         // heure du dernier événement : un trou de 200 ms = nouveau geste
@@ -618,20 +618,25 @@ PanelWindow {
             Timer { id: verrou; interval: 300 }
         }
 
-        // En-tête lisible des vues de l'île (onglets nommés + accès Centre de contrôle)
+        // La navigation reste cliquable sur le bord propre au thème, séparée du contenu des pages.
         EnteteIle {
             id: barreEntete
             objectName: "nc-ile-entete"
-            x: 16; y: 10 + fen.hauteurIdentite
-            width: Math.max(0, ile.width - 32)
+            lateral: fen.disposition.lateral
+            style: fen.plan.onglets
+            x: fen.disposition.bord === "droite" ? ile.width - width - 14 : 16
+            y: fen.disposition.bord === "bas" ? ile.height - height - fen.disposition.bas : fen.disposition.haut
+            width: lateral ? fen.disposition.rail : Math.max(0, ile.width - 32)
+            height: lateral ? Math.max(0, ile.height - y - fen.disposition.bas) : fen.disposition.bande
+            z: 1
             pages: Etat.vues
             active: Etat.vueActive
             nonLues: Partage.silence ? 0 : Notifs.nonLues
-            opacity: fen.ouverte && !fen.recherche && Etat.vues.length > 1 && ile.height > fen.taille.height * 0.65 ? 1 : 0
-            visible: opacity > 0.01 && Etat.vues.length > 1
+            opacity: fen.ouverte && !fen.recherche && fen.multiPages && ile.height > fen.taille.height * 0.65 ? 1 : 0
+            visible: opacity > 0.01 && fen.multiPages
             Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
             onChoisir: nom => Etat.aller(nom)
-            onOuvrirControle: bouton => fen.ouvrirControle(bouton)
+            onOuvrirControle: fen.ouvrirControle()
         }
 
         // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
@@ -643,7 +648,7 @@ PanelWindow {
                 readonly property var contenu: chargeur.item
                 required property string modelData
                 required property int index
-                readonly property size t: fen.tailles[modelData] || fen.tailles.essentiel
+                objectName: "nc-ile-page-" + modelData
                 readonly property bool active: modelData === Etat.vueActive
                 // Une page visitée reste prête tant que l'île est ouverte, et les deux voisines de la page affichée sont
                 // préparées à l'avance, sans bloquer (asynchrone) : glisser vers elles ne fige plus l'île le temps de les
@@ -652,13 +657,16 @@ PanelWindow {
                 onActiveChanged: if (active) dejaVue = true
                 readonly property bool voisine: Math.abs(index - Etat.vue) <= 1
                 Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
-                x: (ile.width - t.width) / 2 + 16
-                width: Math.max(0, t.width - 32 - (fen.points ? Math.max(22, boutonPage.width + boutonPage.anchors.rightMargin - 16 + 4) : 0))
-                height: Math.max(0, t.height - 32 - fen.hauteurEntete)
-                y: 16 + fen.hauteurIdentite + fen.hauteurEntete + (index - Etat.vue) * (ile.height * 0.6)
-                Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
+                readonly property real gauche: fen.disposition.bord === "gauche" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : 0
+                readonly property real droite: fen.disposition.bord === "droite" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : (fen.points ? 18 : 0)
+                x: (ile.width - fen.disposition.largeur) / 2 + 16 + gauche
+                width: Math.max(0, fen.disposition.largeur - 32 - gauche - droite)
+                height: Math.max(0, Math.min(fen.hauteurs[modelData] ?? fen.hauteurs.essentiel, fen.hauteurPage))
+                property real decalage: (index - Etat.vue) * (ile.height * 0.6)
+                y: fen.disposition.haut + (fen.disposition.bord === "haut" ? fen.disposition.bande : 0) + decalage
+                Behavior on decalage { enabled: fen.mouv.actif && !Notifs.enPause; SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
-                opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
+                opacity: fen.ouverte && !fen.recherche && active && ile.height > fen.taille.height * 0.65 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {
@@ -676,9 +684,10 @@ PanelWindow {
         Component {
             id: pEssentiel
             EssentielIle {
+                plan: fen.plan
                 Component.onCompleted: Etat.annoncerHauteur("essentiel", implicitHeight)
                 onImplicitHeightChanged: Etat.annoncerHauteur("essentiel", implicitHeight)
-                onOuvrirControle: bouton => fen.ouvrirControle(bouton)
+                onOuvrirControle: fen.ouvrirControle()
                 onOuvrirRecherche: Etat.chercher(fen.modelData.name)
                 onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
             }
@@ -687,7 +696,10 @@ PanelWindow {
         Component { id: pTerminal; PageTerminal {} }
         Component { id: pResume; PageResume {} }
         Component { id: pConcentration; PageConcentration {} }
-        Component { id: pMusique; Musique {} }
+        Component {
+            id: pMusique
+            Musique { disposition: fen.plan.media; motif: fen.plan.icone; dessin: fen.plan.dessin }
+        }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }
         Component { id: pJeu; Jeu {} }
@@ -705,11 +717,11 @@ PanelWindow {
         Component { id: pPresse; Presse {} }
         Component { id: pFenetres; Fenetres {} }
 
-        // Points de page sur le bord droit quand plus de 4 pages sont activées
+        // Raccourci visuel pour les listes longues ; un rail latéral contient déjà toutes les pages.
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: Math.max(0, Math.min(parent.height - (ile.retraitCoin > 0 ? 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2) : 64), Etat.vues.length * 14))
+            y: fen.disposition.haut + (fen.disposition.bord === "haut" ? fen.disposition.bande : 0) + (fen.hauteurPage - height) / 2
+            height: Math.max(0, Math.min(fen.hauteurPage - 20, Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)
@@ -718,9 +730,10 @@ PanelWindow {
         // ⚙ : les réglages de la page affichée (fenêtre des réglages sur la bonne section)
         ReglagesIle {
             id: boutonPage
-            anchors.right: parent.right; anchors.rightMargin: Math.max(5, ile.retraitCoin)
-            anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(8, ile.retraitCoin)
-            visible: fen.ouverte && !fen.recherche && Etat.vueActive !== "essentiel"
+            x: Math.max(0, ile.width - width - Math.max(16, ile.retraitCoin)
+                - (fen.disposition.bord === "droite" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : 0))
+            y: ile.height - fen.disposition.bas - height - (fen.disposition.bord === "bas" ? fen.disposition.bande : 0)
+            visible: fen.ouverte && !fen.recherche && fen.reglagesPage && ile.height > fen.taille.height * 0.8
             vue: Etat.vueActive
             onOuvert: Etat.fermer()
         }
@@ -735,6 +748,7 @@ PanelWindow {
         // seulement noté puis laissé aux boutons en dessous.
         MouseArea {
             anchors.fill: parent
+            z: 2
             enabled: Etat.parSurvol
             acceptedButtons: Qt.AllButtons
             onPressed: m => { Etat.parSurvol = false; m.accepted = false }

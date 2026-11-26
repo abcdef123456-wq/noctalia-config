@@ -16,8 +16,7 @@ PanelWindow {
     property real droiteReserve: 0
     property real basReserve: 0
     property var ancre: null
-    property var ancreInterne: null
-    property Item boutonRetour: null
+    property var historique: []
     signal fermer()
     signal ouvrirThemes()
 
@@ -43,25 +42,31 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-    function metaSection(id) {
-        var m = ({
-            reseau:        { ico: "wifi",                  fr: "Réseau",           en: "Network",       reglage: "Île" },
-            bluetooth:     { ico: "bluetooth",             fr: "Bluetooth",        en: "Bluetooth",     reglage: "Son et luminosité" },
-            son:           { ico: "volume_up",             fr: "Audio & mixeur",   en: "Audio & mixer", reglage: "Son et luminosité" },
-            systeme:       { ico: "monitoring",            fr: "Système",          en: "System",        reglage: "Mises à jour" },
-            charge:        { ico: "battery_charging_full", fr: "Batterie",         en: "Battery",       reglage: "Énergie" },
-            sante:         { ico: "thermostat",            fr: "Santé matérielle", en: "System Health", reglage: "Île" },
-            concentration: { ico: "do_not_disturb_on",     fr: "Concentration",    en: "Focus",         reglage: "Notifications" },
-            meteo:         { ico: "partly_cloudy_day",     fr: "Météo",            en: "Weather",       reglage: "Île" },
-            calendrier:    { ico: "calendar_month",        fr: "Agenda",           en: "Calendar",      reglage: "Intégration Google" },
-            presse:        { ico: "content_paste",         fr: "Presse-papiers",   en: "Clipboard",     reglage: "Île" },
-            minuteur:      { ico: "timer",                 fr: "Minuteur",         en: "Timer",         reglage: "Île" },
-            fenetres:      { ico: "view_agenda",           fr: "Fenêtres",         en: "Windows",       reglage: "Fenêtres" },
-            jeu:           { ico: "sports_esports",        fr: "Mode jeu",         en: "Game Mode",     reglage: "Énergie" }
+    function titreSection(id) {
+        const titre = ({
+            reseau:        ["Réseau", "Network"],
+            bluetooth:     ["Bluetooth", "Bluetooth"],
+            son:           ["Audio & mixeur", "Audio & mixer"],
+            systeme:       ["Système", "System"],
+            charge:        ["Batterie", "Battery"],
+            sante:         ["Santé matérielle", "System Health"],
+            concentration: ["Concentration", "Focus"],
+            meteo:         ["Météo", "Weather"],
+            calendrier:    ["Agenda", "Calendar"],
+            presse:        ["Presse-papiers", "Clipboard"],
+            minuteur:      ["Minuteur", "Timer"],
+            fenetres:      ["Fenêtres", "Windows"],
+            jeu:           ["Mode jeu", "Game Mode"]
         })[id]
-        return m ? { ico: m.ico, nom: Reglages.t(m.fr, m.en), reglage: m.reglage }
-                 : { ico: "tune", nom: Reglages.t("Centre de contrôle", "Control Center"), reglage: "" }
+        return titre ? Reglages.t(titre[0], titre[1]) : ""
     }
+
+    readonly property string sectionReglages: ({
+        bluetooth: "Son et luminosité", son: "Son et luminosité",
+        charge: "Énergie", jeu: "Énergie", concentration: "Notifications",
+        calendrier: "Intégration Google", fenetres: "Fenêtres",
+        sante: "Île", meteo: "Île", presse: "Île", minuteur: "Île"
+    })[section] ?? ""
 
     readonly property var outils: {
         var o = [{ id: "systeme", ico: "monitoring", fr: "Système", en: "System" }]
@@ -72,6 +77,7 @@ PanelWindow {
         if (PressePapiers.active && !Partage.silence)
             o.push({ id: "presse", ico: "content_paste", fr: "Presse-papiers", en: "Clipboard" })
         o.push({ id: "minuteur", ico: "timer", fr: "Minuteur", en: "Timer" })
+        o.push({ id: "jeu", ico: "sports_esports", fr: "Mode jeu", en: "Game Mode" })
         o.push({ id: "fenetres", ico: "view_agenda", fr: "Fenêtres", en: "Windows" })
         return o
     }
@@ -88,23 +94,37 @@ PanelWindow {
         entree = 1
         panneau.forceActiveFocus()
     }
-    onAncreChanged: { ancreInterne = null; boutonRetour = null }
-    onSectionChanged: {
-        if (section === "accueil") {
-            ancreInterne = null
-            const bouton = boutonRetour
-            boutonRetour = null
-            if (bouton) {
-                Qt.callLater(() => { if (fen.surAccueil && bouton && bouton.visible) bouton.forceActiveFocus() })
-                return
-            }
+    Connections {
+        target: Etat
+        function onOuvertureControle() {
+            fen.historique = []
+            defileAccueil.contentY = 0
         }
-        panneau.forceActiveFocus()
     }
-    function ouvrirWidget(section, bouton) {
-        boutonRetour = bouton
-        ancreInterne = Etat.ancreControle(bouton)
-        Etat.allerControle(section)
+    onSectionChanged: if (panneau) panneau.forceActiveFocus()
+
+    function ouvrirWidget(cible, bouton) {
+        const defilement = surAccueil ? defileAccueil : tiroir.item.defileur
+        historique = historique.concat([{
+            section, bouton, defilement, y: defilement.contentY,
+            raison: bouton.focusReason
+        }])
+        Etat.allerControle(cible)
+    }
+    function retour() {
+        const precedent = historique[historique.length - 1]
+        historique = historique.slice(0, -1)
+        const courant = historique
+        Etat.allerControle(precedent ? precedent.section : "accueil")
+        if (precedent) Qt.callLater(() => {
+            if (fen.historique !== courant || fen.section !== precedent.section) return
+            if (precedent.bouton && precedent.bouton.visible && precedent.bouton.enabled)
+                precedent.bouton.forceActiveFocus(precedent.raison)
+            if (precedent.defilement) {
+                const defilement = precedent.defilement
+                defilement.contentY = Math.min(precedent.y, Math.max(0, defilement.contentHeight - defilement.height))
+            }
+        })
     }
     Behavior on entree {
         enabled: !Reglages.sobre && fen.mouv.actif
@@ -122,16 +142,13 @@ PanelWindow {
         readonly property real margeBasse: Math.max(0, fen.basReserve) + 12
         readonly property real largeurCible: Math.max(0, Math.min(392, fen.width - margeGauche - margeDroite))
         readonly property real hauteurMax: Math.max(0, fen.height - margeHaute - margeBasse)
-        readonly property real hauteurVoulue: fen.surAccueil
-            ? Math.min(hauteurMax, Math.max(410, blocAccueil.implicitHeight + entete.height + 44))
-            : Math.min(hauteurMax, 520)
+        // Même carte pour l'accueil et les tiroirs ; seul le contenu défile.
+        readonly property real hauteurVoulue: Math.min(hauteurMax, 460)
 
         readonly property var placement: Disposition.placerControle(
-            fen.surAccueil ? fen.ancre : fen.ancreInterne ?? fen.ancre,
-            !fen.surAccueil && fen.ancreInterne ? "" : fen.bord, largeurCible, hauteurVoulue,
-            margeGauche, margeHaute, fen.width - margeDroite, fen.height - margeBasse, fen.surAccueil)
-        // La hauteur naturelle du tableau de bord dépend de sa grille ; ne pas reboucler via sa largeur.
-        width: fen.surAccueil ? largeurCible : placement.largeur
+            fen.ancre, fen.bord, largeurCible, hauteurVoulue,
+            margeGauche, margeHaute, fen.width - margeDroite, fen.height - margeBasse)
+        width: placement.largeur
         height: placement.hauteur
 
         readonly property real decalage: (1 - fen.entree) * 16
@@ -145,11 +162,11 @@ PanelWindow {
         Keys.onPressed: event => {
             if (event.modifiers !== Qt.NoModifier) return
             if (event.key === Qt.Key_Escape) {
-                if (!fen.surAccueil) Etat.allerControle("accueil")
+                if (!fen.surAccueil) fen.retour()
                 else fen.fermer()
                 event.accepted = true
             } else if (event.key === Qt.Key_Backspace && !fen.surAccueil) {
-                Etat.allerControle("accueil")
+                fen.retour()
                 event.accepted = true
             } else if (fen.surAccueil && event.key === Qt.Key_Left) {
                 Etat.reglerVolume(Math.max(0, Etat.volume - 0.05))
@@ -256,7 +273,7 @@ PanelWindow {
                         ControleAction {
                             id: zRet; anchors.fill: parent
                             text: Reglages.t("Retour", "Back")
-                            onClicked: Etat.allerControle("accueil")
+                            onClicked: fen.retour()
                         }
                     }
 
@@ -269,7 +286,7 @@ PanelWindow {
                             text: fen.surAccueil
                                   ? (fen.estBrut ? (Couleurs.styleTerminal ? "> CTRL // " + Couleurs.nomThemeAffiche.toUpperCase() : "CTRL // " + Couleurs.nomThemeAffiche.toUpperCase())
                                                  : Reglages.t("Centre de contrôle", "Control Center"))
-                                  : (fen.estBrut ? fen.metaSection(fen.section).nom.toUpperCase() : fen.metaSection(fen.section).nom)
+                                  : (fen.estBrut ? fen.titreSection(fen.section).toUpperCase() : fen.titreSection(fen.section))
                             font.pixelSize: fen.estBrut ? 11 : 15
                             font.weight: Font.Bold
                             font.letterSpacing: fen.estBrut ? 1.0 : -0.2
@@ -307,16 +324,33 @@ PanelWindow {
                         }
                     }
 
+                    Rectangle {
+                        visible: fen.section === "reseau"
+                        width: 30; height: 30
+                        radius: Couleurs.rayon(fen.estBrut ? 2 : 15, width, height)
+                        color: zRes.contientPointeur ? Couleurs.surfaceActive : Couleurs.surfaceDouce
+                        border.width: 1; border.color: Couleurs.bordureSubtile
+                        Ico { anchors.centerIn: parent; nom: "settings"; taille: 16; color: zRes.contientPointeur ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec }
+                        ControleAction {
+                            id: zRes; anchors.fill: parent
+                            objectName: "nc-controle-reglages-reseau"
+                            enabled: tiroir.status === Loader.Ready && fen.section === "reseau"
+                            text: Reglages.t("Ouvrir les paramètres réseau avancés", "Open advanced network settings")
+                            onClicked: tiroir.item.ouvrirParametres()
+                        }
+                    }
+
                     BoutonReglages {
                         objectName: "nc-controle-reglages"
                         taille: 30
-                        section: fen.metaSection(fen.section).reglage
+                        visible: fen.section !== "reseau"
+                        section: fen.sectionReglages
                         aide: Reglages.t("Réglages du bureau", "Desktop settings")
                         onOuvert: fen.fermer()
                         activeFocusOnTab: true
-                        Keys.onReturnPressed: ouvrir()
-                        Keys.onEnterPressed: ouvrir()
-                        Keys.onSpacePressed: ouvrir()
+                        Keys.onReturnPressed: event => { if (!event.isAutoRepeat) ouvrir() }
+                        Keys.onEnterPressed: event => { if (!event.isAutoRepeat) ouvrir() }
+                        Keys.onSpacePressed: event => { if (!event.isAutoRepeat) ouvrir() }
                         border.color: activeFocus ? Couleurs.accent : Couleurs.bordureSubtile
                     }
 
@@ -348,6 +382,7 @@ PanelWindow {
             // ── Tableau de bord principal (accueil) ──
             Flickable {
                 id: defileAccueil
+                objectName: "nc-controle-accueil"
                 visible: fen.surAccueil
                 anchors.top: ligneEntete.bottom; anchors.topMargin: 12
                 anchors.left: parent.left; anchors.right: parent.right
@@ -418,12 +453,10 @@ PanelWindow {
                             width: parent.largeurTuile
                             icone: VpnEtat.indicateur ? "shield_lock" : "vpn_lock"
                             titre: "VPN"
-                            sousTitre: VpnEtat.indicateur ? (VpnEtat.libelle || Reglages.t("Connecté", "Connected")) : Reglages.t("Inactif", "Off")
+                            sousTitre: VpnEtat.indicateur && VpnEtat.libelle ? VpnEtat.libelle : Reglages.t("Gérer les tunnels…", "Manage tunnels…")
                             actif: VpnEtat.indicateur
                             couleurActive: Couleurs.vert
-                            aDetails: true
                             onBasculer: { fen.fermer(); VpnEtat.demanderPanneau() }
-                            onOuvrirDetails: { fen.fermer(); VpnEtat.demanderPanneau() }
                         }
                     }
 
@@ -492,13 +525,17 @@ PanelWindow {
                         PiluleRapide {
                             objectName: "nc-controle-tuile-cloud"
                             width: parent.largeurPil
-                            icone: fen.cloudDispo ? (CloudEtat.envoie ? "cloud_upload" : "cloud") : "auto_awesome"
-                            libelle: fen.cloudDispo ? "Cloud" : "IA"
-                            actif: fen.cloudDispo ? CloudEtat.envoie : !Reglages.iaCoupee
+                            icone: fen.cloudDispo ? (CloudEtat.envoie ? "cloud_upload" : "cloud") : (Reglages.iaCoupee ? "search" : "auto_awesome")
+                            libelle: fen.cloudDispo ? "Cloud" : (Reglages.iaCoupee ? Reglages.t("Recherche", "Search") : Reglages.t("IA", "AI"))
+                            actif: fen.cloudDispo && CloudEtat.envoie
                             couleur: Couleurs.accent
                             onClic: {
                                 if (fen.cloudDispo) { fen.fermer(); CloudEtat.ouvrirPanneau() }
-                                else { fen.fermer(); Etat.chercher(fen.screen ? fen.screen.name : "") }
+                                else {
+                                    const nomEcran = Etat.controleEcran
+                                    Etat.saisie = Reglages.iaCoupee ? "" : "? "
+                                    Etat.chercher(nomEcran)
+                                }
                             }
                         }
                     }
@@ -682,6 +719,7 @@ PanelWindow {
                             model: fen.outils
                             Rectangle {
                                 required property var modelData
+                                objectName: "nc-controle-outil-" + modelData.id
                                 width: rowO.implicitWidth + 16; height: 28
                                 radius: Couleurs.rayon(Couleurs.rayonBouton, width, height)
                                 color: zO.contientPointeur ? Couleurs.accentDoux : (fen.estEditorial ? "transparent" : Couleurs.surfaceDouce)
@@ -716,6 +754,7 @@ PanelWindow {
                 anchors.leftMargin: 16; anchors.rightMargin: 16; anchors.bottomMargin: 14
 
                 Loader {
+                    id: tiroir
                     objectName: "nc-controle-tiroir"
                     anchors.fill: parent
                     active: !fen.surAccueil
@@ -731,7 +770,14 @@ PanelWindow {
             Component { id: tReseau; ControleReseau { onFermerPanneau: fen.fermer() } }
             Component { id: tBluetooth; ControleBluetooth {} }
             Component { id: tAudio; ControleAudio {} }
-            Component { id: tOutils; ControleOutils { section: fen.section; onFermerPanneau: fen.fermer() } }
+            Component {
+                id: tOutils
+                ControleOutils {
+                    section: fen.section
+                    onFermerPanneau: fen.fermer()
+                    onOuvrirTiroir: (section, bouton) => fen.ouvrirWidget(section, bouton)
+                }
+            }
         }
     }
 }

@@ -1,14 +1,14 @@
-// Vue essentielle de l'île ouverte : design sculptural, aéré et dénué de superflu,
-// adapté à chaque famille de thème (Apple/Liquid Glass, Brutaliste, Terminal CRT, Éditorial, Néon, Noctalia).
-// Zéro empilement de boîtes : le canvas de l'île porte directement l'heure, l'état ambiant,
-// l'activité en direct éventuelle (musique ou alerte) et une barre d'actions discrète.
+// Tableau de bord : la composition du thème place l'heure, l'illustration et les indicateurs.
 import QtQuick
 import Quickshell
 import Quickshell.Widgets
 import Quickshell.Services.UPower
+import "CompositionIle.js" as Composition
 
 Item {
     id: vue
+    property var plan: Composition.pour(Couleurs.themeActif)
+    readonly property var composition: Composition.accueil(plan)
     readonly property bool estBrut: Couleurs.styleBrut
     readonly property bool estTerminal: Couleurs.styleTerminal
     readonly property bool estEditorial: Couleurs.styleEditorial
@@ -35,88 +35,61 @@ Item {
         width: parent.width
         spacing: 12
 
-        // ── Micro-bandeau télémétrie (uniquement Brutaliste & Terminal : identité immédiate) ──
-        Item {
-            visible: vue.estBrut || vue.estTerminal
-            width: parent.width
-            height: 16
-
-            Row {
-                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 6; height: 6
-                    radius: Couleurs.rayon(vue.estTerminal ? 0 : 1, width, height)
-                    color: Couleurs.accent
-                }
-                Texte {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: vue.estTerminal
-                          ? ("> " + Couleurs.nomThemeAffiche.toUpperCase() + " // ACTIF")
-                          : ("SYS // " + Couleurs.nomThemeAffiche.toUpperCase())
-                    font.pixelSize: 9; font.weight: Font.Bold; font.letterSpacing: 1.1
-                    color: Couleurs.accent
-                }
-            }
-            Texte {
-                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                text: Notifs.concentration ? "DND" : (VpnEtat.indicateur ? "VPN" : "OK")
-                font.pixelSize: 9; font.weight: Font.Bold; font.letterSpacing: 1.0
-                color: Notifs.concentration ? Couleurs.violet : (VpnEtat.indicateur ? Couleurs.vert : Couleurs.texteSec)
-            }
-            Rectangle {
-                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                height: 1; color: Couleurs.separateur
-            }
-        }
-
-        // ── Zone Héro : Heure + Date + Indicateurs ambiants posés directement sur le canvas ──
         Item {
             id: zoneHero
             width: parent.width
-            height: Math.max(blocTemps.implicitHeight, blocAmbiant.implicitHeight) + 4
+            height: Math.max(vue.composition.h, blocAmbiant.y + blocAmbiant.implicitHeight + 4,
+                             blocTemps.y + blocTemps.implicitHeight + 4)
+            readonly property var placeHeure: vue.composition.heure
+            readonly property var placeArt: vue.composition.art
+            readonly property var placeEtat: vue.composition.etat
 
-            // Sceau vertical raffiné (Éditorial) ou barre d'accent (Néon)
             Rectangle {
-                visible: vue.estEditorial || vue.estNeon
-                x: 0; y: 4
-                width: vue.estEditorial ? 2 : 3
-                height: parent.height - 8
-                radius: Couleurs.rayon(2, width, height)
-                color: Couleurs.accent
-                opacity: vue.estEditorial ? 0.78 : 0.95
+                anchors.fill: parent
+                visible: vue.plan.accueil === "carte" || vue.plan.accueil === "dalle" || vue.plan.accueil === "terminal"
+                color: vue.plan.accueil === "terminal" ? "transparent" : Couleurs.surfaceDouce
+                radius: Couleurs.rayon(vue.plan.accueil === "carte" ? Couleurs.rayonBloc : 0, width, height)
+                border.width: vue.plan.accueil === "carte" ? 0 : 1
+                border.color: Couleurs.bordureSubtile
             }
-
+            Rectangle {
+                visible: vue.plan.accueil === "marge" || vue.plan.accueil === "jardin"
+                x: parent.width * (vue.plan.accueil === "marge" ? .29 : .60)
+                y: 8; width: 1; height: parent.height - 16
+                color: Couleurs.separateur
+            }
+            MotifIle {
+                dessin: vue.plan.dessin
+                x: zoneHero.width * zoneHero.placeArt[0]; y: zoneHero.placeArt[1]
+                width: zoneHero.width * zoneHero.placeArt[2]; height: zoneHero.placeArt[3]
+                opacity: vue.plan.accueil === "minimal" ? .32 : .84
+            }
             Column {
                 id: blocTemps
-                x: (vue.estEditorial || vue.estNeon) ? 12 : 0
-                anchors.verticalCenter: parent.verticalCenter
+                objectName: "nc-essentiel-temps"
+                x: zoneHero.width * zoneHero.placeHeure[0] + (vue.plan.accueil === "terminal" || vue.plan.accueil === "dalle" ? 12 : 0)
+                y: zoneHero.placeHeure[1]
+                width: zoneHero.width * zoneHero.placeHeure[2]
                 spacing: 2
-
-                Row {
-                    spacing: 4
-                    Texte {
-                        visible: vue.estTerminal
-                        anchors.baseline: heureTxt.baseline
-                        text: ">"
-                        font.pixelSize: 22; font.weight: Font.Bold
-                        color: Couleurs.accent
-                    }
-                    Texte {
-                        id: heureTxt
-                        objectName: "nc-essentiel-heure"
-                        text: Etat.heure
-                        font.pixelSize: vue.estEditorial ? 36 : (vue.estApple ? 34 : 32)
-                        font.weight: vue.estEditorial ? Font.Normal : (vue.estBrut ? Font.Black : Font.DemiBold)
-                        font.features: ({ "tnum": 1 })
-                        font.letterSpacing: vue.estEditorial ? -0.5 : (vue.estBrut ? 0.8 : -0.4)
-                        color: (vue.estTerminal || vue.estBrut) ? Couleurs.accent : Couleurs.texte
-                    }
+                readonly property int alignement: zoneHero.placeHeure[3] === "centre" ? Text.AlignHCenter
+                    : zoneHero.placeHeure[3] === "droite" ? Text.AlignRight : Text.AlignLeft
+                Texte {
+                    id: heureTxt
+                    objectName: "nc-essentiel-heure"
+                    width: parent.width
+                    horizontalAlignment: blocTemps.alignement
+                    text: (vue.plan.accueil === "terminal" ? "> " : "") + Etat.heure
+                    font.pixelSize: Math.max(1, Math.min(parent.width / 3.3, vue.estBrut ? 42 : vue.plan.accueil === "minimal" ? 46 : 38))
+                    font.weight: vue.estEditorial ? Font.Normal : (vue.estBrut ? Font.Black : Font.DemiBold)
+                    font.features: ({ "tnum": 1 })
+                    font.letterSpacing: vue.estEditorial ? -0.5 : (vue.estBrut ? 0.8 : -0.4)
+                    color: (vue.estTerminal || vue.estBrut) ? Couleurs.accent : Couleurs.texte
                 }
 
                 Texte {
                     objectName: "nc-essentiel-date"
+                    width: parent.width
+                    horizontalAlignment: blocTemps.alignement
                     visible: Reglages.val("ILE_DATE", "oui") !== "non"
                     text: vue.dateFormatee
                     secondaire: true
@@ -125,25 +98,25 @@ Item {
                 }
             }
 
-            // Filet séparateur vertical pour Brutaliste
-            Rectangle {
-                visible: vue.estBrut
-                anchors.right: blocAmbiant.left; anchors.rightMargin: 12
-                y: 4; width: 1; height: parent.height - 8
-                color: Couleurs.separateur
-            }
-
-            // État ambiant épuré (uniquement ce qui existe / est actif)
+            // Tous les états restent accessibles, que le thème les range comme une légende ou un statut.
             Column {
                 id: blocAmbiant
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-
+                objectName: "nc-essentiel-etat"
+                x: zoneHero.width * zoneHero.placeEtat[0] + (vue.plan.accueil === "dalle" ? 12 : 0)
+                y: Math.max(zoneHero.placeEtat[1], x < blocTemps.x + blocTemps.width && x + width > blocTemps.x
+                            ? blocTemps.y + blocTemps.implicitHeight + 6 : 0)
+                width: zoneHero.width * zoneHero.placeEtat[2] - (vue.plan.accueil === "dalle" ? 24 : 0)
+                spacing: 5
+                readonly property string alignement: zoneHero.placeEtat[3]
+                function debut(ligne) {
+                    return Math.max(0, alignement === "centre" ? (width - ligne) / 2
+                                      : alignement === "droite" ? width - ligne : 0)
+                }
                 // Météo + Batterie sur une ligne fluide
                 Row {
-                    anchors.right: parent.right
+                    x: blocAmbiant.debut(implicitWidth)
                     spacing: 8
+                    visible: Etat.meteoPilule || Etat.batteriePc
 
                     Row {
                         visible: Etat.meteoPilule
@@ -193,7 +166,7 @@ Item {
 
                 // Pastilles d'état actives (seulement si VPN ou Concentration actif)
                 Row {
-                    anchors.right: parent.right
+                    x: blocAmbiant.debut(implicitWidth)
                     spacing: 6
                     visible: Notifs.concentration || VpnEtat.indicateur || Modes.pastille
 
@@ -208,6 +181,7 @@ Item {
                             Texte {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: Modes.nomVisible || Reglages.t("Silence", "DND")
+                                width: Math.max(0, Math.min(implicitWidth, blocAmbiant.width - (VpnEtat.indicateur ? 71 : 28)))
                                 font.pixelSize: 10; font.weight: Font.DemiBold; color: Couleurs.violet
                             }
                         }
@@ -386,7 +360,7 @@ Item {
             }
         }
 
-        // ── Séparateur discret + Passerelle épurée ──
+        // Séparateur et passerelle vers les surfaces du bureau.
         Rectangle {
             width: parent.width; height: 1
             color: Couleurs.separateur

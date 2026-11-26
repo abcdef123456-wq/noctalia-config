@@ -1,6 +1,6 @@
-// Bandeau d'en-tête minimal de l'île ouverte : s'efface automatiquement lorsqu'une seule vue existe,
-// et adapte entièrement son dessin à l'archétype du thème actif (Apple, Brutaliste, Terminal, Éditorial, Néon, Noctalia).
+// Navigation persistante de l'île ouverte : bandeau, galerie ou rail de pages.
 import QtQuick
+import QtQuick.Controls
 
 Item {
     id: entete
@@ -10,9 +10,14 @@ Item {
     signal choisir(string nom)
     signal ouvrirControle(Item bouton)
 
-    readonly property bool multiPages: (pages ? pages.length : 0) > 1
-    implicitHeight: multiPages ? 34 : 0
-    visible: multiPages
+    property bool lateral: false
+    property string style: "capsules"
+    readonly property bool galerie: style === "galerie"
+    readonly property bool icones: style === "icones"
+    readonly property bool plein: style === "blocs"
+    readonly property bool ligne: style === "filets" || galerie
+    implicitHeight: galerie ? 50 : 36
+    visible: pages.length > 1
 
     function meta(nom) {
         var m = ({
@@ -42,157 +47,123 @@ Item {
         return m ? { ico: m.ico, nom: Reglages.t(m.fr, m.en) } : { ico: "circle", nom: nom }
     }
 
-    readonly property var pagesMontrees: {
-        if (!pages || pages.length <= 3) return pages || []
-        const idx = Math.max(0, pages.indexOf(active))
-        const debut = Math.max(0, Math.min(pages.length - 3, idx - 1))
-        return pages.slice(debut, debut + 3)
+    function montrerActive() {
+        const index = pages.indexOf(active)
+        if (index >= 0) onglets.positionViewAtIndex(index, ListView.Contain)
     }
+    onActiveChanged: Qt.callLater(montrerActive)
+    onPagesChanged: Qt.callLater(montrerActive)
+    onWidthChanged: Qt.callLater(montrerActive)
+    onHeightChanged: Qt.callLater(montrerActive)
 
-    // Fond segmenté discret uniquement pour Apple / Noctalia
     Rectangle {
-        visible: Couleurs.styleApple || Couleurs.styleModerne
-        x: onglets.x - 3; y: 2
-        width: onglets.implicitWidth + 6; height: 28
-        radius: Couleurs.rayon(14, width, height)
-        color: Couleurs.surfaceDouce
-        border.width: 1; border.color: Qt.alpha(Couleurs.voile, Couleurs.sombre ? 0.05 : 0.08)
+        anchors.fill: parent
+        visible: entete.style === "capsules" || entete.lateral
+        radius: Couleurs.rayon(entete.style === "capsules" ? 18 : Couleurs.rayonBloc, width, height)
+        color: entete.plein ? Couleurs.surfaceDouce : Qt.alpha(Couleurs.voile, Couleurs.sombre ? .045 : .06)
+        border.width: entete.style === "index" || entete.plein ? 1 : 0
+        border.color: Couleurs.bordureSubtile
     }
-
-    Row {
+    ListView {
         id: onglets
-        anchors.left: parent.left
-        anchors.leftMargin: (Couleurs.styleApple || Couleurs.styleModerne) ? 3 : 0
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: (Couleurs.styleEditorial || Couleurs.styleNeon) ? 14 : (Couleurs.styleBrut || Couleurs.styleTerminal ? 4 : 2)
-        readonly property real largeurOnglet: entete.pagesMontrees.length === 0 ? 0 : Math.max(0,
-            (entete.width - boutonControle.width - 12 - spacing * (entete.pagesMontrees.length - 1)) / entete.pagesMontrees.length)
+        x: 4; y: 3
+        width: Math.max(0, entete.width - (entete.lateral ? 8 : boutonControle.width + 14))
+        height: Math.max(0, entete.height - (entete.lateral ? boutonControle.height + 14 : 6))
+        orientation: entete.lateral ? ListView.Vertical : ListView.Horizontal
+        model: entete.pages
+        spacing: entete.plein ? 3 : 2
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        readonly property real largeurOnglet: Math.max(76, Math.min(140, (width - spacing * (count - 1)) / Math.max(1, count)))
+        delegate: Rectangle {
+            id: tab
+            required property string modelData
+            required property int index
+            readonly property var info: entete.meta(modelData)
+            readonly property bool choisi: modelData === entete.active
+            readonly property bool empile: entete.galerie && !entete.lateral
+            readonly property bool symbole: entete.style !== "index"
+            readonly property bool badge: modelData === "notifications" && entete.nonLues > 0
+            objectName: "nc-ile-onglet-" + modelData
+            width: entete.lateral ? onglets.width : (entete.icones ? 38 : onglets.largeurOnglet)
+            height: entete.lateral ? (entete.icones ? 31 : 34) : onglets.height
+            radius: Couleurs.rayon(entete.style === "capsules" ? 16 : entete.plein ? 1 : 6, width, height)
+            color: choisi && entete.plein ? Couleurs.accent
+                 : choisi && !entete.ligne ? Couleurs.surfaceActive
+                 : action.contientPointeur ? Couleurs.carteSurvol : "transparent"
+            border.width: entete.plein && !choisi ? 1 : 0
+            border.color: Couleurs.bordureSubtile
 
-        Repeater {
-            model: entete.pagesMontrees
-            Item {
-                id: tab
-                required property string modelData
-                required property int index
-                readonly property bool estActif: modelData === entete.active
-                readonly property var info: entete.meta(modelData)
-                readonly property bool avecBadge: modelData === "notifications" && entete.nonLues > 0
-                readonly property bool estSouligne: Couleurs.styleEditorial || Couleurs.styleNeon
-                readonly property bool estBloc: Couleurs.styleBrut || Couleurs.styleTerminal
-                objectName: "nc-ile-onglet-" + modelData
-                width: Math.min(126, onglets.largeurOnglet, titreOnglet.implicitWidth + largeurAccessoires + (estSouligne ? 6 : 16))
-                readonly property real largeurAccessoires: (iconeOnglet.visible ? iconeOnglet.width + contenuTab.spacing : 0)
-                    + (avecBadge ? 5 + contenuTab.spacing : 0)
-                height: 26
-
-                // Fond d'onglet selon l'archétype
-                Rectangle {
-                    anchors.fill: parent
-                    visible: !tab.estSouligne
-                    radius: Couleurs.rayon(tab.estBloc ? 2 : 12, width, height)
-                    color: tab.estActif
-                           ? (tab.estBloc ? Couleurs.accent : (Couleurs.sombre ? Couleurs.gris3 : Couleurs.fond))
-                           : (zt.containsMouse ? Qt.alpha(Couleurs.voile, 0.08) : "transparent")
-                    border.width: tab.estBloc && !tab.estActif ? 1 : 0
-                    border.color: Couleurs.bordureSubtile
-                    Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
-                }
-
-                // Soulignement raffiné pour Éditorial & Néon
-                Rectangle {
-                    visible: tab.estSouligne && tab.estActif
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: parent.width; height: 2
-                    radius: Couleurs.rayon(1, width, height)
-                    color: Couleurs.accent
-                }
-
-                Row {
-                    id: contenuTab
-                    anchors.centerIn: parent
-                    spacing: 5
-                    Ico {
-                        id: iconeOnglet
-                        visible: !Couleurs.styleTerminal && !Couleurs.styleEditorial
-                        anchors.verticalCenter: parent.verticalCenter
-                        nom: tab.info.ico
-                        taille: 13
-                        color: tab.estActif
-                               ? (tab.estBloc ? Couleurs.surAccent : Couleurs.accent)
-                               : Couleurs.texteSec
-                    }
-                    Texte {
-                        id: titreOnglet
-                        width: Math.max(0, Math.min(implicitWidth, tab.width - tab.largeurAccessoires - 6))
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: Couleurs.styleTerminal
-                              ? ("[" + tab.info.nom.toUpperCase() + "]")
-                              : (Couleurs.styleBrut
-                                 ? ("0" + (tab.index + 1) + " " + tab.info.nom.toUpperCase())
-                                 : tab.info.nom)
-                        font.pixelSize: (Couleurs.styleTerminal || Couleurs.styleBrut) ? 10 : 12
-                        font.weight: tab.estActif ? Font.DemiBold : Font.Medium
-                        font.letterSpacing: (Couleurs.styleTerminal || Couleurs.styleBrut) ? 0.6 : 0
-                        color: tab.estActif
-                               ? (tab.estBloc ? Couleurs.surAccent : Couleurs.texte)
-                               : (zt.containsMouse ? Couleurs.texteDoux : Couleurs.texteSec)
-                    }
-                    Rectangle {
-                        visible: tab.avecBadge
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 5; height: 5; radius: width / 2
-                        color: tab.estActif && tab.estBloc ? Couleurs.surAccent : Couleurs.accent
-                    }
-                }
-
-                MouseArea {
-                    id: zt
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: entete.choisir(tab.modelData)
-                }
-                Accessible.role: Accessible.Button
-                Accessible.name: tab.info.nom
+            Rectangle {
+                visible: tab.choisi && entete.ligne
+                x: entete.lateral ? 0 : 5
+                y: entete.lateral ? 5 : parent.height - height
+                width: entete.lateral ? 2 : parent.width - 10
+                height: entete.lateral ? parent.height - 10 : 2
+                color: Couleurs.accent
+            }
+            Ico {
+                visible: tab.symbole
+                x: entete.icones || tab.empile ? (parent.width - width) / 2 : 7
+                y: tab.empile ? 4 : (parent.height - height) / 2
+                nom: tab.info.ico
+                taille: 15
+                color: tab.choisi && entete.plein ? Couleurs.surAccent
+                     : tab.choisi && !entete.ligne ? Couleurs.texteSurSurfaceActive
+                     : tab.choisi ? Couleurs.accent : Couleurs.texteSec
+            }
+            Texte {
+                id: titre
+                visible: !entete.icones
+                x: tab.symbole && !tab.empile ? 27 : 5
+                y: tab.empile ? 21 : 0
+                width: Math.max(0, parent.width - x - (tab.badge ? 10 : 5))
+                height: tab.empile ? parent.height - y - 3 : parent.height
+                horizontalAlignment: tab.empile ? Text.AlignHCenter : Text.AlignLeft
+                text: (entete.style === "index" ? String(tab.index + 1).padStart(2, "0") + "  " : "") + tab.info.nom
+                font.pixelSize: entete.lateral || entete.plein ? 10 : 11
+                font.weight: tab.choisi ? Font.DemiBold : Font.Medium
+                color: tab.choisi && entete.plein ? Couleurs.surAccent
+                     : tab.choisi && !entete.ligne ? Couleurs.texteSurSurfaceActive
+                     : tab.choisi ? Couleurs.texte : Couleurs.texteSec
+            }
+            Rectangle {
+                visible: tab.badge
+                x: parent.width - width - 4; y: 5
+                width: 5; height: 5; radius: width / 2
+                color: tab.choisi && entete.plein ? Couleurs.surAccent : Couleurs.accent
+            }
+            ControleAction {
+                id: action
+                anchors.fill: parent
+                text: tab.info.nom
                 Accessible.checkable: true
-                Accessible.checked: tab.estActif
+                Accessible.checked: tab.choisi
+                ToolTip.visible: hovered && (!titre.visible || titre.truncated)
+                ToolTip.delay: 550
+                ToolTip.text: text
+                onClicked: entete.choisir(tab.modelData)
             }
         }
     }
-
-    // Accès rapide au Centre de contrôle à droite de l'en-tête
     Rectangle {
         id: boutonControle
         objectName: "nc-ile-vers-controle"
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        width: 26; height: 26
-        radius: Couleurs.rayon((Couleurs.styleBrut || Couleurs.styleTerminal) ? 2 : 13, width, height)
-        color: zc.containsMouse ? Couleurs.surfaceActive : Couleurs.surfaceDouce
-        border.width: (Couleurs.styleBrut || Couleurs.styleTerminal || Couleurs.styleNeon) ? 1 : 0
-        border.color: zc.containsMouse ? Couleurs.accent : Couleurs.bordureSubtile
-        Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
+        x: entete.lateral ? (parent.width - width) / 2 : parent.width - width - 4
+        y: entete.lateral ? parent.height - height - 4 : (parent.height - height) / 2
+        width: 28; height: 28
+        radius: Couleurs.rayon(entete.plein ? 1 : 14, width, height)
+        color: zc.contientPointeur ? Couleurs.surfaceActive : Couleurs.surfaceDouce
         Ico {
             anchors.centerIn: parent
-            nom: "tune"; taille: 14
-            color: zc.containsMouse ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
+            nom: "tune"; taille: 15
+            color: zc.contientPointeur ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
         }
-        MouseArea {
+        ControleAction {
             id: zc
             anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            text: Reglages.t("Centre de contrôle", "Control Center")
             onClicked: entete.ouvrirControle(boutonControle)
         }
-        Accessible.role: Accessible.Button
-        Accessible.name: Reglages.t("Centre de contrôle", "Control Center")
-    }
-
-    // Séparateur discret sous l'en-tête
-    Rectangle {
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 1
-        color: Couleurs.separateur
     }
 }

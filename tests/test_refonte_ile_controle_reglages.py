@@ -64,7 +64,7 @@ class IntegrationSource(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class RefonteHorsEcran(unittest.TestCase):
-    def lancer_qml(self, shell_code, reglages="", palette=None, langue="fr", faux_reglages=None):
+    def lancer_qml(self, shell_code, reglages="", palette=None, langue="fr", faux_reglages=None, faux_commandes=None):
         with tempfile.TemporaryDirectory(prefix="nc-refonte-") as d:
             root = Path(d)
             qml_dir = root / "qml"
@@ -90,6 +90,10 @@ class RefonteHorsEcran(unittest.TestCase):
                 p = b / "nc-reglages"
                 p.write_text(faux_reglages, encoding="utf-8")
                 p.chmod(0o755)
+            for nom, code in (faux_commandes or {}).items():
+                p = b / nom
+                p.write_text(code, encoding="utf-8")
+                p.chmod(0o755)
             (qml_dir / "test_shell.qml").write_text(shell_code, encoding="utf-8")
             env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL")}
             env.update(
@@ -104,6 +108,8 @@ class RefonteHorsEcran(unittest.TestCase):
                 QT_QUICK_BACKEND="software",
                 NC_LANGUE=langue,
             )
+            if faux_commandes:
+                env["PATH"] = str(b) + os.pathsep + env.get("PATH", os.defpath)
             r = subprocess.run(["qs", "--no-color", "-p", str(qml_dir / "test_shell.qml")],
                                env=env, text=True, capture_output=True, timeout=20)
             sortie = r.stdout + r.stderr
@@ -227,7 +233,7 @@ ShellRoot {
     id: r
     property bool ferme: false
     property int etape: 0
-    property rect ancreBluetooth
+    property rect geometrie
     TestCase { id: clavier; name: "ClavierControle"; when: false }
     function verifier(ok, message) {
         if (!ok) { console.error(message); Qt.exit(2); throw new Error(message) }
@@ -241,9 +247,19 @@ ShellRoot {
         }
         return null
     }
+    function dimensions(item) { return Qt.rect(item.x, item.y, item.width, item.height) }
+    function memeCarte(panneau) {
+        const actuel = dimensions(panneau)
+        verifier(actuel.x === geometrie.x && actuel.y === geometrie.y && actuel.width === geometrie.width && actuel.height === geometrie.height,
+                 "la carte a changé de géométrie")
+    }
+    function clic(item) {
+        verifier(item && item.visible && item.enabled, "bouton non interactif")
+        clavier.mouseClick(item, item.width / 2, item.height / 2)
+    }
     PanneauControle {
         id: ctrl
-        visible: true; implicitWidth: 900; implicitHeight: 720
+        visible: true; implicitWidth: 900; implicitHeight: 350
         bord: Etat.controleBord || "top"
         ancre: Etat.controleAncre
         basReserve: 44
@@ -254,20 +270,23 @@ ShellRoot {
         onTriggered: {
             const panneau = trouver(ctrl.contentItem, "nc-controle-panneau")
             const tiroir = trouver(ctrl.contentItem, "nc-controle-tiroir")
+            const accueil = trouver(panneau, "nc-controle-accueil")
+            const bt = trouver(panneau, "nc-controle-tuile-bluetooth")
+            const details = trouver(bt, "nc-controle-details")
             if (r.etape === 0) {
-                Etat.ouvrirControle("TEST", "accueil", "bottom", Qt.rect(296, 684, 36, 28))
+                Etat.ouvrirControle("TEST", "accueil", "bottom", Qt.rect(296, 322, 36, 28))
                 r.etape++
                 return
             }
             if (r.etape === 1) {
                 verifier(Math.abs(panneau.y + panneau.height + 56 - ctrl.height) < 1, "carte non ancrée en bas")
                 verifier(Math.abs(panneau.x + panneau.width / 2 - 314) < 1, "carte non centrée sur le bouton")
-                const bt = trouver(panneau, "nc-controle-tuile-bluetooth")
-                trouver(bt, "nc-controle-action").forceActiveFocus()
+                r.geometrie = dimensions(panneau)
+                verifier(accueil.contentHeight > accueil.height + 16, "le tableau de bord doit pouvoir défiler")
+                trouver(bt, "nc-controle-action").forceActiveFocus(Qt.OtherFocusReason)
                 clavier.keyClick(Qt.Key_Tab)
-                const details = trouver(bt, "nc-controle-details")
                 verifier(details.activeFocus, "Tab ne mène pas aux détails Bluetooth")
-                r.ancreBluetooth = Etat.ancreControle(details)
+                accueil.contentY = 16       // L'utilisateur peut défiler après la mise au point automatique de Tab.
                 clavier.keyClick(Qt.Key_Return)
                 verifier(Etat.controleSection === "bluetooth", "Entrée n'ouvre pas Bluetooth")
                 r.etape++
@@ -275,22 +294,55 @@ ShellRoot {
             }
             if (r.etape === 2) {
                 verifier(tiroir.item && tiroir.item.visible, "tiroir Bluetooth invisible")
-                const a = r.ancreBluetooth
-                verifier(panneau.y + panneau.height <= a.y - 7 || panneau.y >= a.y + a.height + 7
-                      || panneau.x + panneau.width <= a.x - 7 || panneau.x >= a.x + a.width + 7,
-                    `le tiroir (${panneau.x}, ${panneau.y}, ${panneau.width}, ${panneau.height}) couvre Bluetooth (${a}); ancre retenue : ${ctrl.ancreInterne}`)
+                memeCarte(panneau)
                 clavier.keyClick(Qt.Key_Backspace)
                 verifier(ctrl.surAccueil, "Retour arrière ne revient pas à l'accueil")
-                verifier(Math.abs(panneau.x + panneau.width / 2 - 314) < 1, "le retour ne retrouve pas l'ancrage de l'accueil")
-                Etat.allerControle("son")
+                memeCarte(panneau)
                 r.etape++
                 return
             }
-            verifier(tiroir.item && tiroir.item.visible, "tiroir Audio invisible")
-            clavier.keyClick(Qt.Key_Escape)
-            verifier(ctrl.surAccueil && !r.ferme, "Échap doit d'abord revenir à l'accueil")
-            clavier.keyClick(Qt.Key_Escape)
-            verifier(r.ferme && !Etat.controleOuvert, "Échap ne ferme pas le panneau")
+            if (r.etape === 3) {
+                verifier(details.activeFocus && accueil.contentY === 16, "le retour n'a pas restauré le focus et le défilement")
+                const concentration = trouver(panneau, "nc-controle-tuile-concentration")
+                clic(trouver(concentration, "nc-controle-details"))
+                verifier(Etat.controleSection === "concentration" && !r.ferme, "le clic n'ouvre pas le tiroir Concentration")
+                memeCarte(panneau)
+                const quinze = trouver(tiroir.item, "nc-controle-minuteur-15")
+                quinze.forceActiveFocus(Qt.TabFocusReason)
+                clavier.keyClick(Qt.Key_Space)
+                verifier(Etat.controleSection === "minuteur" && Etat.minuteurFin > 0, "Espace ne démarre pas le minuteur dans son tiroir")
+                memeCarte(panneau)
+                clic(trouver(panneau, "nc-controle-retour"))
+                verifier(Etat.controleSection === "concentration", "le bouton retour a sauté le tiroir parent")
+                memeCarte(panneau)
+                r.etape++
+                return
+            }
+            if (r.etape === 4) {
+                verifier(trouver(tiroir.item, "nc-controle-minuteur-15").activeFocus, "le tiroir parent n'a pas retrouvé son focus")
+                Etat.ouvrirControle("TEST", "wifi", "left", Qt.rect(18, 100, 30, 32))
+                verifier(Etat.controleSection === "reseau" && tiroir.item, "l'alias Wi-Fi n'ouvre pas le tiroir réseau")
+                r.etape++
+                return
+            }
+            if (r.etape === 5) {
+                verifier(Math.abs(panneau.x - 56) < 1, "le tiroir direct n'est pas ancré au widget à gauche")
+                r.geometrie = dimensions(panneau)
+                tiroir.item.cibleMdp = ({ name: "Wi-Fi de test" })
+                const mdp = trouver(tiroir.item, "nc-controle-mot-de-passe")
+                mdp.forceActiveFocus()
+                mdp.text = "abc"
+                mdp.cursorPosition = mdp.length
+                clavier.keyClick(Qt.Key_Backspace)
+                verifier(Etat.controleSection === "reseau" && mdp.text === "ab", "Retour arrière a quitté le formulaire Wi-Fi")
+                clavier.keyClick(Qt.Key_Escape)
+                verifier(Etat.controleSection === "reseau" && !tiroir.item.cibleMdp && !mdp.text, "Échap n'a pas annulé seulement la saisie Wi-Fi")
+                clavier.keyClick(Qt.Key_Escape)
+                verifier(ctrl.surAccueil && !r.ferme, "Échap doit d'abord revenir à l'accueil du tiroir direct")
+                memeCarte(panneau)
+                clavier.keyClick(Qt.Key_Escape)
+                verifier(r.ferme && !Etat.controleOuvert, "Échap ne ferme pas le panneau")
+            }
             console.warn("CONTROLE_OK")
             Qt.quit()
         }
@@ -298,6 +350,89 @@ ShellRoot {
 }
 ''', reglages="ILE_ANIM=sec\n")
         self.assertIn("CONTROLE_OK", out)
+
+    def test_panneau_controle_routes(self):
+        out = self.lancer_qml('''import QtQuick
+import QtTest
+import Quickshell
+import Quickshell.Io
+ShellRoot {
+    id: r
+    property int etape: 0
+    property int fermetures: 0
+    property int vpn: 0
+    TestCase { id: entree; name: "RoutesControle"; when: false }
+    Connections { target: VpnEtat; function onOuvrirPanneau() { r.vpn++ } }
+    function verifier(ok, message) {
+        if (!ok) { console.error(message); Qt.exit(2); throw new Error(message) }
+    }
+    function trouver(item, nom) {
+        if (item.objectName === nom) return item
+        for (const enfant of item.children) {
+            const trouve = trouver(enfant, nom)
+            if (trouve) return trouve
+        }
+        return null
+    }
+    function clic(nom) {
+        const item = trouver(ctrl.contentItem, nom)
+        verifier(item && item.visible && item.enabled, "bouton indisponible : " + nom)
+        entree.mouseClick(item, item.width / 2, item.height / 2)
+    }
+    PanneauControle {
+        id: ctrl
+        visible: true; implicitWidth: 900; implicitHeight: 720
+        onFermer: { r.fermetures++; Etat.fermerControle() }
+    }
+    Process {
+        id: lireJournal
+        command: ["cat", Quickshell.env("HOME") + "/routes"]
+        stdout: StdioCollector { id: journal }
+        onExited: code => {
+            verifier(code === 0 && journal.text.trim() === "fenetre|Son et luminosité\\nnetwork-editor\\nmsg panel-open control-center network",
+                     "commandes inattendues : " + journal.text)
+            console.warn("ROUTES_CONTROLE_OK")
+            Qt.quit()
+        }
+    }
+    Timer {
+        interval: 180; running: true; repeat: true
+        onTriggered: {
+            if (r.etape === 0) {
+                Etat.batteriePc = false
+                Etat.ouvrirControle("TEST", "charge")
+                verifier(Etat.controleSection === "systeme", "Batterie indisponible n'a pas de repli")
+                verifier(trouver(ctrl.contentItem, "nc-controle-reglages").section === "", "Système ouvre des réglages sans rapport")
+                Etat.ouvrirControle("TEST", "inconnue")
+                verifier(ctrl.surAccueil, "une route inconnue donne un tiroir vide")
+                Etat.ouvrirControle("TEST", "son")
+            } else if (r.etape === 1) {
+                trouver(ctrl.contentItem, "nc-controle-reglages").forceActiveFocus()
+                entree.keyClick(Qt.Key_Return)
+                verifier(r.fermetures === 1 && !Etat.controleOuvert, "les réglages Audio ne ferment pas le centre")
+                Etat.ouvrirControle("TEST", "reseau")
+            } else if (r.etape === 2) {
+                clic("nc-controle-reglages-reseau")
+                verifier(r.fermetures === 2 && !Etat.controleOuvert, "les réglages réseau ne sont pas un tiroir natif")
+                Etat.ouvrirControle("TEST", "accueil")
+            } else if (r.etape === 3) {
+                const tuile = trouver(ctrl.contentItem, "nc-controle-tuile-vpn")
+                verifier(!tuile.aDetails, "la tuile VPN a encore deux boutons pour la même fenêtre")
+                entree.mouseClick(trouver(tuile, "nc-controle-action"), 10, 10)
+                verifier(r.vpn === 1 && r.fermetures === 3 && !Etat.controleOuvert, "VPN n'ouvre pas sa fenêtre externe")
+                lireJournal.running = true
+            }
+            r.etape++
+        }
+    }
+}
+''', reglages="ILE_ANIM=sec\n",
+            faux_reglages='#!/bin/sh\nprintf "%s|%s\\n" "$1" "$2" >> "$HOME/routes"\n',
+            faux_commandes={
+                "nm-connection-editor": '#!/bin/sh\necho network-editor >> "$HOME/routes"\nexit 1\n',
+                "noctalia": '#!/bin/sh\n[ "$1 $2" != "msg panel-open" ] || echo "$*" >> "$HOME/routes"\n',
+            })
+        self.assertIn("ROUTES_CONTROLE_OK", out)
 
     def test_parametres_sidebar_et_filtre_modifies(self):
         faux = '''#!/usr/bin/env python3

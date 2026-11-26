@@ -1,8 +1,13 @@
 # Île essentielle et Centre de contrôle
 
-L’île Quickshell se concentre sur **l’essentiel**. Chacun des thèmes fournis a son propre dessin : silhouette,
-composition de l’heure et de la date, et habillage de l’île ouverte. Changer de thème suffit, sans redémarrer l’île.
-Par exemple : une cassette pour Gruvbox, un afficheur CRT pour Rétro et un feuillet à coin replié pour Papier.
+L’île Quickshell se concentre sur **l’essentiel**. Les 23 thèmes fournis ont leur propre dessin, île fermée **et ouverte**.
+Changer de thème suffit, sans redémarrer l’île. Sakura présente les pages en galerie au-dessus d’un jardin et d’un lecteur
+radial ; Papier place un sommaire à gauche du feuillet ; Gruvbox a des touches en pied et une platine ; Nord ouvre
+un rail à droite, un tableau de bord dépouillé et un lecteur-portrait. Les pages gardent leurs commandes et services.
+- Références visuelles : [Impasto](https://github.com/andreumassanet/impasto) pour les vues spécialisées,
+  [Caelestia](https://github.com/caelestia-dots/shell) pour la continuité entre pilule et tableau de bord,
+  [Dynamic Glacier](https://github.com/mavxa/DynamicGlacier) pour la hiérarchie média, et la capture de référence pour
+  la galerie d’onglets et le disque radial. Les dessins vectoriels de l’île sont propres à ce dépôt.
 - **Île fermée** : heure, date optionnelle, météo brève, notifications non lues et réactions en direct
   (musique, volume, luminosité, minuteur, appel, enregistrement vidéo, agents actifs).
 - **Île ouverte** : par défaut **Essentiel**, **Notifications** et **Musique** (lorsqu’un lecteur est actif),
@@ -12,9 +17,10 @@ Tous les réglages rapides et panneaux détaillés (Wi-Fi/Ethernet, Bluetooth, V
 Caféine, Mode jeu, Volume, Luminosité, Profils d’énergie, Système, Batterie, Santé, Météo, Agenda, Presse-papiers,
 Minuteur, Fenêtres) vivent dans le **panneau Centre de contrôle dédié** (`Super + C`, icônes de la barre, ou bouton
 « Centre de contrôle » sur l’île ; `qs -c nc-ile ipc call ile controle`).
-Les widgets s’ouvrent près du bouton qui les lance, sur le même écran : sous une barre haute, au-dessus d’une barre
-basse et vers l’intérieur pour une barre latérale. Si la place manque, la carte cherche un autre côté. Depuis la barre
-native Noctalia, l’ancre est le point du clic. Le raccourci clavier sans bouton conserve le placement au bord de la barre.
+Seul un **bouton extérieur de la barre** fournit une ancre : sous la barre haute, au-dessus de la barre basse ou
+vers l’intérieur d’une barre latérale, sur le même écran. Si la place manque, la carte cherche un autre côté.
+Depuis la barre native Noctalia, l’ancre est le point du clic. Depuis l’île ou le raccourci, le centre s’ouvre à son
+emplacement normal. Dans le centre, les détails et le retour utilisent la même carte, sans la déplacer.
 
 Dans **Réglages**, une action qui retourne des informations ou qui échoue affiche son résultat dans une boîte de
 dialogue nommée, avec un texte sélectionnable. Une édition ordinaire continue d’afficher un statut discret.
@@ -32,9 +38,8 @@ nc-settings reset ILE_PAGE_ASSISTANT
 Désactiver une page masque son accès sur l’île. Les réglages rapides restent disponibles dans le panneau Centre de
 contrôle (`Super + C`). Si la page ouverte est désactivée, l’île choisit une page encore disponible. Si elles sont
 toutes désactivées, elle se referme et reste en pilule ; le Spotlight reste disponible.
-Les points de navigation restent dans une zone avec 32 px de marge verticale et une gouttière séparée du contenu.
-Le point actif reste visible ; les voisins s’estompent avec la distance et disparaissent avant de dépasser.
-La molette et les flèches permettent toujours d’atteindre les pages hors de cette zone.
+Les onglets défilent si nécessaire et suivent la page active. Les flèches et la molette changent de page ; les
+thèmes à navigation horizontale ajoutent un raccourci par points si plus de quatre pages sont disponibles.
 
 La page Agents affiche seulement les sessions non terminées. Les transitions de fin et leur notification sont
 conservées ; une session qui reprend son travail réapparaît. Aucun fichier d’historique n’est supprimé.

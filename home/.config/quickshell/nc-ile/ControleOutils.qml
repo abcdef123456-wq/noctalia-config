@@ -11,6 +11,8 @@ Item {
     id: vue
     property string section: "systeme"
     signal fermerPanneau()
+    signal ouvrirTiroir(string section, Item bouton)
+    readonly property alias defileur: defilement
 
     readonly property bool actif: visible && Etat.controleOuvert && Etat.ecranVu
     readonly property bool masque: Partage.silence
@@ -372,18 +374,21 @@ Item {
                 }
                 Note { visible: Modes.reglage && !vue.masque && Modes.message !== ""; text: visible ? Modes.message : "" }
                 Bouton {
+                    id: pomodoro
                     glyphe: "timer"; text: Reglages.t("Démarrer un Pomodoro", "Start Pomodoro")
                     enabled: !Etat.pomodoro
-                    onClicked: { Etat.lancerPomodoro(); Etat.allerControle("minuteur") }
+                    onClicked: { Etat.lancerPomodoro(); vue.ouvrirTiroir("minuteur", pomodoro) }
                 }
                 Row {
                     width: parent.width; spacing: 6
                     Repeater {
                         model: [15, 25, 45]
                         Bouton {
+                            id: duree
                             required property int modelData
+                            objectName: "nc-controle-minuteur-" + modelData
                             width: (parent.width - 12) / 3; text: modelData + " min"
-                            onClicked: { vue.lancerMinuteur(modelData); Etat.allerControle("minuteur") }
+                            onClicked: { vue.lancerMinuteur(modelData); vue.ouvrirTiroir("minuteur", duree) }
                         }
                     }
                 }

@@ -121,6 +121,85 @@ ShellRoot {
                     self.assertNotIn(resultat, collection, f"Silhouette identique : {theme}")
                     collection.add(resultat)
 
+    def test_ouverte_change_de_composition_et_garde_les_commandes(self):
+        from tests.test_refonte_ile_controle_reglages import RefonteHorsEcran
+
+        shell = H.ENTETE + "import QtTest\nShellRoot {" + H.OUTILS + r'''
+    id: test
+    property var themes: THEMES_JSON
+    property var dispositions: new Set()
+    property int index: 0
+    property int etape: 0
+    TestCase { id: clic; when: false }
+    Ile {
+        id: fen
+        visible: true
+        modelData: ({ name: "compositions", width: 1000, height: 760 })
+    }
+    Timer {
+        interval: 25; running: true; repeat: true
+        onTriggered: {
+            if (!Reglages.valeurs.ILE_ANIM) return
+            const nom = test.themes[test.index]
+            if (test.etape === 0) {
+                Reglages.style = { STYLE: nom }
+                if (!Etat.ecranOuvert) {
+                    Etat.ecranOuvert = "compositions"
+                    Etat.aller("essentiel")
+                }
+                test.etape = 1
+                return
+            }
+            const page = trouver(fen.contentItem, "nc-ile-page-essentiel")
+            const nav = trouver(fen.contentItem, "nc-ile-entete")
+            const horloge = page && trouver(page, "nc-essentiel-temps")
+            const actions = page && trouver(page, "nc-essentiel-controle")
+            if (test.etape === 1) {
+                if (Couleurs.themeActif !== nom || !actions || !actions.visible || !nav || !nav.visible
+                    || Math.abs(Etat.pilules.compositions.height - fen.taille.height) > 0.5) return
+                const zoneNav = nav.mapToItem(page, 0, 0)
+                const separee = zoneNav.x + nav.width <= 0.5 || zoneNav.y + nav.height <= 0.5
+                    || zoneNav.x >= page.width - 0.5 || zoneNav.y >= page.height - 0.5
+                if (!verifier(separee, nom + ": les onglets recouvrent la page " + zoneNav
+                              + " / " + page.width + "×" + page.height)) return
+                const rect = actions.mapToItem(page, actions.width, actions.height)
+                if (!verifier(rect.x <= page.width && rect.y <= page.height + 1, nom + ": action rognée")) return
+                const date = trouver(page, "nc-essentiel-date")
+                const etat = trouver(page, "nc-essentiel-etat")
+                const finDate = date.mapToItem(etat, date.width, date.height)
+                const debutDate = date.mapToItem(etat, 0, 0)
+                if (!verifier(finDate.y <= 0.5 || finDate.x <= 0.5 || debutDate.x >= etat.width - 0.5,
+                              nom + ": les indicateurs recouvrent la date")) return
+                test.dispositions.add([Math.sign(zoneNav.x), Math.sign(zoneNav.y), nav.style,
+                    Math.round(100 * horloge.x / page.width), horloge.y, horloge.alignement].join("/"))
+                if (++test.index < test.themes.length) { test.etape = 0; return }
+                fen.modelData = { name: "compositions", width: 440, height: 640 }
+                Reglages.style = { STYLE: "nord" }
+                test.etape = 2
+            } else if (test.etape === 2) {
+                if (!actions || !actions.visible || !nav.visible || nav.lateral) return
+                const tab = trouver(nav, "nc-ile-onglet-notifications")
+                if (!tab || !tab.visible) return
+                clic.mouseClick(tab, tab.width / 2, tab.height / 2)
+                if (!verifier(Etat.vueActive === "notifications", "l'onglet ne change pas de page")) return
+                const ctrl = trouver(nav, "nc-ile-vers-controle")
+                clic.mouseClick(ctrl, ctrl.width / 2, ctrl.height / 2)
+                if (!verifier(Etat.controleOuvert && !Etat.controleAncre && !Etat.controleBord,
+                              "un clic dans l'île ne doit pas transmettre d'ancre de barre")) return
+                if (verifier(test.dispositions.size === test.themes.length, "compositions ouvertes dupliquées")) Qt.quit()
+            }
+        }
+    }
+    Timer {
+        interval: 9000; running: true
+        onTriggered: verifier(false, "attente : " + test.themes[test.index] + "/" + test.etape
+              + ", état " + Etat.ecranOuvert + "/" + Etat.vueActive + ", hauteur " + Etat.pilules.compositions.height + "/" + fen.taille.height)
+    }
+}
+'''
+        shell = shell.replace("THEMES_JSON", json.dumps(THEMES))
+        RefonteHorsEcran.lancer_qml(self, shell, reglages="ILE_ANIM=aucun\n")
+
     def test_point_matrice_et_point_choisi_gardent_le_cartouche_ouvert(self):
         from tests.test_refonte_ile_controle_reglages import RefonteHorsEcran
 

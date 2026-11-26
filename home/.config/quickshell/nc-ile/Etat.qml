@@ -30,15 +30,18 @@ Singleton {
     readonly property bool controleOuvert: controleEcran !== ""
     readonly property var pagesControle: ["centre", "reseau", "wifi", "bluetooth", "son", "systeme", "sante",
                                           "charge", "meteo", "presse", "fenetres", "concentration", "jeu", "calendrier", "minuteur"]
+    signal ouvertureControle()
     function normaliserSectionControle(nom) {
         if (nom === "wifi") return "reseau"
         if (nom === "centre" || nom === "" || !nom) return "accueil"
-        return nom
+        if (nom === "charge" && !batteriePc) return "systeme"
+        if (nom === "sante" && !capteursSante) return "systeme"
+        return estPageControle(nom) ? nom : "accueil"
     }
     function normaliserBordControle(bord) {
         return ["top", "bottom", "left", "right"].indexOf(bord) >= 0 ? bord : ""
     }
-    function estPageControle(nom) { return pagesControle.indexOf(nom) >= 0 }
+    function estPageControle(nom) { return nom === "accueil" || pagesControle.indexOf(nom) >= 0 }
     // Wayland ne fournit pas la position globale des surfaces : chacun connaît son origine sur l'écran.
     function ancreControle(item, origine = Qt.point(0, 0)) {
         if (!item) return null
@@ -56,6 +59,7 @@ Singleton {
     function ouvrirControle(ecran, section, bord, ancre) {
         const cible = normaliserSectionControle(section)
         fermer()
+        ouvertureControle()
         controleAncre = ancre ?? null
         controleBord = normaliserBordControle(bord)
         controleSection = cible
@@ -151,7 +155,9 @@ Singleton {
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
     // La page voulue si elle est affichable, sinon le repli (clic sur la batterie de la barre : Batterie, sinon Système)
     function pageOu(nom, repli) {
-        if (nom === "charge" && !batteriePc) return repli
+        // Une préférence de l'île absente ne désactive pas son tiroir dédié ; un refus explicite garde le repli de la barre.
+        if (nom === "charge" && (!batteriePc || Reglages.val("ILE_PAGE_CHARGE", "oui") === "non")) return repli
+        if (nom === "sante" && !capteursSante) return repli
         return estPageControle(nom) || vues.indexOf(nom) >= 0 ? nom : repli
     }
     function aller(nom) {

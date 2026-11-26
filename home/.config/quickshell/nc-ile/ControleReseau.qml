@@ -70,6 +70,10 @@ Item {
     onWifiAllumeChanged: if (!wifiAllume) { annulerSaisie(); cibleConnexion = null; finConnexion.stop() }
 
     function nomVisible(n) { return masque ? Reglages.t("Réseau Wi-Fi", "Wi-Fi network") : n.nom }
+    function ouvrirParametres() {
+        Quickshell.execDetached(["sh", "-c", "nm-connection-editor || exec noctalia msg panel-open control-center network"])
+        fermerPanneau()
+    }
     function annulerSaisie() { if (champMdp) champMdp.clear(); cibleMdp = null }
     function demanderMdp(n) {
         cibleMdp = n
@@ -399,6 +403,7 @@ Item {
                             color: Couleurs.fond; border.width: 1; border.color: Couleurs.accentBord
                             TextInput {
                                 id: champMdp
+                                objectName: "nc-controle-mot-de-passe"
                                 anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
                                 verticalAlignment: TextInput.AlignVCenter
                                 echoMode: TextInput.Password
@@ -467,10 +472,7 @@ Item {
                 ControleAction {
                     id: zAv; anchors.fill: parent
                     text: Reglages.t("Paramètres réseau avancés", "Advanced network settings")
-                    onClicked: {
-                        Quickshell.execDetached(["sh", "-c", "command -v nm-connection-editor >/dev/null && exec nm-connection-editor; exec noctalia msg panel-toggle control-center"])
-                        vue.fermerPanneau()
-                    }
+                    onClicked: vue.ouvrirParametres()
                 }
             }
         }
