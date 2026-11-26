@@ -178,6 +178,18 @@ PanelWindow {
     property bool survolTenu: false
     readonly property bool survolee: survolTenu && !ouverte && !banniere && !enCarte && !pilCachee
     readonly property real hauteurSurvol: survolee ? survolIle.hauteurEnPlus : 0
+    // Clic sur la pilule fermée (hors boutons et cas particuliers) : l'île n'ouvre plus le centre de contrôle (décision
+    // du 26/11). Une activité en cours ouvre sa page si elle est affichée (nc-reglages → Pages de l'île) ; la musique sans
+    // sa page met l'appli qui joue devant. Sinon, et toujours au repos : le lanceur, comme la loupe et Super + R
+    readonly property var pageDuMode: ({ musique: "musique", piste: "musique", minuteur: "minuteur", "minuteur-fini": "minuteur",
+                                         claude: "claude", "claude-fini": "claude", appel: "appel", terminal: "terminal",
+                                         charge: "charge", jeu: "jeu" })
+    function clicPilule() {
+        const page = pageDuMode[compact.mode]
+        if (page && Etat.ouvrirSur(modelData.name, page)) return
+        if (page === "musique" && Etat.lecteur && Etat.lecteur.canRaise) { Etat.lecteur.raise(); return }
+        Etat.chercher(modelData.name)
+    }
     mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
@@ -293,7 +305,9 @@ PanelWindow {
         Ico { anchors.centerIn: parent; nom: "terminal"; taille: 14; color: Couleurs.accentClair; visible: bulle.terminal }
         Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && bulle.agent; visible: bulle.agent
                     agent: Agents.agent(Agents.principale) }
-        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller(bulle.minuteur ? "minuteur" : (bulle.terminal ? "terminal" : "claude")) } }
+        // Sa page si elle est affichée, sinon le lanceur (comme un clic sur la pilule, fen.clicPilule)
+        MouseArea { anchors.fill: parent; onClicked: Etat.ouvrirSur(fen.modelData.name, bulle.minuteur ? "minuteur" : (bulle.terminal ? "terminal" : "claude"))
+                                                     || Etat.chercher(fen.modelData.name) }
     }
 
     // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
@@ -552,8 +566,8 @@ PanelWindow {
                                : (compact.surEnvoiTelechargement(e.x, e.y) ? (CloudEtat.recevoirTelechargement(Etat.dossierTel, Etat.telechargeFini) && CloudEtat.ouvrirPanneau())
                                : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
-                               // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))))))))
+                               // Un agent t'attend dans son terminal : sa question, directement ; sinon fen.clicPilule()
+                               : (Agents.ouvrirAttente(fen.modelData.name) || fen.clicPilule()))))))))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 

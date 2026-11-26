@@ -173,9 +173,10 @@ class Sources(unittest.TestCase):
     def test_pilule_indicateur_clic_survol_et_depot_sur_l_ile_fermee(self):
         compact, ile = lire("Compact.qml"), lire("Ile.qml")
         self.assertIn('objectName: "nc-cloud-pill"', compact)
-        self.assertIn("visible: CloudEtat.actif && CloudEtat.associe", compact)
-        self.assertIn('nom: CloudEtat.envoie ? "cloud_upload" : "cloud"', compact)          # activité discrète pendant un envoi
-        self.assertIn("color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec", compact)
+        # la pilule au repos ne montre que ce qui est actif : la flèche pendant un envoi, rien sinon
+        self.assertIn("visible: CloudEtat.actif && CloudEtat.associe && CloudEtat.envoie", compact)
+        self.assertIn('nom: "cloud_upload"; taille: 15', compact)
+        self.assertIn("color: Couleurs.accentClair", compact)
         self.assertIn("(compact.surCloud(e.x, e.y) ? CloudEtat.basculerPanneau()", ile)
         # Le survol de l'île (et donc du nuage) ne l'ouvre jamais : il l'agrandit seulement (SurvolIle.qml)
         survol = ile[ile.index("HoverHandler {"):ile.index("Behavior on color")]

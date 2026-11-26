@@ -111,6 +111,14 @@ Singleton {
         vueNom = nom
         lirePage()
     }
+    // L'île fermée, ouverte directement sur une page si elle est affichable (clic sur une activité de la pilule, Ile.qml) ;
+    // faux sinon (page coupée dans les réglages ou sans contenu), l'île reste fermée
+    function ouvrirSur(ecran, nom) {
+        if (vues.indexOf(nom) < 0) return false
+        basculer(ecran, false)
+        aller(nom)
+        return true
+    }
 
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
     function basculer(ecran, versCentre) {
