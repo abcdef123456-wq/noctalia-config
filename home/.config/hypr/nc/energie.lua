@@ -143,17 +143,25 @@ function nc.mode_jeu()
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
     local q = nc.guillemets
     -- « Ne pas déranger » d'avant le jeu (oui/non), noté une seule fois : l'île muette ne laisse rien, donc on coupe comme avant
-    local dnd = q((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-dnd")     -- entre guillemets pour sh
+    local chemin_dnd = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-dnd"
+    local dnd = q(chemin_dnd)
+    local en_jeu = "[ -e " .. q(fichier_jeu) .. " ]"
+    -- Sérialise le contrôle de la marque et les changements de Concentration avec la restauration à la sortie.
+    local function sous_verrou(cmd)
+        return "( flock -x 9 || exit; " .. cmd .. " ) 9>" .. q(chemin_dnd .. ".lock")
+    end
     local appli = q(nc.t("Mode jeu", "Game Mode"))
     if actif then
-        -- « : ; » devant : Hyprland lit un « [ … ] » en tête de commande comme des règles de lancement (la commande partait cassée)
-        hl.exec_cmd(": ; [ -e " .. dnd .. " ] || { e=$(timeout 2 qs -c nc-ile ipc call ile concentrationEtat 2>/dev/null) && [ -n \"$e\" ] && echo \"$e\" > " .. dnd .. "; };"
+        hl.exec_cmd(sous_verrou(en_jeu .. " && { [ -e " .. dnd
+            .. " ] || { e=$(timeout 2 qs -c nc-ile ipc call ile concentrationEtat 2>/dev/null) && [ -n \"$e\" ] && echo \"$e\" > " .. dnd .. "; }; }")
+            .. ";"
             .. " hyprctl reload; notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu activé", "Game Mode on")) .. " "
             .. q(nc.t("Effets coupés, notifications en pause, profil Performance.", "Effects off, notifications paused, Performance profile.")) .. ";"
-            .. " sleep 2.6; timeout 2 qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
+            .. " sleep 2.6; " .. sous_verrou(en_jeu .. " && { timeout 2 qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on; }"))
     else
-        hl.exec_cmd(": ; [ \"$(cat " .. dnd .. " 2>/dev/null)\" = oui ] || { timeout 2 qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; };"
-            .. " rm -f " .. dnd .. "; hyprctl reload;"
+        hl.exec_cmd(sous_verrou(en_jeu .. " && exit 0; [ \"$(cat " .. dnd
+            .. " 2>/dev/null)\" = oui ] || { timeout 2 qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; };"
+            .. " rm -f " .. dnd) .. "; hyprctl reload;"
             .. " notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu désactivé", "Game Mode off")) .. " "
             .. q(nc.t("Effets et notifications rétablis.", "Effects and notifications restored.")))
     end
