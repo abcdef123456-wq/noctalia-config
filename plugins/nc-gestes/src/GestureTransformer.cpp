@@ -14,15 +14,16 @@ using namespace NcGestes;
 
 // Délai maximal sans aucun rendu (fenêtre jamais affichée) avant d'abandonner le geste.
 static constexpr auto ATTENTE_PREMIER_RENDU = std::chrono::milliseconds(800);
-// Goutte : sans nouveau commit de l'appli, son contenu (tel quel) entre quand même pendant l'ouverture, à cette progression.
+// Sans nouveau commit de l'appli, son contenu (tel quel) entre quand même à cette progression du geste.
 static constexpr float PRET_AU_PLUS_TARD = 0.72F;
 static constexpr auto  FONDU_CONTENU     = std::chrono::milliseconds(120);
 
 CGestureTransformer::CGestureTransformer(PHLWINDOWREF window, int mode, const CBox& anchor, const Couleurs& couleurs, std::chrono::milliseconds duration) :
     m_window(window), m_mode(mode), m_anchor(anchor), m_couleurs(couleurs), m_duration(duration) {
-    // Le premier tampon (celui de l'ouverture) est souvent vide : le suivant apporte le vrai contenu.
+    // Le premier tampon (celui de l'ouverture) est souvent vide : le suivant apporte le vrai contenu. Jusque-là, chaque
+    // geste montre une carte d'émail du thème.
     const auto W = window.lock();
-    if (m_mode == GESTE_GOUTTE && W && W->resource())
+    if (W && W->resource())
         m_commit = W->resource()->m_events.commit.listen([this] {
             if (!m_pretDepuis)
                 m_pretDepuis = clock::now();
@@ -60,9 +61,12 @@ bool CGestureTransformer::tick() {
 
 CBox CGestureTransformer::transformedExtents(const CBox& currentBox) const {
     const auto PWINDOW = m_window.lock();
-    // Seule la goutte sort du cadre de la fenêtre ; les autres gestes n'agrandissent rien.
-    if (!m_active || !PWINDOW || m_mode != GESTE_GOUTTE)
+    if (!m_active || !PWINDOW)
         return currentBox;
+    // Gestes dans le cadre : un peu de marge pour les repères de coupe qui dépassent et les battants qui viennent vers
+    // nous. Seule la goutte va jusqu'à la pilule.
+    if (m_mode != GESTE_GOUTTE)
+        return currentBox.copy().expand(std::max(currentBox.h * 0.05, 16.0));
 
     // currentBox est local au moniteur au rendu et global pour le damage : on ramène l'ancre
     // dans le même repère en passant par la boîte complète globale de la fenêtre.

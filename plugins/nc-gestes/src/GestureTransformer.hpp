@@ -40,7 +40,7 @@ namespace NcGestes {
         std::chrono::milliseconds        m_duration;
         clock::time_point                m_created = clock::now();
         std::optional<clock::time_point> m_start; // premier rendu réel : rien n'est consommé avant le premier pixel
-        // Contenu prêt : premier commit de l'appli après l'ouverture (la goutte reste en émail jusque-là), au plus tard
+        // Contenu prêt : premier commit de l'appli après l'ouverture (le geste montre l'émail jusque-là), au plus tard
         // à 72 % du geste.
         std::optional<clock::time_point> m_pretDepuis;
         CHyprSignalListener              m_commit;

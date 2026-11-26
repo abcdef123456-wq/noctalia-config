@@ -43,6 +43,10 @@ Dans `docs/superpowers/maquettes/` :
 - `planche-goutte-reelle.webp` : la goutte rendue par le plugin `nc-gestes` sur une vraie fenêtre, avant et après la
   reprise du 2026-11-26, thème clair et sombre, ralenti et vitesse réelle (Hyprland 0.57.2 imbriqué, échelle 1,6,
   vraie île `nc-ile` au-dessus), avec la maquette validée en référence.
+- `planche-gestes-clair.webp`, `planche-gestes-sombre.webp` : les 13 autres gestes du plugin, finis comme la goutte
+  (couleurs de l'île, carte d'émail tant que l'appli n'a rien dessiné), une ligne par geste : ralenti ×0,15 puis
+  vitesse réelle (Hyprland 0.57.2 imbriqué, échelle 1,6).
+- `planche-gestes-natifs.webp` : les 9 gestes natifs (styles Hyprland de `nc/apparence.lua`), ralentis.
 
 Figma (île, survol, lanceur, atlas) : https://www.figma.com/design/pTRxbS5oOZsgV3x41s7Voz
 
@@ -60,6 +64,10 @@ Figma (île, survol, lanceur, atlas) : https://www.figma.com/design/pTRxbS5oOZsg
   `Super + C`, comme proposé le 24, ou autre chose ?
 - Ordre des lots. Proposition : île Émail + survol, puis lanceur, puis la goutte (plugin), puis les gestes des
   autres thèmes.
-- Plugin : le col hors du cadre de la fenêtre marche (phase 1). Restent les 13 autres gestes, le branchement
-  (`install.sh`, `apparence.lua`, ancre envoyée par `Ile.qml`, réglage) et le repli natif sur les distributions
-  sans en-têtes Hyprland (Debian, Fedora, Nobara).
+- Plugin : les 14 gestes ont la même finition (2026-11-26). Restent le branchement (`install.sh`, réglage) et le
+  repli natif sur les distributions sans en-têtes Hyprland (Debian, Fedora, Nobara).
+- Gestes natifs trop proches à l'œil (planche des natifs) : `fondu` et `apparition` (popin 100 % et 97 %, presque
+  le même fondu), `debouche` et `rail` (même glissement depuis le bord le plus proche, seule la courbe change),
+  `bloc` et `feuille` (même glissement depuis la gauche). Proposition : passer `feuille` (papier : une feuille
+  tirée d'une pile) et `rail` (cyberjaune : file sur un rail puis s'enclenche) au plugin, où ils peuvent avoir une
+  vraie forme, et donner à `apparition` un style à part (par exemple `gnomed`) ou la fusionner avec `fondu`.
