@@ -4,8 +4,8 @@
 #include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/output/Monitor.hpp>
-#include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
+#include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
 #include <algorithm>
@@ -70,7 +70,7 @@ CBox CGestureTransformer::transformedExtents(const CBox& currentBox) const {
     a.translate(currentBox.pos() - PWINDOW->getFullWindowBoundingBox().pos());
 
     // Englobe la fenêtre, la pilule, et la goutte (centrée sous la pilule, jamais plus large que la fenêtre) ; marges
-    // pour le léger dépassement du ressort à l'ouverture (4 %) et l'ombre douce.
+    // pour le léger dépassement du ressort à l'ouverture (2,5 %), l'étirement de la chute et l'ombre douce.
     const double CX = a.middle().x;
     const double MX = currentBox.w * 0.05, MY = currentBox.h * 0.08;
     const double X1 = std::min({currentBox.x - MX, a.x, CX - currentBox.w * 0.5});
