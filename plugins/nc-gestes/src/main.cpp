@@ -56,6 +56,7 @@ namespace {
     HANDLE                                                      g_handle = nullptr;
     SConfig                                                     g_config;
     std::map<std::string, CBox>                                 g_anchors; // par écran, logique, local à l'écran
+    Couleurs                                                    g_couleurs; // Émail de l'île (surface, accent), pour la goutte
     std::vector<PHLWINDOWREF>                                   g_animated;
     std::vector<CHyprSignalListener>                            g_listeners;
     SP<IPC::Socket1::SCommand>                                  g_command;
@@ -92,7 +93,7 @@ namespace {
         w->presentation().alpha(Desktop::View::WINDOW_ALPHA_FADE)->warp();
 
         const auto DUREE = std::chrono::milliseconds(sc<int>(GESTE->dureeMs / std::max(g_config.speed, 0.1F)));
-        w->effects().transformers()->emplace<CGestureTransformer>(w->m_self, GESTE->mode, anchorFor(MON), DUREE);
+        w->effects().transformers()->emplace<CGestureTransformer>(w->m_self, GESTE->mode, anchorFor(MON), g_couleurs, DUREE);
         g_animated.emplace_back(w->m_self);
         g_pHyprRenderer->damageWindow(w);
     }
@@ -147,6 +148,20 @@ namespace {
         return ec == std::errc{} && ptr == s.data() + s.size();
     }
 
+    // « #rrggbb » -> RVB 0..1
+    bool parseCouleur(const std::string& s, float* out) {
+        if (s.size() != 7 || s[0] != '#')
+            return false;
+        for (int i = 0; i < 3; ++i) {
+            unsigned v         = 0;
+            const auto [p, ec] = std::from_chars(s.data() + 1 + 2 * i, s.data() + 3 + 2 * i, v, 16);
+            if (ec != std::errc{} || p != s.data() + 3 + 2 * i)
+                return false;
+            out[i] = sc<float>(v) / 255.F;
+        }
+        return true;
+    }
+
     std::string jsonEscape(const std::string& s) {
         std::string out;
         for (const char c : s) {
@@ -163,9 +178,15 @@ namespace {
         for (auto const& [name, box] : g_anchors)
             anchors += std::format("{}\"{}\": [{}, {}, {}, {}]", anchors.empty() ? "" : ", ", jsonEscape(name), box.x, box.y, box.w, box.h);
 
-        return std::format(R"({{"version": "{}", "renderer": "{}", "shader": "{}", "enabled": {}, "mode": "{}", "speed": {}, "active": {}, "anchors": {{{}}}}})",
-                           HYPRLAND_API_VERSION, rendererGL() ? "gl" : "autre", gesteShaderFailed() ? "erreur" : "ok", g_config.enabled, g_config.mode,
-                           g_config.speed, g_animated.size(), anchors);
+        std::string couleurs = "null";
+        if (g_couleurs)
+            couleurs = std::format("[{}, {}, {}, {}, {}, {}]", (*g_couleurs)[0], (*g_couleurs)[1], (*g_couleurs)[2], (*g_couleurs)[3], (*g_couleurs)[4],
+                                   (*g_couleurs)[5]);
+
+        return std::format(
+            R"({{"version": "{}", "renderer": "{}", "shader": "{}", "enabled": {}, "mode": "{}", "speed": {}, "active": {}, "anchors": {{{}}}, "couleurs": {}}})",
+            HYPRLAND_API_VERSION, rendererGL() ? "gl" : "autre", gesteShaderFailed() ? "erreur" : "ok", g_config.enabled, g_config.mode, g_config.speed,
+            g_animated.size(), anchors, couleurs);
     }
 
     IPC::Socket1::SResponse onIpc(const IPC::Socket1::SRequest& req) {
@@ -183,11 +204,17 @@ namespace {
             return statusJson();
 
         if (SUB == "anchor") {
-            // anchor <écran> <x> <y> <l> <h> : pilule au repos, logique, locale à l'écran.
+            // anchor <écran> <x> <y> <l> <h> [<surface> <accent>] : pilule au repos, logique, locale à l'écran, et ses
+            // couleurs (#rrggbb) dont la goutte est faite.
             double v[4];
-            if (args.size() != 7 || !std::ranges::all_of(std::views::iota(0, 4), [&](int i) { return parseFloat(args[3 + i], v[i]); }) || v[2] <= 0 || v[3] <= 0)
-                return "nc-gestes : usage anchor <écran> <x> <y> <largeur> <hauteur>";
+            std::array<float, 6> c{};
+            if ((args.size() != 7 && args.size() != 9) ||
+                !std::ranges::all_of(std::views::iota(0, 4), [&](int i) { return parseFloat(args[3 + i], v[i]); }) || v[2] <= 0 || v[3] <= 0 ||
+                (args.size() == 9 && !(parseCouleur(args[7], c.data()) && parseCouleur(args[8], c.data() + 3))))
+                return "nc-gestes : usage anchor <écran> <x> <y> <largeur> <hauteur> [<#surface> <#accent>]";
             g_anchors[args[2]] = CBox{v[0], v[1], v[2], v[3]};
+            if (args.size() == 9)
+                g_couleurs = c;
             return "ok";
         }
 

@@ -97,15 +97,19 @@ PanelWindow {
             _empriseStable = r
         envoyerAncreGestes(false)
     }
-    // Pilule au repos (logique, locale à l'écran) pour le plugin Hyprland nc-gestes : la goutte de Rose Aube en part.
+    // Pilule au repos (logique, locale à l'écran) pour le plugin Hyprland nc-gestes : la goutte de Rose Aube en part,
+    // faite de son émail (surface de la pilule, accent pour le filet).
     // Envoyée hors ressort et seulement quand elle change ; nc-plugin-sync la redemande (forcer) après un chargement.
     // Toujours la ligne au repos (largeur du contenu, hauteur « ligne »), jamais l'île agrandie au survol.
     // Plugin absent : hyprctl répond une erreur, ignorée.
     property string _ancreGestes: ""
+    function hexGestes(c) { return "#" + [c.r, c.g, c.b].map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("") }
+    readonly property string couleursGestes: hexGestes(Couleurs.fond) + " " + hexGestes(Couleurs.accent)
+    onCouleursGestesChanged: envoyerAncreGestes(false)
     function envoyerAncreGestes(forcer) {
         const l = Couleurs.forme === "point" ? 10 : compact.largeur
         const a = [modelData.name, Math.round((modelData.width - l) / 2), Math.round(ile.y), Math.round(l),
-                   Couleurs.forme === "point" ? 10 : ligne].map(String)
+                   Couleurs.forme === "point" ? 10 : ligne].map(String).concat(couleursGestes.split(" "))
         if (!forcer && a.join(" ") === _ancreGestes) return
         _ancreGestes = a.join(" ")
         Quickshell.execDetached(["hyprctl", "nc-gestes", "anchor"].concat(a))

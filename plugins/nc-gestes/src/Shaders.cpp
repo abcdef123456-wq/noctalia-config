@@ -30,13 +30,14 @@ uniform float u_scale;      // échelle du moniteur
 uniform float u_radius;     // arrondi de la fenêtre
 uniform int   u_mode;       // geste : 1 goutte, 2..14 voir geste()
 
+uniform float u_pret;       // goutte : fondu du vrai contenu de la fenêtre, 0..1
+uniform vec3  u_surface;    // goutte : surface de la pilule (Émail du thème)
+uniform vec3  u_bord;       // goutte : accent du thème, pour le filet
+
 out vec4 fragColor;
 
 const float PI        = 3.14159265;
-const float T_RUPTURE = 0.6;
-const float LARGEUR_RUPTURE = 0.8;  // part de la largeur finale atteinte avant la rupture
-const float ETIREMENT   = 0.18;     // hauteur gagnée sous son poids juste avant la rupture
-const float AFFAISSEMENT = 0.3;     // le col s'allonge d'autant pendant que la goutte s'alourdit
+const float T_RUPTURE = 0.56; // la goutte se détache (maquette email-goutte.html : 0,54)
 
 float sdBox(vec2 p, vec2 b, float r) {
     r = min(r, min(b.x, b.y));
@@ -51,116 +52,180 @@ float smin(float a, float b, float k) {
     return min(a, b) - h * h * h * k / 6.0;
 }
 
-// Filet vertical de y0 à y1, axe glissant de x0 à x1, demi-largeur a -> b pincée au milieu.
-float sdCol(vec2 p, float x0, float y0, float x1, float y1, float a, float b, float pince) {
-    float len = y1 - y0;
-    if (abs(len) < 0.5 || max(a, b) <= 0.01)
-        return 1e5;
-    float u     = clamp((p.y - y0) / len, 0.0, 1.0);
-    float axe   = mix(x0, x1, smoothstep(0.0, 1.0, u));
-    float demi  = mix(a, b, u) * (1.0 - pince * sin(PI * u));
-    float dx    = abs(p.x - axe) - demi;
-    float dy    = abs(p.y - mix(y0, y1, u));
-    vec2  d     = vec2(dx, dy);
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-
-// Garde le corps dans la colonne de la fenêtre (donc à l'écran) ; le col s'incline vers lui.
-float centreCorps(float x, float largeur, float gauche, float ww) {
-    return clamp(x, gauche + largeur * 0.5, gauche + ww - largeur * 0.5);
-}
-
 vec4 echantillon(vec2 px) {
     return texture(tex, (px - u_texOrigin) / u_texSize);
 }
 
-// 1 · Goutte (rose-aube) : née sous l'île, elle pend à un col liquide, se détache et tombe à sa place.
-vec4 goutte(vec2 p, float t) {
-    float s  = u_scale;
+vec4 fenPx(vec2 px);
 
-    vec2  innerPos  = u_inner.xy;
-    vec2  innerSize = max(u_inner.zw, vec2(1.0));
-    vec2  innerOff  = innerPos - u_full.xy;
-    float ww = innerSize.x, wh = innerSize.y;
-    vec2  winC = innerPos + innerSize * 0.5;
+// Profil de goutte (capsule inégale) : cercle r1 à l'origine, cercle r2 à (0, h), y vers le haut. Exacte, donc un
+// contour net à un pixel près quelle que soit la taille.
+float sdGoutte(vec2 q, float r1, float r2, float h) {
+    q.x     = abs(q.x);
+    float b = (r1 - r2) / h;
+    float a = sqrt(max(1.0 - b * b, 0.0));
+    float k = dot(q, vec2(-b, a));
+    if (k < 0.0)
+        return length(q) - r1;
+    if (k > a * h)
+        return length(q - vec2(0.0, h)) - r2;
+    return dot(q, vec2(a, b)) - r1;
+}
+
+// Col en sablier, vertical de y0 à y1 : demi-largeur a en haut, b en bas, w au pincement (à la fraction uw).
+float sdCou(vec2 p, float x, float y0, float y1, float a, float b, float w, float uw) {
+    float len = y1 - y0;
+    if (len < 0.5)
+        return 1e5;
+    float u    = clamp((p.y - y0) / len, 0.0, 1.0);
+    float demi = u < uw ? mix(a, w, smoothstep(0.0, 1.0, u / uw)) : mix(w, b, smoothstep(0.0, 1.0, (u - uw) / (1.0 - uw)));
+    vec2  d    = vec2(abs(p.x - x) - demi, max(y0 - p.y, p.y - y1));
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// Ressort amorti (dépassement d'environ 2,5 %, posé à x = 1).
+float ressort(float x) {
+    return 1.0 - exp(-7.0 * x) * (cos(6.0 * x) + 1.1667 * sin(6.0 * x));
+}
+
+// Corps de la goutte, posé par goutte() et relu pour l'ombre. Repère local : x de l'écran, y compté depuis le bord de
+// l'île vers la fenêtre (la goutte pend toujours « vers le bas », même sous une pilule en bas d'écran).
+vec2  gC;    // centre du grand cercle, puis de la fenêtre qui s'ouvre
+float gR1;   // rayon du bulbe
+float gRH;   // rayon du haut, côté col
+float gH;    // écart des deux centres
+vec2  gEt;   // étirement de la chute
+vec2  gDemi; // demi-taille de la fenêtre qui s'ouvre
+float gRR;   // son arrondi
+float gM;    // 0 goutte -> 1 fenêtre
+
+float corps(vec2 L) {
+    vec2  q  = (L - gC) / gEt;
+    float dG = sdGoutte(vec2(q.x, -q.y), gR1, gRH, gH) * min(gEt.x, gEt.y);
+    if (gM <= 0.0)
+        return dG;
+    return mix(dG, sdBox(L - gC, gDemi, gRR), gM);
+}
+
+// 1 · Goutte (rose-aube) : une goutte de l'émail de l'île gonfle sous la pilule, pend à un col qui s'amincit en
+// sablier, se pince et se détache (une gouttelette suit), tombe en s'étirant un peu, puis s'ouvre en fenêtre à sa place
+// sur un ressort amorti. Le vrai contenu entre en fondu dès que l'appli l'a dessiné.
+vec4 goutte(vec2 p, float t) {
+    float s    = u_scale;
+    vec2  iS   = max(u_inner.zw, vec2(1.0));
+    float ww   = iS.x, wh = iS.y;
+    vec2  winC = u_inner.xy + iS * 0.5;
     vec2  aC   = u_anchor.xy + u_anchor.zw * 0.5;
 
     // La goutte pend sous l'île, ou monte au-dessus si la pilule est en bas.
-    float dir      = winC.y >= aC.y ? 1.0 : -1.0;
-    float bordIle  = dir > 0.0 ? u_anchor.y + u_anchor.w : u_anchor.y;
-    float bordFen  = dir > 0.0 ? innerPos.y : innerPos.y + wh;
-    float trajet   = abs(bordFen - bordIle);
-    float rondFin  = max(u_radius, 22.0 * s);
-    float ecartMax = min(68.0 * s, max(28.0 * s, trajet * 0.42));
+    float dir     = winC.y >= aC.y ? 1.0 : -1.0;
+    float bordIle = dir > 0.0 ? u_anchor.y + u_anchor.w : u_anchor.y;
+    vec2  L       = vec2(p.x, (p.y - bordIle) * dir);
+    vec2  wC      = vec2(winC.x, (winC.y - bordIle) * dir);
 
-    float dw, dh, cx, haut, rr, vol;
-    float dCol = 1e5, dCap = 1e5, k = 0.0;
+    // Bulbe à la rupture : un tiers de la largeur, rond, jamais plus grand que la fenêtre.
+    float R  = 0.5 * min(clamp(0.34 * ww, 80.0 * s, 320.0 * s), 0.6 * min(ww, wh));
+    float Lc = clamp(0.55 * R, 22.0 * s, 80.0 * s); // col au plus long (maquette : un quart du bulbe)
 
-    // Collerette sous la pilule ; en grande partie cachée par l'île, au-dessus des fenêtres. Elle s'enfle avec la goutte.
-    float retrait = 1.0 - smoothstep(T_RUPTURE, T_RUPTURE + 0.12, t);
-    float enfle   = 1.0 + 0.22 * sin(PI * clamp(t / T_RUPTURE, 0.0, 1.0));
-    float capDemi = min(u_anchor.z * 0.5 - 4.0 * s, 46.0 * s) * enfle * retrait;
-    if (capDemi > 0.5)
-        dCap = sdBox(p - vec2(aC.x, bordIle - dir * 4.0 * s), vec2(capDemi, 8.0 * s * max(retrait, 0.2)), 6.0 * s);
+    float g       = clamp(t / T_RUPTURE, 0.0, 1.0);
+    float gonfle  = smoothstep(0.0, 0.85, g);
+    float poids   = smoothstep(0.55, 1.0, g);
+    float tension = pow(smoothstep(0.4, 1.0, g), 1.3);
+    bool  casse   = t > T_RUPTURE;
+    float f       = clamp((t - T_RUPTURE) / (1.0 - T_RUPTURE), 0.0, 1.0);
+    float recul   = smoothstep(0.0, 0.22, f);   // la queue rentre dans la goutte, qui s'arrondit
+    float xc      = clamp(f / 0.72, 0.0, 1.0);
+    float chute   = xc * xc * (3.0 - 2.0 * xc);
+    float xo      = clamp((f - 0.16) / 0.84, 0.0, 1.0);
+    float ouvre   = ressort(xo);
+    // La goutte, déjà ronde après le recul, devient une boîte arrondie (un disque) qui s'ouvre en fenêtre.
+    gM            = casse ? smoothstep(0.0, 0.18, f) : 0.0;
 
-    if (t <= T_RUPTURE) {
-        // Gonflement : la vraie fenêtre grossit sous l'île, puis pend en s'alourdissant pendant que le col s'amincit.
-        float g       = t / T_RUPTURE;
-        float bud     = 1.0 - pow(1.0 - g, 3.0);
-        float poids   = smoothstep(0.35, 1.0, g);
-        float tension = smoothstep(0.3, T_RUPTURE, t);
-        k             = pow(tension, 1.35);
-        dw   = mix(0.14, LARGEUR_RUPTURE, bud) * ww;
-        dh   = dw * (wh / ww) * (1.0 + ETIREMENT * poids);
-        float ecart = mix(4.0 * s, ecartMax, bud) * (1.0 + AFFAISSEMENT * poids);
-        cx   = centreCorps(mix(aC.x, winC.x, 0.18 * bud), dw, innerPos.x, ww);
-        haut = bordIle + dir * ecart;
-        rr   = mix(min(dw, dh) * 0.44, rondFin, bud);
-        vol  = 1.0;
-        // Col : large au départ, il s'amincit jusqu'à un fil avant de céder.
-        dCol = sdCol(p, aC.x, bordIle, cx, haut + dir * 2.0 * s, mix(38.0, 5.0, k) * s, mix(34.0, 8.0, k) * s, mix(0.3, 0.92, k));
+    // Goutte suspendue : elle gonfle, puis s'alourdit (le haut s'affine, le col s'allonge). Après la rupture, valeurs
+    // de la rupture (g = 1).
+    float r1   = mix(4.0 * s, R, gonfle) * (1.0 + 0.04 * poids);
+    float rH   = r1 * mix(0.6, 0.38, poids);
+    float h    = r1 * mix(0.2, 0.55, poids);
+    float col  = mix(4.0 * s, Lc, gonfle) * (1.0 + 0.35 * poids);
+    float cBas = col + rH + h;
+    if (casse) {
+        rH = mix(rH, r1 * 0.9, recul);
+        h  = mix(h, r1 * 0.12, recul);
+    }
+    gR1 = r1;
+    gRH = rH;
+    gH  = max(h, abs(r1 - rH) + 0.5);
+    gC  = casse ? mix(vec2(aC.x, cBas), wC, chute) : vec2(aC.x, cBas);
+    float et = 4.0 * xc * (1.0 - xc) * (1.0 - clamp(ouvre, 0.0, 1.0));
+    gEt      = vec2(1.0 - 0.08 * et, 1.0 + 0.16 * et);
+    gDemi    = mix(vec2(r1), iS * 0.5, ouvre) * gEt;
+    gRR      = mix(min(gDemi.x, gDemi.y), u_radius, smoothstep(0.0, 0.7, clamp(ouvre, 0.0, 1.0)));
+
+    float dCorps = corps(L);
+
+    // Collerette sous la pilule (cachée par l'île, l'île est au-dessus des fenêtres), col, restes de la rupture.
+    float capDemi = clamp(u_anchor.z * 0.5 - u_anchor.w * 0.5, 2.0 * s, 30.0 * s) * (0.7 + 0.3 * gonfle);
+    float d, dEclats = 1e5;
+    if (!casse) {
+        // Col en sablier : large contre la pilule, il s'évase dans l'épaule du bulbe et se pince entre les deux.
+        float a      = min(u_anchor.z * 0.2, 26.0 * s) * mix(1.0, 0.55, tension);
+        float b      = rH * mix(0.9, 0.7, tension);
+        float taille = mix(min(a, b) * 0.6, 0.35, tension); // jusqu'à un fil d'un demi-pixel avant de céder
+        float dCou   = sdCou(L, aC.x, -6.0 * s, col + rH * 0.6, a, b, taille, 0.6);
+        float dCap   = sdBox(L - vec2(aC.x, -8.0 * s), vec2(capDemi, 6.0 * s), 6.0 * s);
+        d            = smin(smin(dCorps, dCou, mix(28.0, 8.0, tension) * s), dCap, 12.0 * s);
     } else {
-        // Rupture puis chute : la fenêtre rejoint sa place réelle et sa taille réelle.
-        float f      = (t - T_RUPTURE) / (1.0 - T_RUPTURE);
-        float vol0   = 1.0 - pow(1.0 - f, 4.0);
-        float dw0    = LARGEUR_RUPTURE * ww;
-        dw   = mix(dw0, ww, vol0);
-        dh   = mix(dw0 * wh / ww * (1.0 + ETIREMENT), wh, vol0) * (1.0 + 0.05 * sin(PI * vol0));
-        cx   = mix(centreCorps(mix(aC.x, winC.x, 0.18), dw0, innerPos.x, ww), winC.x, vol0);
-        haut = mix(bordIle + dir * ecartMax * (1.0 + AFFAISSEMENT), bordFen, vol0);
-        rr   = mix(rondFin, u_radius, vol0);
-        vol  = 1.0 - vol0;
-        // Ménisque resté sous l'île et queue du corps qui se résorbent.
-        float queue = ecartMax * 0.4 * retrait;
-        dCol = min(sdCol(p, aC.x, bordIle, aC.x, bordIle + dir * queue, 5.0 * s * retrait, 0.0, 0.0),
-                   sdCol(p, cx, haut + dir * 2.0 * s, cx, haut - dir * queue, 7.0 * s * retrait, 0.0, 0.0));
+        float reste = 1.0 - smoothstep(0.0, 0.15, f);
+        float dCap  = sdBox(L - vec2(aC.x, -8.0 * s), vec2(capDemi * mix(1.0, 0.6, recul), 6.0 * s), 6.0 * s);
+        float bout  = col * 0.2 * reste; // ménisque qui remonte dans la pilule
+        float dBout = reste > 0.01 ? length(L - vec2(aC.x, clamp(L.y, -6.0 * s, bout))) - 5.0 * s * reste : 1e5;
+        // Gouttelette née au pincement, qui suit plus lentement et se résorbe.
+        float rs   = max(r1 * 0.035, 2.5 * s) * (1.0 - smoothstep(0.25, 0.6, f));
+        vec2  cs   = vec2(mix(aC.x, gC.x, 0.5 * chute), -6.0 * s + 0.6 * (col + 0.23 * r1 + 6.0 * s) + (gC.y - cBas) * 0.5);
+        float dSat = rs > 0.2 ? length(L - cs) - rs : 1e5;
+        dEclats    = min(dSat, smin(dCap, dBout, 6.0 * s));
+        d          = min(dCorps, dEclats);
     }
 
-    vec2  corpsDemi = vec2(dw, dh) * 0.5;
-    vec2  corpsC    = vec2(cx, haut + dir * corpsDemi.y);
-    vec2  corpsTL   = corpsC - corpsDemi;
-    float dCorps    = sdBox(p - corpsC, corpsDemi, rr);
-    float d         = smin(dCorps, smin(dCap, dCol, 10.0 * s), mix(28.0, 4.0, k) * s);
-    if (t > T_RUPTURE)
-        d = min(smin(dCorps, dCol, 8.0 * s), smin(dCap, dCol, 6.0 * s));
+    float M  = 1.0 - smoothstep(-0.5, 0.5, d);      // anticrénelage sur un pixel physique
+    float Mc = 1.0 - smoothstep(-0.5, 0.5, dCorps);
 
-    float masque      = 1.0 - smoothstep(-0.75, 0.75, d);
-    float masqueCorps = 1.0 - smoothstep(-0.75, 0.75, dCorps);
+    // Émail : la surface de la pilule, teintée de l'accent (un peu plus sur un thème sombre, où elle se fondrait dans le
+    // fond), une lumière douce en haut (comme l'île fermée).
+    bool  sombre = dot(u_surface, vec3(0.299, 0.587, 0.114)) < 0.5;
+    vec3  S      = mix(u_surface, u_bord, sombre ? 0.14 : 0.08);
+    float haut   = gC.y - mix(gH + gRH, gDemi.y, gM);
+    float rel    = clamp((L.y - haut) / max(mix(gH + gRH + gR1, 2.0 * gDemi.y, gM), 1.0), 0.0, 1.0);
+    vec3  c      = mix(S, vec3(1.0), (sombre ? 0.12 : 0.3) * (1.0 - smoothstep(0.0, 0.6, rel)));
+    // Ménisque et gouttelette, trop petits pour un filet : plus soutenus pour rester visibles.
+    c            = mix(c, mix(S, u_bord, 0.5), (1.0 - smoothstep(-0.5, 0.5, dEclats)) * (1.0 - Mc));
 
-    // Corps : la boîte complète de la fenêtre, mise à l'échelle pour que sa surface épouse le corps.
-    vec2 ech  = vec2(dw, dh) / innerSize;
-    vec2 uv   = (p - (corpsTL - innerOff * ech)) / (u_full.zw * ech);
-    vec4 cWin = vec4(0.0);
-    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))))
-        cWin = echantillon(u_full.xy + uv * u_full.zw);
-    cWin *= mix(1.0, masqueCorps, vol); // silhouette de goutte, relâchée à l'atterrissage
+    // Vrai contenu, une fois dessiné par l'appli : dans la goutte qui tombe, sans déformation (il la couvre, sans
+    // bordure), puis exact quand la fenêtre se pose.
+    float cyL  = mix(gC.y + 0.5 * (gR1 - gH - gRH) * gEt.y, gC.y, gM);
+    vec2  ech  = mix(vec2(gR1, 0.5 * (gH + gRH + gR1)) * gEt, gDemi, gM) / (iS * 0.5);
+    vec2  cR   = vec2(gC.x, bordIle + dir * cyL);
+    vec2  q    = (p - cR) / mix(vec2(max(ech.x, ech.y)), ech, smoothstep(0.5, 1.0, clamp(ouvre, 0.0, 1.0))) + winC;
+    vec4  cw   = fenPx(clamp(q, u_inner.xy + 1.0, u_inner.xy + iS - 1.0));
+    float cA   = u_pret * smoothstep(T_RUPTURE - 0.1, T_RUPTURE + 0.12, t) * Mc;
+    c          = c * (1.0 - cA * cw.a) + cA * cw.rgb;
 
-    // Col et collerette : la bande de la fenêtre tournée vers l'île, sans texte étiré.
-    float rx    = clamp((p.x - corpsTL.x) / dw, 0.15, 0.85);
-    vec4  cBand = echantillon(innerPos + vec2(rx * ww, (dir > 0.0 ? 0.02 : 0.98) * wh));
+    // Filet fin de l'accent et reflet en haut : la goutte se lit sur un thème clair comme sur un sombre. Ils s'effacent
+    // quand la fenêtre se pose.
+    float arete  = 1.0 - smoothstep(0.8, 0.95, t);
+    float filet  = 1.0 - smoothstep(0.6 * s, 1.4 * s, -(casse ? dCorps : d));
+    c            = mix(c, mix(S, u_bord, sombre ? 0.8 : 0.7), filet * (sombre ? 0.85 : 0.6) * arete);
+    float bande  = smoothstep(1.0 * s, 1.8 * s, -dCorps) * (1.0 - smoothstep(2.0 * s, 3.0 * s, -dCorps));
+    c            = mix(c, mix(S, vec3(1.0), sombre ? 0.4 : 0.85), bande * (1.0 - smoothstep(0.0, 0.3, rel)) * 0.8 * arete);
 
-    float aCol = masque * (1.0 - masqueCorps);
-    return cBand * aCol + cWin * (1.0 - aCol); // alpha prémultiplié
+    // Ombre douce du corps, vers le bas de l'écran.
+    vec2  pO    = p - vec2(0.0, 8.0 * s);
+    float dO    = corps(vec2(pO.x, (pO.y - bordIle) * dir));
+    float ombre = (sombre ? 0.32 : 0.22) * (1.0 - smoothstep(-6.0 * s, 20.0 * s, dO)) * clamp(r1 / (20.0 * s), 0.0, 1.0) * arete;
+
+    vec4 res = vec4(c, 1.0) * M + vec4(0.0, 0.0, 0.0, ombre) * (1.0 - M); // alpha prémultiplié
+    // Fin : la vraie fenêtre (bordure et ombre comprises), au pixel près.
+    return mix(res, fenPx(p), smoothstep(0.86, 1.0, t));
 }
 
 // ---- Gestes 2 à 14 : la fenêtre reste dans son cadre ----
@@ -389,6 +454,9 @@ NcGestes::SGesteShader* NcGestes::gesteShader() {
     s.scale         = glGetUniformLocation(PROG, "u_scale");
     s.radius        = glGetUniformLocation(PROG, "u_radius");
     s.mode          = glGetUniformLocation(PROG, "u_mode");
+    s.pret          = glGetUniformLocation(PROG, "u_pret");
+    s.surface       = glGetUniformLocation(PROG, "u_surface");
+    s.bord          = glGetUniformLocation(PROG, "u_bord");
     g_geste         = std::move(s);
     return &*g_geste;
 }

@@ -73,8 +73,10 @@ class UneLigne(unittest.TestCase):
         self.assertEqual(repos["h"], 30)
         self.assertEqual(repos["mode"], "musique")
         self.assertFalse(repos["loupe"], "la loupe n'existe pas hors survol")
-        # ancre de la goutte (plugin nc-gestes) : la ligne au repos, centrée ; le survol ne la change pas
-        self.assertEqual(repos["ancre"].split()[1:], ["%d" % round((repos["ecran"] - repos["largeur"]) / 2), "9", "%d" % round(repos["largeur"]), "30"])
+        # ancre de la goutte (plugin nc-gestes) : la ligne au repos, centrée, puis l'émail dont la goutte est faite
+        # (surface de la pilule, accent) ; le survol ne la change pas
+        self.assertEqual(repos["ancre"].split()[1:5], ["%d" % round((repos["ecran"] - repos["largeur"]) / 2), "9", "%d" % round(repos["largeur"]), "30"])
+        self.assertRegex(" ".join(repos["ancre"].split()[5:]), r"^#[0-9a-f]{6} #[0-9a-f]{6}$")
         self.assertEqual(e["survol"]["ancre"], repos["ancre"])
         # survol : l'île grandit un peu (progression dessous, loupe au bout de la ligne), avec ses ressorts
         self.assertLess(e["survol-tout-de-suite"]["h"], 40, "le ressort part de la ligne, pas d'un saut")
@@ -104,7 +106,7 @@ class UneLigne(unittest.TestCase):
         e = self.etapes("ILE_LIGNE=34\nILE_ANIM_ECRANS=ecran-rendu:aucun\n")
         self.assertEqual(e["repos"]["ligne"], 34)
         self.assertEqual(e["repos"]["h"], 34)
-        self.assertTrue(e["repos"]["ancre"].endswith(" 34"), e["repos"]["ancre"])
+        self.assertEqual(e["repos"]["ancre"].split()[4], "34", e["repos"]["ancre"])
         self.assertGreater(e["survol-tout-de-suite"]["h"], 34 + 20)
         self.assertEqual(e["survol-tout-de-suite"]["survol"], 1)
         self.assertEqual(e["sortie-tout-de-suite"]["h"], 34)

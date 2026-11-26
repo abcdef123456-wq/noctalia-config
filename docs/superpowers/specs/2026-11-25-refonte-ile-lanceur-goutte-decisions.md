@@ -21,6 +21,9 @@ Pourquoi ce fichier : ces décisions avaient disparu du design `2026-11-24-ecosy
 6. **Goutte** (17:20 à 17:46, « je veux cette animation ») : au lancement d'une appli, la **fenêtre entière** (pas
    l'icône) grossit sous l'île en restant suspendue, le col s'amincit, se rompt, et la fenêtre tombe à sa place.
    À retravailler : plus de volume **avant** la rupture. L'animation ne retarde jamais l'ouverture de l'appli.
+   Essai en vrai le 2026-11-26 (thème clair, échelle 1,6) : « ça ne ressemble pas à une goutte qui gonfle puis se
+   détache », « plus clean ». Refaite en vraie goutte d'émail (bulbe rond, col en sablier, pincement, chute, ouverture
+   sur un ressort) ; le contenu de l'appli y entre dès qu'il est dessiné.
 7. **Un geste par thème** (17:30) : la goutte est la signature d'Émail (Rose Aube) seulement. Chaque thème a sa
    propre ouverture de fenêtre (paravent pour Sakura, rail pour Cyberjaune, ligne cathodique pour Vaporwave,
    balayage pour Matrice, horizon pour Nord…) : voir les quatre planches. « Très simpliste, j'aime bien » (17:43).
@@ -37,8 +40,9 @@ Dans `docs/superpowers/maquettes/` :
 - `email-goutte.html` : démo animée de la goutte, version 2, reconstruite depuis la conversation. Ses trois images
   (`email-ile.png`, `email-lanceur-ile.png`, `email-firefox.svg`) sont perdues : la démo joue sur fond vide.
 - `goutte-planche.webp` : neuf images de cette démo, de 27 ms à 680 ms.
-- `planche-goutte-reelle.webp` : la goutte rendue par le plugin `nc-gestes` sur une vraie fenêtre, avant et après le
-  volume ajouté avant la rupture (Hyprland 0.57.2 imbriqué, échelle 1,6, vraie île `nc-ile` au-dessus).
+- `planche-goutte-reelle.webp` : la goutte rendue par le plugin `nc-gestes` sur une vraie fenêtre, avant et après la
+  reprise du 2026-11-26, thème clair et sombre, ralenti et vitesse réelle (Hyprland 0.57.2 imbriqué, échelle 1,6,
+  vraie île `nc-ile` au-dessus), avec la maquette validée en référence.
 
 Figma (île, survol, lanceur, atlas) : https://www.figma.com/design/pTRxbS5oOZsgV3x41s7Voz
 
