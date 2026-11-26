@@ -10,25 +10,30 @@ l'ouverture), au plus tard pendant l'ouverture : la goutte n'est jamais un aplat
 | Geste | Thème | Durée | Ce qu'on voit |
 |---|---|---:|---|
 | `goutte` | rose-aube | 680 ms | gonfle sous l'île (56 % du temps), col en sablier, pincement, chute, s'ouvre |
-| `paravent` | sakura | 360 ms | deux volets se déplient depuis la ligne médiane |
-| `coupe` | solarized-clair | 320 ms | deux repères en L tracent le cadre, puis le remplissent |
-| `horizon` | nord | 340 ms | remonte de derrière la ligne de son bord bas |
-| `maree` | ocean | 380 ms | une ligne d'eau ondulante monte et découvre le contenu |
-| `eventail` | everforest | 360 ms | les lames s'écartent depuis le milieu du bord bas |
-| `rideau` | catppuccin | 320 ms | un velours plissé s'ouvre depuis le centre |
-| `cathodique` | vaporwave | 300 ms | un trait s'étire, puis s'ouvre en écran, sans éclair |
-| `fuite` | synthwave | 360 ms | avance depuis l'horizon, en perspective |
-| `vantaux` | dracula | 320 ms | deux battants pivotent sur les bords, ombre de fente |
-| `balayage` | matrice | 280 ms | front tramé (Bayer 4 × 4) de gauche à droite |
-| `averse` | pluie-verte | 300 ms | lignes de 18 px de haut en bas, colonnes décalées |
-| `paliers` | retro | 290 ms | une bande s'élargit, puis s'étend en hauteur, par crans |
-| `contour` | oled | 300 ms | le filet du contour se trace, puis le contenu apparaît |
+| `paravent` | sakura | 360 ms | un paravent de quatre panneaux, replié en zigzag, se déplie à plat |
+| `coupe` | solarized-clair | 320 ms | deux repères de coupe en L tracent le cadre, puis le contenu le remplit en diagonale |
+| `horizon` | nord | 340 ms | une ligne d'horizon s'étend au bord bas, la fenêtre remonte de derrière elle |
+| `maree` | ocean | 380 ms | une ligne d'eau ondulante, ourlée d'écume, monte et découvre le contenu |
+| `eventail` | everforest | 360 ms | cinq lames refermées au milieu pivotent depuis le bas jusqu'à leur place |
+| `rideau` | catppuccin | 320 ms | deux pans de velours plissé, teints de l'accent, s'ouvrent depuis le milieu |
+| `cathodique` | vaporwave | 300 ms | un trait de l'accent s'étire, puis s'ouvre en écran, sans éclair blanc |
+| `fuite` | synthwave | 360 ms | avance depuis une ligne d'horizon, en perspective qui se redresse |
+| `vantaux` | dracula | 320 ms | deux battants moulurés pivotent sur leurs gonds extérieurs |
+| `balayage` | matrice | 280 ms | front tramé (Bayer 4 × 4) de gauche à droite, cellules neuves qui luisent |
+| `averse` | pluie-verte | 300 ms | lignes de haut en bas par colonnes décalées, tête de colonne qui luit |
+| `paliers` | retro | 290 ms | une bande s'élargit, puis s'étend en hauteur, par crans, dans un cadre |
+| `contour` | oled | 300 ms | le filet du contour fait le tour depuis le haut, puis le contenu apparaît |
 
-Les traits de `coupe` et `contour` prennent la couleur de la bordure de la fenêtre, donc celle du thème.
+Tous les gestes ont la finition de la goutte : couleurs de l'île (surface de la pilule et accent, passées par
+`anchor`), bords lissés sur un pixel physique, lisibles en clair comme en sombre. Tant que l'appli n'a rien dessiné
+(premier commit après l'ouverture, au plus tard à 72 % du geste), un geste montre une carte d'émail du thème à la
+place de la fenêtre, jamais une surface vide ; le contenu y entre ensuite en fondu. Les gestes 2 à 14 finissent en
+fondu sur la vraie fenêtre, au pixel près.
 
 L'animation est seulement visuelle : la fenêtre est posée, focalisable et à sa géométrie finale dès l'ouverture.
 Le plugin s'appuie sur les « transformers » de fenêtre d'Hyprland (`Render::IWindowTransformer`), sans aucun
-crochet en mémoire. Seule la goutte dessine hors du cadre de la fenêtre (son col), grâce à `transformedExtents`.
+crochet en mémoire. Seule la goutte dessine loin du cadre de la fenêtre (son col), grâce à `transformedExtents` ; les
+autres gestes ont une petite marge autour du cadre (repères de coupe, battants).
 
 ## Dans la session
 

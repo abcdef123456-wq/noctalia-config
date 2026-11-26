@@ -262,157 +262,248 @@ vec4 fen(vec2 q) {
     return fenPx(u_inner.xy + q * max(u_inner.zw, vec2(1.0)));
 }
 
-// Couleur de la bordure de la fenêtre (donc du thème), opaque et lisible ; gris clair si elle n'en a pas.
-vec4 accent() {
-    vec4 c = echantillon(vec2(u_inner.x + u_inner.z * 0.5, u_inner.y - 0.75 * u_scale));
-    if (c.a < 0.3)
-        return vec4(0.85, 0.85, 0.85, 1.0);
-    vec3 rgb = c.rgb / c.a;
-    if (dot(rgb, vec3(0.299, 0.587, 0.114)) < 0.2)
-        rgb = mix(rgb, vec3(1.0), 0.6);
-    return vec4(rgb, 1.0);
-}
-
 // Teinte une couleur prémultipliée sans toucher à son alpha (ni le dépasser).
 vec4 teinte(vec4 c, float f) {
     return vec4(min(c.rgb * f, vec3(c.a)), c.a);
 }
 
+// ---- Finition commune (même niveau que la goutte) ----
+
+// Couverture d'une distance signée en pixels physiques, sur un pixel : contour net, sans crénelage.
+float couvre(float d) {
+    return 1.0 - smoothstep(-0.5, 0.5, d);
+}
+
+bool themeSombre() {
+    return dot(u_surface, vec3(0.299, 0.587, 0.114)) < 0.5;
+}
+
+// Émail du thème : la surface de la pilule, teintée de l'accent (un peu plus sur un thème sombre).
+vec3 email() {
+    return mix(u_surface, u_bord, themeSombre() ? 0.14 : 0.08);
+}
+
+// Accent de l'île, opaque, pondéré (prémultiplié) : filets et traits des gestes.
+vec4 trait(float a) {
+    return vec4(u_bord, 1.0) * a;
+}
+
+// Pose b (prémultiplié) par-dessus a.
+vec4 sur(vec4 a, vec4 b) {
+    return b + a * (1.0 - b.a);
+}
+
+// Carte d'émail à la place de la surface (q normalisé : 0..1 = la surface) : ce que montre un geste tant que l'appli
+// n'a rien dessiné. Arrondi de la fenêtre, lumière douce en haut, filet de l'accent.
+vec4 carte(vec2 q) {
+    vec2  iS     = max(u_inner.zw, vec2(1.0));
+    float d      = sdBox((q - 0.5) * iS, iS * 0.5, u_radius);
+    bool  sombre = themeSombre();
+    vec3  c      = mix(email(), vec3(1.0), (sombre ? 0.12 : 0.3) * (1.0 - smoothstep(0.0, 0.5, q.y)));
+    float filet  = 1.0 - smoothstep(0.6 * u_scale, 1.4 * u_scale, -d);
+    c            = mix(c, mix(email(), u_bord, sombre ? 0.8 : 0.7), filet * (sombre ? 0.85 : 0.6));
+    return vec4(c, 1.0) * couvre(d);
+}
+
+// Ce que montre un geste en q : la carte d'émail, puis le vrai contenu (bordure et ombre comprises) en fondu dès que
+// l'appli l'a dessiné.
+vec4 matiere(vec2 q) {
+    return mix(carte(q), fen(q), u_pret);
+}
+
+vec4 matierePx(vec2 px) {
+    return matiere((px - u_inner.xy) / max(u_inner.zw, vec2(1.0)));
+}
+
 vec4 geste(int mode, vec2 p, float t) {
-    float s  = u_scale;
-    vec2  iS = max(u_inner.zw, vec2(1.0));
-    vec2  q  = (p - u_inner.xy) / iS;
+    float s    = u_scale;
+    vec2  iS   = max(u_inner.zw, vec2(1.0));
+    vec2  q    = (p - u_inner.xy) / iS;
+    vec2  pi   = p - u_inner.xy;
     vec2  winC = u_inner.xy + iS * 0.5;
-    float e  = eo(t);
+    float e    = eo(t);
     float apparait = smoothstep(0.0, 0.18, t);
+    float efface   = 1.0 - smoothstep(0.75, 1.0, t); // les traits de l'accent s'en vont avant la fin
 
     if (mode == 2) {
-        // Paravent (sakura) : deux volets pliés sur la ligne médiane se déplient vers le haut et vers le bas.
-        float c = sin(e * PI * 0.5);
-        if (c < 1e-3)
-            return vec4(0.0);
-        float dq  = q.y - 0.5;
-        float src = dq / c;
-        float d   = clamp(abs(src) / 0.5, 0.0, 1.0);
-        float wf  = 1.0 + 0.12 * (1.0 - c) * d;
-        float pli = exp(-abs(dq) * iS.y / (6.0 * s));
-        vec4  col = fen(vec2(0.5 + (q.x - 0.5) / wf, 0.5 + src));
-        return teinte(col, (1.0 - 0.45 * (1.0 - c) * d) * (1.0 - 0.25 * (1.0 - c) * pli)) * apparait;
+        // Paravent (sakura) : un paravent japonais de quatre panneaux, replié en zigzag, se déplie à plat. Chaque panneau
+        // garde son morceau de fenêtre ; ceux tournés vers l'ombre sont plus sombres, et l'arête qui vient vers nous est
+        // un peu plus haute. Filet de l'accent dans les plis tant qu'ils existent.
+        float th   = (1.0 - e) * 1.35;
+        float W    = iS.x * cos(th);
+        float x    = (p.x - (winC.x - 0.5 * W)) / max(W, 1e-3);
+        float k    = clamp(floor(x * 4.0), 0.0, 3.0);
+        float u    = clamp(x * 4.0 - k, 0.0, 1.0);
+        bool  pair = mod(k, 2.0) < 0.5;
+        float hs   = 1.0 + 0.1 * sin(th) * (pair ? u : 1.0 - u);
+        float m    = couvre(max((abs(x - 0.5) - 0.5) * W, abs(p.y - winC.y) - 0.5 * iS.y * hs));
+        vec4  col  = matiere(vec2(x, 0.5 + (p.y - winC.y) / (iS.y * hs)));
+        col        = teinte(col, 1.0 - (pair ? 0.08 : 0.42) * sin(th)) * m;
+        float pli  = abs(x * 4.0 - floor(x * 4.0 + 0.5)) * W / 4.0;
+        float dans = step(0.5, x * 4.0) * step(x * 4.0, 3.5);
+        return sur(col, trait(0.8 * couvre(pli - 0.5 * s) * dans * sin(th) * m)) * apparait;
     }
     if (mode == 3) {
-        // Plan de coupe (solarized-clair) : deux repères en L tracent le cadre, puis le contenu le remplit en diagonale.
-        float lp = eo(t / 0.55);
-        vec2  a  = u_inner.xy, b = u_inner.xy + iS;
-        float dl = min(min(segment(p, a, a + vec2(lp * iS.x, 0.0)), segment(p, a, a + vec2(0.0, lp * iS.y))),
-                       min(segment(p, b, b - vec2(lp * iS.x, 0.0)), segment(p, b, b - vec2(0.0, lp * iS.y))));
-        float trait  = (1.0 - smoothstep(0.75 * s - 0.5, 0.75 * s + 0.5, dl)) * (1.0 - smoothstep(0.8, 1.0, t));
-        float f      = smoothstep(0.4, 1.0, t) * 1.3;
-        float rempli = 1.0 - smoothstep(f - 0.1, f, (q.x + q.y) * 0.5);
-        return accent() * trait + fen(q) * rempli * (1.0 - trait);
+        // Plan de coupe (solarized-clair) : deux repères de coupe en L, qui dépassent du cadre comme sur une épreuve,
+        // tracent le cadre ; puis le contenu le remplit en diagonale, derrière un front fin.
+        float lp  = eo(t / 0.5);
+        vec2  a   = u_inner.xy, b = u_inner.xy + iS;
+        float deb = 10.0 * s;
+        float dl  = min(min(segment(p, a - vec2(deb, 0.0), a + vec2(lp * iS.x, 0.0)), segment(p, a - vec2(0.0, deb), a + vec2(0.0, lp * iS.y))),
+                        min(segment(p, b + vec2(deb, 0.0), b - vec2(lp * iS.x, 0.0)), segment(p, b + vec2(0.0, deb), b - vec2(0.0, lp * iS.y))));
+        float rep = couvre(dl - 0.5 * s) * smoothstep(0.0, 0.06, t) * efface;
+        float f   = smoothstep(0.36, 0.95, t);
+        float dd  = ((pi.x + pi.y) - f * (iS.x + iS.y) * 1.02) * 0.7071;
+        vec4  col = matiere(q) * couvre(dd);
+        float front = couvre(abs(dd) - 0.5 * s) * step(0.001, f) * (1.0 - f) * couvre(sdBox(p - winC, iS * 0.5, u_radius));
+        return sur(sur(col, trait(front)), trait(rep));
     }
     if (mode == 4) {
-        // Horizon (nord) : la fenêtre remonte de derrière la ligne de son bord bas.
-        if (p.y > u_inner.y + iS.y + 2.0 * s)
-            return vec4(0.0);
-        return fenPx(p - vec2(0.0, (1.0 - e) * 0.45 * iS.y)) * apparait;
+        // Horizon (nord) : une ligne d'horizon froide s'étend au bord bas, la fenêtre remonte de derrière elle.
+        float ligne = u_inner.y + iS.y;
+        vec4  col   = matierePx(p - vec2(0.0, (1.0 - e) * 0.5 * iS.y)) * couvre(p.y - ligne) * apparait;
+        float large = 0.5 * iS.x * mix(0.25, 1.0, eo(t / 0.3));
+        float dansX = couvre(abs(p.x - winC.x) - large);
+        float lueur = exp(-max(ligne - p.y, 0.0) / (16.0 * s)) * 0.3 * (1.0 - e) * step(p.y, ligne) * dansX;
+        float trace = couvre(abs(p.y - ligne) - 0.5 * s) * dansX * efface;
+        return sur(sur(col, trait(lueur)), trait(trace));
     }
     if (mode == 5) {
-        // Marée (ocean) : une ligne d'eau ondulante monte et découvre le contenu.
-        float niveau = 1.12 - e * 1.3;
-        float vague  = (0.02 * sin(q.x * 9.0 + t * 7.0) + 0.008 * sin(q.x * 23.0 - t * 11.0)) * (1.0 - t);
-        float bord   = 6.0 * s / iS.y;
-        return fen(q) * smoothstep(niveau + vague - bord, niveau + vague + bord, q.y);
+        // Marée (ocean) : une ligne d'eau ondulante monte, ourlée d'écume, et découvre le contenu ; juste sous elle,
+        // l'eau teinte encore un peu la fenêtre.
+        float niveau = mix(1.06, -0.06, e);
+        float vague  = (0.018 * sin(q.x * 9.0 + t * 7.0) + 0.007 * sin(q.x * 23.0 - t * 11.0)) * (1.0 - e);
+        float dpx    = (niveau + vague - q.y) * iS.y;
+        vec4  col    = matiere(q) * couvre(dpx);
+        float prof   = clamp(-dpx / (28.0 * s), 0.0, 1.0);
+        col          = vec4(mix(col.rgb, u_bord * col.a, 0.3 * (1.0 - prof) * (1.0 - e)), col.a);
+        float ecume  = couvre(abs(dpx) - 0.75 * s) * couvre(abs(p.x - winC.x) - 0.5 * iS.x) * efface;
+        return sur(col, trait(ecume));
     }
     if (mode == 6) {
-        // Éventail (everforest) : les lames s'écartent depuis le milieu du bord bas.
-        vec2  P    = vec2(winC.x, u_inner.y + iS.y);
-        vec2  v    = p - P;
-        float phi  = atan(v.x, -v.y);
-        float phiS = phi / max(e, 1e-3);
-        if (abs(phiS) > PI * 0.5 && e < 0.999)
-            return vec4(0.0);
-        float lame  = (phiS / PI + 0.5) * 5.0;
-        float bordL = min(fract(lame), 1.0 - fract(lame));
-        vec4  col   = fenPx(P + length(v) * vec2(sin(phiS), -cos(phiS)));
-        return teinte(col, 1.0 - 0.35 * (1.0 - e) * (1.0 - smoothstep(0.0, 0.08, bordL))) * apparait;
+        // Éventail (everforest) : cinq lames de la fenêtre, refermées l'une sur l'autre au milieu, pivotent autour du
+        // milieu du bord bas et s'écartent jusqu'à leur place ; filet de l'accent sur leurs arêtes tant qu'elles bougent.
+        vec2  P   = vec2(winC.x, u_inner.y + iS.y);
+        vec2  v   = p - P;
+        float lw  = iS.x / 5.0;
+        vec4  res = vec4(0.0);
+        for (int j = 0; j < 5; ++j) {
+            // Les lames extérieures d'abord : celle du milieu reste par-dessus.
+            float fk  = j == 0 ? 0.0 : (j == 1 ? 4.0 : (j == 2 ? 1.0 : (j == 3 ? 3.0 : 2.0)));
+            vec2  c   = vec2(u_inner.x + (fk + 0.5) * lw, winC.y);
+            float a   = -(1.0 - e) * atan(c.x - P.x, P.y - c.y);
+            float ca  = cos(a), sa = sin(a);
+            vec2  src = P + vec2(v.x * ca + v.y * sa, -v.x * sa + v.y * ca);
+            float d   = sdBox(src - c, vec2(0.5 * lw, 0.5 * iS.y), 0.0);
+            vec4  col = teinte(matierePx(src), 1.0 - 0.35 * abs(a)) * couvre(d);
+            res       = sur(res, sur(col, trait(couvre(abs(d) - 0.5 * s) * (1.0 - e))));
+        }
+        return res * apparait;
     }
     if (mode == 7) {
-        // Rideau (catppuccin) : un velours plissé s'ouvre depuis le centre et se tend.
-        float sx    = max(e, 1e-3);
-        float srcX  = 0.5 + (q.x - 0.5) / sx;
-        float plis  = 1.0 - 0.18 * (1.0 - e) * (0.5 + 0.5 * cos(srcX * PI * 14.0));
-        float reste = 0.5 * sx * u_full.z - abs(p.x - (u_full.x + 0.5 * u_full.z));
-        float doux  = smoothstep(0.0, 10.0 * s * (1.0 - e) + 0.5, reste);
-        return teinte(fen(vec2(srcX, q.y)), plis) * doux * apparait;
+        // Rideau (catppuccin) : deux pans de velours plissé, teints de l'accent, s'ouvrent depuis le milieu et se
+        // rassemblent sur les côtés ; la fenêtre est derrière.
+        float demi  = 0.5 * iS.x;
+        float ax    = abs(p.x - winC.x);
+        float bord  = demi * e + 3.0 * s * sin(q.y * 11.0) * (1.0 - e);
+        float u     = clamp((ax - bord) / max(demi - bord, 1.0), 0.0, 1.0);
+        float pli   = 0.5 + 0.5 * cos(u * PI * mix(16.0, 7.0, e));
+        vec3  velours = mix(email(), u_bord, themeSombre() ? 0.45 : 0.3) * mix(0.8, 1.04, pli) * mix(0.85, 1.0, u);
+        float cm    = couvre(bord - ax) * couvre(sdBox(p - winC, iS * 0.5, u_radius)) * (1.0 - smoothstep(0.7, 1.0, t));
+        vec4  win   = matiere(q);
+        return sur(win, vec4(velours, 1.0) * cm) * apparait;
     }
     if (mode == 8) {
-        // Ligne cathodique (vaporwave) : un trait s'étire en largeur, puis s'ouvre en écran, sans éclair blanc.
-        float wl = eo(t / 0.35);
-        float hp = eo((t - 0.35) / 0.65);
-        float hf = max(mix(2.0 * s / iS.y, 1.0, hp), 1e-4);
-        if (abs(p.x - (u_full.x + 0.5 * u_full.z)) > wl * 0.5 * u_full.z)
-            return vec4(0.0);
-        float balayage = 1.0 - 0.22 * (1.0 - hp) * (0.5 + 0.5 * sin(p.y * PI / (1.5 * s)));
-        return teinte(fen(vec2(q.x, 0.5 + (q.y - 0.5) / hf)), balayage);
+        // Ligne cathodique (vaporwave) : un trait de l'accent s'étire, entouré d'une lueur, puis s'ouvre en écran ;
+        // des lignes de balayage s'estompent. Aucun éclair blanc.
+        float wl  = eo(t / 0.32);
+        float hp  = eo((t - 0.32) / 0.68);
+        float hh  = mix(1.0 * s, 0.5 * iS.y, hp);
+        float hw  = 0.5 * iS.x * wl;
+        float m   = couvre(max(abs(p.x - winC.x) - hw, abs(p.y - winC.y) - hh));
+        float hf  = max(hh / (0.5 * iS.y), 1e-4);
+        float scan = 1.0 - 0.22 * (1.0 - hp) * (0.5 + 0.5 * sin(p.y * PI / (1.5 * s)));
+        vec4  col = teinte(matiere(vec2(q.x, 0.5 + (q.y - 0.5) / hf)), scan);
+        col       = mix(col, trait(1.0), 0.85 * (1.0 - smoothstep(0.0, 0.3, hp))) * m;
+        float lueur = exp(-abs(p.y - winC.y) / (7.0 * s)) * 0.4 * (1.0 - hp) * couvre(abs(p.x - winC.x) - hw);
+        return sur(trait(lueur), col);
     }
     if (mode == 9) {
-        // Point de fuite (synthwave) : la fenêtre avance depuis l'horizon, en perspective qui se redresse.
-        float sc = mix(0.18, 1.0, e);
-        vec2  c  = mix(vec2(winC.x, u_inner.y + 0.1 * iS.y), winC, e);
-        float ny = (p.y - (c.y - 0.5 * sc * iS.y)) / (sc * iS.y);
-        float wf = mix(mix(0.55, 1.0, e), 1.0, clamp(ny, 0.0, 1.0));
-        return fen(vec2(0.5 + (p.x - c.x) / (sc * iS.x * wf), ny)) * apparait;
+        // Point de fuite (synthwave) : la fenêtre avance depuis une ligne d'horizon, en perspective qui se redresse.
+        float yh  = u_inner.y + 0.12 * iS.y;
+        float sc  = mix(0.16, 1.0, e);
+        vec2  c   = mix(vec2(winC.x, yh + 0.5 * 0.16 * iS.y), winC, e);
+        float top = c.y - 0.5 * sc * iS.y;
+        float ny  = (p.y - top) / (sc * iS.y);
+        float wf  = mix(mix(0.55, 1.0, e), 1.0, clamp(ny, 0.0, 1.0));
+        float nx  = 0.5 + (p.x - c.x) / (sc * iS.x * wf);
+        float m   = couvre(max((abs(nx - 0.5) - 0.5) * sc * iS.x * wf, (abs(ny - 0.5) - 0.5) * sc * iS.y));
+        vec4  col = matiere(vec2(nx, ny)) * m * apparait;
+        float hz  = couvre(abs(p.y - yh) - 0.5 * s) * couvre(abs(p.x - winC.x) - 0.5 * iS.x * mix(0.3, 1.0, eo(t / 0.25))) *
+                   (1.0 - smoothstep(0.35, 0.8, t));
+        return sur(trait(hz), col);
     }
     if (mode == 10) {
-        // Vantaux (dracula) : deux battants pivotent sur les bords extérieurs, une ombre marque la fente.
-        float c = sin(e * PI * 0.5);
-        if (c < 1e-3)
-            return vec4(0.0);
-        bool  gauche = q.x < 0.5;
-        float x      = gauche ? q.x : 1.0 - q.x;
-        if (x > 0.5 * c)
-            return vec4(0.0);
-        float src   = x / c;
-        float d     = clamp(src / 0.5, 0.0, 1.0);
-        float hs    = 1.0 - 0.14 * (1.0 - c) * d;
-        float fente = exp(-(0.5 * c - x) * iS.x / (8.0 * s));
-        vec4  col   = fen(vec2(gauche ? src : 1.0 - src, 0.5 + (q.y - 0.5) / hs));
-        return teinte(col, (1.0 - 0.4 * (1.0 - c) * d) * (1.0 - 0.45 * (1.0 - c) * fente));
+        // Vantaux (dracula) : deux battants d'émail moulurés ferment la fenêtre, puis pivotent sur leurs gonds
+        // extérieurs ; leur bord libre vient vers nous. La fenêtre sort de l'ombre derrière eux.
+        float th  = e * 0.5 * PI;
+        float lw  = 0.5 * iS.x * cos(th);
+        bool  g   = p.x < winC.x;
+        float dx  = abs(p.x - (g ? u_inner.x : u_inner.x + iS.x));
+        float u   = clamp(dx / max(lw, 1e-3), 0.0, 1.0);
+        float hs  = 1.0 + 0.08 * sin(th) * u;
+        float dB  = max(dx - lw, abs(p.y - winC.y) - 0.5 * iS.y * hs);
+        float bm  = couvre(dB) * (1.0 - smoothstep(0.85, 1.0, t));
+        vec3  bat = mix(email(), u_bord, 0.22) * (1.0 - 0.45 * sin(th) * u);
+        float moulure = couvre(abs(dB + 12.0 * s) - 0.5 * s);
+        vec4  bv  = sur(vec4(bat, 1.0), trait(0.55 * moulure)) * bm;
+        vec4  win = teinte(matiere(q), mix(0.55, 1.0, e));
+        return sur(win, bv) * apparait;
     }
     if (mode == 11) {
-        // Balayage (matrice) : un front tramé (Bayer 4 × 4) révèle la fenêtre de gauche à droite.
-        float bande = 64.0 * s / iS.x;
+        // Balayage (matrice) : un front tramé (Bayer 4 × 4, cellules alignées sur les pixels) révèle la fenêtre de
+        // gauche à droite ; les cellules qui viennent d'apparaître luisent de l'accent.
+        float cell  = max(floor(4.0 * s + 0.5), 1.0);
+        float bande = 16.0 * cell / iS.x;
         float front = smoothstep(0.0, 1.0, t) * (1.0 + 2.0 * bande) - bande;
         float u     = (front - q.x) / bande;
-        float seuil = (bayer4(floor(p / (4.0 * s))) + 0.5) / 16.0;
-        return fen(q) * (u >= 1.0 ? 1.0 : (u <= 0.0 ? 0.0 : step(seuil, u)));
+        float seuil = (bayer4(floor(pi / cell)) + 0.5) / 16.0;
+        float m     = u >= 1.0 ? 1.0 : (u <= 0.0 ? 0.0 : step(seuil, u));
+        vec4  col   = matiere(q) * m;
+        float tete  = m * (1.0 - smoothstep(0.0, 0.6, u)) * step(0.0, u);
+        return mix(col, trait(col.a), 0.65 * tete);
     }
     if (mode == 12) {
-        // Averse (pluie-verte) : lignes de 18 px révélées de haut en bas, colonnes légèrement décalées.
-        float ligne = 18.0 * s;
-        float r     = floor((p.y - u_inner.y) / ligne);
+        // Averse (pluie-verte) : lignes révélées de haut en bas par colonnes décalées ; la ligne de tête de chaque
+        // colonne luit de l'accent.
+        float ligne = max(floor(18.0 * s + 0.5), 1.0);
+        float colw  = max(floor(36.0 * s + 0.5), 1.0);
+        float r     = floor(pi.y / ligne);
         float n     = max(ceil(iS.y / ligne), 1.0);
-        float pc    = clamp((t - hash(floor((p.x - u_inner.x) / (36.0 * s))) * 0.15) / 0.85, 0.0, 1.0);
+        float pc    = clamp((t - hash(floor(pi.x / colw)) * 0.15) / 0.85, 0.0, 1.0);
         float front = pc * (n + 1.0);
         float m     = step(r + 1.0, front);
         float tete  = m * step(front, r + 2.0);
-        return teinte(fen(q) * m, 1.0 + 0.18 * tete * (1.0 - t));
+        vec4  col   = matiere(q) * m;
+        return mix(col, trait(col.a), 0.6 * tete * efface);
     }
     if (mode == 13) {
-        // Deux paliers (retro) : une bande s'élargit, puis s'étend en hauteur, par crans.
-        float w = floor(eo(t / 0.42) * 6.0) / 6.0;
-        float h = mix(0.12, 1.0, floor(eo((t - 0.45) / 0.55) * 6.0) / 6.0);
-        vec2  d = abs(q - 0.5);
-        bool  dedans = (w >= 1.0 || d.x <= w * 0.5) && (h >= 1.0 || d.y <= h * 0.5);
-        return dedans ? fen(q) : vec4(0.0);
+        // Deux paliers (retro) : une bande s'élargit, puis s'étend en hauteur, par crans, dans un cadre phosphore.
+        float w   = mix(1.0 / 12.0, 1.0, floor(eo(t / 0.42) * 6.0) / 6.0);
+        float h   = mix(0.12, 1.0, floor(eo((t - 0.45) / 0.55) * 6.0) / 6.0);
+        vec2  hw  = vec2(w, h) * 0.5 * iS;
+        float d   = sdBox(p - winC, hw, min(u_radius, min(hw.x, hw.y)));
+        vec4  col = matiere(q) * couvre(d);
+        float cadre = couvre(abs(d) - 0.5 * s) * efface;
+        return sur(col, trait(cadre));
     }
     if (mode == 14) {
-        // Contour (oled) : le filet du contour se trace depuis le haut, puis le contenu apparaît dedans.
+        // Contour (oled) : le filet de l'accent fait le tour depuis le haut, puis le contenu apparaît dedans.
         float d     = sdBox(p - winC, iS * 0.5, u_radius);
-        float trait = 1.0 - smoothstep(0.75 * s - 0.5, 0.75 * s + 0.5, abs(d));
         float a     = abs(atan(p.x - winC.x, -(p.y - winC.y))) / PI;
-        trait *= step(a, eo(t / 0.48)) * (1.0 - smoothstep(0.75, 1.0, t));
-        return accent() * trait + fen(q) * smoothstep(0.35, 1.0, t) * (1.0 - trait);
+        float trace = couvre(abs(d) - 0.5 * s) * step(a, eo(t / 0.48)) * efface;
+        vec4  col   = matiere(q) * smoothstep(0.35, 1.0, t);
+        return sur(col, trait(trace));
     }
     return fen(q);
 }
@@ -420,7 +511,9 @@ vec4 geste(int mode, vec2 p, float t) {
 void main() {
     vec2  p = u_canvas + gl_FragCoord.xy;
     float t = clamp(u_t, 0.0, 1.0);
-    fragColor = u_mode == 1 ? goutte(p, t) : geste(u_mode, p, t);
+    vec4  g = u_mode == 1 ? goutte(p, t) : geste(u_mode, p, t);
+    // Gestes 2 à 14 : fin en fondu sur la vraie fenêtre, au pixel près (la goutte le fait déjà).
+    fragColor = u_mode == 1 ? g : mix(g, fenPx(p), smoothstep(0.88, 1.0, t));
 }
 )GLSL";
 
