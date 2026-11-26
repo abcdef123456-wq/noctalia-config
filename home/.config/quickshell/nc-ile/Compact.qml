@@ -1,7 +1,5 @@
 // Contenu de la pilule (île fermée), sur une seule ligne :
-//   repos   : les indicateurs actifs seulement (VPN, Concentration, envoi Cloud, point des notifications non lues) ;
-//             sans rien, une petite pilule vide (l'heure, la date et la météo sont dans la barre)
-//   musique : pochette, titre (et artiste), lecture / pause
+//   repos   : heure et date ;  musique : pochette, titre (et artiste), lecture / pause
 //   réactions (2 à 3 s) : volume, luminosité, nouveau morceau, chargeur, profil d'énergie, mode jeu
 //   Claude Code et Antigravity (nc-claude) : ce qu'il fait (son logo qui bouge), « t'attend dans le terminal », « a terminé »
 // largeur : largeur voulue de la pilule ; l'île s'y ajuste avec un ressort.
@@ -21,8 +19,7 @@ Item {
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur"
                                    : (Terminal.enCours ? "terminal" : "repos")))))
-    // Au repos sans indicateur : une petite pilule de 64 px ; les autres contenus gardent 110 px au moins
-    readonly property real largeur: Math.max(mode === "repos" ? 64 : 110, actif.implicitWidth + 32)
+    readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
     implicitHeight: 30
     // Le point (x, y) de l'île tombe-t-il sur l'indicateur VPN de la pilule au repos ? (le clic ouvre alors le panneau VPN)
     function surVpn(x, y) {
@@ -88,7 +85,7 @@ Item {
         }
     }
 
-    // ── Repos : rien que ce qui est actif, rien de ce que la barre montre déjà ──
+    // ── Repos : heure et date ──
     Fondu {
         id: repos
         montre: c.mode === "repos"
@@ -104,17 +101,17 @@ Item {
                     font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 150) }
             Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle
         }
-        // Cloud JARVIS : seulement pendant un envoi, la flèche d'envoi en couleur d'accent, fixe (aucune animation sans
-        // fin dans la pilule : test_ile_cadence). Associé et au repos, rien : le panneau reste sur nc-cloud et la recherche
+        // Cloud JARVIS (CLOUD_JARVIS=oui et ce PC associé) : un petit nuage ; pendant un envoi, la flèche d'envoi en
+        // couleur d'accent, fixe (aucune animation sans fin dans la pilule : test_ile_cadence).
         Ico {
             id: pastilleCloud
             objectName: "nc-cloud-pill"
             anchors.verticalCenter: parent.verticalCenter
-            visible: CloudEtat.actif && CloudEtat.associe && CloudEtat.envoie
-            nom: "cloud_upload"; taille: 15
-            color: Couleurs.accentClair
+            visible: CloudEtat.actif && CloudEtat.associe
+            nom: CloudEtat.envoie ? "cloud_upload" : "cloud"; taille: 15
+            color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec
             Accessible.role: Accessible.Button
-            Accessible.name: Reglages.t("Cloud JARVIS : envoi en cours", "JARVIS Cloud: uploading")
+            Accessible.name: CloudEtat.envoie ? Reglages.t("Cloud JARVIS : envoi en cours", "JARVIS Cloud: uploading") : "Cloud JARVIS"
         }
         // Un mode Concentration actif (Modes.qml) : son icône et son nom court ; le nom est caché pendant un partage d'écran
         Row {
@@ -127,15 +124,15 @@ Item {
             Accessible.role: Accessible.StaticText
             Accessible.name: Reglages.t("Mode Concentration actif", "Focus mode on")
         }
-        // Notifications non lues : un point discret (pas pendant un partage d'écran)
-        Rectangle {
-            objectName: "nc-notifs-pill-point"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: Notifs.nonLues > 0 && !Partage.silence
-            width: 6; height: 6; radius: 3
-            color: Couleurs.accent
-            Accessible.role: Accessible.StaticText
-            Accessible.name: Reglages.t("Notifications non lues", "Unread notifications")
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
+                visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages
+        // Météo (nc-reglages, ILE_METEO)
+        Row {
+            anchors.verticalCenter: parent.verticalCenter; spacing: 3
+            visible: Etat.meteoPilule
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.meteo.icone || "cloud"; taille: 15; color: Couleurs.texteSec }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: (Etat.meteo.temp !== undefined ? Etat.meteo.temp : "") + "°"; secondaire: true }
         }
     }
 

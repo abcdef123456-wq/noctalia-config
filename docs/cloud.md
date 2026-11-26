@@ -88,9 +88,9 @@ lecture seule (le panneau dit le mode annoncé). Rien ne se monte tout seul : ni
 
 ### Envoyer des fichiers
 
-- Pendant un envoi (`CLOUD_JARVIS=oui` et ce PC associé), une flèche d'envoi en couleur d'accent dans la pilule au
-  repos : un clic ouvre le panneau, un autre le ferme. Hors envoi, rien dans la pilule (elle ne montre que ce qui est
-  actif) : le panneau s'ouvre par `nc-cloud fenetre` ou la recherche. Une notification dit la fin de l'envoi.
+- Un petit nuage dans la pilule (à côté de l'heure, avec `CLOUD_JARVIS=oui` et ce PC associé) : un clic ouvre le
+  panneau, un autre le ferme ; le survoler n'ouvre pas l'île. Pendant un envoi, il devient une flèche d'envoi en couleur
+  d'accent, et une notification dit la fin.
 - Glisse des fichiers dans la carte « Déposer des fichiers » ou sur l'île fermée (un cadre d'accent s'allume et le
   panneau s'ouvre au lâcher). La sélection affiche les fichiers reçus et le dossier de destination (le dossier
   affiché). Rien ne part avant « Envoyer ici ». C'est une copie : les fichiers restent où ils sont.

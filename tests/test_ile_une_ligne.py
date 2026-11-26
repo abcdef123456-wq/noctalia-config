@@ -115,29 +115,16 @@ class UneLigne(unittest.TestCase):
         self.assertEqual(e["repos"]["h"], 30)
 
 
-# Pilote du repos sans musique : la pilule, ses textes visibles, puis un point de notification, puis un clic
-REPOS = """
+# Clic sur la pilule au repos (sans musique) : son contenu d'avant (l'heure), puis le lanceur, jamais une page
+CLIC_REPOS = """
     var f = vs.instances[0], i = f.ilot, k = i.children, c = null
     for (var n = 0; n < k.length; n++) if (k[n].largeur !== undefined && k[n].actif !== undefined) c = k[n]
-    function textes(item, l) {
-        l = l || []
-        if (!item.visible || item.opacity <= 0.01) return l
-        if (item.text !== undefined && item.font !== undefined && item.font.family !== "Material Symbols Rounded" && item.text !== "") l.push(item.text)
-        for (var j = 0; j < item.children.length; j++) textes(item.children[j], l)
-        return l
-    }
-    function point() { var r = trouver(c, "nc-notifs-pill-point"); return r !== null && r.visible }
-    function note(nom) {
-        console.log("ETAPE " + JSON.stringify({ nom: nom, mode: c.mode, largeur: c.largeur, h: i.height, ligne: f.ligne,
-            textes: textes(c.actif), heure: Etat.heure, date: Etat.dateCourte, point: point(),
-            ouverte: Etat.ecranOuvert, recherche: Etat.recherche, vue: Etat.vueActive }))
-    }
-    function trouver(item, nom) { if (item.objectName === nom) return item; for (var j = 0; j < item.children.length; j++) { var r = trouver(item.children[j], nom); if (r) return r } return null }
-    function plus(ms, fn) { Qt.createQmlObject('import QtQuick; Timer { interval: ' + ms + '; running: true }', racine).triggered.connect(fn) }
-    note("repos")
-    Notifs.revenues = [{ id: "essai-1", synthetique: true, appName: "Essai", summary: "Bonjour", body: "" }]
-    plus(400, function() { note("notification") })
-    plus(500, function() { f.clicPilule(); plus(1200, function() { note("clic") }) })
+    var heure = c.actif.children.some(function(x) { return x.visible && x.text === Etat.heure })
+    f.clicPilule()
+    Qt.createQmlObject('import QtQuick; Timer { interval: 1200; running: true }', racine).triggered.connect(function() {
+        console.log("ETAPE " + JSON.stringify({ nom: "clic-repos", mode: c.mode, heure: heure, ouverte: Etat.ecranOuvert,
+                                               recherche: Etat.recherche }))
+    })
 """
 # Clic sur la ligne musique : la page Musique si elle est affichée, sinon (lecteur factice sans « raise ») le lanceur
 CLIC_MUSIQUE = """
@@ -150,9 +137,9 @@ CLIC_MUSIQUE = """
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell (qs) absent")
-class ReposMinimal(unittest.TestCase):
-    """Retour de Théo le 26/11 : sans musique, la pilule montrait encore nuage, heure, date et météo, et un clic ouvrait
-    le centre de contrôle dans l'île. Au repos : une ligne courte des seuls indicateurs actifs ; un clic : le lanceur."""
+class Clic(unittest.TestCase):
+    """Théo, 26/11 : un clic sur l'île n'ouvre plus le centre de contrôle (il sera refait à part). Au repos : le lanceur ;
+    le contenu de la pilule ne change pas."""
     def setUp(self):
         self.t = Path(tempfile.mkdtemp(prefix="nct-repos-"))
         self.addCleanup(shutil.rmtree, str(self.t), True)
@@ -167,24 +154,11 @@ class ReposMinimal(unittest.TestCase):
         self.assertIsNotNone(png, journal[-1500:])
         return {d["nom"]: d for d in (json.loads(x) for x in re.findall(r"ETAPE (\{.*?\})\n", journal))}, journal
 
-    def test_repos_sans_heure_ni_date_ni_meteo_et_clic_vers_le_lanceur(self):
-        e, journal = self.etapes("fermee", REPOS, 2400)
-        self.assertEqual(set(e), {"repos", "notification", "clic"}, journal[-1500:])
-        r = e["repos"]
-        self.assertEqual(r["mode"], "repos")
-        self.assertEqual(r["h"], r["ligne"], "une seule ligne")
-        self.assertNotEqual(r["heure"], "")
-        # rien de ce que la barre montre déjà : ni l'heure, ni la date, ni de température
-        self.assertEqual(r["textes"], [], r)
-        self.assertEqual(r["largeur"], 64, "sans indicateur : une petite pilule")
-        self.assertFalse(r["point"])
-        # une notification non lue : un point discret, la pilule reste courte
-        n = e["notification"]
-        self.assertTrue(n["point"])
-        self.assertEqual(n["textes"], [])
-        self.assertLessEqual(n["largeur"], 64)
-        # clic sur la pilule au repos : le lanceur depuis l'île, jamais une page ni le centre de contrôle
-        c = e["clic"]
+    def test_clic_au_repos_ouvre_le_lanceur(self):
+        e, journal = self.etapes("fermee", CLIC_REPOS, 1600)
+        c = e["clic-repos"]
+        self.assertEqual(c["mode"], "repos", journal[-1500:])
+        self.assertTrue(c["heure"], "l'heure reste dans la pilule au repos")
         self.assertNotEqual(c["ouverte"], "")
         self.assertTrue(c["recherche"], c)
 
@@ -223,14 +197,6 @@ class Source(unittest.TestCase):
         shell = (QML / "shell.qml").read_text(encoding="utf-8")
         self.assertIn("function basculer(): void { Etat.basculer(", shell)
         self.assertIn("function page(nom: string): void {", shell)
-
-    def test_repos_sans_doublon_de_la_barre(self):
-        compact = (QML / "Compact.qml").read_text(encoding="utf-8")
-        repos = compact[compact.index("        id: repos\n"):compact.index("    // ── Musique")]
-        for absent in ("Etat.heure", "Etat.dateCourte", "Etat.meteo", "ILE_DATE"):
-            self.assertNotIn(absent, repos)
-        for present in ('objectName: "nc-vpn-pill"', 'objectName: "nc-mode-pill"', 'objectName: "nc-notifs-pill-point"'):
-            self.assertIn(present, repos)
 
     def test_surface_assez_haute_au_survol(self):
         # la progression dépasse la bande de 56 px : la surface grandit comme pour une bannière
