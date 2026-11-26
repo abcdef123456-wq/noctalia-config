@@ -20,6 +20,7 @@
     "ILE_LUEUR": "non",
     "ILE_MAJUSCULES": "oui",
     "ILE_ACCENTS": "accent",
+    "ILE_FORME": "cadre",
     "TERMINAL_POLICE": "JetBrainsMono Nerd Font Mono, CaskaydiaCove Nerd Font Mono",
     "TERMINAL_OPACITE": "96",
     "TERMINAL_MARGE": "6",

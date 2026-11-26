@@ -1,15 +1,36 @@
-# Pages de l’île
+# Île essentielle et Centre de contrôle
 
-Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces pages)
-permet d’activer ou désactiver chacune des 19 pages :
-Musique, Agents IA, Minuteur, Recharge, Jeu, Centre de contrôle, JARVIS, Notifications, Son, Réseau, Bluetooth,
-Système, Santé, Calendrier, Météo, Presse-papiers, Fenêtres, Appel et Terminal. La page Santé (températures,
-ventilateurs, profil d'énergie, alerte de surchauffe) n'existe que sur une machine qui a des capteurs
-(`nc-ile-etat capteurs`).
+L’île Quickshell se concentre sur **l’essentiel**. Les 23 thèmes fournis ont leur propre dessin, île fermée **et ouverte**.
+Changer de thème remplace la scène sans redémarrer. Chez Dracula, les commandes occupent les trois baies d’un vitrail ;
+chez Sakura, elles bordent un ticket de salon de thé illustré ; chez Gruvbox, ce sont les touches d’un magnétophone.
+Les mêmes emplacements servent au **transport du lecteur** sur Musique et aux **filtres de la boîte** sur Notifications.
+Les autres pages conservent leurs outils sous une version courte de l’illustration.
+Le thème personnel **Pénombre de papier** bénéficie aussi d’une scène dédiée : une grue en origami sur papier brun.
 
-Les choix sont conservés dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Huit pages sont coupées par
-défaut (JARVIS, Agents IA, Santé, Jeu, Appel, Terminal, Fenêtres, Minuteur) ; les autres sont activées. Un « oui »
-déjà réglé est gardé. Les pages d’activité n’apparaissent que lorsqu’elles ont du contenu. Exemple :
+Les dessins sont originaux. Références : [lunanoir21](https://github.com/lunanoir21/quickshell-dynamic-island)
+pour l’idée d’un instrument qui change de fonction, [Alan-Betty](https://github.com/Alan-Betty/quickshell-DynamicIsland)
+pour les activités intégrées et [Impasto](https://github.com/andreumassanet/impasto) pour la continuité entre barre et pages.
+
+- **Île fermée** : heure, date optionnelle, météo brève, notifications non lues et réactions en direct
+  (musique, volume, luminosité, minuteur, appel, enregistrement vidéo, agents actifs).
+- **Île ouverte** : par défaut **Essentiel**, **Notifications** et **Musique** (lorsqu’un lecteur est actif),
+  plus un accès direct au **Centre de contrôle** et à la **Recherche**.
+
+Tous les réglages rapides et panneaux détaillés (Wi-Fi/Ethernet, Bluetooth, VPN, Concentration, Lumière nocturne,
+Caféine, Mode jeu, Volume, Luminosité, Profils d’énergie, Système, Batterie, Santé, Météo, Agenda, Presse-papiers,
+Minuteur, Fenêtres) vivent dans le **panneau Centre de contrôle dédié** (`Super + C`, icônes de la barre, ou bouton
+« Centre de contrôle » sur l’île ; `qs -c nc-ile ipc call ile controle`).
+Seul un **bouton extérieur de la barre** fournit une ancre : sous la barre haute, au-dessus de la barre basse ou
+vers l’intérieur d’une barre latérale, sur le même écran. Si la place manque, la carte cherche un autre côté.
+Depuis la barre native Noctalia, l’ancre est le point du clic. Depuis l’île ou le raccourci, le centre s’ouvre à son
+emplacement normal. Dans le centre, les détails et le retour utilisent la même carte, sans la déplacer.
+
+Dans **Réglages**, une action qui retourne des informations ou qui échoue affiche son résultat dans une boîte de
+dialogue nommée, avec un texte sélectionnable. Une édition ordinaire continue d’afficher un statut discret.
+
+Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces
+pages) permet tout de même de réactiver ou masquer à la carte chacune des 20 pages sur l’île. Les choix sont conservés
+dans `~/.config/nc/reglages.conf` et relus sans redémarrage. Un « oui » déjà réglé est gardé. Exemple :
 
 ```sh
 nc-settings set ILE_PAGE_ASSISTANT oui
@@ -17,14 +38,11 @@ nc-settings set ILE_PAGE_MUSIQUE non
 nc-settings reset ILE_PAGE_ASSISTANT
 ```
 
-Désactiver une page masque son accès, y compris via la commande IPC `page`. Cela ne désactive pas sa fonction :
-un minuteur continue, les notifications de fin d’un agent restent actives, et le cockpit JARVIS reste accessible.
-Si la page ouverte est désactivée, l’île choisit une page encore disponible. Si elles sont toutes désactivées,
-elle se referme et reste en pilule ; le Spotlight reste disponible. Il suffit de réactiver une page pour la rouvrir.
-
-Les points de navigation restent dans une zone avec 32 px de marge verticale et une gouttière séparée du contenu.
-Le point actif reste visible ; les voisins s’estompent avec la distance et disparaissent avant de dépasser.
-La molette et les flèches permettent toujours d’atteindre les pages hors de cette zone.
+Désactiver une page masque son accès sur l’île. Les réglages rapides restent disponibles dans le panneau Centre de
+contrôle (`Super + C`). Si la page ouverte est désactivée, l’île choisit une page encore disponible. Si elles sont
+toutes désactivées, elle se referme et reste en pilule ; le Spotlight reste disponible.
+Les onglets défilent si nécessaire et suivent la page active. Les flèches et la molette changent de page ; les
+thèmes à navigation horizontale ajoutent un raccourci par points si plus de quatre pages sont disponibles.
 
 La page Agents affiche seulement les sessions non terminées. Les transitions de fin et leur notification sont
 conservées ; une session qui reprend son travail réapparaît. Aucun fichier d’historique n’est supprimé.
@@ -35,10 +53,11 @@ Une ville saisie n'envoie que son nom à Open-Meteo. Ville introuvable : message
 Validation isolée : `python3 -B -m unittest tests.test_island_pages tests.test_assistant_page -q`.
 Les essais QML nécessitent Quickshell et QtTest (dépendance de test uniquement).
 
-## Centre de contrôle personnalisable
+## Ancienne page Centre de contrôle (optionnelle)
 
-Le crayon en haut à droite du centre de contrôle ouvre le mode édition : chaque module (connexions, musique, nuit,
-mode jeu, luminosité, volume, énergie) montre un œil (masquer) et deux flèches (monter, descendre) ; les modules masqués
+Dans cette page réactivable depuis les réglages de l’île, le crayon en haut à droite ouvre le mode édition.
+Chaque module (connexions, musique, nuit, mode jeu, luminosité, volume, énergie) montre un œil (masquer) et
+deux flèches (monter, descendre) ; les modules masqués
 sont listés en dessous, un clic les remontre ; « Réinitialiser » rend la disposition de départ, « Terminer » ferme le
 mode. Au moins un module reste visible. Clavier : ↑ ↓ choisissent un module, Maj + ↑ ↓ le déplacent, Espace ou Entrée
 le masquent ou le remontrent, Échap termine ; les boutons portent un nom d’accessibilité et une infobulle s’affiche

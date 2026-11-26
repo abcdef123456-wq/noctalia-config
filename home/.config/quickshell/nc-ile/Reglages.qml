@@ -23,8 +23,11 @@ Singleton {
     // En profil Économie sur batterie, seule l'IA d'arrière-plan se met en pause (IA_ECONOMIE, nc-ia --fond) : rien dans
     // l'île ne tourne tout seul, tout ce qu'on y lance reste disponible
     readonly property bool iaCoupee: val("IA_MODE", "auto") === "non"
-    // Pages coupées par défaut (même liste que nc-reglages) ; un « oui » écrit dans reglages.conf les garde
-    readonly property var pagesCoupees: ["assistant", "claude", "sante", "jeu", "appel", "terminal", "fenetres", "minuteur"]
+    // Pages coupées par défaut dans l'île (déplacées vers le Centre de contrôle dédié ; même liste dans nc-reglages).
+    // Seul l'essentiel (essentiel, musique, notifications) reste sur l'île par défaut ; un « oui » dans reglages.conf les remet.
+    readonly property var pagesCoupees: ["centre", "son", "reseau", "bluetooth", "systeme", "charge", "sante",
+                                         "calendrier", "meteo", "presse", "jeu", "concentration",
+                                         "assistant", "claude", "appel", "terminal", "fenetres", "minuteur"]
     function pageActive(nom) { return !(iaCoupee && (nom === "claude" || nom === "assistant")) && val("ILE_PAGE_" + nom.toUpperCase(), pagesCoupees.indexOf(nom) >= 0 ? "non" : "oui") !== "non" }
     function filtrerPages(pages) { return pages.filter(nom => pageActive(nom)) }
     readonly property bool en: {

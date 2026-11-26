@@ -619,7 +619,7 @@ def cmd_verifier(a):
     else:
         for c in controles:
             print(("✓ " if c["ok"] else "· " if c.get("facultatif") else "✗ ") + c["message"])
-        # Dernière ligne : le résumé (la fenêtre des réglages n'en montre qu'une), en erreur s'il manque quelque chose
+        # Le résumé suit les contrôles ; une recommandation bloquante passe sur stderr.
         manque = [c["message"] for c in controles if not c["ok"] and not c.get("facultatif")]
         if manque:
             print(T("À faire : ", "To do: ") + manque[0], file=sys.stderr)

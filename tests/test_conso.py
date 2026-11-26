@@ -475,11 +475,13 @@ FAUX_NOCTALIA = '#!/bin/sh\necho "noctalia $*" >> "$HOME/appels"\n'
 
 
 class ClicBatterie(unittest.TestCase):
-    def lancer(self, *args, ile=True):
+    def lancer(self, *args, ile=True, pointeur=None):
         with tempfile.TemporaryDirectory(prefix="nc-clic-batterie-") as d:
             b = Path(d) / "bin"
             b.mkdir()
-            for nom, code in (("systemctl", FAUX_SYSTEMCTL), ("qs", FAUX_QS), ("noctalia", FAUX_NOCTALIA), ("pgrep", "#!/bin/sh\nexit 0\n")):
+            hyprctl = "#!/bin/sh\nexit 1\n" if pointeur is None else f"#!/bin/sh\nprintf '%s\\n' '{pointeur}'\n"
+            for nom, code in (("systemctl", FAUX_SYSTEMCTL), ("qs", FAUX_QS), ("noctalia", FAUX_NOCTALIA),
+                              ("hyprctl", hyprctl), ("pgrep", "#!/bin/sh\nexit 0\n")):
                 (b / nom).write_text(code)
                 (b / nom).chmod(0o755)
             env = dict(HOME=d, PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_LANGUE="fr", NC_TEST_ILE="1" if ile else "0")
@@ -495,9 +497,14 @@ class ClicBatterie(unittest.TestCase):
         # Les autres icônes ne changent pas
         self.assertEqual(self.lancer("ile", "systeme"), ["qs -c nc-ile ipc call ile page systeme"])
 
-    def test_ipc_et_barre(self):
-        shell = (QML / "shell.qml").read_text()
-        self.assertIn("function pageOu(nom: string, repli: string): void { page(Etat.pageOu(nom, repli)) }", shell)
+    def test_clic_natif_transmet_la_position_avec_le_repli(self):
+        position = '{"x":-420,"y":850}'
+        self.assertEqual(self.lancer("ile", "charge", "systeme", pointeur=position),
+                         ["qs -c nc-ile ipc call ile controleWidget charge systeme " + position])
+        self.assertEqual(self.lancer("ile", "centre", pointeur=position),
+                         ["qs -c nc-ile ipc call ile controleWidget centre  " + position])
+
+    def test_bouton_batterie_configure_le_repli_systeme(self):
         config = (REPO / "home/.config/noctalia/config.toml").read_text()
         bloc = config[config.index('[widget."nc/batterie:batterie".actions]'):][:200]
         self.assertIn('nc-shell-msg ile charge systeme"', bloc)

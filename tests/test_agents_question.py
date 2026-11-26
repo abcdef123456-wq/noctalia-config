@@ -476,7 +476,7 @@ ShellRoot {
     def test_clic_sur_la_pilule_ouvre_la_question(self):
         # Question vieille d'une heure : l'indicateur reste, et le clic sur la pilule l'ouvre (session en tête)
         self.executer(self.etat(), '''
- if (etape === 0) { if (Agents.sessions.length === 2) etape++; return }
+ if (etape === 0) { Reglages.valeurs = ({ ILE_PAGE_CLAUDE: "oui" }); if (Agents.sessions.length === 2) etape++; return }
  if (etape === 1) {
   verifier(Agents.attendTerminal && Agents.attend.id === "Q", "indicateur perdu après 15 min")
   verifier(Etat.vues.indexOf("claude") >= 0, "page des agents absente")
@@ -498,8 +498,8 @@ ShellRoot {
         self.executer(self.etat(age_question=10), '''
  if (etape === 0) { if (Agents.sessions.length === 2) etape++; return }
  if (etape === 1) {
-  Reglages.valeurs = ({}); Etat.basculer("TEST", true)
-  verifier(Etat.vueActive === "centre", "départ")
+  Reglages.valeurs = ({ ILE_PAGE_CLAUDE: "oui" }); Etat.basculer("TEST", true)
+  verifier(Etat.vueActive === "essentiel", "départ : " + Etat.vueActive)
   Agents.montrer("Q"); etape++; return
  }
  if (etape === 2) {

@@ -1,20 +1,24 @@
-// Une île par écran : pilule noire posée sur la barre de Noctalia (couche au-dessus), qui se déploie avec un ressort,
-// comme l'île dynamique de l'iPhone. Ouverte, ses pages se suivent verticalement : d'abord les activités en cours
-// (musique, minuteur, recharge, mode jeu), puis le centre de contrôle, Son, Wi-Fi, Bluetooth, Système, Calendrier.
-// Points sur le bord droit, molette ou deux doigts pour descendre ; l'île prend la taille de chaque page.
+// Une île par écran, au-dessus de la barre de Noctalia. Ouverte, la navigation et la composition des pages
+// suivent le thème ; la molette et les flèches passent entre les vues et l'île prend la taille du contenu.
 // Deux activités en même temps (musique + minuteur) : la seconde dans une petite bulle à côté de la pilule.
 // Seule la forme de l'île capte la souris ; un clic ailleurs, Échap, Super + C ou un clic sur la pilule la referment.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import "IdentitesIle.js" as Identites
+import "CompositionIle.js" as Composition
 
 PanelWindow {
     id: fen
     required property var modelData
     screen: modelData
+    signal ouvrirThemes()
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
+    readonly property var identite: Identites.pour(Couleurs.themeActif)
+    readonly property var plan: Composition.pour(Couleurs.themeActif)
+    function ouvrirControle() { Etat.ouvrirControle(modelData.name, "accueil") }
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
@@ -175,18 +179,30 @@ PanelWindow {
     }
     onOuverteChanged: { prise.prete = false; if (ouverte) prise.restart() }
 
-    // Taille de chaque page
-    function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32))) }
-    readonly property var tailles: ({
-        musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: adaptee("charge", 140),
-        jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
-        claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
-        fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170), concentration: adaptee("concentration", 260)
+    // Le bandeau décoratif reste au-dessus des pages. La navigation occupe un autre bord selon le thème.
+    readonly property bool multiPages: Etat.vues.length > 1
+    readonly property bool reglagesPage: Etat.vueActive !== "essentiel"
+    readonly property var disposition: Composition.cadre(plan, modelData.width, multiPages, reglagesPage)
+    function adaptee(nom, mini) { return Math.max(mini, Math.min(548, Etat.hauteurs[nom] || mini)) }
+    readonly property var hauteurs: ({
+        essentiel: Math.max(0, Etat.hauteurs.essentiel ?? 0), musique: 66,
+        minuteur: Etat.minuteurFin > 0 ? 118 : 302, charge: adaptee("charge", 108),
+        jeu: 218, centre: adaptee("centre", 462), son: adaptee("son", 268), reseau: adaptee("reseau", 228),
+        bluetooth: adaptee("bluetooth", 188), notifications: adaptee("notifications", 168),
+        systeme: 568, sante: adaptee("sante", 268), calendrier: adaptee("calendrier", 378),
+        claude: adaptee("claude", 148), assistant: 530, meteo: 298, presse: adaptee("presse", 168),
+        fenetres: adaptee("fenetres", 128), appel: adaptee("appel", 118), terminal: adaptee("terminal", 118),
+        resume: adaptee("resume", 138), concentration: adaptee("concentration", 228)
     })
-    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
-    readonly property bool points: Etat.vues.length > 1 && !recherche
-    // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
+    readonly property real margeScene: scene.item ? scene.item.implicitHeight + 8 : 0
+    readonly property real hautContenu: disposition.haut + (disposition.bord === "haut" ? disposition.bande : 0)
+    readonly property real retraitGauche: disposition.bord === "gauche" && disposition.rail > 0 ? disposition.rail + 12 : 0
+    readonly property real retraitDroit: disposition.bord === "droite" && disposition.rail > 0 ? disposition.rail + 12 : (points ? 18 : 0)
+    readonly property real hauteurPage: Math.min(hauteurs[Etat.vueActive] ?? hauteurs.essentiel,
+        Math.max(0, Math.min(680, modelData.height - ile.y - 8) - disposition.surHauteur - margeScene))
+    readonly property size taille: recherche ? Qt.size(Math.min(modelData.width, 680), spot.hauteurVoulue)
+                                             : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur + margeScene)
+    readonly property bool points: Etat.vues.length > 4 && !recherche && !disposition.lateral
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
     readonly property bool confirmGpu: !ouverte && ModeGraphique.demande
@@ -289,7 +305,7 @@ PanelWindow {
             radius: ile.radius + modelData
             color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
             opacity: fen.ouverte || (Couleurs.contourFermee && !fen.pilCachee) ? 1 : 0
-            visible: opacity > 0.01
+            visible: !ile.fondDessine && opacity > 0.01
             Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         }
     }
@@ -301,7 +317,7 @@ PanelWindow {
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
         opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0
-        visible: opacity > 0.01                     // le fondu de fermeture (220 ms) se joue avant de cacher
+        visible: !ile.fondDessine && opacity > 0.01
         Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -311,7 +327,40 @@ PanelWindow {
         }
     }
 
+    // L'encoche et les formes choisies à la main restent prioritaires dans les modes spéciaux ou personnalisés.
     Rectangle {
+        anchors.fill: ile
+        radius: ile.radius
+        color: ile.color
+        opacity: ile.opacity
+        visible: !ile.fondDessine && (ile.pointFerme || Couleurs.forme !== "encoche")
+        border.width: Couleurs.forme === "cadre" ? 1 : 0
+        border.color: Couleurs.accent
+    }
+    FormeIle {
+        anchors.fill: ile
+        visible: !ile.fondDessine && Couleurs.forme === "encoche"
+        opacity: ile.opacity
+        rayon: ile.radius
+        couleur: ile.color
+    }
+    Loader {
+        anchors.fill: ile
+        active: ile.fondDessine || ile.pageIdentite
+        opacity: ile.opacity
+        sourceComponent: HabillageIle {
+            plan: fen.identite
+            pigment: scene.item && !scene.item.breve ? scene.item.planche.accent : Couleurs.accent
+            encre: scene.item && !scene.item.breve ? scene.item.planche.ink : Couleurs.texte
+            page: ile.pageIdentite
+            dessinerFond: ile.fondDessine
+            fond: ile.color
+            contour: cadre.opacity * cadre.e
+            lueur: Couleurs.lueur && (fen.ouverte || Couleurs.contourFermee)
+        }
+    }
+
+    Item {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         // Encoche : collée au bord haut. Sinon centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 =
@@ -321,6 +370,13 @@ PanelWindow {
         // Forme « point » : fermée, l'île n'est qu'un point plein d'accent de 10 px (ouverte, bannière ou carte : comme d'habitude)
         readonly property bool pointFerme: Couleurs.forme === "point" && !fen.ouverte && !fen.enCarte && !fen.banniere && !fen.confirmGpu
                                            && !fen.confirmNoeud && !fen.demandeClaude && !fen.sessionNoeud && !fen.recherche
+        readonly property bool pageIdentite: fen.ouverte && !fen.recherche && width >= 240 && height >= 76
+        readonly property bool geometrieManuelle: {
+            const rayon = Reglages.valeurs["ILE_RAYON"]
+            return !!Reglages.valeurs["ILE_FORME"] || (!!rayon && rayon !== "auto")
+        }
+        readonly property bool fondDessine: !geometrieManuelle && (pageIdentite
+            || (!fen.grandeVoulue && !pointFerme && width >= 100 && height >= 24 && height <= 36))
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
@@ -336,10 +392,10 @@ PanelWindow {
             return retrait > Math.ceil(42 * (1 - Math.SQRT1_2)) ? retrait : 0
         }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
-        radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
-        color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
-        border.width: Couleurs.forme === "cadre" ? 1 : 0
-        border.color: Couleurs.accent
+        property real radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
+        property color color: scene.item && !scene.item.breve ? scene.item.planche.paper
+            : pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
+            ? Qt.alpha(Couleurs.fond, 0.72) : Qt.alpha(Couleurs.fond, Couleurs.verre)
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
@@ -373,8 +429,6 @@ PanelWindow {
         }
         Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
         clip: true
-        FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
-
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
@@ -543,7 +597,7 @@ PanelWindow {
         // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)
         MouseArea {
             anchors.fill: parent
-            enabled: fen.ouverte && fen.points && !fen.recherche
+            enabled: fen.ouverte && fen.multiPages && !fen.recherche
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             property real dernier: 0         // heure du dernier événement : un trou de 200 ms = nouveau geste
@@ -570,7 +624,48 @@ PanelWindow {
             Timer { id: verrou; interval: 300 }
         }
 
-        // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
+        // La navigation reste cliquable sur le bord propre au thème, séparée du contenu des pages.
+        EnteteIle {
+            id: barreEntete
+            objectName: "nc-ile-entete"
+            lateral: fen.disposition.lateral
+            style: fen.plan.onglets
+            papier: scene.item && !scene.item.breve ? scene.item.planche : null
+            x: (ile.width - fen.disposition.largeur) / 2 + (fen.disposition.bord === "droite" ? fen.disposition.largeur - width - 14 : 16)
+            y: fen.disposition.bord === "bas" ? ile.height - height - fen.disposition.bas : fen.disposition.haut
+            width: lateral ? fen.disposition.rail : Math.max(0, fen.disposition.largeur - 32)
+            height: lateral ? Math.max(0, ile.height - y - fen.disposition.bas) : fen.disposition.bande
+            z: 1
+            pages: Etat.vues
+            active: Etat.vueActive
+            nonLues: Partage.silence ? 0 : Notifs.nonLues
+            opacity: fen.ouverte && !fen.recherche && fen.multiPages && ile.height > fen.taille.height * 0.65 ? 1 : 0
+            visible: opacity > 0.01 && fen.multiPages
+            Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
+            onChoisir: nom => Etat.aller(nom)
+            onOuvrirControle: fen.ouvrirControle()
+        }
+
+        // Une seule scène interactive, libérée à la fermeture.
+        Loader {
+            id: scene
+            objectName: "nc-ile-scene"
+            active: fen.ouverte && !fen.recherche
+            visible: active && ile.height > fen.taille.height * .75
+            x: (ile.width - fen.disposition.largeur) / 2 + 16 + fen.retraitGauche
+            y: fen.hautContenu
+            width: Math.max(0, fen.disposition.largeur - 32 - fen.retraitGauche - fen.retraitDroit)
+            sourceComponent: SceneOuverte {
+                page: Etat.vueActive
+                rubrique: barreEntete.meta(page).nom
+                readonly property var contenu: pages.itemAt(Etat.vue)?.contenu ?? null
+                filtre: boite && contenu ? (contenu.filtre ?? "toutes") : "toutes"
+                onChoisirFiltre: valeur => { if (contenu) { contenu.filtre = valeur; contenu.choix = -1 } }
+                onOuvrirControle: fen.ouvrirControle()
+                onOuvrirRecherche: Etat.chercher(fen.modelData.name)
+                onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
+            }
+        }
         Repeater {
             id: pages
             model: Etat.vues
@@ -579,7 +674,7 @@ PanelWindow {
                 readonly property var contenu: chargeur.item
                 required property string modelData
                 required property int index
-                readonly property size t: fen.tailles[modelData] || fen.tailles.centre
+                objectName: "nc-ile-page-" + modelData
                 readonly property bool active: modelData === Etat.vueActive
                 // Une page visitée reste prête tant que l'île est ouverte, et les deux voisines de la page affichée sont
                 // préparées à l'avance, sans bloquer (asynchrone) : glisser vers elles ne fige plus l'île le temps de les
@@ -588,38 +683,54 @@ PanelWindow {
                 onActiveChanged: if (active) dejaVue = true
                 readonly property bool voisine: Math.abs(index - Etat.vue) <= 1
                 Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
-                x: (ile.width - t.width) / 2 + 16
-                width: Math.max(0, t.width - 32 - (fen.points ? Math.max(22, boutonPage.width + boutonPage.anchors.rightMargin - 16 + 4) : 0))
-                height: t.height - 32
-                y: 16 + (index - Etat.vue) * (ile.height * 0.6)
-                Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
+                x: scene.x
+                width: scene.width
+                height: Math.max(0, Math.min(fen.hauteurs[modelData] ?? fen.hauteurs.essentiel, fen.hauteurPage))
+                property real decalage: (index - Etat.vue) * (ile.height * 0.6)
+                y: fen.hautContenu + fen.margeScene + decalage
+                Behavior on decalage { enabled: fen.mouv.actif && !Notifs.enPause; SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
-                opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
+                opacity: fen.ouverte && !fen.recherche && active && ile.height > fen.taille.height * 0.65 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
+                Rectangle {
+                    anchors.fill: parent
+                    visible: !!scene.item && !scene.item.breve
+                    color: Couleurs.fond; radius: Couleurs.rayonBloc
+                }
                 Loader {
                     id: chargeur
                     anchors.fill: parent
                     asynchronous: true
                     active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
-                    sourceComponent: ({ concentration: pConcentration, musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
+                    sourceComponent: ({ essentiel: pEssentiel, concentration: pConcentration, musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres,
-                                        appel: pAppel, terminal: pTerminal, resume: pResume })[pageIle.modelData] || pCentre
+                                        appel: pAppel, terminal: pTerminal, resume: pResume })[pageIle.modelData] || pEssentiel
                 }
+            }
+        }
+        Component {
+            id: pEssentiel
+            EssentielIle {
+                Component.onCompleted: Etat.annoncerHauteur("essentiel", implicitHeight)
+                onImplicitHeightChanged: Etat.annoncerHauteur("essentiel", implicitHeight)
             }
         }
         Component { id: pAppel; PageAppel {} }
         Component { id: pTerminal; PageTerminal {} }
         Component { id: pResume; PageResume {} }
         Component { id: pConcentration; PageConcentration {} }
-        Component { id: pMusique; Musique {} }
+        Component {
+            id: pMusique
+            Musique { motif: fen.plan.icone; dessin: fen.plan.dessin }
+        }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }
         Component { id: pJeu; Jeu {} }
         Component { id: pCentre; Centre {} }
         Component { id: pSon; Son {} }
-        Component { id: pNotifs; PageNotifs {} }
+        Component { id: pNotifs; PageNotifs { dansScene: true } }
         Component { id: pReseau; PageListe { mode: "wifi" } }
         Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
         Component { id: pSysteme; Systeme {} }
@@ -631,11 +742,11 @@ PanelWindow {
         Component { id: pPresse; Presse {} }
         Component { id: pFenetres; Fenetres {} }
 
-        // Points de page sur le bord droit (comme le Centre de contrôle de l'iPhone)
+        // Raccourci visuel pour les listes longues ; un rail latéral contient déjà toutes les pages.
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: Math.max(0, Math.min(parent.height - (ile.retraitCoin > 0 ? 2 * (boutonPage.height + boutonPage.anchors.bottomMargin + 2) : 64), Etat.vues.length * 14))
+            y: fen.hautContenu + fen.margeScene + (fen.hauteurPage - height) / 2
+            height: Math.max(0, Math.min(fen.hauteurPage - 20, Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)
@@ -644,9 +755,10 @@ PanelWindow {
         // ⚙ : les réglages de la page affichée (fenêtre des réglages sur la bonne section)
         ReglagesIle {
             id: boutonPage
-            anchors.right: parent.right; anchors.rightMargin: Math.max(5, ile.retraitCoin)
-            anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(8, ile.retraitCoin)
-            visible: fen.ouverte && fen.points
+            x: Math.max(0, ile.width - width - Math.max(16, ile.retraitCoin)
+                - (fen.disposition.bord === "droite" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : 0))
+            y: ile.height - fen.disposition.bas - height - (fen.disposition.bord === "bas" ? fen.disposition.bande : 0)
+            visible: fen.ouverte && !fen.recherche && fen.reglagesPage && ile.height > fen.taille.height * 0.8
             vue: Etat.vueActive
             onOuvert: Etat.fermer()
         }
@@ -655,11 +767,13 @@ PanelWindow {
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)
         Keys.onDownPressed: Etat.changerVue(1)
-    
+        Keys.onLeftPressed: Etat.changerVue(-1)
+        Keys.onRightPressed: Etat.changerVue(1)
         // Clic dans l'île ouverte au survol : elle reste ouverte comme après un clic. Au-dessus de tout, le clic est
         // seulement noté puis laissé aux boutons en dessous.
         MouseArea {
             anchors.fill: parent
+            z: 2
             enabled: Etat.parSurvol
             acceptedButtons: Qt.AllButtons
             onPressed: m => { Etat.parSurvol = false; m.accepted = false }

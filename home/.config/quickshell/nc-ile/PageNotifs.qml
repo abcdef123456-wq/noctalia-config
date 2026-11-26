@@ -14,6 +14,7 @@ import Quickshell.Widgets
 Item {
     id: p
     property string recherche: ""
+    property bool dansScene: false
     property string filtre: "toutes"          // toutes, nonlues, urgentes
     property var replies: ({})               // appli repliée
     property var menus: ({})                 // id -> "reporter" | "masquer" | "repondre"
@@ -75,8 +76,8 @@ Item {
 
     Item {
         id: tete
-        width: parent.width; height: 34
-        Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Notifications" + (Notifs.nonLues ? "  ·  " + Notifs.nonLues : ""); font.pixelSize: 20; font.weight: Font.Bold }
+        width: parent.width; height: !p.dansScene || Notifs.liste.length ? 34 : 0
+        Texte { visible: !p.dansScene; anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Notifications" + (Notifs.nonLues ? "  ·  " + Notifs.nonLues : ""); font.pixelSize: 20; font.weight: Font.Bold }
         Row {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 12
             Texte {
@@ -117,6 +118,7 @@ Item {
             width: parent.width; height: 30
             Row {
                 id: filtres
+                visible: !p.dansScene
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                 Repeater {
                     model: [{ id: "toutes", nom: Reglages.t("Toutes", "All") }, { id: "nonlues", nom: Reglages.t("Non lues", "Unread") }, { id: "urgentes", nom: Reglages.t("Urgentes", "Urgent") }]
@@ -134,7 +136,7 @@ Item {
                 }
             }
             Rectangle {
-                anchors.left: filtres.right; anchors.leftMargin: 8; anchors.right: parent.right; height: 30; radius: Couleurs.rayon(15, width, height)
+                anchors.left: p.dansScene ? parent.left : filtres.right; anchors.leftMargin: p.dansScene ? 0 : 8; anchors.right: parent.right; height: 30; radius: Couleurs.rayon(15, width, height)
                 color: Couleurs.gris2; border.width: 1; border.color: champ.activeFocus ? Couleurs.accent : "transparent"
                 Ico { x: 9; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 15; color: Couleurs.texteSec }
                 TextInput {
@@ -180,7 +182,7 @@ Item {
         Column {
             id: liste
             width: p.width; spacing: 8
-            readonly property real voulue: 34 + (outils.visible ? outils.height + 8 : 0) + 10 + implicitHeight
+            readonly property real voulue: tete.height + (outils.visible ? outils.height + 8 : 0) + 10 + implicitHeight
             onVoulueChanged: Etat.annoncerHauteur("notifications", voulue)
             Component.onCompleted: Etat.annoncerHauteur("notifications", voulue)
 

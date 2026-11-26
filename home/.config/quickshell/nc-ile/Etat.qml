@@ -22,8 +22,58 @@ Singleton {
     // Comme sur iPhone : d'abord les activités en cours (musique, minuteur, recharge, mode jeu), puis le centre de
     // contrôle et ses pages de détails ; on descend de l'une à l'autre (points sur le bord droit).
     property string ecranOuvert: ""
-    // Lanceur qui sort de la pilule (ILE_LANCEUR_FONDU, LanceurFondu.qml) : chaque île inscrit sa pilule (objet, jamais un
-    // état qui bouge) ; pendant l'animation, « lanceurFondu » = écran dont la pilule est cachée, « lanceurProprio » = le lanceur
+    // Panneau Centre de contrôle dédié (PanneauControle.qml) : séparé de l'île pour garder l'île sur l'essentiel
+    property string controleEcran: ""
+    property string controleSection: "accueil"
+    property string controleBord: ""        // "" = détection auto (barre active / réserves), sinon "top"|"bottom"|"left"|"right"
+    property var controleAncre: null      // Rectangle du déclencheur dans le repère logique de l'écran.
+    readonly property bool controleOuvert: controleEcran !== ""
+    readonly property var pagesControle: ["centre", "reseau", "wifi", "bluetooth", "son", "systeme", "sante",
+                                          "charge", "meteo", "presse", "fenetres", "concentration", "jeu", "calendrier", "minuteur"]
+    signal ouvertureControle()
+    function normaliserSectionControle(nom) {
+        if (nom === "wifi") return "reseau"
+        if (nom === "centre" || nom === "" || !nom) return "accueil"
+        if (nom === "charge" && !batteriePc) return "systeme"
+        if (nom === "sante" && !capteursSante) return "systeme"
+        return estPageControle(nom) ? nom : "accueil"
+    }
+    function normaliserBordControle(bord) {
+        return ["top", "bottom", "left", "right"].indexOf(bord) >= 0 ? bord : ""
+    }
+    function estPageControle(nom) { return nom === "accueil" || pagesControle.indexOf(nom) >= 0 }
+    // Wayland ne fournit pas la position globale des surfaces : chacun connaît son origine sur l'écran.
+    function ancreControle(item, origine = Qt.point(0, 0)) {
+        if (!item) return null
+        const debut = item.mapToItem(null, 0, 0)
+        const fin = item.mapToItem(null, item.width, item.height)
+        return Qt.rect(origine.x + debut.x, origine.y + debut.y, fin.x - debut.x, fin.y - debut.y)
+    }
+    function basculerControle(ecran, section, bord, ancre) {
+        const cible = normaliserSectionControle(section)
+        if (controleEcran === ecran && (section === undefined || section === "" || controleSection === cible)) {
+            fermerControle(); return
+        }
+        ouvrirControle(ecran, cible, bord, ancre)
+    }
+    function ouvrirControle(ecran, section, bord, ancre) {
+        const cible = normaliserSectionControle(section)
+        fermer()
+        ouvertureControle()
+        controleAncre = ancre ?? null
+        controleBord = normaliserBordControle(bord)
+        controleSection = cible
+        controleEcran = ecran
+        lire()
+        lireLuminosite(false)
+        lirePage()
+    }
+    function allerControle(section) {
+        controleSection = normaliserSectionControle(section)
+        lire()
+        lirePage()
+    }
+    function fermerControle() { controleEcran = ""; controleSection = "accueil"; controleBord = ""; controleAncre = null }
     property var pilules: ({})
     property string lanceurFondu: ""
     property var lanceurProprio: null
@@ -78,13 +128,13 @@ Singleton {
     // Page Santé (Sante.qml) après Système, seulement si la machine a des capteurs (températures, ventilateurs : vu une
     // fois au démarrage par Chaleur.qml, nc-ile-etat capteurs) ; machine virtuelle ou tour sans capteur : pas de page
     property bool capteursSante: false
-    readonly property var vues: Reglages.filtrerPages(activites.concat(["centre"],
+    readonly property var vues: Reglages.filtrerPages(activites.concat(["essentiel", "notifications", "centre"],
                                                  batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
-                                                 ["assistant", "notifications"], Modes.pagePossible ? ["concentration"] : [],
+                                                 ["assistant"], Modes.pagePossible ? ["concentration"] : [],
                                                  ["son", "reseau", "bluetooth", "systeme"], capteursSante ? ["sante"] : [], ["calendrier"],
                                                  (meteo.temp !== undefined || meteoErreur !== "") ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))
-    property string vueNom: "centre"
+    property string vueNom: "essentiel"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
     readonly property string vueActive: vues[vue] || ""
     onVuesChanged: {
@@ -104,7 +154,12 @@ Singleton {
     }
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
     // La page voulue si elle est affichable, sinon le repli (clic sur la batterie de la barre : Batterie, sinon Système)
-    function pageOu(nom, repli) { return vues.indexOf(nom) >= 0 ? nom : repli }
+    function pageOu(nom, repli) {
+        // Une préférence de l'île absente ne désactive pas son tiroir dédié ; un refus explicite garde le repli de la barre.
+        if (nom === "charge" && (!batteriePc || Reglages.val("ILE_PAGE_CHARGE", "oui") === "non")) return repli
+        if (nom === "sante" && !capteursSante) return repli
+        return estPageControle(nom) || vues.indexOf(nom) >= 0 ? nom : repli
+    }
     function aller(nom) {
         if (vues.indexOf(nom) < 0) return
         recherche = false
@@ -117,11 +172,15 @@ Singleton {
     property bool parSurvol: false
     function basculer(ecran, versCentre) {
         parSurvol = false
+        fermerControle()
         if (ecranOuvert === ecran) { fermer(); return }
         if (!vues.length) return
         recherche = false
         var disponibles = Reglages.filtrerPages(activites)
-        vueNom = versCentre || disponibles.length === 0 ? (vues.indexOf("centre") >= 0 ? "centre" : vues[0]) : disponibles[0]
+        var cible = versCentre && vues.indexOf("centre") >= 0 ? "centre"
+                    : (disponibles.length > 0 && !versCentre ? disponibles[0]
+                    : (vues.indexOf("essentiel") >= 0 ? "essentiel" : vues[0]))
+        vueNom = cible
         ecranOuvert = ecran
         activiteType = ""
         lire()
@@ -183,6 +242,7 @@ Singleton {
     property string agirPortee: ""       // son bureau seulement (Super + Ctrl + O) : nc-ia agir --bureau N
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
     function chercher(ecran) {
+        fermerControle()
         if (ecranOuvert === ecran && recherche) { fermer(); return }
         recherche = true
         ecranOuvert = ecran
@@ -200,7 +260,7 @@ Singleton {
     }
     function ajouterMinute() { if (minuteurFin > 0) { minuteurFin += 60000; minuteurDuree += 60000 } }
     function arreterMinuteur() {
-        minuteurFin = 0; if (vueNom === "minuteur") vueNom = "centre"
+        minuteurFin = 0; if (vueNom === "minuteur") vueNom = vues.indexOf("essentiel") >= 0 ? "essentiel" : (vues[0] || "")
         if (pomodoro) { pomodoro = false; concentrationPomodoro(false) }
     }
     // Pomodoro : 25 min de travail (Ne pas déranger), 5 min de pause, 15 toutes les 4 séances ; enchaîne tout seul
@@ -624,6 +684,7 @@ Singleton {
 
     // ── Luminosité (nc-brightness, même échelle que les touches) ──
     property real luminosite: 0.5
+    property bool aLuminosite: false
     property bool luminositeVueParTouche: false
     Process {
         id: lecteurLum
@@ -631,7 +692,8 @@ Singleton {
         stdout: StdioCollector {
             onStreamFinished: {
                 var v = parseInt(this.text)
-                if (!isNaN(v)) etat.luminosite = v / 100
+                etat.aLuminosite = !isNaN(v)
+                if (etat.aLuminosite) etat.luminosite = v / 100
                 if (etat.luminositeVueParTouche) activite("luminosite")
                 etat.luminositeVueParTouche = false
             }
@@ -705,12 +767,13 @@ Singleton {
             reac.confirmer()
         }
     }
-    // nc-ile-etat (une centaine de ms de calcul) : seulement pour les pages qui lisent Etat.sys. Une lecture demandée
-    // pendant une autre est mise en file (une seule en attente), pas ignorée
-    readonly property bool pageSys: ["centre", "systeme", "reseau", "bluetooth"].indexOf(vueActive) >= 0
+    // nc-ile-etat (une centaine de ms de calcul) : pour les pages de l'île ou du Centre de contrôle qui lisent Etat.sys.
+    readonly property string vueSysActive: controleOuvert ? controleSection : vueActive
+    readonly property bool pageSys: (ecranOuvert !== "" && ["centre", "systeme", "reseau", "bluetooth"].indexOf(vueActive) >= 0)
+                                    || (controleOuvert && ["accueil", "systeme", "reseau", "bluetooth", "charge"].indexOf(controleSection) >= 0)
     function lire() { if (pageSys) lecteurEtat.demander() }
-    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== "" && etat.pageSys && etat.ecranVu; onTriggered: { etat.lire(); etat.lirePage() } }
-    onPageSysChanged: if (pageSys && ecranOuvert !== "") lire()
+    Timer { interval: 2000; repeat: true; running: (etat.ecranOuvert !== "" || etat.controleOuvert) && etat.pageSys && etat.ecranVu; onTriggered: { etat.lire(); etat.lirePage() } }
+    onPageSysChanged: if (pageSys && (ecranOuvert !== "" || controleOuvert)) lire()
 
     // Listes des pages Wi-Fi, Bluetooth, et mesures de la page Système
     property var liste: []
@@ -728,11 +791,10 @@ Singleton {
         }
     }
     function lirePage() {
-        var quoi = ({ reseau: "wifi", bluetooth: "bt", systeme: "systeme" })[vueActive]
+        var quoi = ({ reseau: "wifi", bluetooth: "bt", systeme: "systeme" })[vueSysActive]
         lecteurPage.commande = !quoi ? [] : quoi === "systeme" ? [bin + "nc-ile-etat", quoi, limiteBin] : [bin + "nc-ile-etat", quoi]
         lecteurPage.demander()
     }
-
     // Chemin de nc-limite-charge (nc-plateforme-root) : cherché une seule fois au démarrage de l'île, jamais à chaque relecture
     // (il ne change pas pendant la session) ; "" s'il manque ou n'a pas la forme attendue
     property string limiteBin: ""

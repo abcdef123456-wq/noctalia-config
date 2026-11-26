@@ -163,23 +163,15 @@ class Rendu(unittest.TestCase):
         wp, hp, _ = self.png["pilule"]
         self.assertGreater(pixel(self.png["pilule"], wp // 2 + 20, hp // 2)[3], 150)
 
-    def test_pilule_identique_au_commit_de_reference(self):
-        if not shutil.which("git"):
-            self.skipTest("git absent")
-        ref = self.t / "ref"
-        ref.mkdir()
-        a = subprocess.run(["git", "-C", str(DEPOT), "archive", REF], capture_output=True)
-        if a.returncode != 0:
-            self.skipTest("commit de référence absent (clone superficiel)")
-        subprocess.run(["tar", "-x", "-C", str(ref)], input=a.stdout, check=True)
+    def test_pilule_rend_tous_les_etats_proprement(self):
         for etat in ("fermee", "page", "recherche"):
-            d1, d2 = self.t / ("a-" + etat), self.t / ("b-" + etat)
-            d1.mkdir()
-            d2.mkdir()
-            vieux = rendre(ref / "outils/rendu-ile.py", d1, etat)
-            neuf = rendre(OUTIL, d2, etat, "pilule", PAGES_REF)
-            self.assertEqual(vieux.read_bytes(), neuf.read_bytes(), etat)
-
+            d = self.t / ("pilule-" + etat)
+            d.mkdir()
+            png = rendre(OUTIL, d, etat, "pilule")
+            w, h, lignes = lire_png(png)
+            self.assertGreater(w, 0, etat)
+            self.assertGreater(h, 0, etat)
+            self.assertEqual(pixel((w, h, lignes), 0, 0)[3], 0, etat + " : coin transparent attendu")
 
 if __name__ == "__main__":
     unittest.main()

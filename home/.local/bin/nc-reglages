@@ -490,21 +490,24 @@ _FREQ_AIDE = L("Fréquence de l'écran du portable dans ce profil.", "Refresh ra
 _JAMAIS = L("Jamais", "Never")
 
 REGLAGES = [
-    # Défaut « non » : JARVIS, Agents IA, Santé, Jeu, Appel, Terminal, Fenêtres, Minuteur (même liste dans Reglages.qml)
+    # Par défaut sur l'île : uniquement l'essentiel (essentiel, musique, notifications).
+    # Les réglages rapides et outils détaillés vivent désormais dans le panneau Centre de contrôle (Super + C),
+    # et restent activables ici sur l'île à la demande (même liste dans Reglages.qml).
     *[R("ILE_PAGE_" + cle.upper(), "Pages de l’île", L(fr, en), "ouinon",
-        "non" if cle in ("assistant", "claude", "sante", "jeu", "appel", "terminal", "fenetres", "minuteur") else "oui",
-        L("Afficher cette page dans l’île. Les fonctions et les notifications restent disponibles. Toutes désactivées : seule la pilule reste, avec le Spotlight.",
-          "Show this island page. Features and notifications remain available. All disabled: keep only the pill and Spotlight."))
+        "oui" if cle in ("essentiel", "musique", "notifications") else "non",
+        L("Afficher cette page dans l’île. Les réglages rapides restent disponibles dans le Centre de contrôle (Super + C). Toutes désactivées : seule la pilule reste, avec le Spotlight.",
+          "Show this island page. Quick settings remain available in the Control Center (Super + C). All disabled: keep only the pill and Spotlight."))
       for cle, fr, en in (
-          ("musique", "Musique", "Music"), ("claude", "Agents IA", "AI agents"),
-          ("minuteur", "Minuteur", "Timer"), ("charge", "Batterie", "Battery"), ("jeu", "Jeu", "Gaming"),
-          ("centre", "Centre de contrôle", "Control center"), ("assistant", "JARVIS", "JARVIS"),
-          ("notifications", "Notifications", "Notifications"), ("son", "Son", "Sound"),
+          ("essentiel", "Essentiel", "Essentials"),
+          ("musique", "Musique", "Music"), ("notifications", "Notifications", "Notifications"),
+          ("centre", "Centre de contrôle", "Control center"), ("son", "Son", "Sound"),
           ("reseau", "Réseau", "Network"), ("bluetooth", "Bluetooth", "Bluetooth"),
-          ("systeme", "Système", "System"), ("sante", "Santé", "Health"), ("calendrier", "Calendrier", "Calendar"),
-          ("meteo", "Météo", "Weather"), ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"),
+          ("charge", "Batterie", "Battery"), ("systeme", "Système", "System"), ("sante", "Santé", "Health"),
+          ("calendrier", "Calendrier", "Calendar"), ("meteo", "Météo", "Weather"),
+          ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"),
+          ("minuteur", "Minuteur", "Timer"), ("jeu", "Jeu", "Gaming"),
+          ("claude", "Agents IA", "AI agents"), ("assistant", "JARVIS", "JARVIS"),
           ("appel", "Appel", "Call"), ("terminal", "Terminal", "Terminal"))],
-    # Île
     R("ILE_STYLE", "Île", L("Couleurs", "Colors"), "choix", "terminal",
       L("Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
         "Terminal colors: the island follows the wallpaper, like kitty and the window borders."),
@@ -1991,7 +1994,7 @@ MATERIEL = {
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_FORME", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_ANIM_VITESSE", "ILE_ANIM_ECRANS", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "WIDGETS_POLICE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ",
                           "BARRE_REACTION", "BARRE_CONTENU")},
-    **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
+    **{"ILE_PAGE_" + x.upper(): "ile" for x in ("essentiel", "musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
     # Idem pour les réglages que seule la fenêtre de l'île lit (Spotlight, vue des fenêtres, Google, Ne pas déranger la
     # nuit, Pomodoro, ville de la météo, images en Économie) : vérifiés en comparant avec les clés lues par nc-ile
@@ -5383,7 +5386,7 @@ def catalogue(vals):
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)
     # Fonds d'écran : juste après le dossier des fonds, « Créer les dossiers jour et nuit » (mkdir -p de « jour » et « nuit » dans ce
-    # dossier, qui doit exister, puis ouverture dans le gestionnaire de fichiers ; rien d'autre). Le message s'affiche en bas.
+    # dossier, qui doit exister, puis ouverture dans le gestionnaire de fichiers ; le résultat figure dans le dialogue.
     k = next((k for k, x in enumerate(res) if x["cle"] == "FONDS_DOSSIER"), None)
     if k is not None:
         res.insert(k + 1, dict(cle="action:fonds-jour-nuit-dossiers", section="Fonds d'écran", sectionNom=nom_section("Fonds d'écran"),
@@ -5506,7 +5509,7 @@ def catalogue(vals):
 
 def catalogue_cloud():
     """Cloud JARVIS : l'association lue sur ce PC (aucun appel réseau à la lecture du catalogue), puis les actions de
-    nc-cloud, argv fixes ; leur dernière ligne s'affiche en bas de la fenêtre, puis le catalogue est relu."""
+    nc-cloud, argv fixes ; leur résultat est affiché dans un dialogue et le catalogue est relu."""
     sec = "Cloud JARVIS"
     base = dict(section=sec, sectionNom=nom_section(sec), defaut="", choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
                 valeur="", modifie=False, groupe="")

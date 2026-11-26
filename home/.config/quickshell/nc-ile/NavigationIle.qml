@@ -9,6 +9,7 @@ Item {
     // Nom lu par un lecteur d'écran : le libellé traduit de la page, pas son identifiant (« fenetres »)
     function libelle(nom) {
         var l = ({
+            essentiel: ["Essentiel", "Essentials"],
             musique: ["Musique", "Music"], claude: ["Claude", "Claude"], minuteur: ["Minuteur", "Timer"], charge: ["Batterie", "Battery"],
             jeu: ["Jeu", "Game"], centre: ["Centre de contrôle", "Control Center"], assistant: ["Assistant", "Assistant"],
             notifications: ["Notifications", "Notifications"], son: ["Son", "Sound"], reseau: ["Réseau", "Network"],

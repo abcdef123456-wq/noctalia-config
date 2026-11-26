@@ -10,9 +10,8 @@ import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
-COUPEES = "assistant claude sante jeu appel terminal fenetres minuteur".split()  # défaut « non » (refonte de l'île à venir)
-PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme sante calendrier meteo presse fenetres appel terminal".split()
-
+COUPEES = "centre son reseau bluetooth systeme charge sante calendrier meteo presse jeu assistant claude appel terminal fenetres minuteur".split()
+PAGES = "essentiel musique notifications centre son reseau bluetooth charge systeme sante calendrier meteo presse fenetres minuteur jeu claude assistant appel terminal".split()
 
 class ReglagesPages(unittest.TestCase):
     def test_all_pages_are_registered_with_safe_defaults(self):
@@ -149,7 +148,7 @@ Qt.quit()
 
     def test_preferences_filter_dynamic_and_static_pages_and_allow_all_off(self):
         self.executer('''
-if(etape===0){Reglages.valeurs={ILE_PAGE_ASSISTANT:"oui",ILE_PAGE_JEU:"oui"};Etat.enCharge=true;Etat.jeu=true;Etat.minuteurFin=Date.now()+10000;Etat.meteo={temp:20};etape++}
+if(etape===0){Reglages.valeurs={ILE_PAGE_ASSISTANT:"oui",ILE_PAGE_JEU:"oui",ILE_PAGE_CHARGE:"oui",ILE_PAGE_CENTRE:"oui",ILE_PAGE_MINUTEUR:"oui",ILE_PAGE_METEO:"oui"};Etat.enCharge=true;Etat.jeu=true;Etat.minuteurFin=Date.now()+10000;Etat.meteo={temp:20};etape++}
 else if(etape===1){
  verifier(Etat.vues.indexOf("charge")>=0,"activité absente")
  Etat.basculer("TEST",true);Etat.aller("assistant")
@@ -157,22 +156,22 @@ else if(etape===1){
 }else if(etape===2){
  verifier(Etat.vues.indexOf("assistant")<0&&Etat.vues.indexOf("charge")<0,"page désactivée visible")
  verifier(Etat.vueActive!=="assistant"&&Etat.vueActive!=="centre","repli vers page désactivée")
- var valeurs={};nav.pages.forEach(n=>valeurs["ILE_PAGE_"+n.toUpperCase()]="non");Reglages.valeurs=valeurs;etape++
+ var valeurs={};nav.pages.forEach(n=>valeurs["ILE_PAGE_"+n.toUpperCase()]="non");valeurs["ILE_PAGE_ESSENTIEL"]="non";Reglages.valeurs=valeurs;etape++
 }else if(etape===3){
  verifier(Etat.vues.length===0&&Etat.vueActive===""&&Etat.ecranOuvert==="","toutes désactivées")
  Etat.basculer("TEST",true);verifier(Etat.ecranOuvert==="","réouverture sans page")
  Etat.changerVue(1);Reglages.valeurs={};etape++
 }else if(etape===4){
- Etat.basculer("TEST",true);verifier(Etat.vueActive==="centre"&&Etat.ecranOuvert==="TEST","réactivation impossible");Qt.quit()
+ Etat.basculer("TEST",true);verifier(Etat.vueActive==="essentiel"&&Etat.ecranOuvert==="TEST","réactivation impossible");Qt.quit()
 }
 ''', etat_reel=True)
 
     def test_page_batterie_apres_le_centre_seulement_avec_une_batterie(self):
-        # Page Batterie (charge) : juste après le centre sur un PC à batterie, jamais deux fois pendant une recharge
-        # (elle est alors en tête, comme activité), absente sans batterie ou avec ILE_PAGE_CHARGE=non ; le clic sur la
-        # batterie de la barre (pageOu) revient alors à Système
+        # Page Batterie (charge) : activée sur l'île, juste après le centre sur un PC à batterie, jamais deux fois
+        # pendant une recharge (en tête, comme activité), absente sans batterie ou avec ILE_PAGE_CHARGE=non.
         self.executer('''
 if(etape===0){
+ Reglages.valeurs={ILE_PAGE_CENTRE:"oui",ILE_PAGE_CHARGE:"oui",ILE_PAGE_SYSTEME:"oui"}
  verifier(Etat.vues.indexOf("charge")<0,"page Batterie sur un PC sans batterie")
  verifier(Etat.pageOu("charge","systeme")==="systeme","repli sans batterie")
  Etat.batteriePc=true;etape++
@@ -180,19 +179,18 @@ if(etape===0){
  var v=Etat.vues
  verifier(v[v.indexOf("centre")+1]==="charge","Batterie pas juste après le centre : "+v)
  verifier(Etat.pageOu("charge","systeme")==="charge","clic vers Batterie")
- Etat.basculer("TEST",false);verifier(Etat.vueActive==="centre","sans activité, l'île s'ouvre sur le centre");Etat.fermer()
+ Etat.basculer("TEST",false);verifier(Etat.vueActive==="essentiel","sans activité, l'île s'ouvre sur essentiel");Etat.fermer()
  Etat.enCharge=true;etape++
 }else if(etape===2){
  var v=Etat.vues
  verifier(v.filter(n=>n==="charge").length===1,"Batterie deux fois : "+v)
  verifier(v[0]==="charge","recharge : la page en tête, comme activité")
- Etat.enCharge=false;Reglages.valeurs={ILE_PAGE_CHARGE:"non"};etape++
+ Etat.enCharge=false;Reglages.valeurs={ILE_PAGE_CENTRE:"oui",ILE_PAGE_CHARGE:"non",ILE_PAGE_SYSTEME:"oui"};etape++
 }else if(etape===3){
  verifier(Etat.vues.indexOf("charge")<0,"ILE_PAGE_CHARGE=non : page affichée")
  verifier(Etat.pageOu("charge","systeme")==="systeme","ILE_PAGE_CHARGE=non : pas de repli vers Système");Qt.quit()
 }
 ''', etat_reel=True)
-
     def test_finished_sessions_are_hidden_without_losing_completion_events(self):
         self.executer('''
 if(etape===0){Agents.donnees={sessions:{a:{id:"a",agent:"codex",etat:"travail",projet:"A",maj:Date.now()/1000},b:{id:"b",agent:"claude",etat:"fini",projet:"B",maj:Date.now()/1000}}};etape++}

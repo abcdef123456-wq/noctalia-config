@@ -117,7 +117,7 @@ touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis 
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))
 -- Carrousel des sessions (plugin nc/sessions) ; sans lui, le menu de nc-session
 touche(SUPER .. " + SHIFT + code:25", cmd(barre .. "sessions"),    trad("Bureaux|Sessions : ouvrir ou enregistrer une disposition", "Sessions: open or save a layout"))
-touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
+touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle", "Control Center"))
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
 touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), trad("Applis et barre|Réglages du bureau (fenêtre, avec recherche)", "Desktop settings (window, with search)"))
 -- Panneau VPN de l'île (tunnels VPN et WireGuard de NetworkManager, nc-vpn) ; sans l'île, la liste en notification
@@ -504,7 +504,7 @@ do
     local actions = {
         recherche = { "~/.local/bin/nc-shell-msg menu", nc.t("la recherche (Spotlight)", "Search (Spotlight)") },
         lanceur   = { "noctalia msg panel-toggle launcher", nc.t("le lanceur d'applis", "App launcher") },
-        centre    = { "qs -c nc-ile ipc call ile basculer 2>/dev/null || noctalia msg panel-toggle control-center",
+        centre    = { "qs -c nc-ile ipc call ile controle 2>/dev/null || noctalia msg panel-toggle control-center",
                       nc.t("le centre de contrôle", "Control Center") },
     }
     local a = actions[nc.reglage("SUPER_SEUL", "rien")]

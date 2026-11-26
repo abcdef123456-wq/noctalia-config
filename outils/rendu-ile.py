@@ -3,8 +3,8 @@
 
   outils/rendu-ile.py --sortie DOSSIER [--reglages FICHIER.conf] [--palette palette-ile.json] ETAT...
 
-ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), page (la page Système ouverte),
-recherche (Spotlight avec un texte tapé), agent (pilule d'un agent factice au travail). Un PNG par état : DOSSIER/ETAT.png.
+ETAT : fermee, musique (pilule avec un lecteur factice), essentiel, lecteur (page Musique ouverte), page (Système),
+recherche (Spotlight), agent (pilule d'un agent factice). Un PNG par état : DOSSIER/ETAT.png.
 --polices : dossier de polices lu en plus, en lecture seule (défaut : $XDG_DATA_HOME/fonts ou ~/.local/share/fonts).
 --echelle N : 1 (défaut), 2 ou 3 ; l'image est N fois plus grande, dessinée à cette taille (pas agrandie après coup).
 Le système est factice (Processeur, 8 cœurs, 16 Go, 45 °C, disque 40 %, batterie 80 %, ni Wi-Fi ni météo ni musique réels) :
@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes", "epinglee", "agent")
+ETATS = ("fermee", "musique", "essentiel", "lecteur", "page", "recherche", "bureau", "themes", "epinglee", "agent")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -44,12 +44,17 @@ FAUX_LECTEUR = """readonly property var lecteurs: [fauxLecteur]
         property string identity: "Musique"
         property string desktopEntry: ""
         property string dbusName: "faux"
+        property int uniqueId: 1
         property bool isPlaying: true
         property real position: 83
         property real length: 244
+        property bool positionSupported: true
+        property bool lengthSupported: true
         property bool canSeek: true
         property bool canRaise: false
         property bool canTogglePlaying: true
+        property bool canGoPrevious: true
+        property bool canGoNext: true
         function togglePlaying() {}
         function raise() {}
         function previous() {}
@@ -61,6 +66,8 @@ MARGE = 24
 ACTIONS = {
     "fermee": "",
     "musique": "",
+    "essentiel": 'Etat.basculer(nom, true); Etat.aller("essentiel")',
+    "lecteur": 'Etat.basculer(nom, true); Etat.aller("musique")',
     "page": 'Etat.basculer(nom, true); Etat.aller("systeme")',
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
     "bureau": "",                                                # widgets du bureau : l'île reste fermée
@@ -196,7 +203,7 @@ def preparer(root, etat, reglages, palette):
                                                                + morceau(b"IDAT", zlib.compress(brut)) + morceau(b"IEND", b""))
         f = ile / "shell.qml"
         f.write_text(f.read_text().replace('racine.effacerEpingles("")   //', "//", 1))
-    if etat == "musique":
+    if etat in ("musique", "lecteur"):
         f = ile / "Etat.qml"
         t, n = re.subn(r"readonly property var lecteurs:.*", lambda m: FAUX_LECTEUR, f.read_text(), count=1)
         if n != 1:

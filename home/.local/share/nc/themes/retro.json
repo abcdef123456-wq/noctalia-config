@@ -36,7 +36,8 @@
     "FENETRES_MAITRE_ORIENTATION": "bas",
     "FENETRES_ESPACE": "0",
     "DOCK": "non",
-    "ILE_BANDE": "oui"
+    "ILE_BANDE": "oui",
+    "ILE_FORME": "cadre"
   },
   "noctalia": {
     "bar.default": {
