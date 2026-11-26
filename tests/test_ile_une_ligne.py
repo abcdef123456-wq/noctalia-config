@@ -115,6 +115,62 @@ class UneLigne(unittest.TestCase):
         self.assertEqual(e["repos"]["h"], 30)
 
 
+# Clic sur la pilule au repos (sans musique) : son contenu d'avant (l'heure), puis le lanceur, jamais une page
+CLIC_REPOS = """
+    var f = vs.instances[0], i = f.ilot, k = i.children, c = null
+    for (var n = 0; n < k.length; n++) if (k[n].largeur !== undefined && k[n].actif !== undefined) c = k[n]
+    var heure = c.actif.children.some(function(x) { return x.visible && x.text === Etat.heure })
+    f.clicPilule()
+    Qt.createQmlObject('import QtQuick; Timer { interval: 1200; running: true }', racine).triggered.connect(function() {
+        console.log("ETAPE " + JSON.stringify({ nom: "clic-repos", mode: c.mode, heure: heure, ouverte: Etat.ecranOuvert,
+                                               recherche: Etat.recherche }))
+    })
+"""
+# Clic sur la ligne musique : la page Musique si elle est affichée, sinon (lecteur factice sans « raise ») le lanceur
+CLIC_MUSIQUE = """
+    var f = vs.instances[0]
+    f.clicPilule()
+    Qt.createQmlObject('import QtQuick; Timer { interval: 1200; running: true }', racine).triggered.connect(function() {
+        console.log("ETAPE " + JSON.stringify({ nom: "clic-musique", ouverte: Etat.ecranOuvert, recherche: Etat.recherche, vue: Etat.vueActive }))
+    })
+"""
+
+
+@unittest.skipUnless(shutil.which("qs"), "Quickshell (qs) absent")
+class Clic(unittest.TestCase):
+    """Théo, 26/11 : un clic sur l'île n'ouvre plus le centre de contrôle (il sera refait à part). Au repos : le lanceur ;
+    le contenu de la pilule ne change pas."""
+    def setUp(self):
+        self.t = Path(tempfile.mkdtemp(prefix="nct-repos-"))
+        self.addCleanup(shutil.rmtree, str(self.t), True)
+
+    def etapes(self, etat, pilote, attente, reglages=""):
+        m = charger_rendu()
+        m.ACTIONS[etat] = pilote
+        m.ATTENTE = attente
+        conf = self.t / "reglages.conf"
+        conf.write_text(reglages)
+        png, journal = m.rendre(etat, str(self.t), str(conf), None)
+        self.assertIsNotNone(png, journal[-1500:])
+        return {d["nom"]: d for d in (json.loads(x) for x in re.findall(r"ETAPE (\{.*?\})\n", journal))}, journal
+
+    def test_clic_au_repos_ouvre_le_lanceur(self):
+        e, journal = self.etapes("fermee", CLIC_REPOS, 1600)
+        c = e["clic-repos"]
+        self.assertEqual(c["mode"], "repos", journal[-1500:])
+        self.assertTrue(c["heure"], "l'heure reste dans la pilule au repos")
+        self.assertNotEqual(c["ouverte"], "")
+        self.assertTrue(c["recherche"], c)
+
+    def test_clic_musique_page_si_affichee_sinon_lanceur(self):
+        e, journal = self.etapes("musique", CLIC_MUSIQUE, 1600)
+        self.assertEqual(e["clic-musique"]["vue"], "musique", journal[-1500:])
+        self.assertFalse(e["clic-musique"]["recherche"])
+        self.assertNotEqual(e["clic-musique"]["ouverte"], "")
+        e, journal = self.etapes("musique", CLIC_MUSIQUE, 1600, "ILE_PAGE_MUSIQUE=non\n")
+        self.assertTrue(e["clic-musique"]["recherche"], journal[-1500:])
+
+
 class Source(unittest.TestCase):
     def setUp(self):
         self.ile = (QML / "Ile.qml").read_text(encoding="utf-8")
@@ -127,6 +183,20 @@ class Source(unittest.TestCase):
         self.assertNotIn("parSurvol", self.ile)
         # seul le clic sur la loupe ouvre la recherche, depuis l'île (même chemin que Super + R)
         self.assertIn("(survolIle.surLoupe(e.x, e.y) ? Etat.chercher(fen.modelData.name)", self.ile)
+
+    def test_le_clic_n_ouvre_plus_le_centre_de_controle(self):
+        clic = self.ile[self.ile.index("onClicked: e => e.button === Qt.RightButton"):self.ile.index("onWheel: w => Etat.reglerVolume")]
+        self.assertNotRegex(clic, r"\bEtat\.basculer\(")
+        self.assertNotRegex(self.ile, r"\bEtat\.basculer\(", "ni la pilule ni sa bulle n'ouvrent le centre de contrôle")
+        self.assertIn("(Agents.ouvrirAttente(fen.modelData.name) || fen.clicPilule())", clic)
+        f = self.ile[self.ile.index("function clicPilule()"):]
+        f = f[:f.index("\n    }\n")]
+        self.assertNotIn("basculer", f)
+        self.assertIn("Etat.chercher(modelData.name)", f)
+        # Super + C et l'IPC « ouvrir » / « page » restent, en attendant le panneau de #60
+        shell = (QML / "shell.qml").read_text(encoding="utf-8")
+        self.assertIn("function basculer(): void { Etat.basculer(", shell)
+        self.assertIn("function page(nom: string): void {", shell)
 
     def test_surface_assez_haute_au_survol(self):
         # la progression dépasse la bande de 56 px : la surface grandit comme pour une bannière

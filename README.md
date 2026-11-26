@@ -11,7 +11,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - Couleurs tirées du fond d'écran : barre, terminal, Dolphin, bordures des fenêtres (vives ou sobres selon l'image) ;
 - **île dynamique** au centre de la barre : l'heure, ta musique (pochette, égaliseur qui danse sur le son) ; elle
   s'étire comme sur iPhone pour le volume, la luminosité, un nouveau morceau, le chargeur, le profil d'énergie ; un clic
-  (ou **Super + C**) et le centre de contrôle en sort : Wi-Fi, Bluetooth, son, luminosité, profils, mode jeu… ;
+  ouvre le lanceur, **Super + C** le centre de contrôle : Wi-Fi, Bluetooth, son, luminosité, profils, mode jeu… ;
 - **fenêtres comme sur macOS** : **Super + H** masque la fenêtre ; dans la barre, le titre de la fenêtre s'agrandit au
   survol et montre toutes les fenêtres du bureau, les masquées comprises (un clic les ramène), un clic ouvre le menu des
   fenêtres, la molette passe de l'une à l'autre ; trois doigts vers le haut : la vue de toutes les fenêtres ;
@@ -148,7 +148,8 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 
 Au centre de la barre, une pilule noire comme l'île de l'iPhone : l'heure, ta musique (pochette, onde sonore). Elle
 s'étire quelques secondes pour le volume, la luminosité, un nouveau morceau, le chargeur, le profil d'énergie, le mode
-jeu. Un clic (ou **Super + C**) et elle se déploie en centre de contrôle façon iOS : Wi-Fi, Bluetooth, ne pas déranger,
+jeu. Un clic ouvre le lanceur depuis l'île (ou la page de l'activité en cours, musique, minuteur…, si elle est affichée) ;
+**Super + C** la déploie en centre de contrôle façon iOS : Wi-Fi, Bluetooth, ne pas déranger,
 mode jeu, musique, curseurs verticaux de luminosité et de volume, lumière de nuit, halo musical, profil d'énergie,
 capture, notifications, réglages, verrouillage, extinction. **Appui long (ou clic droit)** sur Wi-Fi, Bluetooth ou le
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
