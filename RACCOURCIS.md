@@ -31,7 +31,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `C` | Cloud JARVIS : le panneau de l'île, tes fichiers sur ton serveur (si le Cloud JARVIS est activé dans les réglages ; sinon le raccourci n'existe pas) |
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
-| `Super` + `` ` `` | Terminal déroulant (sous Échap) ; rangé tout seul dès que tu vas ailleurs (clic sur une autre fenêtre ou sur le bureau à côté, Alt + Tab, autre bureau), il revient tel quel ; ce que tu y lances s'ouvre sur le bureau du dessous |
+| `Super` + `` ` `` | Terminal déroulant (sous Échap) : ouvre Kitty au premier appel. Il se range quand tu vas ailleurs et revient tel quel. Les applis lancées depuis ce terminal s’ouvrent sur le bureau du dessous. |
 | `Super` + `Maj` + `V` | Historique du presse-papiers |
 | `Super` + `.` | Émojis |
 | `Impr. écran` | Capture de l'écran |

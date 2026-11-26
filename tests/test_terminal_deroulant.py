@@ -12,6 +12,31 @@ REPO = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(shutil.which("lua"), "Lua requis")
 class TerminalDeroulant(unittest.TestCase):
+    def test_lance_kitty_uniquement_a_la_creation_du_bureau_vide(self):
+        harness = r'''
+local creation, lancements
+lancements = {}
+hl = {
+    window_rule = function() end,
+    layer_rule = function() end,
+    workspace_rule = function() end,
+    on = function(e, f) if e == "workspace.created" then creation = f end end,
+    exec_cmd = function(cmd, regles) lancements[#lancements + 1] = {cmd, regles.workspace} end,
+}
+nc = { reglage = function(_, defaut) return defaut end }
+dofile(arg[1])
+assert(creation, "pas de lancement sur workspace.created")
+creation({ name = "1", is_empty = true })
+creation({ name = "special:term", is_empty = false })
+assert(#lancements == 0, "lancement hors du bureau terminal vide")
+creation({ name = "special:term", is_empty = true })
+assert(#lancements == 1 and lancements[1][1] == "kitty --class dropterm"
+    and lancements[1][2] == "special:term silent", "kitty doit rester sur le bureau terminal")
+'''
+        r = subprocess.run(["lua", "-", str(REPO / "home/.config/hypr/nc/regles.lua")],
+                           input=harness, text=True, capture_output=True, timeout=5)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_range_quand_on_va_ailleurs(self):
         source = (REPO / "home/.config/hypr/nc/automatismes.lua").read_text()
         debut = source.index("-- Terminal déroulant (Super + touche sous Échap")
