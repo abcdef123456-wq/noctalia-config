@@ -221,7 +221,11 @@ touche(SUPER .. " + code:41", function()
         local l, h = xy(w.size)
         if x and y and l and h then nc.places_plein_ecran[w.address] = { x = x, y = y, l = l, h = h } end
     end
-    hl.dispatch(hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }))
+    -- Garder le plein écran du compositeur : en scrolling, le plein écran du layout déplace la bande de colonnes.
+    -- Les modes explicites (0 = normal, 2 = plein écran) quittent aussi un maximisé sans dépendre du toggle d'Hyprland.
+    hl.dispatch(hl.dsp.window.fullscreen_state({
+        internal = etait and 0 or 2, client = 0, layout_aware = false, window = w,
+    }))
     local p = etait and nc.places_plein_ecran[w.address]
     if p then
         nc.places_plein_ecran[w.address] = nil

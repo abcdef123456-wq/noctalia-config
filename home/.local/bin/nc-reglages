@@ -684,21 +684,6 @@ REGLAGES = [
         "un partage d'écran ou une fenêtre en plein écran ; arrêtée écran éteint ou verrouillé. Non : aucun minuteur.",
         "Every 20 minutes of screen time, the pill says “Look far away” for 20 seconds, silently. Never during game mode, "
         "screen sharing or a fullscreen window; stopped while the screen is off or locked. No: no timer at all.")),
-    R("WIDGETS_BUREAU", "Île", L("Widgets du bureau (horloge)", "Desktop widgets (clock)"), "ouinon", "non",
-      L("Une grande horloge et la date sur le bureau, en haut à gauche, sous les fenêtres, sans prendre la souris, au style du thème "
-        "(police, majuscules, arrondis). Mise à jour une fois par minute, arrêtée écran éteint ou verrouillé. « Tout masquer » de la page "
-        "Fenêtres de l'île les cache aussi, « Tout afficher » les remet (l'état vit dans l'île, pas sur disque). Non : rien n'existe, rien ne tourne.",
-        "A big clock and the date on the desktop, top left, below windows, never taking the mouse, in the theme style (font, "
-        "capitals, rounding). Updated once a minute, stopped while the screen is off or locked. “Hide All” on the island's Windows page "
-        "hides them too and “Show All” brings them back (the state lives in the island, not on disk). No: nothing exists, nothing runs.")),
-    R("WIDGETS_PLAQUE", "Île", L("Widgets du bureau sur une plaque", "Desktop widgets on a plate"), "ouinon", "oui",
-      L("Oui : l'horloge sur une plaque au verre du thème. Non : posée directement sur le fond, comme l'écran verrouillé d'un iPhone.",
-        "Yes: the clock on a plate with the theme's glass. No: straight on the wallpaper, like an iPhone lock screen.")),
-    R("WIDGETS_POLICE", "Île", L("Police des widgets du bureau", "Desktop widgets font"), "texte", "",
-      L("Police des widgets d'un thème (horloge, cartes). Une police installée, ou plusieurs séparées par des virgules (ex. Doto, "
-        "JetBrains Mono) : la première installée est prise. Vide, ou aucune installée : la police de l'île.",
-        "Font of a theme's desktop widgets (clock, cards). An installed font, or several separated by commas (e.g. Doto, "
-        "JetBrains Mono): the first installed one is used. Empty, or none installed: the island font.")),
     R("ILE_APPEL", "Île", L("Appels dans l'île", "Calls in the island"), "ouinon", "oui",
       L("Une appli enregistre le micro (Discord, navigateur, Zoom, Teams…) : la pilule montre l'appli, sa durée et le niveau du micro ; "
         "la page Appel coupe ou réactive le micro. Appel commencé micro coupé : l'île le dit. Seul le niveau est mesuré, jamais le son.",
@@ -2008,7 +1993,7 @@ MATERIEL = {
     "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_FORME", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_ANIM_VITESSE", "ILE_ANIM_ECRANS", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "WIDGETS_POLICE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ",
+                          "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ",
                           "BARRE_REACTION", "BARRE_CONTENU")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres", "appel", "terminal")},
@@ -2433,19 +2418,7 @@ def _ecrire(vals):
 # bordures et ombres (nc-theme-sync), le dossier de fonds et le fond de départ ; voir appliquer_style et
 # appliquer_noctalia. Un thème mal écrit est refusé en entier (message clair), jamais appliqué à moitié.
 ORDRE_THEMES = ("noctalia", "apple", "oled", "nord", "catppuccin", "dracula", "gruvbox", "kanagawa")
-# Widgets de bureau d'un thème (nc-ile/WidgetsTheme.qml) : listes fermées
-WIDGETS_TYPES = ("horloge-fine", "horloge-mots", "horloge-segments", "horloge-geante", "calendrier", "date", "citation", "musique",
-                 "jauges", "anneau", "jauge-aiguille", "meteo", "accueil")
-WIDGETS_COINS = ("haut-gauche", "haut-droite", "bas-gauche", "bas-droite", "centre")
-WIDGETS_TAILLES = ("petit", "moyen", "grand")
-WIDGETS_STYLES = ("texte", "carte", "carte-ronde", "brutal")    # facultatif ; texte : sans carte (le défaut)
-# Façon de dessiner l'heure (horloges seulement, facultatif) : un fichier nc-ile/Chiffres<Nom>.qml par valeur, ni plus ni moins
-WIDGETS_CHIFFRES = ("fin", "points", "segments", "mots", "aiguille")
-# Variantes (facultatives) d'un type : même contenu, autre mise en page
-WIDGETS_VARIANTES = {"horloge-geante": ("quart", "empilee"), "calendrier": ("ligne",), "musique": ("bandeau",), "meteo": ("phrase",)}
-WIDGETS_MAX = 8                                                 # empilés par coin (WidgetsTheme.qml), jamais l'un sur l'autre
-_CLES_THEME = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits",
-               "widgets"}
+_CLES_THEME = {"nom", "libelle", "palette", "reglages", "noctalia", "theme_sync", "fonds", "fond_de_depart", "credits"}
 _themes_cache = [None, ({}, {})]
 
 
@@ -2742,6 +2715,8 @@ def _verifier_theme(nom, d):
             refus(f"« {ou} » : ni « / » ni « .. »", f"\"{ou}\": no \"/\" or \"..\"")
         return x
 
+    if isinstance(d, dict):
+        d.pop("widgets", None)                       # ancienne clé (widgets du bureau, retirés) : ignorée, pas refusée
     objet(d, "(racine)", _CLES_THEME, ("nom", "libelle", "palette", "reglages"))
     if d["nom"] != nom:
         refus(f"« nom » ({d['nom']!r}) différent du nom du fichier ({nom!r})",
@@ -2760,6 +2735,8 @@ def _verifier_theme(nom, d):
         refus("« reglages » doit être un objet", "\"reglages\" must be an object")
     reglages = {}
     for k, v in d["reglages"].items():
+        if k in ("WIDGETS_BUREAU", "WIDGETS_POLICE", "WIDGETS_PLAQUE"):
+            continue                   # anciens réglages (widgets du bureau, retirés) d'un thème copié : ignorés, pas refusés
         if k not in PAR_CLE or k == "STYLE":
             refus(f"réglage inconnu « {k} »", f"unknown setting \"{k}\"")
         if k == "FONDS_DOSSIER":       # un thème (fichier tiers) ne pointe pas un dossier au hasard : le champ « fonds » suffit
@@ -2792,19 +2769,8 @@ def _verifier_theme(nom, d):
         objet(c, "credits", {"nom", "lien", "licence"}, ("nom", "lien", "licence"))
         for k in c:
             texte(c[k], f"credits.{k}")
-    widgets = d.get("widgets", [])
-    if not isinstance(widgets, list) or len(widgets) > WIDGETS_MAX:
-        refus(f"« widgets » doit être une liste de {WIDGETS_MAX} éléments au plus", f"\"widgets\" must be a list of at most {WIDGETS_MAX} items")
-    for w in widgets:
-        objet(w, "widgets", {"type", "coin", "taille", "style", "chiffres", "variante"}, ("type", "coin", "taille"))
-        for k, permis in (("type", WIDGETS_TYPES), ("coin", WIDGETS_COINS), ("taille", WIDGETS_TAILLES), ("style", WIDGETS_STYLES),
-                          ("chiffres", WIDGETS_CHIFFRES if str(w.get("type")).startswith("horloge-") else ()),
-                          ("variante", WIDGETS_VARIANTES.get(w["type"], ()) if isinstance(w["type"], str) else ())):
-            if k in w and w[k] not in permis:
-                refus(f"« widgets.{k} » : {', '.join(permis) or '-'}", f"\"widgets.{k}\": {', '.join(permis) or '-'}")
     return {"nom": nom, "libelle": lib, "palette": [src, pnom], "reglages": reglages, "noctalia": noct,
-            "theme_sync": sync, "fonds": fonds, "fond_de_depart": depart, "credits": credits,
-            "widgets": d.get("widgets", [])}
+            "theme_sync": sync, "fonds": fonds, "fond_de_depart": depart, "credits": credits}
 
 
 def charger_themes():
@@ -2852,7 +2818,7 @@ def theme_choisi(nom):
     if nom == "noctalia":                          # le défaut marche aussi sans dossier de thèmes
         return {"nom": nom, "libelle": "noctalia-config", "palette": ["fond", ""], "reglages": {}, "noctalia": {},
                 "theme_sync": {"bordure": "degrade", "ombre": "coloree"}, "fonds": "", "fond_de_depart": "",
-                "credits": [], "widgets": []}
+                "credits": []}
     raise ValueError(T(f"thème « {nom} » introuvable dans {dossier_themes()}",
                        f"theme \"{nom}\" not found in {dossier_themes()}"))
 
@@ -3962,10 +3928,6 @@ def appliquer_style(vals):
     deja = f"STYLE={style}\n" in ancien and "\nFONDS_DOSSIER=" in ancien
     if theme["fonds"] and (_style_choisi[0] == style or deja):
         prereglage["FONDS_DOSSIER"] = os.path.join(HOME, "Pictures/Wallpapers", theme["fonds"])
-    if theme["widgets"]:                           # sans widgets (thème noctalia) : style.conf reste identique à l'octet
-        # type:coin:taille[:style[:chiffres[:variante]]], champs vides en fin retirés (sans style : la ligne d'avant)
-        prereglage["WIDGETS_THEME"] = ",".join(":".join([w["type"], w["coin"], w["taille"], w.get("style", ""), w.get("chiffres", ""),
-                                                          w.get("variante", "")]).rstrip(":") for w in theme["widgets"])
     if style == "apple":
         p = police_apple()
         if p:

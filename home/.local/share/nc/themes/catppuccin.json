@@ -18,7 +18,6 @@
     "ILE_ANIM": "ressort",
     "ILE_ACCENTS": "accent",
     "ILE_CONTOUR_FERMEE": "oui",
-    "WIDGETS_PLAQUE": "oui",
     "FENETRES_BORDURE": "2",
     "FENETRES_OMBRE": "30",
     "ILE_STYLE": "terminal",
@@ -113,6 +112,5 @@
   },
   "fonds": "catppuccin",
   "fond_de_depart": "catppuccin-brume.jpg",
-  "credits": [],
-  "widgets": []
+  "credits": []
 }

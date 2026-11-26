@@ -37,10 +37,7 @@
     "VERROU_COULEUR": "accent",
     "DOCK": "non",
     "ILE_BANDE": "oui",
-    "ILE_FORME": "point",
-    "WIDGETS_BUREAU": "oui",
-    "WIDGETS_POLICE": "Doto, JetBrains Mono",
-    "FENETRES_MAITRE_CENTRE_AIR": "oui"
+    "ILE_FORME": "point"
   },
   "noctalia": {
     "bar.default": {
@@ -92,31 +89,5 @@
   },
   "fonds": "matrice",
   "fond_de_depart": "matrice-planete.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-geante",
-      "coin": "centre",
-      "taille": "grand",
-      "chiffres": "points"
-    },
-    {
-      "type": "meteo",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte-ronde"
-    },
-    {
-      "type": "anneau",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte-ronde"
-    },
-    {
-      "type": "musique",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "carte"
-    }
-  ]
+  "credits": []
 }

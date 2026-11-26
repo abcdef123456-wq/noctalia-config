@@ -53,7 +53,7 @@ class Rendu(unittest.TestCase):
             shutil.copytree(str(QML), str(avant))
             for f in avant.glob("*.qml"):
                 f.write_text(re.sub(r"Couleurs\.rayon\(([0-9.]+), width, height\)", r"\1", f.read_text()))
-            for etat in ("page", "recherche", "bureau"):
+            for etat in ("page", "recherche"):
                 png = {}
                 for nom, qml in (("apres", QML), ("avant", avant)):
                     outil.QML = qml

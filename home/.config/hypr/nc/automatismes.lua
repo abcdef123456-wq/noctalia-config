@@ -35,6 +35,46 @@ hl.on("window.fullscreen", function(w)
     end
 end)
 
+-- Hyprland agrandit et décale la colonne quand une application demande le plein écran en scrolling. À la sortie,
+-- sa largeur revient, mais le ruban reste décalé. Réaligner les deux demi-colonnes sans changer les largeurs
+-- personnalisées, les piles dans une même colonne ou les bureaux défilants de plus de deux fenêtres.
+local plein_defilant = {}
+local function demi_colonne(w)
+    local l = w.layout
+    local c = l and l.column
+    if c and c.width == 0.5 then return c.index end
+end
+
+hl.on("window.fullscreen", function(w)
+    local a = w and w.address
+    if not a then return end
+    if (tonumber(w.fullscreen) or 0) ~= 0 then
+        plein_defilant[a] = w.fullscreen_handler == "scrolling" or nil
+        return
+    end
+    if not plein_defilant[a] then return end
+    plein_defilant[a] = nil
+    -- La largeur des colonnes est relue une fois la sortie terminée, sur le bureau encore au premier plan.
+    hl.timer(function()
+        local active = hl.get_active_window()
+        if not (active and active.address == a and active.fullscreen == 0 and active.workspace) then return end
+        local colonne = demi_colonne(active)
+        if not colonne then return end
+        local autre
+        for _, v in ipairs(active.workspace:get_windows()) do
+            if v.address ~= a and v.mapped and not v.hidden and not v.floating then
+                if autre or v.fullscreen ~= 0 then return end
+                autre = demi_colonne(v)
+                if not autre or autre == colonne then return end
+            end
+        end
+        if autre then hl.dispatch(hl.dsp.layout("fit all")) end
+    end, { timeout = 1, type = "oneshot" })
+end)
+hl.on("window.close", function(w)
+    if w and w.address then plein_defilant[w.address] = nil end
+end)
+
 -- ── Halo musical ────────────────────────────────────────────────────────────
 -- n de 0 (silence) à 1 (basse forte) : le halo de la fenêtre active s'intensifie et s'élargit, sa bordure s'éclaircit.
 -- Couleurs de départ lues au chargement (celles du fond d'écran, nc/couleurs.lua) ; n = 0 les remet telles quelles.

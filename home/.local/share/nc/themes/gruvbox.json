@@ -16,7 +16,6 @@
     "ILE_VERRE": "100",
     "ILE_LUEUR": "non",
     "ILE_CONTOUR_FERMEE": "non",
-    "WIDGETS_PLAQUE": "non",
     "FENETRES_BORDURE": "3",
     "FENETRES_OMBRE": "0",
     "ILE_STYLE": "terminal",
@@ -38,7 +37,6 @@
     "ANIM_BUREAUX": "fade",
     "DOCK": "non",
     "ILE_FORME": "rectangle",
-    "WIDGETS_BUREAU": "oui",
     "FENETRES_MAITRE_PART": "0.55"
   },
   "noctalia": {
@@ -83,32 +81,5 @@
   },
   "fonds": "gruvbox",
   "fond_de_depart": "meules-automne.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-mots",
-      "coin": "haut-gauche",
-      "taille": "moyen",
-      "style": "brutal"
-    },
-    {
-      "type": "calendrier",
-      "coin": "haut-gauche",
-      "taille": "moyen",
-      "style": "brutal"
-    },
-    {
-      "type": "meteo",
-      "coin": "haut-gauche",
-      "taille": "moyen",
-      "style": "brutal",
-      "variante": "phrase"
-    },
-    {
-      "type": "musique",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "style": "brutal"
-    }
-  ]
+  "credits": []
 }

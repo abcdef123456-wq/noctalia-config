@@ -3,7 +3,6 @@
  "apple": [
   "ILE_POLICE=Inter",
   "FENETRES_OMBRE=30",
-  "WIDGETS_PLAQUE=non",
   "ILE_CONTOUR_EPAISSEUR=0",
   "ILE_CONTOUR_FERMEE=non",
   "ILE_RAYON=rond",
@@ -25,9 +24,7 @@
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=non",
   "ILE_FORME=encoche",
-  "WIDGETS_BUREAU=oui",
   "FENETRES_SEULE_CENTREE=16:10",
-  "WIDGETS_THEME=horloge-geante:haut-droite:petit:carte:aiguille,calendrier:haut-droite:moyen:carte,musique:haut-droite:moyen:carte",
   "ILE_Y=5"
  ],
  "oled": [
@@ -64,7 +61,6 @@
   "ILE_VERRE=94",
   "ILE_LUEUR=non",
   "ILE_CONTOUR_FERMEE=oui",
-  "WIDGETS_PLAQUE=non",
   "FENETRES_BORDURE=1",
   "FENETRES_OMBRE=16",
   "ILE_STYLE=terminal",
@@ -94,7 +90,6 @@
   "ILE_ANIM=ressort",
   "ILE_ACCENTS=accent",
   "ILE_CONTOUR_FERMEE=oui",
-  "WIDGETS_PLAQUE=oui",
   "FENETRES_BORDURE=2",
   "FENETRES_OMBRE=30",
   "ILE_STYLE=terminal",
@@ -123,7 +118,6 @@
   "ILE_LUEUR=oui",
   "ILE_ACCENTS=accent",
   "ILE_CONTOUR_FERMEE=oui",
-  "WIDGETS_PLAQUE=oui",
   "FENETRES_BORDURE=2",
   "FENETRES_OMBRE=32",
   "ILE_STYLE=terminal",
@@ -142,9 +136,7 @@
   "DOCK=non",
   "ILE_BANDE=oui",
   "FENETRES_ESPACE=0",
-  "FENETRES_MARGE=0",
-  "WIDGETS_BUREAU=oui",
-  "WIDGETS_THEME=horloge-geante:haut-droite:moyen:::empilee,jauges:haut-droite:grand,musique:bas-gauche:moyen:carte"
+  "FENETRES_MARGE=0"
  ],
  "gruvbox": [
   "ILE_CONTOUR_EPAISSEUR=3",
@@ -152,7 +144,6 @@
   "ILE_VERRE=100",
   "ILE_LUEUR=non",
   "ILE_CONTOUR_FERMEE=non",
-  "WIDGETS_PLAQUE=non",
   "FENETRES_BORDURE=3",
   "FENETRES_OMBRE=0",
   "ILE_STYLE=terminal",
@@ -174,9 +165,7 @@
   "ANIM_BUREAUX=fade",
   "DOCK=non",
   "ILE_FORME=rectangle",
-  "WIDGETS_BUREAU=oui",
   "FENETRES_MAITRE_PART=0.55",
-  "WIDGETS_THEME=horloge-mots:haut-gauche:moyen:brutal,calendrier:haut-gauche:moyen:brutal,meteo:haut-gauche:moyen:brutal::phrase,musique:haut-droite:moyen:brutal",
   "ILE_Y=5"
  ],
  "kanagawa": [
@@ -186,7 +175,6 @@
   "ILE_LUEUR=non",
   "ILE_ACCENTS=accent",
   "ILE_CONTOUR_FERMEE=oui",
-  "WIDGETS_PLAQUE=oui",
   "FENETRES_BORDURE=1",
   "FENETRES_OMBRE=20",
   "ILE_STYLE=terminal",
@@ -206,10 +194,8 @@
   "DOCK_POSITION=bottom",
   "DOCK_AUTO=oui",
   "ILE_BANDE=non",
-  "WIDGETS_BUREAU=oui",
   "FENETRES_COLONNE_LARGEUR=0.50",
   "FENETRES_SEULE_CENTREE=16:10",
-  "WIDGETS_THEME=horloge-geante:haut-gauche:petit:carte,calendrier:haut-gauche:moyen:carte,meteo:haut-gauche:moyen:carte,musique:haut-droite:grand:carte",
   "ILE_Y=5"
  ]
 }

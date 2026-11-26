@@ -30,7 +30,7 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "bureau", "themes", "epinglee", "agent")
+ETATS = ("fermee", "musique", "page", "recherche", "themes", "epinglee", "agent")
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -63,16 +63,15 @@ ACTIONS = {
     "musique": "",
     "page": 'Etat.basculer(nom, true); Etat.aller("systeme")',
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
-    "bureau": "",                                                # widgets du bureau : l'île reste fermée
     "themes": "racine.themesOuvert = true",
     "epinglee": 'racine.epingler(racine.epingleDossier + "/EssaiEpi10.png")',
     # un agent factice qui travaille : l'heure, l'étincelle et une étape longue (coupée à 200 px) dans la pilule
     "agent": 'Agents.donnees = { sessions: { a: { id: "a", agent: "claude", etat: "travail", maj: Date.now() / 1000,'
              ' etape: "Lance : Vérifier fiche + aperçu du rendu" } }, demandes: {} }',
 }
-# Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; les widgets et le carrousel
+# Fenêtre capturée (sa « cible », et son « ilot » s'il y en a un) : l'île par défaut ; le carrousel et l'image épinglée
 # sont des fenêtres à part
-FENETRES = {"bureau": "vb.instances[0]", "themes": "chargeurThemes.item", "epinglee": "chargeurEpingle.item"}
+FENETRES = {"themes": "chargeurThemes.item", "epinglee": "chargeurEpingle.item"}
 # Le carrousel est une fenêtre entière, avec des fonds JPEG opaques : Qt le sort en RGB, sans que ça compte
 SANS_ALPHA = {"themes", "epinglee"}
 PILOTE = """
@@ -87,7 +86,7 @@ PILOTE = """
     Timer {
         id: grab; interval: %(attente)d
         onTriggered: %(fenetre)s.cible.grabToImage(function(r) {
-            var i = %(fenetre)s.ilot || %(fenetre)s.cible      // bureau, thèmes : pas d'île, le contenu entier
+            var i = %(fenetre)s.ilot || %(fenetre)s.cible      // thèmes, image épinglée : pas d'île, le contenu entier
             console.log("CADRE " + JSON.stringify([i.x, i.y, i.width, i.height, i.parent.width, i.parent.height]))
             console.log("RENDU " + (r.saveToFile(Quickshell.env("NCR_PNG")) ? "ok" : "echec"))
             Qt.quit()
@@ -204,17 +203,10 @@ def preparer(root, etat, reglages, palette):
         f.write_text(t)
     f = ile / "shell.qml"
     t = f.read_text().replace("Variants {", "Variants {\n        id: vs", 1)
-    if etat == "bureau":                                         # on capture la plaque des widgets, dans le Variants de Bureau
-        t, n = re.subn(r"Variants \{((?:(?!Variants \{).)*?Bureau \{\})", lambda m: "Variants {\n        id: vb" + m.group(1), t, count=1, flags=re.S)
-        if n != 1:
-            raise SystemExit("rendu-ile : le Variants de Bureau a changé dans shell.qml")
     i = t.rindex("}")                                            # fin du ShellRoot
     f.write_text(t[:i] + PILOTE % {"action": ACTIONS[etat], "attente": ATTENTE, "fenetre": FENETRES.get(etat, "vs.instances[0]")} + t[i:])
     if reglages:
         shutil.copy2(reglages, str(root / "home/.config/nc/reglages.conf"))
-    if etat == "bureau":                                         # l'état n'a de sens qu'avec le réglage allumé
-        with open(str(root / "home/.config/nc/reglages.conf"), "a") as c:
-            c.write("\nWIDGETS_BUREAU=oui\n")
     if palette:
         shutil.copy2(palette, str(root / "home/.config/nc/palette-ile.json"))
     return ile

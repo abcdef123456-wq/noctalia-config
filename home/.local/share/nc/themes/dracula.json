@@ -17,7 +17,6 @@
     "ILE_LUEUR": "oui",
     "ILE_ACCENTS": "accent",
     "ILE_CONTOUR_FERMEE": "oui",
-    "WIDGETS_PLAQUE": "oui",
     "FENETRES_BORDURE": "2",
     "FENETRES_OMBRE": "32",
     "ILE_STYLE": "terminal",
@@ -36,8 +35,7 @@
     "DOCK": "non",
     "ILE_BANDE": "oui",
     "FENETRES_ESPACE": "0",
-    "FENETRES_MARGE": "0",
-    "WIDGETS_BUREAU": "oui"
+    "FENETRES_MARGE": "0"
   },
   "noctalia": {
     "bar.default": {
@@ -91,24 +89,5 @@
   },
   "fonds": "dracula",
   "fond_de_depart": "dracula-chateau.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-geante",
-      "coin": "haut-droite",
-      "taille": "moyen",
-      "variante": "empilee"
-    },
-    {
-      "type": "jauges",
-      "coin": "haut-droite",
-      "taille": "grand"
-    },
-    {
-      "type": "musique",
-      "coin": "bas-gauche",
-      "taille": "moyen",
-      "style": "carte"
-    }
-  ]
+  "credits": []
 }
