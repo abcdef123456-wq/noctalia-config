@@ -39,8 +39,7 @@
     "DOCK_AUTO": "non",
     "DOCK_TAILLE": "40",
     "ILE_BANDE": "oui",
-    "ILE_FORME": "rectangle",
-    "WIDGETS_BUREAU": "oui"
+    "ILE_FORME": "rectangle"
   },
   "noctalia": {
     "bar.default": {
@@ -85,19 +84,5 @@
   },
   "fonds": "cyberjaune",
   "fond_de_depart": "cyberjaune-puces.jpg",
-  "credits": [],
-  "widgets": [
-    {
-      "type": "horloge-segments",
-      "coin": "haut-gauche",
-      "taille": "grand",
-      "style": "brutal"
-    },
-    {
-      "type": "jauges",
-      "coin": "haut-gauche",
-      "taille": "grand",
-      "style": "brutal"
-    }
-  ]
+  "credits": []
 }

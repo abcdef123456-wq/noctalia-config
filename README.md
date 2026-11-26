@@ -280,11 +280,6 @@ sortante est conservée. En particulier, l'activation ne masque pas Noctalia si 
   d'écran, la pilule dit « Regarde au loin » pendant 20 secondes, sans son. Rien pendant le mode jeu, un partage d'écran
   ou une fenêtre en plein écran (la pause attend 20 minutes de plus). Écran éteint ou verrouillé, le minuteur s'arrête et
   repart de zéro au retour. Éteint, aucun minuteur ne tourne.
-- **Widgets du bureau** (`nc-reglages` → Île, réglage `WIDGETS_BUREAU`, « non » par défaut) : une grande horloge et la date,
-  posées sur le bureau sous les fenêtres (coin haut gauche, sans prendre la souris), avec la police, les majuscules, le rayon
-  et les couleurs du thème. À « non », aucune fenêtre n'existe. À « oui », un seul minuteur, calé sur la minute, arrêté écran
-  éteint. « Tout masquer » de la page Fenêtres cache aussi les widgets, « Tout afficher » les remonte (entrée « Widgets du
-  bureau : cacher / afficher ») ; cet état vit en mémoire seulement, jamais sur disque.
 - **Actions rapides du presse-papiers** (`nc-reglages` → Île, réglage `ILE_PRESSE_ACTIONS`) : sous un texte copié, la page
   Presse-papiers propose selon ce qu'il est : une couleur (`#rgb`, `#rrggbb`, `rgb(…)`) avec sa pastille et ses
   conversions hex, rgb et hsl ; un lien http(s) avec « Ouvrir » ; un chemin qui existe avec « Ouvrir le dossier » ; un calcul
