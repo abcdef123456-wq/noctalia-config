@@ -37,8 +37,8 @@ Dans `docs/superpowers/maquettes/` :
 - `email-goutte.html` : démo animée de la goutte, version 2, reconstruite depuis la conversation. Ses trois images
   (`email-ile.png`, `email-lanceur-ile.png`, `email-firefox.svg`) sont perdues : la démo joue sur fond vide.
 - `goutte-planche.webp` : neuf images de cette démo, de 27 ms à 680 ms.
-- `planche-goutte-reelle.webp` : la goutte rendue par le plugin `nc-gestes` sur une vraie fenêtre (Hyprland 0.57.2
-  imbriqué ; le cadre jaune tient lieu de pilule, l'île ne tournait pas dans l'essai).
+- `planche-goutte-reelle.webp` : la goutte rendue par le plugin `nc-gestes` sur une vraie fenêtre, avant et après le
+  volume ajouté avant la rupture (Hyprland 0.57.2 imbriqué, échelle 1,6, vraie île `nc-ile` au-dessus).
 
 Figma (île, survol, lanceur, atlas) : https://www.figma.com/design/pTRxbS5oOZsgV3x41s7Voz
 
