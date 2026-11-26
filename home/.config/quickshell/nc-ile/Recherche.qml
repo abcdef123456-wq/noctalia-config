@@ -57,15 +57,17 @@ Item {
     property string espaceChoisi: "applis"
     function changerEspace(nom) {
         if (espaces.indexOf(nom) < 0) return
-        espace = nom; espaceChoisi = nom; espaceManuel = true; sel = 0; annulerSuppr()
+        // Une Entrée en attente des applis visait l'espace quitté : jamais rejouée sur un autre (revue PR 63)
+        espace = nom; espaceChoisi = nom; espaceManuel = true; sel = 0; entreeEnAttente = false; annulerSuppr()
         attente.restart(); attentePaquets.restart()     // fichiers ou logiciels : cherchés seulement dans leur espace
         chercher()
     }
     function espaceSuivant(d) { changerEspace(espaces[(espaces.indexOf(espace) + d + espaces.length) % espaces.length]) }
-    // Une saisie qui ne vit que dans les Actions : préfixes, raccourcis web, note, mdp, session, heure, port, question…
+    // Une saisie qui ne vit que dans les Actions : préfixes, raccourcis web, note, mdp, session, heure d'une ville connue, port,
+    // question… (« time machine » : ville inconnue, une recherche ordinaire)
     function estPrefixeAction(t) {
         return /^([?!@>+;:]|(g|yt|w)\s|(notes?|rappels?|reminders?|sessions?|mdp|password)(\s|$))/i.test(t)
-               || !!Saisies.lienWeb(t, liensWeb) || !!Saisies.demandeProcessus(t) || Saisies.villeHeure(t) !== ""
+               || !!Saisies.lienWeb(t, liensWeb) || !!Saisies.demandeProcessus(t) || Saisies.zoneVille(Saisies.villeHeure(t), zonesHeure) !== ""
                || Saisies.demandeHorloges(t) || Aide.estQuestion(t) || estDiag(t)
     }
     // Une saisie que qalc peut calculer (« 2+2 », « 1,5 h en min », « jours jusqu'au 25/12 »)
@@ -79,6 +81,20 @@ Item {
         if (estPrefixeAction(q)) espace = "actions"
         else if (espaceManuel) espace = espaces.indexOf(espaceChoisi) >= 0 ? espaceChoisi : "applis"
         else if (!(espace === "actions" && estCalcul(q))) espace = "applis"
+    }
+    // Liens web ou zones lus après la saisie : le préfixe qu'ils reconnaissent change l'espace
+    function rerouter() {
+        var avant = espace
+        routerEspace()
+        if (espace !== avant) sel = 0
+        chercher()
+    }
+    // Un calcul sans appli qui commence par la saisie : il est dans les Actions. Pas avant la liste d'applis (une appli
+    // peut encore correspondre) : rappelé à son arrivée, quel que soit l'ordre de fin de qalc et de nc-apps list
+    function basculerCalcul() {
+        if (calcul === "" || !applisLues || espaceManuel || espace !== "applis" || resultats.some(x => x.s >= 80)) return
+        espace = "actions"; sel = 0
+        chercher()
     }
 
     // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
@@ -519,6 +535,7 @@ Item {
                 try { r.applis = JSON.parse(text) } catch (e) {}
                 r.applisLues = true
                 r.chercher()
+                r.basculerCalcul()
                 // Entrée tapée avant que les applis soient chargées : validée maintenant, sur la liste complète
                 if (r.entreeEnAttente) { r.entreeEnAttente = false; if (r.actif) r.valider(r.sel, false) }
             }
@@ -775,13 +792,13 @@ Item {
         // lu une seule fois, au premier « heure … » tapé ; TZDIR d'abord (NixOS), comme glibc pour « date » ensuite
         path: r.zonesVoulues ? (Quickshell.env("TZDIR") || "/usr/share/zoneinfo") + "/zone1970.tab" : ""
         printErrors: false
-        onLoaded: { r.zonesHeure = Saisies.listeZones(text()); attente.restart() }
+        onLoaded: { r.zonesHeure = Saisies.listeZones(text()); if (r.q !== "") r.rerouter(); attente.restart() }
     }
     FileView {
         id: fichierLiens
         path: r.liensVoulus ? (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/nc/liens-web.conf" : ""
         printErrors: false
-        onLoaded: { r.liensWeb = Saisies.analyseLiens(text()); if (r.q !== "") r.chercher() }
+        onLoaded: { r.liensWeb = Saisies.analyseLiens(text()); if (r.q !== "") r.rerouter() }
     }
     FileView {
         id: fichierSnippets
@@ -821,9 +838,8 @@ Item {
                 var t = text.trim().split("\n").pop().replace(/^"(\d{4}-\d{2}-\d{2})"$/, "$1")      // date de qalc : sans guillemets
                 // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
                 r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
-                // Un calcul sans appli qui commence par la saisie : il est dans les Actions
-                if (r.calcul !== "" && !r.espaceManuel && r.espace === "applis" && !r.resultats.some(x => x.s >= 80)) { r.espace = "actions"; r.sel = 0 }
                 r.chercher()
+                r.basculerCalcul()
             }
         }
     }
@@ -1028,9 +1044,10 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
+    // Saisie changée : une Entrée en attente des applis visait l'ancienne
     onQChanged: { if (modeDiag && q !== diagPour) { modeDiag = false; diag.annuler() }
                   routerEspace()
-                  sel = 0; annulerSuppr(); retourSession = null; retourMdp = null; retourSnippet = false; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+                  sel = 0; entreeEnAttente = false; annulerSuppr(); retourSession = null; retourMdp = null; retourSnippet = false; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = [], act = espace === "actions"     // act : préfixes et cartes, Actions seulement
