@@ -54,11 +54,13 @@ Item {
     readonly property var espaces: fichiersActifs ? ["applis", "fichiers", "actions"] : ["applis", "actions"]
     property string espace: "applis"
     property bool espaceManuel: false
+    // Une Entrée en attente des applis visait l'espace quitté : jamais rejouée sur un autre, que le changement vienne
+    // d'une touche, d'un clic, d'un calcul ou de liens lus en retard
+    onEspaceChanged: entreeEnAttente = false
     property string espaceChoisi: "applis"
     function changerEspace(nom) {
         if (espaces.indexOf(nom) < 0) return
-        // Une Entrée en attente des applis visait l'espace quitté : jamais rejouée sur un autre (revue PR 63)
-        espace = nom; espaceChoisi = nom; espaceManuel = true; sel = 0; entreeEnAttente = false; annulerSuppr()
+        espace = nom; espaceChoisi = nom; espaceManuel = true; sel = 0; annulerSuppr()
         attente.restart(); attentePaquets.restart()     // fichiers ou logiciels : cherchés seulement dans leur espace
         chercher()
     }
@@ -89,11 +91,14 @@ Item {
         if (espace !== avant) sel = 0
         chercher()
     }
-    // Un calcul sans appli qui commence par la saisie : il est dans les Actions. Pas avant la liste d'applis (une appli
-    // peut encore correspondre) : rappelé à son arrivée, quel que soit l'ordre de fin de qalc et de nc-apps list
-    function basculerCalcul() {
-        if (calcul === "" || !applisLues || espaceManuel || espace !== "applis" || resultats.some(x => x.s >= 80)) return
-        espace = "actions"; sel = 0
+    // Un calcul : Actions, sauf si une appli commence par la saisie (applisFortes, calculé par chercher() dans tous les
+    // espaces). Pas avant la liste d'applis (une appli peut encore correspondre) : rappelé à son arrivée et à chaque
+    // réponse de qalc, donc pour la saisie finale, qu'elle soit venue des Applis ou d'un calcul déjà en Actions
+    function routerCalcul() {
+        if (!applisLues || espaceManuel || estPrefixeAction(q)) return
+        var voulu = calcul !== "" && !applisFortes ? "actions" : "applis"
+        if (espace === voulu) return
+        espace = voulu; sel = 0
         chercher()
     }
 
@@ -535,7 +540,7 @@ Item {
                 try { r.applis = JSON.parse(text) } catch (e) {}
                 r.applisLues = true
                 r.chercher()
-                r.basculerCalcul()
+                r.routerCalcul()
                 // Entrée tapée avant que les applis soient chargées : validée maintenant, sur la liste complète
                 if (r.entreeEnAttente) { r.entreeEnAttente = false; if (r.actif) r.valider(r.sel, false) }
             }
@@ -839,7 +844,7 @@ Item {
                 // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
                 r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
                 r.chercher()
-                r.basculerCalcul()
+                r.routerCalcul()
             }
         }
     }
@@ -1391,6 +1396,7 @@ Item {
         if (Aide.estQuestion(q)) reponsesAide(q, 3).forEach(e => out.push(itemAide(e, 500 + e.score)))
         // « Que se passe-t-il ? », « ça marche pas »… : le bilan du bureau en tête (même l'IA coupée : nc-diag suffit)
         if (estDiag(q)) out.push(Object.assign({ s: 1000 }, ligneDiag))
+        applisFortes = out.some(x => x.e === "applis" && x.s >= 80)      // pour routerCalcul, quel que soit l'espace
         out = out.filter(x => (x.e || "actions") === espace)     // jamais deux espaces mêlés
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
@@ -1493,6 +1499,7 @@ Item {
         }
     }
     property bool entreeEnAttente: false
+    property bool applisFortes: false        // une appli ou une fenêtre commence par la saisie (dernier chercher())
     property bool applisLues: false          // la liste d'applis a été lue (vide ou non) ou a échoué : plus d'attente
     // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
     // Un enregistrement ou une suppression de session en cours aussi : décharger le Spotlight arrêterait nc-session

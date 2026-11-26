@@ -264,7 +264,8 @@ class EspacesHorsEcran(unittest.TestCase):
 
     def test_calcul_attend_la_liste_des_applis(self):
         # « 9-5 » : calculable, et l'appli « 9-5 Agenda » commence par la saisie : Applis, quel que soit l'ordre de fin de
-        # qalc et de nc-apps list (revue PR 63, P2). « 2+2 », sans appli : Actions dès que la liste arrive.
+        # qalc et de nc-apps list (revue PR 63, P2). « 2+2 », sans appli : Actions dès que la liste arrive, sans rejouer une
+        # Entrée tapée dans Applis ; puis « 9-5 » à sa place : l'onglet ne bouge pas pendant la frappe, l'appli le ramène.
         self.scenario('''
   if (etape === 0) { if (!attendre(champ.activeFocus, "le champ n'a pas le focus")) return
    champ.text = "9-5"; etape++; return }
@@ -288,9 +289,14 @@ class EspacesHorsEcran(unittest.TestCase):
    Etat.saisie = "2+2"; spot.actif = true; etape++; return }
   if (etape === 7) { if (!attendre(spot.calcul === "4", "qalc : " + spot.calcul)) return
    verifier(!spot.applisLues && spot.espace === "applis", "2+2 avant la liste : " + spot.espace)
+   spot.valider(spot.sel, false); verifier(spot.entreeEnAttente, "Entrée en attente des applis")
    liberer("list"); etape++; return }
   if (etape === 8) { if (!attendre(spot.espace === "actions", "2+2 après la liste : " + spot.espace)) return
    verifier(titres()[0] === "= 4" && spot.sel === 0, "calcul en tête : " + JSON.stringify(titres()))
+   verifier(!spot.entreeEnAttente && Etat.fermetures === 0, "Entrée de Applis rejouée dans Actions")
+   champ.text = "9-5"; verifier(spot.espace === "actions", "pendant la frappe, l'onglet reste : " + spot.espace)
+   etape++; return }
+  if (etape === 9) { if (!attendre(spot.espace === "applis" && titres().indexOf("9-5 Agenda") >= 0, "9-5 après 2+2 : " + spot.espace + " " + JSON.stringify(titres()))) return
    Qt.quit() }''', bloquer=("list",))
 
     def test_ville_inconnue_reste_une_recherche(self):
@@ -308,13 +314,22 @@ class EspacesHorsEcran(unittest.TestCase):
         self.assertIn("files time machine", appels)
 
     def test_raccourci_web_lu_apres_la_saisie(self):
-        # « gh noctalia » déjà saisi à l'ouverture, liens-web.conf lu ensuite : Actions et le raccourci (revue PR 63, P2)
+        # « gh noctalia » déjà saisi à l'ouverture, liens-web.conf lu ensuite : Actions et le raccourci (revue PR 63, P2).
+        # Entrée tapée dans Applis avant les liens et la liste d'applis : jamais rejouée sur la ligne GitHub (P1)
         self.scenario('''
   if (etape === 0) { verifier(spot.liensWeb.length === 0, "liens pas encore lus")
-   Etat.saisie = "gh noctalia"; spot.actif = true; etape++; return }
+   Etat.saisie = "gh noctalia"; spot.actif = true
+   verifier(spot.espace === "applis" && spot.liensWeb.length === 0, "avant les liens : " + spot.espace)
+   spot.valider(spot.sel, false); verifier(spot.entreeEnAttente, "Entrée en attente des applis")
+   etape++; return }
   if (etape === 1) { if (!attendre(spot.espace === "actions" && titres()[0] === "noctalia", "gh noctalia : " + spot.espace + " " + JSON.stringify(titres()))) return
    verifier(spot.resultats[0].sous === "Rechercher sur GitHub", "raccourci : " + spot.resultats[0].sous)
-   Qt.quit() }''', actif=False, fichiers={"config/nc/liens-web.conf": "gh\tGitHub\thttps://github.com/search?q=%s\n"})
+   verifier(!spot.entreeEnAttente, "liens lus : l'Entrée tapée dans Applis est oubliée")
+   liberer("list"); etape++; return }
+  if (etape === 2) { if (attendre(spot.applisLues, "liste d'applis jamais lue")) etape++; return }
+  if (etape === 3) { attente++; if (attente < 4) return
+   verifier(Etat.fermetures === 0, "ligne GitHub validée sans Entrée dans Actions")
+   Qt.quit() }''', actif=False, bloquer=("list",), fichiers={"config/nc/liens-web.conf": "gh\tGitHub\thttps://github.com/search?q=%s\n"})
 
 
 if __name__ == "__main__":
