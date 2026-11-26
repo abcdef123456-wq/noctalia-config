@@ -32,6 +32,8 @@ outils/attester-ci-locale NUMERO_PR
 
 Lancer la commande depuis une copie de confiance des outils, à jour depuis `main`, et non depuis la branche à tester. Le pilote récupère le commit de la PR sans changer de branche, l’exécute dans des conteneurs et publie `ci-locale` sur ce commit. Si la tête de la PR change pendant le test, relancer sur la nouvelle version.
 
+Si `Installer les outils` échoue sous Arch sur un délai de téléchargement du miroir, relancer l’attestation complète quand le miroir répond. Ne pas désactiver la vérification des signatures ni publier un succès sans exécuter les deux jobs.
+
 La [règle de `main`](https://github.com/abcdef123456-wq/noctalia-config/settings/rules/27927625) accepte le statut quelle que soit sa source GitHub. Il s’agit d’une attestation de confiance : un compte avec l’accès **Write** peut publier un succès sans exécuter les tests, et ce succès permet la fusion sans revue humaine. N’accorder cet accès qu’aux personnes de confiance.
 
 ## Demander la fusion automatique
