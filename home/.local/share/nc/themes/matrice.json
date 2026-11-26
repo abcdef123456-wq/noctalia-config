@@ -36,8 +36,7 @@
     "VERROU_COULEUR": "accent",
     "DOCK": "non",
     "ILE_BANDE": "oui",
-    "ILE_FORME": "point",
-    "FENETRES_MAITRE_CENTRE_AIR": "oui"
+    "ILE_FORME": "point"
   },
   "noctalia": {
     "bar.default": {
