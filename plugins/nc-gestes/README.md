@@ -2,12 +2,14 @@
 
 Plugin Hyprland 0.57.2 des gestes d'ouverture de fenêtres de noctalia-config : quatorze gestes de thème dessinés
 sur la vraie texture de la fenêtre, par un seul programme GL. La signature d'Émail (Rose Aube) est **la goutte** :
-la vraie fenêtre naît sous la pilule de l'île, gonfle jusqu'aux quatre cinquièmes de sa largeur finale en pendant au
-bout d'un col liquide, s'alourdit et s'étire pendant que le col s'amincit et cède, puis la fenêtre tombe à sa place.
+une goutte de l'émail de l'île (la couleur de sa pilule) gonfle dessous, pend à un col en sablier qui s'amincit jusqu'au
+fil, se pince (une gouttelette suit), tombe en s'étirant un peu, puis s'ouvre en fenêtre à sa place sur un ressort
+amorti. Le vrai contenu de la fenêtre y entre en fondu dès que l'appli l'a dessiné (son premier commit après
+l'ouverture), au plus tard pendant l'ouverture : la goutte n'est jamais un aplat vide.
 
 | Geste | Thème | Durée | Ce qu'on voit |
 |---|---|---:|---|
-| `goutte` | rose-aube | 680 ms | gonfle sous l'île (60 % du temps), col, rupture, chute |
+| `goutte` | rose-aube | 680 ms | gonfle sous l'île (56 % du temps), col en sablier, pincement, chute, s'ouvre |
 | `paravent` | sakura | 360 ms | deux volets se déplient depuis la ligne médiane |
 | `coupe` | solarized-clair | 320 ms | deux repères en L tracent le cadre, puis le remplissent |
 | `horizon` | nord | 340 ms | remonte de derrière la ligne de son bord bas |
@@ -42,8 +44,9 @@ Tout est automatique, sans root :
   du thème, ou `natif` pour un geste natif ou `auto` ; coupé avec les animations (réglage, caractère `aucun`,
   Économie, « Aucun effet », mode jeu, « Aucune sur batterie » de l'île) ; durée suivant la vitesse des animations
   et le caractère, un peu plus courte sur batterie en « Douces ».
-- L'île (`Ile.qml`) envoie `anchor` quand la pilule au repos change, jamais pendant un ressort ; `nc-plugin-sync` la
-  redemande après un chargement (`qs -c nc-ile ipc call ile gestesAncre`).
+- L'île (`Ile.qml`) envoie `anchor` (avec la surface de sa pilule et l'accent du thème) quand la pilule au repos ou le
+  thème change, jamais pendant un ressort ; `nc-plugin-sync` la redemande après un chargement
+  (`qs -c nc-ile ipc call ile gestesAncre`).
 
 ## Compiler
 
@@ -70,13 +73,15 @@ libéré.
 
 ```sh
 hyprctl nc-gestes status                       # état en JSON
-hyprctl nc-gestes anchor <écran> <x> <y> <l> <h>  # pilule de l'île au repos, logique, locale à l'écran
+hyprctl nc-gestes anchor <écran> <x> <y> <l> <h> [<#surface> <#accent>]  # pilule de l'île au repos (logique,
+                                               # locale à l'écran) et ses couleurs, dont la goutte est faite
 hyprctl nc-gestes set enabled 0                # ou 1
 hyprctl nc-gestes set mode natif               # un geste du tableau, ou « natif » (aucun)
 hyprctl nc-gestes set speed 1.25               # 0.1 à 10 ; divise la durée de base
 ```
 
-Sans ancre envoyée, la pilule est supposée centrée en haut de l'écran (184 × 34 à 10 px du bord).
+Sans ancre envoyée, la pilule est supposée centrée en haut de l'écran (184 × 34 à 10 px du bord) ; sans couleurs, la
+goutte prend l'émail vert sombre de la maquette.
 
 Fenêtres laissées à l'animation native : plein écran, espace spécial (terminal déroulant), fenêtres de moins de
 80 × 80, cachées ou « override-redirect ».

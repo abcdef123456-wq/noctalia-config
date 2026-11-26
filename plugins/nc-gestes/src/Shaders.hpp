@@ -6,7 +6,8 @@ namespace NcGestes {
     // Programme des gestes (un seul, choisi par u_mode) et emplacements de ses uniformes.
     struct SGesteShader {
         SP<CShader> shader;
-        GLint tex = -1, canvas = -1, texOrigin = -1, texSize = -1, full = -1, inner = -1, anchor = -1, t = -1, scale = -1, radius = -1, mode = -1;
+        GLint tex = -1, canvas = -1, texOrigin = -1, texSize = -1, full = -1, inner = -1, anchor = -1, t = -1, scale = -1, radius = -1, mode = -1,
+              pret = -1, surface = -1, bord = -1;
     };
 
     // Compile au premier appel (contexte EGL courant requis). nullptr si la compilation a échoué.
