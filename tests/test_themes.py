@@ -192,6 +192,21 @@ class Reapplication(Base):
         self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "6")
         self.assertFalse(any(k.startswith("WIDGETS_") for k in self.lignes_style()))
 
+    def test_ancien_theme_perso_garde_ses_autres_reglages(self):
+        """Un thème perso copié d'un ancien thème (clés WIDGETS_*) s'applique ; une autre clé inconnue reste refusée."""
+        self.ecrire_theme("ancien", reglages={"FENETRES_ARRONDI": "9", "WIDGETS_BUREAU": "oui",
+                                              "WIDGETS_POLICE": "Doto, JetBrains Mono", "WIDGETS_PLAQUE": "non"})
+        r = self.nc("set", "STYLE", "ancien")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.nc("appliquer")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.lignes_style()["FENETRES_ARRONDI"], "9")
+        self.assertFalse(any(k.startswith("WIDGETS_") for k in self.lignes_style()))
+        self.ecrire_theme("mauvais", reglages={"WIDGETS_BUREAU": "oui", "WIDGETS_AUTRE": "oui"})
+        r = self.nc("set", "STYLE", "mauvais")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("WIDGETS_AUTRE", r.stdout + r.stderr)
+
     def test_dossier_de_fonds_au_choix_puis_garde(self):
         """Choisir le thème pose son dossier de fonds ; une réapplication ensuite le garde."""
         self.nc("set", "STYLE", "dracula")
