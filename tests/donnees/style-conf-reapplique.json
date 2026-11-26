@@ -25,7 +25,8 @@
   "DOCK_AUTO=non",
   "ILE_FORME=encoche",
   "FENETRES_SEULE_CENTREE=16:10",
-  "ILE_Y=5"
+  "ILE_Y=3",
+  "ILE_LIGNE=34"
  ],
  "oled": [
   "ILE_CONTOUR_EPAISSEUR=0",
@@ -53,7 +54,8 @@
   "FENETRES_FOND=noir",
   "DOCK=non",
   "BARRE_SYSTEME=non",
-  "ILE_Y=8"
+  "ILE_Y=8",
+  "ILE_LIGNE=29"
  ],
  "nord": [
   "ILE_CONTOUR_EPAISSEUR=1",
@@ -108,7 +110,8 @@
   "DOCK=oui",
   "DOCK_POSITION=left",
   "DOCK_AUTO=non",
-  "ILE_Y=13"
+  "ILE_Y=10",
+  "ILE_LIGNE=36"
  ],
  "dracula": [
   "ILE_CONTOUR=degrade",
@@ -166,7 +169,8 @@
   "DOCK=non",
   "ILE_FORME=rectangle",
   "FENETRES_MAITRE_PART=0.55",
-  "ILE_Y=5"
+  "ILE_Y=3",
+  "ILE_LIGNE=34"
  ],
  "kanagawa": [
   "ILE_CONTOUR_EPAISSEUR=1",
@@ -196,6 +200,7 @@
   "ILE_BANDE=non",
   "FENETRES_COLONNE_LARGEUR=0.50",
   "FENETRES_SEULE_CENTREE=16:10",
-  "ILE_Y=5"
+  "ILE_Y=3",
+  "ILE_LIGNE=34"
  ]
 }

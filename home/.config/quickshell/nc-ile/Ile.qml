@@ -15,6 +15,9 @@ PanelWindow {
     screen: modelData
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
+    // Hauteur de l'île fermée, sur une seule ligne : celle des pastilles de la barre du haut du thème (ILE_LIGNE, écrit
+    // par nc-reglages) ; 30 sur la barre de base, dans la bande ILE_BANDE ou sans barre en haut
+    readonly property int ligne: Reglages.val("ILE_BANDE", "non") === "oui" ? 30 : (parseInt(Reglages.val("ILE_LIGNE", "30")) || 30)
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
@@ -22,7 +25,7 @@ PanelWindow {
         const largeur = point ? 10 : compact.largeur
         const x = Math.floor((modelData.width - largeur) / 2 - 5)
         const y = Math.max(0, Math.floor(ile.y - 5))
-        return Qt.rect(x, y, modelData.width - 2 * x, Math.ceil(ile.y + (point ? 10 : 30) + 5) - y)
+        return Qt.rect(x, y, modelData.width - 2 * x, Math.ceil(ile.y + (point ? 10 : ligne) + 5) - y)
     }
 
     // Rectangle réellement occupé à l'échelle de l'écran, pas la surface Wayland (800 px, voire tout l'écran).
@@ -96,12 +99,13 @@ PanelWindow {
     }
     // Pilule au repos (logique, locale à l'écran) pour le plugin Hyprland nc-gestes : la goutte de Rose Aube en part.
     // Envoyée hors ressort et seulement quand elle change ; nc-plugin-sync la redemande (forcer) après un chargement.
+    // Toujours la ligne au repos (largeur du contenu, hauteur « ligne »), jamais l'île agrandie au survol.
     // Plugin absent : hyprctl répond une erreur, ignorée.
     property string _ancreGestes: ""
     function envoyerAncreGestes(forcer) {
         const l = Couleurs.forme === "point" ? 10 : compact.largeur
         const a = [modelData.name, Math.round((modelData.width - l) / 2), Math.round(ile.y), Math.round(l),
-                   Couleurs.forme === "point" ? 10 : 30].map(String)
+                   Couleurs.forme === "point" ? 10 : ligne].map(String)
         if (!forcer && a.join(" ") === _ancreGestes) return
         _ancreGestes = a.join(" ")
         Quickshell.execDetached(["hyprctl", "nc-gestes", "anchor"].concat(a))
@@ -130,7 +134,7 @@ PanelWindow {
     onRechercheChanged: {
         entreeSpot.stop(); fonduSpot = 1
         if (recherche) {
-            retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + 1
+            retourRecherche.stop(); spotDepuisPilule = ile.width <= compact.largeur + survolIle.largeurEnPlus + 1
             if (!spotDepuisPilule && !Notifs.enPause && fen.mouv.actif) { fonduSpot = 0; entreeSpot.start() }
         } else { retourRecherche.restart(); repos.restart() }
     }
@@ -144,7 +148,7 @@ PanelWindow {
     // Seule la hauteur change (56 pour la pilule, 700 ouverte, en bannière ou en demande) : le bord haut reste fixe.
     // À l'ouverture, la surface grandit dans le même tour ; à la fermeture, elle ne rapetisse qu'une fois les ressorts au
     // repos (taille voulue à 0,5 près pendant 120 ms, 900 ms au plus), sinon l'île serait coupée pendant son rebond
-    readonly property bool grandeVoulue: ouverte || banniere || enCarte
+    readonly property bool grandeVoulue: ouverte || banniere || enCarte || hauteurSurvol > 0
     readonly property bool grande: grandeVoulue || retour.running
     onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else { retour.restart(); repos.restart() }
     Timer { id: retour; interval: 900 }
@@ -169,15 +173,18 @@ PanelWindow {
     readonly property bool recherche: ouverte && Etat.recherche
     // Pilule cachée le temps que le lanceur (Code.qml) sort d'elle : ni survol ni clic ne l'activent (le clic est avalé)
     readonly property bool pilCachee: Etat.lanceurFondu === modelData.name
+    // Survol (nc-reglages → Île → Agrandir au survol) : l'île s'agrandit un peu (loupe, progression du morceau) et se
+    // replie quand le curseur sort. Le survol seul n'ouvre jamais ni les pages ni la recherche
+    property bool survolTenu: false
+    readonly property bool survolee: survolTenu && !ouverte && !banniere && !enCarte && !pilCachee
+    readonly property real hauteurSurvol: survolee ? survolIle.hauteurEnPlus : 0
     mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
     HyprlandFocusGrab {
         windows: [fen]
-        // Ouverte au survol : pas de prise tant qu'on n'a pas cliqué dedans (elle garderait le pointeur, et l'île ne
-        // saurait plus quand il en sort)
-        active: fen.ouverte && prise.prete && !Etat.parSurvol
+        active: fen.ouverte && prise.prete
         onCleared: Etat.fermer()
     }
     Timer {
@@ -246,7 +253,7 @@ PanelWindow {
         readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee && (Etat.microActif || Etat.cameraActive)
                                        && !retour.running && !retourRecherche.running      // pas avant que l'île ait fini de rétrécir
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
-        y: ile.y + 15 - height / 2
+        y: ile.y + fen.ligne / 2 - height / 2
         width: 8; height: 8; radius: 4
         color: Etat.cameraActive ? Couleurs.vert : Couleurs.orange
         opacity: montre ? 1 : 0
@@ -266,7 +273,7 @@ PanelWindow {
                                        && (minuteur || Agents.travaille || Terminal.enCours) && Etat.activiteType === ""
                                        && !retour.running && !retourRecherche.running
         x: ile.x + ile.width + (montre ? 7 : -30)
-        y: ile.y; width: 30; height: 30; radius: 15
+        y: ile.y + (fen.ligne - height) / 2; width: 30; height: 30; radius: 15
         color: Couleurs.fond
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
@@ -332,12 +339,14 @@ PanelWindow {
         y: Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9))
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
         // Forme « point » : fermée, l'île n'est qu'un point plein d'accent de 10 px (ouverte, bannière ou carte : comme d'habitude)
+        // Survolé, le point redevient l'île d'une ligne, agrandie comme les autres formes
         readonly property bool pointFerme: Couleurs.forme === "point" && !fen.ouverte && !fen.enCarte && !fen.banniere && !fen.confirmGpu
-                                           && !fen.confirmNoeud && !fen.demandeClaude && !fen.sessionNoeud && !fen.recherche
-        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
+                                           && !fen.confirmNoeud && !fen.demandeClaude && !fen.sessionNoeud && !fen.recherche && !fen.survolTenu
+        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10
+                                                   : compact.largeur + (fen.survolee ? survolIle.largeurEnPlus : 0))))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
-                                                   : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : 30))))))
+                                                   : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : fen.ligne + fen.hauteurSurvol))))))
         width: cibleLargeur
         height: cibleHauteur
         // La page a 16 px de marge. Dans un quart de cercle, le retrait diagonal
@@ -348,7 +357,7 @@ PanelWindow {
             const retrait = Math.ceil(radius * (1 - Math.SQRT1_2))
             return retrait > Math.ceil(42 * (1 - Math.SQRT1_2)) ? retrait : 0
         }
-        readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
+        readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : fen.ligne / 2)), cibleLargeur, cibleHauteur)
         radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
         color: pointFerme ? Couleurs.accent : Couleurs.forme === "encoche" ? "transparent" : Qt.alpha(Couleurs.fond, Couleurs.forme === "cadre" ? 0.72 : Couleurs.verre)
         border.width: Couleurs.forme === "cadre" ? 1 : 0
@@ -356,37 +365,46 @@ PanelWindow {
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
-                                        && Math.abs(height - cibleHauteur) < 1 && cibleHauteur === 30
+                                        && Math.abs(height - cibleHauteur) < 1 && cibleHauteur === fen.ligne
         Component.onCompleted: Etat.enregistrerPilule(fen.modelData.name, ile)
         Component.onDestruction: Etat.oublierPilule(fen.modelData.name, ile)
 
-        // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
-        // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)
+        // Survol : après 120 ms sur l'île (juste passer dessus vers la barre ne l'agrandit pas) ; repliée dès la sortie
         HoverHandler {
             id: survol
             enabled: Reglages.val("ILE_SURVOL", "oui") !== "non" && !fen.pilCachee
-            onHoveredChanged: if (hovered) { sortieSurvol.stop(); attenteSurvol.restart() } else { attenteSurvol.stop(); sortieSurvol.restart() }
+            onHoveredChanged: if (hovered) attenteSurvol.restart(); else { attenteSurvol.stop(); fen.survolTenu = false }
         }
         Timer {
             id: attenteSurvol
-            interval: 280                           // juste passer dessus (vers la barre) ne l'ouvre pas
-            onTriggered: {
-                // Sur l'indicateur Cloud : pas d'ouverture ; on regarde à nouveau tant que le curseur reste dans la pilule
-                if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }
-                if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.enCarte && !Etat.enregistre) {
-                    Etat.basculer(fen.modelData.name, false)
-                    Etat.parSurvol = true
-                }
-            }
-        }
-        Timer {
-            id: sortieSurvol
-            interval: 450
-            onTriggered: if (!survol.hovered && fen.ouverte && Etat.parSurvol && !Etat.recherche) Etat.fermer()
+            interval: 120
+            onTriggered: fen.survolTenu = survol.hovered
         }
         Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
         clip: true
         FormeIle { visible: Couleurs.forme === "encoche"; anchors.fill: parent; rayon: ile.radius; couleur: Qt.alpha(Couleurs.fond, Couleurs.verre) }
+        // Émail (île fermée : pilule, survol, bannière, carte) : lumière douce en haut et reflet fin sur l'arête, aux
+        // couleurs du thème (Couleurs.qml) ; statique, sans flou ni contour. Ouverte, les pages gardent leur fond
+        Rectangle {
+            anchors.fill: parent
+            radius: ile.radius
+            visible: opacity > 0.01 && (Couleurs.forme === "pilule" || Couleurs.forme === "rectangle")
+            opacity: fen.ouverte ? 0 : 1
+            Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
+            gradient: Gradient {
+                GradientStop { position: 0; color: Couleurs.emailLumiere }
+                GradientStop { position: 0.6; color: Qt.alpha(Couleurs.emailLumiere, 0) }
+            }
+            Rectangle {
+                x: ile.radius; y: 1; width: Math.max(0, parent.width - 2 * ile.radius); height: 1
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Qt.alpha(Couleurs.emailReflet, 0) }
+                    GradientStop { position: 0.46; color: Couleurs.emailReflet }
+                    GradientStop { position: 1; color: Qt.alpha(Couleurs.emailReflet, 0) }
+                }
+            }
+        }
 
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
@@ -408,8 +426,11 @@ PanelWindow {
 
         Compact {
             id: compact
-            anchors.centerIn: parent
+            // Toujours sur la ligne du haut : au survol, l'île grandit vers le bas (progression) et des deux côtés (loupe)
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
+            height: fen.ligne
             // Un texte qui s'allonge (étape d'un agent) est là tout de suite, l'île le rejoint avec son ressort : le contenu
             // se réduit le temps qu'elle grandisse, au lieu d'être rogné des deux côtés (« 6:50 » ; long avec ILE_ANIM=doux)
             // Contenu de 32 px ou moins (forme « point ») ou largeur pas encore connue : échelle 1, jamais NaN ni 0 au repos
@@ -418,6 +439,13 @@ PanelWindow {
             opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)
                      : (ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))
             Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
+        }
+        SurvolIle {
+            id: survolIle
+            anchors.fill: parent
+            montre: fen.survolee
+            ligne: fen.ligne
+            mouv: fen.mouv
         }
 
         // Spotlight : longue capsule de recherche
@@ -511,6 +539,9 @@ PanelWindow {
             enabled: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
+                            // Loupe de l'île survolée : la recherche part de l'île, au même endroit que Super + R
+                            : (survolIle.surLoupe(e.x, e.y) ? Etat.chercher(fen.modelData.name)
+                            : (compact.surLecture(e.x, e.y) ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
                                // « Bonjour » au réveil : un clic ouvre le résumé
                                : (Resume.actif && !Resume.ouvert && Etat.activiteType === "" ? Resume.ouvrir(fen.modelData.name)
@@ -522,7 +553,7 @@ PanelWindow {
                                : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))))))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))))))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
@@ -668,14 +699,5 @@ PanelWindow {
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)
         Keys.onDownPressed: Etat.changerVue(1)
-    
-        // Clic dans l'île ouverte au survol : elle reste ouverte comme après un clic. Au-dessus de tout, le clic est
-        // seulement noté puis laissé aux boutons en dessous.
-        MouseArea {
-            anchors.fill: parent
-            enabled: Etat.parSurvol
-            acceptedButtons: Qt.AllButtons
-            onPressed: m => { Etat.parSurvol = false; m.accepted = false }
-        }
     }
 }

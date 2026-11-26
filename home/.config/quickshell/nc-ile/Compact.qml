@@ -1,5 +1,5 @@
-// Contenu de la pilule (île fermée) :
-//   repos   : heure et date ;  musique : pochette, heure, onde sonore (en pause : symbole lecture et titre)
+// Contenu de la pilule (île fermée), sur une seule ligne :
+//   repos   : heure et date ;  musique : pochette, titre (et artiste), lecture / pause
 //   réactions (2 à 3 s) : volume, luminosité, nouveau morceau, chargeur, profil d'énergie, mode jeu
 //   Claude Code et Antigravity (nc-claude) : ce qu'il fait (son logo qui bouge), « t'attend dans le terminal », « a terminé »
 // largeur : largeur voulue de la pilule ; l'île s'y ajuste avec un ressort.
@@ -37,6 +37,12 @@ Item {
         if (!pastilleCloud.visible || mode !== "repos") return false
         var p = c.mapToItem(pastilleCloud, x, y)
         return p.x >= -4 && p.x <= pastilleCloud.width + 4 && p.y >= -6 && p.y <= pastilleCloud.height + 6
+    }
+    // Sur le bouton lecture / pause de la musique ? Le clic met en pause ou relance, sans ouvrir l'île (Ile.qml)
+    function surLecture(x, y) {
+        if (mode !== "musique") return false
+        var p = c.parent.mapToItem(boutonLecture, x, y)
+        return p.x >= -6 && p.x <= boutonLecture.width + 6 && p.y >= -8 && p.y <= boutonLecture.height + 8
     }
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
@@ -130,7 +136,7 @@ Item {
         }
     }
 
-    // ── Musique : pochette | heure (et titre en pause) | onde ──
+    // ── Musique : pochette | titre (et artiste) | lecture / pause ──
     Fondu {
         id: musique
         montre: c.mode === "musique"
@@ -141,24 +147,14 @@ Item {
             Image { anchors.fill: parent; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(40, 40); visible: Etat.pochette === "" }
             Ico { anchors.centerIn: parent; nom: "music_note"; taille: 14; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
         }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.titre; secondaire: true; visible: !Etat.joue; width: Math.min(implicitWidth, 150) }
-        Row {
-            visible: Etat.joue
-            spacing: 2
-            anchors.verticalCenter: parent.verticalCenter
-            Repeater {
-                model: 5
-                Rectangle {
-                    required property int index
-                    width: 3; radius: Couleurs.rayon(1.5, width, height)
-                    height: 6 + Etat.bandes[index] * 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: Couleurs.jauge
-                }
-            }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.titre; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 130) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.artiste; secondaire: true; width: Math.min(implicitWidth, 80); visible: Etat.artiste !== "" }
+        Ico {
+            id: boutonLecture
+            anchors.verticalCenter: parent.verticalCenter; nom: Etat.joue ? "pause" : "play_arrow"; taille: 17
+            Accessible.role: Accessible.Button
+            Accessible.name: Etat.joue ? Reglages.t("Pause", "Pause") : Reglages.t("Lecture", "Play")
         }
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "play_arrow"; taille: 16; color: Couleurs.texteSec; visible: !Etat.joue }
     }
 
     // ── Minuteur en cours : décompte orange ──

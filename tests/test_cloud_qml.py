@@ -177,7 +177,9 @@ class Sources(unittest.TestCase):
         self.assertIn('nom: CloudEtat.envoie ? "cloud_upload" : "cloud"', compact)          # activité discrète pendant un envoi
         self.assertIn("color: CloudEtat.envoie ? Couleurs.accentClair : Couleurs.texteSec", compact)
         self.assertIn("(compact.surCloud(e.x, e.y) ? CloudEtat.basculerPanneau()", ile)
-        self.assertIn("if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }", ile)
+        # Le survol de l'île (et donc du nuage) ne l'ouvre jamais : il l'agrandit seulement (SurvolIle.qml)
+        survol = ile[ile.index("HoverHandler {"):ile.index("Behavior on color")]
+        self.assertNotIn("Etat.basculer", survol)
         m = re.search(r"DropArea \{\n\s*id: depotCloud(.*?)\n        \}\n", ile, re.S)
         self.assertIsNotNone(m)
         d = m.group(1) if m else ""

@@ -211,11 +211,13 @@ class Accents(HorsEcran):
         self.assertEqual(self.r[40]["jauge"], "accent")
 
     def test_barres_branchees(self):
-        """Les barres (jauges de Système, musique, volume) prennent Couleurs.jauge ; les chiffres gardent leur couleur."""
+        """Les barres (jauges de Système, musique, progression au survol, volume) prennent Couleurs.jauge ; les chiffres
+        gardent leur couleur."""
         q = Path(__file__).resolve().parents[1] / "home/.config/quickshell/nc-ile"
         self.assertIn("color: Qt.colorEqual(me.couleur, Couleurs.texte) ? Couleurs.jauge : me.couleur", (q / "Systeme.qml").read_text())
         self.assertEqual((q / "Musique.qml").read_text().count("Couleurs.jauge"), 2)
-        self.assertEqual((q / "Compact.qml").read_text().count("Couleurs.jauge"), 2)
+        self.assertEqual((q / "Compact.qml").read_text().count("Couleurs.jauge"), 1)
+        self.assertEqual((q / "SurvolIle.qml").read_text().count("Couleurs.jauge"), 1)
 
 
 if __name__ == "__main__":

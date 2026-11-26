@@ -80,7 +80,8 @@ class Source(unittest.TestCase):
         for autre in ("AssistantEtat.activitePilule", '"telechargement"', '"claude"', '"musique"', '"minuteur"'):
             self.assertLess(ordre.index('"partage"'), ordre.index(autre), autre)
         self.assertIn("partage: partage", self.compact)
-        self.assertIn("!Partage.indicateur", (QML / "Etat.qml").read_text())
+        # la pilule n'a plus d'onde (une ligne : pochette, titre, lecture) : rien à arrêter pendant le partage
+        self.assertIn('readonly property bool barresAffichees: joue && ecranVu && ecranOuvert !== ""', (QML / "Etat.qml").read_text())
         # Clic sur la bulle de fin : l'île déjà ouverte sur cet écran n'est pas basculée (basculer la fermerait)
         self.assertIn('Etat.ecranOuvert !== ecran) Etat.basculer(ecran, true)', (QML / "Notifs.qml").read_text())          # l'onde sonore s'arrête avec la pilule musique
 

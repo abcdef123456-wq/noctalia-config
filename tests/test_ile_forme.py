@@ -172,7 +172,9 @@ class Rendu(unittest.TestCase):
         if a.returncode != 0:
             self.skipTest("commit de référence absent (clone superficiel)")
         subprocess.run(["tar", "-x", "-C", str(ref)], input=a.stdout, check=True)
-        for etat in ("fermee", "page", "recherche"):
+        # la pilule fermée a changé exprès (Émail : lumière et reflet, décision du 24/11, test_ile_une_ligne) ;
+        # les pages et la recherche restent au pixel près
+        for etat in ("page", "recherche"):
             d1, d2 = self.t / ("a-" + etat), self.t / ("b-" + etat)
             d1.mkdir()
             d2.mkdir()

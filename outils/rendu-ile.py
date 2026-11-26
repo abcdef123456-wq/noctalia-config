@@ -3,7 +3,8 @@
 
   outils/rendu-ile.py --sortie DOSSIER [--reglages FICHIER.conf] [--palette palette-ile.json] ETAT...
 
-ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), page (la page Système ouverte),
+ETAT : fermee (pilule fermée), musique (pilule avec une musique factice), survol (la même, survolée : loupe et progression),
+volume (la même, le volume qui remplace un instant son contenu), page (la page Système ouverte),
 recherche (Spotlight avec un texte tapé), agent (pilule d'un agent factice au travail). Un PNG par état : DOSSIER/ETAT.png.
 --polices : dossier de polices lu en plus, en lecture seule (défaut : $XDG_DATA_HOME/fonts ou ~/.local/share/fonts).
 --echelle N : 1 (défaut), 2 ou 3 ; l'image est N fois plus grande, dessinée à cette taille (pas agrandie après coup).
@@ -30,7 +31,8 @@ import json
 
 DEPOT = Path(__file__).resolve().parents[1]
 QML = DEPOT / "home/.config/quickshell/nc-ile"
-ETATS = ("fermee", "musique", "page", "recherche", "themes", "epinglee", "agent")
+ETATS = ("fermee", "musique", "survol", "volume", "page", "recherche", "themes", "epinglee", "agent")
+MUSIQUE = {"musique", "survol", "volume"}    # états avec le faux lecteur
 ATTENTE = 3000                     # ms laissées aux ressorts (ouverture, fondus) avant la capture
 LIMITE = 40                        # s : au-delà, qs est arrêté
 PROPRIETES_COUCHE = re.compile(r"^\s*(exclusionMode|WlrLayershell\.\w+|mask|aboveWindows|screen|focusable|exclusiveZone)\s*:")
@@ -61,6 +63,8 @@ MARGE = 24
 ACTIONS = {
     "fermee": "",
     "musique": "",
+    "survol": "vs.instances[0].survolTenu = true",
+    "volume": 'Etat.pret = true; Etat.activite("volume", 60000)',
     "page": 'Etat.basculer(nom, true); Etat.aller("systeme")',
     "recherche": 'Etat.saisie = "fir"; Etat.chercher(nom)',
     "themes": "racine.themesOuvert = true",
@@ -195,7 +199,7 @@ def preparer(root, etat, reglages, palette):
                                                                + morceau(b"IDAT", zlib.compress(brut)) + morceau(b"IEND", b""))
         f = ile / "shell.qml"
         f.write_text(f.read_text().replace('racine.effacerEpingles("")   //', "//", 1))
-    if etat == "musique":
+    if etat in MUSIQUE:
         f = ile / "Etat.qml"
         t, n = re.subn(r"readonly property var lecteurs:.*", lambda m: FAUX_LECTEUR, f.read_text(), count=1)
         if n != 1:

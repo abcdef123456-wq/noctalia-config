@@ -30,6 +30,7 @@ def barre_de_base():
     t = CONFIG.read_text(encoding="utf-8")
     sec = re.search(r"^\[bar\.default\]\n(.*?)(?=^\[)", t, re.M | re.S).group(1)
     val = {k: int(re.search(r"^%s = (\d+)" % k, sec, re.M).group(1)) for k in ("thickness", "margin_edge")}
+    val["capsule_thickness"] = float(re.search(r"^capsule_thickness = ([\d.]+)", sec, re.M).group(1))
     return dict(val, position=re.search(r'^position = "(\w+)"', sec, re.M).group(1))
 
 
@@ -43,13 +44,22 @@ def barre(d):
     return dict(barre_de_base(), **d.get("noctalia", {}).get("bar.default", {}))
 
 
+def ligne_ile(d):
+    """Hauteur de l'île fermée, sur une ligne : les pastilles de la barre du haut (épaisseur × capsule_thickness,
+    arrondie vers le bas, 24 à 40) ; 30 dans la bande ILE_BANDE ou sans barre en haut."""
+    b = barre(d)
+    if d.get("reglages", {}).get("ILE_BANDE") == "oui" or b["position"] != "top":
+        return ILE_FERMEE
+    return max(24, min(40, int(round(b["thickness"] * b["capsule_thickness"], 6))))
+
+
 def y_ile(d):
     """y de l'île fermée (Ile.qml) : 6 dans la bande de 42 px, sinon centrée dans la barre du haut (ILE_Y de nc-reglages),
     9 sans barre en haut."""
     b = barre(d)
     if d.get("reglages", {}).get("ILE_BANDE") == "oui":
         return 6
-    return b["margin_edge"] + (b["thickness"] - ILE_FERMEE) // 2 if b["position"] == "top" else ILE_Y
+    return b["margin_edge"] + (b["thickness"] - ligne_ile(d)) // 2 if b["position"] == "top" else ILE_Y
 
 
 def hauteur_ile(d, y=None):
@@ -57,7 +67,7 @@ def hauteur_ile(d, y=None):
     reglages = d.get("reglages", {})
     e = int(reglages.get("ILE_CONTOUR_EPAISSEUR", "2"))
     contour = reglages.get("ILE_CONTOUR_FERMEE") == "oui" and reglages.get("ILE_CONTOUR", "degrade") != "aucun"
-    return (y_ile(d) if y is None else y) + ILE_FERMEE + (e if contour else 0)
+    return (y_ile(d) if y is None else y) + ligne_ile(d) + (e if contour else 0)
 
 
 def regle_hauteur(d, y=None):
@@ -141,9 +151,11 @@ class Centrage(unittest.TestCase):
             b = barre(d)
             with self.subTest(theme=nom):
                 self.assertEqual(nc.ile_y(d) if d["reglages"].get("ILE_BANDE") != "oui" else 6, y_ile(d))
+                if d["reglages"].get("ILE_BANDE") != "oui":
+                    self.assertEqual(nc.ile_ligne(d), ligne_ile(d))
                 if b["position"] == "top" and d["reglages"].get("ILE_BANDE") != "oui":
                     haut = y_ile(d) - b["margin_edge"]
-                    bas = b["margin_edge"] + b["thickness"] - y_ile(d) - ILE_FERMEE
+                    bas = b["margin_edge"] + b["thickness"] - y_ile(d) - ligne_ile(d)
                     self.assertLessEqual(abs(haut - bas), 1, f"{haut} px au-dessus, {bas} px dessous")
         # contrôle : l'ancien y fixe (9) dans le bandeau de pluie-verte (collé, 40 px) n'est pas centré
         b = barre(themes()["pluie-verte"])
@@ -169,7 +181,10 @@ class BandeSource(unittest.TestCase):
         self.assertIn('y: Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : '
                       '(parseInt(Reglages.val("ILE_Y", "%d")) || %d))' % (ILE_Y, ILE_Y), ile)
         self.assertGreaterEqual(zone, 6 + ILE_FERMEE + 6)                  # dans la bande : 6 au-dessus, 6 dessous
-        self.assertRegex(ile, r"fen\.hauteurBanniere : (?:\(pointFerme \? 10 : )?%d\)" % ILE_FERMEE)   # forme « point » : 10
+        # une ligne de la barre (forme « point » : 10), 30 par défaut et dans la bande ; plus la progression au survol
+        self.assertIn("fen.hauteurBanniere : (pointFerme ? 10 : fen.ligne + fen.hauteurSurvol)", ile)
+        self.assertIn('readonly property int ligne: Reglages.val("ILE_BANDE", "non") === "oui" ? %d : '
+                      '(parseInt(Reglages.val("ILE_LIGNE", "%d")) || %d)' % ((ILE_FERMEE,) * 3), ile)
 
 
 def charger_rendu():

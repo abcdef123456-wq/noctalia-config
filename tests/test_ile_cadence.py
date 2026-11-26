@@ -25,11 +25,11 @@ class Cadence(unittest.TestCase):
                                  nom + " : un mouvement sans fin à 165 images/s ; passe par Pas.qml (30 images/s)")
 
     def test_onde_sans_animation_entre_deux_pas(self):
-        for nom in ("Compact.qml", "Musique.qml"):
-            with self.subTest(nom):
-                source = (QML / nom).read_text()
-                bloc = source[source.index("Etat.bandes[index]"):][:400]
-                self.assertNotIn("Behavior on height", bloc, nom + " : l'onde redessinerait l'île à 165 Hz")
+        source = (QML / "Musique.qml").read_text()
+        bloc = source[source.index("Etat.bandes[index]"):][:400]
+        self.assertNotIn("Behavior on height", bloc, "Musique.qml : l'onde redessinerait l'île à 165 Hz")
+        # La pilule, sur une seule ligne, n'a plus d'onde : rien n'y bouge 30 fois par seconde pendant une musique
+        self.assertNotIn("Etat.bandes", (QML / "Compact.qml").read_text())
         etat = (QML / "Etat.qml").read_text()
         repli = etat[etat.index("property real dernierSon"):][:600]
         self.assertRegex(repli, r"interval: 33\b", "onde de repli à 30 images/s")
