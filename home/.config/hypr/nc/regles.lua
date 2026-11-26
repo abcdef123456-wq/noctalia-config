@@ -59,7 +59,11 @@ hl.window_rule({
 })
 
 -- Terminal déroulant (Super + touche sous Échap) : kitty lancé au premier appel
-hl.workspace_rule({ workspace = "special:term", on_created_empty = "kitty --class dropterm" })
+hl.on("workspace.created", function(ws)
+    if ws.name == "special:term" and ws.is_empty then
+        hl.exec_cmd("kitty --class dropterm", { workspace = "special:term silent" })
+    end
+end)
 hl.window_rule({
     name   = "terminal-deroulant",
     match  = { class = "^(dropterm)$" },
