@@ -16,7 +16,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
   survol et montre toutes les fenêtres du bureau, les masquées comprises (un clic les ramène), un clic ouvre le menu des
   fenêtres, la molette passe de l'une à l'autre ; trois doigts vers le haut : la vue de toutes les fenêtres ;
 - batterie de la barre : au survol, la consommation réelle (relue chaque seconde) et le temps restant ;
-- **Super + R** : recherche compacte au centre de l'écran (applis, fichiers, calculs) ;
+- **Super + R** : lanceur qui sort de l'île, en trois espaces séparés (applis, fichiers, actions et calculs) ;
 - **Super + W** : carrousel de fonds d'écran (dans un thème, seulement les fonds du thème, puis « Mes fonds » : les tiens, rangés à part dans `mes-fonds/`, qu'aucune mise à jour ne touche) ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
@@ -154,14 +154,17 @@ capture, notifications, réglages, verrouillage, extinction. **Appui long (ou cl
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
 se referme dans la pilule.
 
-Horloges mondiales : le réglage `HORLOGES_VILLES` (8 villes au plus, sans réseau) fait afficher, par « heure » ou « horloges » dans la recherche, une carte par ville devant les résultats.
+Horloges mondiales : le réglage `HORLOGES_VILLES` (8 villes au plus, sans réseau) fait afficher, par « heure » ou « horloges » dans la recherche, une carte par ville dans l'espace Actions du lanceur.
 
-**Super + R** ouvre le Spotlight : applis, fenêtres, fichiers, calculs, `> commande`, **`? question`** (et toute
+**Super + R** ouvre le lanceur, qui sort de l'île. Il a trois espaces dont les résultats ne se mélangent jamais :
+**Applis** (applis et fenêtres ouvertes, l'espace de départ), **Fichiers** et **Actions** (tout le reste). `Tab` /
+`Maj + Tab`, un clic sur l'onglet, ou ← → dans un champ vide changent d'espace ; un préfixe ci-dessous, ou un calcul
+qui ne ressemble à aucune appli, passe tout seul dans Actions. Actions : `> commande`, **`? question`** (et toute
 question comme « comment changer le fond d'écran » : réponses instantanées de la config, sans IA — réglages, raccourcis,
 commandes, documentation, `nc-aide-config` ; Entrée sur un réglage ouvre la fenêtre des réglages dessus, l'IA reste
 proposée en dernier ; la recherche de la fenêtre des réglages comprend aussi ces questions), et
 **`+ nom` pour installer un logiciel** (dépôts de ta distribution, AUR avec paru ou yay, Flatpak ; `nc-logiciels`) :
-Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). En tapant sans
+Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). Dans Actions, en tapant sans
 préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
 installer dans le Spotlight »).
 **`rappel 15h appeler le garage`** (ou `rappel 20 min …`, `reminder tomorrow 9am …`) programme une notification

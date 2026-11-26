@@ -397,7 +397,7 @@ QtObject {
     "Rappels": 'pragma Singleton\nimport QtQuick\nQtObject { property var liste: []; property bool plein: false; function analyser(p) { return {ok: false, raison: "heure"} } function quand(d) { return "" } function creer(t, d) { return false } function supprimer(i) {} }',
 }
 SINGLETONS = ("Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion")
-NOMS = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
+NOMS = ["Reglages", "Etat", "Partage", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Diagnostic", "Etincelle", "Texte", "Ico"]
 FAUX_BIN = {
     "nc-apps": '#!/bin/sh\nprintf "%s\\n" "[]"\n',
     "hyprctl": "#!/bin/sh\nprintf '%s\\n' '[]'\n",

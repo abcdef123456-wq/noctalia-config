@@ -197,7 +197,7 @@ PanelWindow {
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170), concentration: adaptee("concentration", 260)
     })
-    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
+    readonly property size taille: recherche ? Qt.size(438, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
     readonly property bool points: Etat.vues.length > 1 && !recherche
     // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
@@ -398,11 +398,11 @@ PanelWindow {
         Behavior on radius { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.duree; easing.type: fen.mouv.courbe } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()
-        // Spotlight : son contenu apparaît avec la largeur de l'île (0 à 300 px, 1 à 560 px), et la pilule ne s'efface qu'à
+        // Lanceur : son contenu apparaît avec la largeur de l'île (0 à 260 px, 1 à 400 px), et la pilule ne s'efface qu'à
         // mesure : l'île n'est jamais une forme vide pendant qu'elle s'étire (un « carré noir » quand la pilule partait en
-        // 90 ms et le Spotlight n'apparaissait qu'au-delà de 560 px). Suit le ressort image par image : rien de plus lent.
-        // Géométrie pure, aussi à la fermeture : la pilule et le Spotlight suivent la largeur dans les deux sens
-        readonly property real etirementRecherche: Math.max(0, Math.min(1, (width - 300) / 260))
+        // 90 ms et le lanceur n'apparaissait qu'au-delà de sa taille). Suit le ressort image par image : rien de plus lent.
+        // Géométrie pure, aussi à la fermeture : la pilule et le lanceur suivent la largeur dans les deux sens
+        readonly property real etirementRecherche: Math.max(0, Math.min(1, (width - 260) / 140))
         // Retour du Spotlight vers la pilule (pas vers une page : alors l'île reste ouverte)
         readonly property bool retourSpot: retourRecherche.running && !fen.ouverte && !fen.banniere && !fen.enCarte
 
@@ -424,7 +424,7 @@ PanelWindow {
         // Chargés seulement quand ils servent (mémoire), gardés le temps de l'animation de fermeture
         Loader {
             id: spot
-            readonly property int hauteurVoulue: item ? item.hauteurVoulue : 56
+            readonly property int hauteurVoulue: item ? item.hauteurVoulue : 136      // saisie, onglets et pied
             // Travail en cours après la fermeture (appli lancée suivie…) : reste chargé. Recopié par un signal, pas lu
             // directement sur item (active dépendrait de item, qui dépend de active : boucle de liaisons)
             property bool occupe: false

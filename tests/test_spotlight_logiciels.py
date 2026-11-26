@@ -183,7 +183,7 @@ QtObject {
 }''')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t} function sansReseau(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "LanceurOnglets", "LanceurLigne", "LanceurPied", "Emoji", "Partage", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool silence: false }')
             # La recherche cite CloudEtat (entrée Cloud JARVIS) : un faux, coupé et non associé
             (q / "CloudEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool associe: false }')
@@ -225,10 +225,13 @@ ShellRoot {
    verifier(spot.resultats[0].sous.indexOf("AUR") === 0, "origine AUR affichée")
    verifier(spot.resultats[0].icone === "file:///tmp/zen.png", "icône du catalogue affichée : " + spot.resultats[0].icone)
    spot.valider(0, false); verifier(Etat.fermetures === 1, "Entrée ferme l'île"); champ.text = "obs"; etape++; return }
-  if (etape === 2) { if (spot.paquetsPour !== "obs" || spot.applis.length === 0) return
+  if (etape === 2) { if (spot.applis.length === 0 || spot.resultats.length === 0) return
    var t = spot.resultats.map(x => x.titre)
-   verifier(t[0] === "Obsidian", "l'appli installée reste en tête : " + JSON.stringify(t))
-   verifier(t.indexOf("obs-studio") >= 0 && t.indexOf("obsidian") < 0, "suggestion en bas, sans le paquet déjà installé : " + JSON.stringify(t))
+   verifier(t[0] === "Obsidian" && t.indexOf("obs-studio") < 0, "Applis : l'appli installée, aucun logiciel à installer : " + JSON.stringify(t))
+   spot.changerEspace("actions"); etape++; return }      // les suggestions de logiciels vivent dans les Actions
+  if (etape === 3) { if (spot.paquetsPour !== "obs") return
+   var u = spot.resultats.map(x => x.titre)
+   verifier(u.indexOf("obs-studio") >= 0 && u.indexOf("obsidian") < 0 && u.indexOf("Obsidian") < 0, "suggestion sans le paquet déjà installé : " + JSON.stringify(u))
    verifier(spot.resultats.length <= 6, "six lignes au plus"); Qt.quit() }
  } }
  Timer { interval: 9000; running: true; onTriggered: Qt.exit(9) }
