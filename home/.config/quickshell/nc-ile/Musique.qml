@@ -1,12 +1,12 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Services.Mpris
-import Quickshell.Widgets
 
 Item {
     id: m
-    property string motif: "music_note"
-    property string dessin: ""
+    required property var planche
+    readonly property color encre: planche?.ink ?? Couleurs.texte
+    readonly property color accent: planche?.accent ?? Couleurs.accent
 
     readonly property var lecteur: Etat.lecteur
     readonly property string source: lecteur ? lecteur.identity : ""
@@ -26,93 +26,15 @@ Item {
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
     }
 
-    // Le transport et les métadonnées sont intégrés à la scène du thème.
-    Pochette {
-        width: 54; height: 54; anchors.verticalCenter: parent.verticalCenter
-    }
+    // La scène porte la pochette cliquable et le transport ; cette bande complète le lecteur.
     Texte {
-        x: 66; y: 2; width: Math.max(0, parent.width - 111)
-        text: m.source || m.etatLecture; secondaire: true; font.pixelSize: 11
+        x: 12; y: 4; width: Math.max(0, parent.width - 64)
+        text: m.planche ? (m.source || m.etatLecture) : Reglages.t("Progression", "Progress")
+        color: m.planche ? m.encre : Couleurs.texteDoux; font.pixelSize: 11
+        font.family: m.planche?.font ?? Couleurs.police
     }
-    Onde { anchors.right: parent.right; y: 0 }
-    Progression { x: 66; y: 23; width: Math.max(0, parent.width - 68) }
-
-    component Cible: Item {
-        id: cible
-        required property string libelle
-        readonly property bool survol: zone.containsMouse
-        readonly property bool appuye: zone.pressed
-        signal activer()
-        activeFocusOnTab: enabled
-        Accessible.role: Accessible.Button
-        Accessible.name: libelle
-        Accessible.onPressAction: if (enabled) activer()
-        Keys.onReturnPressed: activer()
-        Keys.onEnterPressed: activer()
-        Keys.onSpacePressed: activer()
-        MouseArea {
-            id: zone
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: { cible.forceActiveFocus(Qt.MouseFocusReason); cible.activer() }
-        }
-    }
-
-
-    component Sceau: Loader {
-        sourceComponent: m.dessin !== "" ? vectoriel : glyphe
-        Component { id: vectoriel; MotifIle { dessin: m.dessin } }
-        Component {
-            id: glyphe
-            Ico { nom: m.motif || "music_note"; taille: Math.min(width, height) * 0.66; color: Couleurs.accent; Accessible.ignored: true }
-        }
-    }
-
-    component Pochette: Cible {
-        id: cadre
-        property real arrondi: Couleurs.rayon(Couleurs.rayonBloc, width, height)
-        readonly property bool imagePresente: art.status === Image.Ready || icone.status === Image.Ready
-        enabled: !!m.lecteur && m.lecteur.canRaise
-        libelle: Reglages.t("Ouvrir le lecteur", "Open player")
-        Accessible.ignored: !enabled
-        onActiver: if (enabled) { m.lecteur.raise(); Etat.fermer() }
-        Rectangle {
-            anchors.fill: parent
-            radius: cadre.arrondi
-            color: Couleurs.carte
-        }
-        ClippingRectangle {
-            anchors.fill: parent; radius: cadre.arrondi; color: "transparent"
-            visible: art.status === Image.Ready
-            Image {
-                id: art
-                anchors.fill: parent; fillMode: Image.PreserveAspectCrop
-                // Etat applique la politique d’images (notamment ECO_IMAGES) avant tout chargement.
-                source: Etat.pochette; asynchronous: true
-                sourceSize: Qt.size(128, 128)
-            }
-        }
-        Image {
-            id: icone
-            anchors.centerIn: parent
-            width: Math.min(50, parent.width * 0.52); height: width
-            source: art.status !== Image.Ready ? Etat.iconeLecteur : ""
-            sourceSize: Qt.size(100, 100)
-            visible: art.status !== Image.Ready && status === Image.Ready
-        }
-        Sceau {
-            anchors.centerIn: parent
-            width: parent.width * 0.65
-            height: width
-            active: !cadre.imagePresente
-        }
-        Rectangle {
-            anchors.fill: parent; radius: cadre.arrondi; color: "transparent"
-            border.width: cadre.activeFocus ? 2 : 1
-            border.color: cadre.survol || cadre.activeFocus ? Couleurs.accent : Couleurs.bordureSubtile
-        }
-    }
+    Onde { anchors.right: parent.right; anchors.rightMargin: 12; y: 2 }
+    Progression { x: 12; y: 23; width: Math.max(0, parent.width - 24) }
 
     component Onde: Row {
         id: onde
@@ -124,7 +46,7 @@ Item {
                 required property int index
                 anchors.verticalCenter: onde.verticalCenter
                 width: 3; height: 4 + Etat.bandes[index] * 16
-                radius: width / 2; color: Couleurs.jauge
+                radius: width / 2; color: m.planche?.paper ? m.accent : Couleurs.jauge
             }
         }
     }
@@ -160,14 +82,14 @@ Item {
             width: parent.width; height: glissiere.segmentee ? 9 : 4
             anchors.verticalCenter: parent.verticalCenter
             radius: glissiere.segmentee ? 0 : 2
-            color: Couleurs.separateur
-            Rectangle { width: parent.width * glissiere.fraction; height: parent.height; radius: parent.radius; color: Couleurs.jauge }
+            color: Qt.alpha(m.encre, .22)
+            Rectangle { width: parent.width * glissiere.fraction; height: parent.height; radius: parent.radius; color: m.planche?.paper ? m.accent : Couleurs.jauge }
             Repeater {
                 model: glissiere.segmentee ? 19 : 0
                 Rectangle {
                     required property int index
                     x: Math.round(rail.width * (index + 1) / 20)
-                    width: 2; height: rail.height; color: Couleurs.carte
+                    width: 2; height: rail.height; color: m.planche?.paper ?? Couleurs.carte
                 }
             }
         }
@@ -175,7 +97,7 @@ Item {
             visible: glissiere.enabled && (zoneSeek.containsMouse || glissiere.activeFocus)
             width: 8; height: width; radius: width / 2
             x: Math.min(parent.width - width, Math.max(0, parent.width * glissiere.fraction - width / 2))
-            anchors.verticalCenter: parent.verticalCenter; color: Couleurs.accent
+            anchors.verticalCenter: parent.verticalCenter; color: m.encre
         }
         MouseArea {
             id: zoneSeek
@@ -199,15 +121,15 @@ Item {
 
     component Progression: Item {
         id: progression
-        property bool modeConsole: false
+        readonly property bool modeConsole: m.planche?.font === "monospace"
         readonly property real fraction: glissiere.fraction
         readonly property string ecoule: m.positionConnue ? m.temps(glissiere.value) : "—:—"
         readonly property string restant: m.positionConnue && m.duree > 0 ? "−" + m.temps(m.duree - glissiere.value) : "—:—"
         objectName: "nc-musique-progression"
-        height: modeConsole ? 22 : 32
+        height: 32
         Glissiere { id: glissiere; width: parent.width; height: 22; segmentee: progression.modeConsole }
-        Texte { visible: !progression.modeConsole; anchors.bottom: parent.bottom; text: progression.ecoule; secondaire: true; font.pixelSize: 10 }
-        Texte { visible: !progression.modeConsole; anchors.bottom: parent.bottom; anchors.right: parent.right; text: progression.restant; secondaire: true; font.pixelSize: 10 }
+        Texte { anchors.bottom: parent.bottom; text: progression.ecoule; color: m.encre; font.pixelSize: 10 }
+        Texte { anchors.bottom: parent.bottom; anchors.right: parent.right; text: progression.restant; color: m.encre; font.pixelSize: 10 }
     }
 
 }

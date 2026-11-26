@@ -25,6 +25,19 @@ function matrice(w) {
     }
     return points
 }
+function prismeNocturne(w, h, marge = 0) {
+    const t = Math.max(0, Math.min(1, (h - 30) / 90))
+    w += 2 * marge
+    h += 2 * marge
+    const b = Math.min(w / 4, h * 0.30, 8 + 6 * t + marge * (2 - Math.SQRT2))
+    const r = Math.min(b * 0.45, 2.8 + 2.7 * t + marge)
+    const d = r * Math.SQRT1_2
+    const k = b + r, l = -marge, x = w - marge, y = h - marge
+    return `M${l+k},${l} H${x-k} Q${x-b},${l} ${x-b+d},${l+d} L${x-d},${l+b-d} Q${x},${l+b} ${x},${l+k}`
+         + ` V${y-k} Q${x},${y-b} ${x-d},${y-b+d} L${x-b+d},${y-d} Q${x-b},${y} ${x-k},${y}`
+         + ` H${l+k} Q${l+b},${y} ${l+b-d},${y-d} L${l+d},${y-b+d} Q${l},${y-b} ${l},${y-k}`
+         + ` V${l+k} Q${l},${l+b} ${l+d},${l+b-d} L${l+b-d},${l+d} Q${l+b},${l} ${l+k},${l} Z`
+}
 
 const plans = {
     "penombre": {
@@ -182,13 +195,21 @@ const plans = {
         cadre: (t,d,s) => composition(t+s+13+(d ? d+9 : 0), 0,18, t+s+21,18, t+8,18, [bloc(t+3,10,s+10,17,2,"plein")])
     },
     "dracula": {
-        dessin: "ailes", tailles: [14, 9, 0], signe: "", titre: "droite",
-        repos: (w,h) => `M1,2 Q${w*.27},0 ${w/2-10},6 L${w/2-5},1 L${w/2},5 L${w/2+5},1 L${w/2+10},6 Q${w*.73},0 ${w-1},2 L${w-10},${h-7} Q${w*.75},${h-14} ${w*.64},${h-3} Q${w*.55},${h-8} ${w/2},${h-1} Q${w*.45},${h-8} ${w*.36},${h-3} Q${w*.25},${h-14} 10,${h-7} Z`,
-        page: (w,h) => `M0,8 Q${w*.25},-5 ${w/2-19},9 L${w/2-10},0 L${w/2},7 L${w/2+10},0 L${w/2+19},9 Q${w*.75},-5 ${w},8 V${h-19} Q${w*.74},${h-24} ${w*.64},${h-5} Q${w*.55},${h-11} ${w/2},${h} Q${w*.45},${h-11} ${w*.36},${h-5} Q${w*.26},${h-24} 0,${h-19} Z`,
-        carte: w => cartouche(`M8,12 Q30,5 65,16 L74,9 L80,16 L86,9 L95,16 Q130,5 154,12 L143,29 Q121,20 103,29 Q92,23 80,32 Q68,23 57,29 Q39,20 19,29 Z M${w*.58},11 H${w-9} L${w-18},29 H${w*.54} Z`, `M29,17 Q49,15 65,22 M95,22 Q111,15 131,17`),
-        cadre: (t,d) => {
-            const w = Math.max(t,d) + 19
-            return composition(w, (w-t)/2,d ? 10 : 15, (w-d)/2,24, 0,0, [bloc(2,9,3,10,0,"encre"), bloc(w-5,9,3,10,0,"encre")])
+        dessin: "nocturne", tailles: [15, 11, 10], signe: "◆", titre: "droite",
+        repos: prismeNocturne, page: prismeNocturne, continu: prismeNocturne,
+        carte: w => {
+            const g0 = Math.round(w * 0.64), g1 = Math.round(w * 0.86)
+            return cartouche(
+                `M22,11 H84 L89,16 V22 L84,27 H22 L17,22 V16 Z M30,15 L34,19 L30,23 L26,19 Z `
+                + `M${g0+5},11 H${g1-5} L${g1},16 V22 L${g1-5},27 H${g0+5} L${g0},22 V16 Z`,
+                `M42,19 H78 M97,19 H${g0-10} L${g0-5},14`
+            )
+        },
+        cadre: (t,d,s) => {
+            const badge = bloc(0, 6, s + 10, 18, 5, "verre")
+            if (!d) return composition(s + t + 19, s + 17, 15, s + t + 17, 15, 5, 15, [badge])
+            return composition(s + t + d + 35, s + 17, 15, s + t + 33, 15, 5, 15,
+                               [badge, bloc(s + t + 25, 9, 1, 12, 0, "encre")])
         }
     },
     "ocean": {

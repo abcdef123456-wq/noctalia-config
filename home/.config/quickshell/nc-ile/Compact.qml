@@ -142,12 +142,36 @@ Item {
     Fondu {
         id: musique
         montre: c.mode === "musique"
-        ClippingRectangle {
-            width: 20; height: 20; radius: Couleurs.rayon(6, width, height); color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
+        Item {
+            readonly property real rayon: Couleurs.rayon(6, width, height)
+            width: 20; height: 20
             anchors.verticalCenter: parent.verticalCenter
-            Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
-            Image { anchors.fill: parent; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(40, 40); visible: Etat.pochette === "" }
-            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 14; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
+            Rectangle {
+                anchors.fill: parent; radius: parent.rayon
+                visible: note.visible
+                color: Couleurs.themeActif === "dracula" ? Qt.alpha(Couleurs.accent, 0.16) : Couleurs.gris2
+            }
+            ClippingRectangle {
+                anchors.fill: parent; radius: parent.rayon; color: "transparent"
+                visible: pochette.status === Image.Ready
+                Image {
+                    id: pochette
+                    anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop
+                    asynchronous: true; sourceSize: Qt.size(144, 144)
+                }
+            }
+            Image {
+                id: icone
+                anchors.fill: parent; sourceSize: Qt.size(40, 40)
+                source: pochette.status === Image.Ready ? "" : Etat.iconeLecteur
+                visible: status === Image.Ready
+            }
+            Ico {
+                id: note
+                anchors.centerIn: parent; nom: "music_note"; taille: 14
+                visible: pochette.status !== Image.Ready && !icone.visible
+                color: Couleurs.themeActif === "dracula" ? Couleurs.accentClair : Couleurs.texte
+            }
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.titre; secondaire: true; visible: !Etat.joue; width: Math.min(implicitWidth, 150) }

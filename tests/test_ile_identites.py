@@ -160,7 +160,7 @@ ShellRoot {
             if (test.etape === 1) {
                 if (Couleurs.themeActif !== nom || !actions || !actions.visible || !nav || !nav.visible
                     || Math.abs(Etat.pilules.compositions.height - fen.taille.height) > 0.5) return
-                if (!dessin || dessin.status !== Image.Ready) return
+                if (nom !== "dracula" && (!dessin || dessin.status !== Image.Ready)) return
                 const coin = nav.mapToItem(scene, 0, 0)
                 const separee = coin.x + nav.width <= .5 || coin.y + nav.height <= .5
                     || coin.x >= scene.width - .5 || coin.y >= scene.height - .5
@@ -176,10 +176,12 @@ ShellRoot {
                 test.dispositions.add(positions.join("/"))
                 if (++test.index < test.themes.length) { test.etape = 0; return }
                 fen.modelData = { name: "compositions", width: 440, height: 640 }
-                Reglages.style = { STYLE: "nord" }
+                Reglages.style = { STYLE: "dracula" }
                 test.etape = 2
             } else if (test.etape === 2) {
-                if (!actions || !actions.visible || !nav.visible || nav.lateral) return
+                if (Couleurs.themeActif !== "dracula" || !actions || !actions.visible || !nav.visible || nav.lateral) return
+                const date = trouver(scene, "nc-essentiel-date")
+                if (!verifier(date && !date.visible, "Dracula affiche la date malgré ILE_DATE=non")) return
                 const tab = trouver(nav, "nc-ile-onglet-notifications")
                 if (!tab || !tab.visible) return
                 clic.mouseClick(tab, tab.width / 2, tab.height / 2)
@@ -206,7 +208,7 @@ ShellRoot {
 }
 '''
         shell = shell.replace("THEMES_JSON", json.dumps(THEMES))
-        RefonteHorsEcran.lancer_qml(self, shell, reglages="ILE_ANIM=aucun\n")
+        RefonteHorsEcran.lancer_qml(self, shell, reglages="ILE_ANIM=sec\nILE_ANIM_ECRANS=compositions:aucun\nILE_DATE=non\n")
 
     def test_point_matrice_et_point_choisi_gardent_le_cartouche_ouvert(self):
         from tests.test_refonte_ile_controle_reglages import RefonteHorsEcran

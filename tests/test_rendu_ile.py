@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 DEPOT = Path(__file__).resolve().parents[1]
 OUTIL = DEPOT / "outils/rendu-ile.py"
@@ -96,6 +97,18 @@ class AssistantsPng(unittest.TestCase):
             self.assertTrue(m.png_valide(t / "rgba.png"))
         finally:
             shutil.rmtree(str(t), ignore_errors=True)
+
+    def test_repli_rgb_conserve_le_contenu_en_haute_densite(self):
+        m = charger_outil()
+        with tempfile.TemporaryDirectory() as t:
+            png = Path(t) / "capture.png"
+            png.write_bytes(faire_png(24, 16, lambda _: b"\xbd\x93\xf9" * 24))
+            with patch.object(m, "MARGE", 1):
+                m.recadrer(png, (6, 3, 4, 2, 12, 8), forcer_alpha=True)
+            w, h, _, lignes = m.lire_png(png)
+            self.assertEqual((w, h), (12, 8))
+            self.assertEqual([ligne[3::4] for ligne in lignes],
+                             [bytes(12)] * 2 + [bytes(2) + b"\xff" * 8 + bytes(2)] * 4 + [bytes(12)] * 2)
 
 
 class Refus(unittest.TestCase):

@@ -85,12 +85,6 @@ function vaporwave(){
 function tokyo(){
     return sheet('Quai de correspondance','Interchange platform','#202834','#f2ece0','#f0b789','monospace',[16,10,395,12],[17,34,294,52],[20,100,291,15],[[20,135,135,31],[166,135,124,31],[302,135,154,31]],2,path('M16 29H461M16 126H461',null,'#75838b')+path('M350 38v60q0 14 14 14h91',null,'#df9677',5)+path('M382 38v29q0 14 13 14h60',null,'#8db9bf',5)+[48,75,101].map(y=>dot(350,y,5,'#f3e9cd')).join('')+dot(382,50,5,'#f3e9cd')+dot(435,81,5,'#f3e9cd'));
 }
-function dracula(){
-    const plum='#211c30',glass='#514058',lead='#bea6b3';
-    function arch(x,w,h){let m=x+w/2;return path('M'+x+' 166V'+(h+31)+'Q'+x+' '+(h+13)+' '+m+' '+h+'Q'+(x+w)+' '+(h+13)+' '+(x+w)+' '+(h+31)+'V166Z',glass,lead,1.6)}
-    let tracer=arch(5,94,32)+arch(106,269,4)+arch(382,93,32)+[52,429].map(x=>ring(x,68,15,lead,1)+path('M'+x+' 53l12 15 -12 15 -12 -15Z','#81617f',lead)+path('M'+(x-32)+' 110l32 -21 32 21 -32 26Z',null,lead)+path('M'+x+' 88v56',null,lead)).join('');
-    return sheet('Les heures du beffroi','Belfry hours',plum,'#f8e8ee','#c3a4c0','serif',[132,35,217,12],[129,48,225,49],[134,110,215,14],[[153,134,174,32],[17,131,70,32],[393,131,69,32]],12,tracer+path('M113 155V51Q114 33 144 24M368 155V51Q368 35 336 24',null,'#87667f')+dot(240,22,6,'#d4bac8'));
-}
 function ocean(){
     let sonar=dot(93,87,75,'#153d47')+repeat(4,i=>ring(93,87,14+18*i,'#5f9f9e',1))+path('M18 87H168M93 13V162',null,'#669f9c')+path('M93 87l34 -57q20 11 30 34Z','#367471')+path('M93 87l64 -23',null,'#a9dcd0',2)+dot(121,48,3,'#b1dcbb');
     return sheet('Station bathymétrique','Bathymetric station','#133039','#dbf2e8','#95c8bf','monospace',[183,15,282,11],[181,35,283,48],[184,96,275,14],[[182,130,132,33],[323,130,60,33],[394,130,63,33]],16,sonar+repeat(6,i=>box(184+i*42,116,25,2,0,'#527d80')));
@@ -111,5 +105,5 @@ function penombre(){
         dot(78,57,37,'#7f463c')+crane+path('M188 12V120M198 127H459',null,'#94695b')
         +path('M10 26V9H27M454 9h16v17',null,'#b38972'));
 }
-const catalog={noctalia,apple,oled,'clair-neutre':clairNeutre,brutaliste,cyberjaune,gruvbox,matrice,retro,'pluie-verte':pluieVerte,papier,'solarized-clair':solarizedClair,sakura,kanagawa,'rose-aube':roseAube,everforest,synthwave,vaporwave,tokyo,dracula,ocean,catppuccin,nord,penombre}
+const catalog={noctalia,apple,oled,'clair-neutre':clairNeutre,brutaliste,cyberjaune,gruvbox,matrice,retro,'pluie-verte':pluieVerte,papier,'solarized-clair':solarizedClair,sakura,kanagawa,'rose-aube':roseAube,everforest,synthwave,vaporwave,tokyo,ocean,catppuccin,nord,penombre}
 function pour(nom){return (Object.prototype.hasOwnProperty.call(catalog,nom)?catalog[nom]:noctalia)()}

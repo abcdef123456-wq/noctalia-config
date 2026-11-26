@@ -1,8 +1,9 @@
 # Île essentielle et Centre de contrôle
 
 L’île Quickshell se concentre sur **l’essentiel**. Les 23 thèmes fournis ont leur propre dessin, île fermée **et ouverte**.
-Changer de thème remplace la scène sans redémarrer. Chez Dracula, les commandes occupent les trois baies d’un vitrail ;
-chez Sakura, elles bordent un ticket de salon de thé illustré ; chez Gruvbox, ce sont les touches d’un magnétophone.
+Changer de thème remplace la scène sans redémarrer. Chez Dracula, la même forme biseautée s’étire de la pastille
+au panneau, avec un filet violet-rose et des commandes natives ; l’éventuel contour fermé reste réglable.
+Chez Sakura, les commandes bordent un ticket de salon de thé illustré ; chez Gruvbox, ce sont les touches d’un magnétophone.
 Les mêmes emplacements servent au **transport du lecteur** sur Musique et aux **filtres de la boîte** sur Notifications.
 Les autres pages conservent leurs outils sous une version courte de l’illustration.
 Le thème personnel **Pénombre de papier** bénéficie aussi d’une scène dédiée : une grue en origami sur papier brun.

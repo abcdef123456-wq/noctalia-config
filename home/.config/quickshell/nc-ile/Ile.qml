@@ -17,6 +17,7 @@ PanelWindow {
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
     readonly property var mouv: Mouvement.pourEcran(modelData.name)
     readonly property var identite: Identites.pour(Couleurs.themeActif)
+    readonly property bool nocturne: !!identite.continu
     readonly property var plan: Composition.pour(Couleurs.themeActif)
     function ouvrirControle() { Etat.ouvrirControle(modelData.name, "accueil") }
 
@@ -199,7 +200,7 @@ PanelWindow {
     readonly property real retraitGauche: disposition.bord === "gauche" && disposition.rail > 0 ? disposition.rail + 12 : 0
     readonly property real retraitDroit: disposition.bord === "droite" && disposition.rail > 0 ? disposition.rail + 12 : (points ? 18 : 0)
     readonly property real hauteurPage: Math.min(hauteurs[Etat.vueActive] ?? hauteurs.essentiel,
-        Math.max(0, Math.min(680, modelData.height - ile.y - 8) - disposition.surHauteur - margeScene))
+        Math.max(0, Math.min(620, modelData.height - ile.y - 8) - disposition.surHauteur - margeScene))
     readonly property size taille: recherche ? Qt.size(Math.min(modelData.width, 680), spot.hauteurVoulue)
                                              : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur + margeScene)
     readonly property bool points: Etat.vues.length > 4 && !recherche && !disposition.lateral
@@ -350,8 +351,8 @@ PanelWindow {
         opacity: ile.opacity
         sourceComponent: HabillageIle {
             plan: fen.identite
-            pigment: scene.item && !scene.item.breve ? scene.item.planche.accent : Couleurs.accent
-            encre: scene.item && !scene.item.breve ? scene.item.planche.ink : Couleurs.texte
+            pigment: scene.item?.papier?.accent ?? Couleurs.accent
+            encre: scene.item?.papier?.ink ?? Couleurs.texte
             page: ile.pageIdentite
             dessinerFond: ile.fondDessine
             fond: ile.color
@@ -375,8 +376,10 @@ PanelWindow {
             const rayon = Reglages.valeurs["ILE_RAYON"]
             return !!Reglages.valeurs["ILE_FORME"] || (!!rayon && rayon !== "auto")
         }
-        readonly property bool fondDessine: !geometrieManuelle && (pageIdentite
-            || (!fen.grandeVoulue && !pointFerme && width >= 100 && height >= 24 && height <= 36))
+        readonly property bool fondDessine: !geometrieManuelle && (fen.nocturne
+            ? (!pointFerme && !fen.recherche && !fen.banniere && !fen.enCarte
+                && (fen.ouverte || retour.running || (height >= 22 && height <= 40)))
+            : (pageIdentite || (!fen.grandeVoulue && !pointFerme && width >= 100 && height >= 24 && height <= 36)))
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
@@ -393,9 +396,9 @@ PanelWindow {
         }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
         property real radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
-        property color color: scene.item && !scene.item.breve ? scene.item.planche.paper
-            : pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
-            ? Qt.alpha(Couleurs.fond, 0.72) : Qt.alpha(Couleurs.fond, Couleurs.verre)
+        property color color: (fen.ouverte ? scene.item?.papier?.paper : null)
+            ?? (pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
+            ? Qt.alpha(Couleurs.fond, 0.72) : Qt.alpha(Couleurs.fond, Couleurs.verre))
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
         readonly property bool auRepos: !fen.ouverte && !fen.banniere && !fen.enCarte && Math.abs(width - cibleLargeur) < 1
@@ -630,11 +633,11 @@ PanelWindow {
             objectName: "nc-ile-entete"
             lateral: fen.disposition.lateral
             style: fen.plan.onglets
-            papier: scene.item && !scene.item.breve ? scene.item.planche : null
+            papier: scene.item?.papier ?? null
             x: (ile.width - fen.disposition.largeur) / 2 + (fen.disposition.bord === "droite" ? fen.disposition.largeur - width - 14 : 16)
             y: fen.disposition.bord === "bas" ? ile.height - height - fen.disposition.bas : fen.disposition.haut
             width: lateral ? fen.disposition.rail : Math.max(0, fen.disposition.largeur - 32)
-            height: lateral ? Math.max(0, ile.height - y - fen.disposition.bas) : fen.disposition.bande
+            height: lateral ? Math.max(0, ile.height - fen.disposition.haut - fen.disposition.bas) : fen.disposition.bande
             z: 1
             pages: Etat.vues
             active: Etat.vueActive
@@ -651,7 +654,9 @@ PanelWindow {
             id: scene
             objectName: "nc-ile-scene"
             active: fen.ouverte && !fen.recherche
-            visible: active && ile.height > fen.taille.height * .75
+            opacity: active && ile.height > fen.taille.height * (fen.nocturne ? 0.65 : 0.75) ? 1 : 0
+            Behavior on opacity { enabled: fen.nocturne && scene.active && !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            visible: active && opacity > 0.01
             x: (ile.width - fen.disposition.largeur) / 2 + 16 + fen.retraitGauche
             y: fen.hautContenu
             width: Math.max(0, fen.disposition.largeur - 32 - fen.retraitGauche - fen.retraitDroit)
@@ -695,8 +700,9 @@ PanelWindow {
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
                 Rectangle {
                     anchors.fill: parent
-                    visible: !!scene.item && !scene.item.breve
-                    color: Couleurs.fond; radius: Couleurs.rayonBloc
+                    visible: !!scene.item?.papier
+                    color: modelData === "musique" ? (scene.item?.papier?.paper ?? Couleurs.fond) : Couleurs.fond
+                    radius: modelData === "musique" ? 0 : Couleurs.rayonBloc
                 }
                 Loader {
                     id: chargeur
@@ -723,7 +729,7 @@ PanelWindow {
         Component { id: pConcentration; PageConcentration {} }
         Component {
             id: pMusique
-            Musique { motif: fen.plan.icone; dessin: fen.plan.dessin }
+            Musique { planche: scene.item?.papier ?? null }
         }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }

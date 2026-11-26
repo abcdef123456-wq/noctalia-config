@@ -92,10 +92,13 @@ Item {
             width: entete.lateral ? onglets.width : (entete.icones ? 38 : onglets.largeurOnglet)
             height: entete.lateral ? (entete.icones ? 31 : 34) : onglets.height
             radius: Couleurs.rayon(entete.style === "capsules" ? 16 : entete.plein ? 1 : 6, width, height)
-            color: choisi && entete.plein ? entete.encre : choisi && !entete.ligne ? Qt.alpha(entete.encre, .16)
+            readonly property bool capsuleNeon: entete.style === "capsules" && Couleurs.themeActif === "dracula"
+            color: choisi && entete.plein ? entete.encre
+                 : choisi && capsuleNeon ? Qt.alpha(entete.pigment, .20)
+                 : choisi && !entete.ligne ? Qt.alpha(entete.encre, .16)
                  : action.contientPointeur ? Qt.alpha(entete.encre, .10) : "transparent"
-            border.width: entete.plein && !choisi ? 1 : 0
-            border.color: Couleurs.bordureSubtile
+            border.width: (entete.plein && !choisi) || (capsuleNeon && choisi) ? 1 : 0
+            border.color: capsuleNeon && choisi ? Qt.alpha(entete.pigment, .48) : Couleurs.bordureSubtile
 
             Rectangle {
                 visible: tab.choisi && entete.ligne

@@ -170,7 +170,7 @@ def preparer(root, etat, reglages, palette):
                 # « cible » : le contenu de la fenêtre (contour et lueur y sont dessinés derrière l'île), « ilot » : l'île.
                 # Seulement ici : les autres fenêtres (tiroir JARVIS, barres) n'ont ni « racine » Item ni « ile ».
                 t = t.replace("id: fen\n", "id: fen\n    readonly property Item cible: racine\n    readonly property Item ilot: ile\n", 1)
-                t = t.replace("    Item {\n        id: fondClic", "    Item {\n    id: racine\n    anchors.fill: parent\n    Item {\n        id: fondClic", 1)
+                t = t.replace("    Item {\n        id: fondClic", '    Item {\n    id: racine\n    anchors.fill: parent\n    Rectangle { width: 1; height: 1; color: "#80000080" }\n    Item {\n        id: fondClic', 1)
                 t = t.replace("rayonTheme: Couleurs.rayon(fen.ouverte", "rayonTheme: 0.01 + Couleurs.rayon(fen.ouverte", 1)    # un rayon nul fait sortir Qt software en RGB, sans alpha
                 t = t.rstrip()
                 t = t[:t.rindex("}")] + "}\n}\n"
@@ -306,11 +306,12 @@ def recadrer(png, cadre, forcer_alpha=False):
     forcer_alpha : si Qt a écrit du RGB (le transparent est devenu noir), rend du RGBA : opaque dans le cadre de l'île, transparent autour."""
     x, y, ew, eh, pw, ph = cadre
     w, h, bpp, lignes = lire_png(png)
-    if forcer_alpha and bpp == 3:
-        lignes = [b"".join(l[i:i + 3] + (b"\xff" if x <= i // 3 < x + ew and y <= j < y + eh else b"\0") for i in range(0, w * 3, 3))
-                  for j, l in enumerate(lignes)]
-        bpp = 4
     e = w / pw if pw else 1
+    if forcer_alpha and bpp == 3:
+        gauche, haut, droite, bas = (round(v * e) for v in (x, y, x + ew, y + eh))
+        lignes = [b"".join(l[i:i + 3] + (b"\xff" if gauche <= i // 3 < droite and haut <= j < bas else b"\0")
+                           for i in range(0, w * 3, 3)) for j, l in enumerate(lignes)]
+        bpp = 4
     x0, y0 = int(round((x - MARGE) * e)), int(round((y - MARGE) * e))
     lw, lh = int(round((ew + 2 * MARGE) * e)), int(round((eh + 2 * MARGE) * e))
     noir = bytes(bpp) * lw

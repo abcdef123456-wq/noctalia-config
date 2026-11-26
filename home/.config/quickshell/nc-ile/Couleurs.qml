@@ -128,6 +128,7 @@ Singleton {
     readonly property color bleu: v("bleu", "#0a84ff")
     readonly property color violet: v("violet", "#5e5ce6")
     readonly property color rose: v("rose", "#ff375f")
+    readonly property color cyan: v("cyan", "#64d2ff")
     readonly property color fondVert: v("fondVert", "#0d3318")
     readonly property color fondOrange: v("fondOrange", "#3a2a10")
 
