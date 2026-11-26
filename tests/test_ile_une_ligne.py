@@ -32,7 +32,8 @@ ETAPES = """
     }
     function note(nom) {
         console.log("ETAPE " + JSON.stringify({ nom: nom, h: i.height, w: i.width, ligne: f.ligne, mode: c.mode,
-            ouverte: Etat.ecranOuvert, recherche: Etat.recherche, survol: s.opacity, loupe: s.surLoupe(i.width - 20, f.ligne / 2) }))
+            ouverte: Etat.ecranOuvert, recherche: Etat.recherche, survol: s.opacity, loupe: s.surLoupe(i.width - 20, f.ligne / 2),
+            ancre: f._ancreGestes, largeur: c.largeur, ecran: f.modelData.width }))
     }
     function plus(ms, fn) { Qt.createQmlObject('import QtQuick; Timer { interval: ' + ms + '; running: true }', racine).triggered.connect(fn) }
     note("repos")
@@ -72,6 +73,9 @@ class UneLigne(unittest.TestCase):
         self.assertEqual(repos["h"], 30)
         self.assertEqual(repos["mode"], "musique")
         self.assertFalse(repos["loupe"], "la loupe n'existe pas hors survol")
+        # ancre de la goutte (plugin nc-gestes) : la ligne au repos, centrée ; le survol ne la change pas
+        self.assertEqual(repos["ancre"].split()[1:], ["%d" % round((repos["ecran"] - repos["largeur"]) / 2), "9", "%d" % round(repos["largeur"]), "30"])
+        self.assertEqual(e["survol"]["ancre"], repos["ancre"])
         # survol : l'île grandit un peu (progression dessous, loupe au bout de la ligne), avec ses ressorts
         self.assertLess(e["survol-tout-de-suite"]["h"], 40, "le ressort part de la ligne, pas d'un saut")
         s = e["survol"]
@@ -100,6 +104,7 @@ class UneLigne(unittest.TestCase):
         e = self.etapes("ILE_LIGNE=34\nILE_ANIM_ECRANS=ecran-rendu:aucun\n")
         self.assertEqual(e["repos"]["ligne"], 34)
         self.assertEqual(e["repos"]["h"], 34)
+        self.assertTrue(e["repos"]["ancre"].endswith(" 34"), e["repos"]["ancre"])
         self.assertGreater(e["survol-tout-de-suite"]["h"], 34 + 20)
         self.assertEqual(e["survol-tout-de-suite"]["survol"], 1)
         self.assertEqual(e["sortie-tout-de-suite"]["h"], 34)
