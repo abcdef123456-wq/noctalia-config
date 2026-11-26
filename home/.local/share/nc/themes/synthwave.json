@@ -29,6 +29,7 @@
     "TERMINAL_MARGE": "12",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "rebond",
+    "FENETRES_GESTE": "fuite",
     "FENETRES_OMBRE_DECALAGE": "auto",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",

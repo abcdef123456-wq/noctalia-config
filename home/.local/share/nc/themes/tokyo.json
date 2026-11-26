@@ -29,6 +29,7 @@
     "TERMINAL_MARGE": "10",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "vif",
+    "FENETRES_GESTE": "debouche",
     "FENETRES_OMBRE_DECALAGE": "auto",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_MAITRE_ORIENTATION": "droite",

@@ -40,6 +40,7 @@
     "TERMINAL_MARGE": "12",
     "TERMINAL_CURSEUR": "beam",
     "FENETRES_CARACTERE": "doux",
+    "FENETRES_GESTE": "centre",
     "FENETRES_OMBRE_DECALAGE": "auto",
     "FENETRES_DISPOSITION": "dwindle",
     "FENETRES_COINS_FORME": "doux",

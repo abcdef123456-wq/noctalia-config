@@ -30,16 +30,17 @@ local cj = function(v)
   end
   return s(v)
 end
-courbes, anims, cfg = {}, {}, {}
+courbes, anims, cfg, cmds = {}, {}, {}, {}
 hl = {
   config = function(t) cfg[#cfg + 1] = t end,
   curve = function(n, o) courbes[#courbes + 1] = '"' .. n .. '":' .. cj(o.points) end,
   animation = function(a)
-    anims[#anims + 1] = string.format('["%s",%s,%.17g,"%s","%s"]', a.leaf, tostring(a.enabled), a.speed, a.bezier, a.style or "")
+    anims[#anims + 1] = string.format('["%s",%s,%.17g,"%s","%s"]', a.leaf, tostring(a.enabled), a.speed or 0, a.bezier or "", a.style or "")
   end,
+  exec_cmd = function(c) cmds[#cmds + 1] = c end,
 }
 nc = { reglage = function(k, d) if REG[k] ~= nil then return REG[k] end return d end, hypr_min = function() return false end,
-       profil = { profil = PROFIL or "balanced" } }
+       profil = { profil = PROFIL or "balanced", batterie = BATTERIE or false } }
 '''
 SORTIE = r'''
 io.write("{" .. table.concat(courbes, ",") .. "}\n[" .. table.concat(anims, ",") .. "]\n")

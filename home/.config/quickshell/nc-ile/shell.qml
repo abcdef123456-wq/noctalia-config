@@ -377,6 +377,8 @@ ShellRoot {
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }
+        // nc-plugin-sync, après le chargement du plugin nc-gestes : chaque île renvoie la place de sa pilule
+        function gestesAncre(): void { for (const i of ecransIle.instances) i.envoyerAncreGestes(true) }
         function fiche(): void {                                                            // Super + /
             Etat.fermer()
             if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // comme Échap

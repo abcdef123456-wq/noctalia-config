@@ -22,6 +22,9 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("playerctld daemon")
     -- Ancienne barre (Waybar, HyprPanel, ancienne Noctalia…) qui démarrerait encore : arrêtée et désactivée
     hl.exec_cmd("~/.local/bin/nc-session-propre")
+    -- Gestes d'ouverture du thème (plugin nc-gestes) : compilé pour cet Hyprland s'il a changé, puis chargé ; sans
+    -- en-têtes ni compilateur, rien (gestes natifs). En arrière-plan, ne retarde rien
+    hl.exec_cmd("~/.local/bin/nc-plugin-sync")
     -- Disposition de fenêtres à rouvrir à l'ouverture de session (nc-reglages → Fenêtres → Session à l'ouverture)
     if nc.reglage("SESSION_DEMARRAGE", "aucune") ~= "aucune" then hl.exec_cmd("~/.local/bin/nc-session demarrage") end
     -- Carrousel des fonds : surveillance et miniatures du dossier réel, après le démarrage, à basse priorité

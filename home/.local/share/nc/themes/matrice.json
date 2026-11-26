@@ -25,6 +25,7 @@
     "TERMINAL_MARGE": "10",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "vif",
+    "FENETRES_GESTE": "balayage",
     "FENETRES_OMBRE_DECALAGE": "aucun",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "doux",

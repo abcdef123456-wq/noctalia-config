@@ -25,6 +25,7 @@
     "TERMINAL_MARGE": "8",
     "TERMINAL_CURSEUR": "block",
     "FENETRES_CARACTERE": "sec",
+    "FENETRES_GESTE": "bloc",
     "FENETRES_OMBRE_DECALAGE": "dure",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "carres",

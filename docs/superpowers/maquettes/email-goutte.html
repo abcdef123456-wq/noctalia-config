@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Émail — Lancement en goutte</title>
+<style>
+:root{color-scheme:dark;background:#171f1b;color:#f1f5e9;font:16px/1.5 system-ui,sans-serif}*{box-sizing:border-box}body{margin:0}main{width:min(1050px,100% - 32px);margin:26px auto}h1{font-size:1.3rem;margin:0;font-weight:610}p{margin:2px 0 0;color:#c4cfc5;font-size:.9rem}.intro{display:flex;justify-content:space-between;align-items:center;gap:12px 24px;flex-wrap:wrap;margin-bottom:14px}.controls{display:flex;gap:8px}button{border:1px solid #64796a;padding:8px 14px;border-radius:7px;min-height:42px;background:#26362e;color:inherit;font:inherit;cursor:pointer}button:hover:not(:disabled){background:#40564a}button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #e4edc8;outline-offset:3px}kbd{font:.8rem ui-monospace,monospace;color:#c4cfc5;margin-left:.3em}.scene{position:relative;aspect-ratio:8/5;isolation:isolate;overflow:hidden;border:1px solid #64796a;border-radius:12px;background:#c4b296}.desktop,.launcher,.motion{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}.launch-at{position:absolute;left:34.3%;top:15%;width:31.4%;height:5.2%;min-height:0;padding:0;border:0;background:transparent!important;border-radius:6px}.launch-at:hover{box-shadow:0 0 0 1px inset #c9dfac}.foot{margin-top:8px}.motion[hidden],button[hidden]{display:none}noscript{color:#f2dcb6}
+.controls{align-items:center;flex-wrap:wrap}.slow{display:flex;align-items:center;gap:.45rem;padding:.35rem;font-size:.85rem;color:#c4cfc5;cursor:pointer}.slow input{accent-color:#c5d6ad}
+</style>
+<main>
+  <div class="intro">
+    <div><h1>Émail — ouverture en goutte</h1><p>Sélectionne Firefox dans l’île ou lance la démo.</p></div>
+    <div class="controls"><label class="slow"><input id="slow" type="checkbox">Ralenti</label><button id="launch" type="button">Lancer Firefox <kbd>Entrée</kbd></button><button id="reset" type="button" hidden>Rejouer</button></div>
+  </div>
+  <div class="scene" id="scene" data-phase="lanceur">
+    <img class="desktop" src="email-ile.png" alt="" width="1280" height="800">
+    <img class="launcher" id="launcher" src="email-lanceur-ile.png" alt="" width="1280" height="800">
+    <button class="launch-at" id="row" type="button" aria-label="Ouvrir Firefox depuis le résultat sélectionné"></button>
+    <svg class="motion" id="motion" viewBox="0 0 1280 800" aria-hidden="true" hidden>
+      <defs>
+        <linearGradient id="enamel" x2="0" y2="1"><stop stop-color="#35443a"/><stop offset="1" stop-color="#243129"/></linearGradient>
+        <linearGradient id="lip"><stop stop-color="#9bad9c" stop-opacity="0"/><stop offset=".5" stop-color="#9bad9c" stop-opacity=".85"/><stop offset="1" stop-color="#9bad9c" stop-opacity="0"/></linearGradient>
+        <clipPath id="window-clip"><use href="#body-shape"/></clipPath>
+      </defs>
+      <rect id="shadow" rx="16" fill="#1a211d" opacity="0"/>
+      <path id="body-shape" fill="url(#enamel)" stroke="#65796c"/>
+      <g clip-path="url(#window-clip)">
+        <g id="window-content" opacity="0">
+        <path d="M661 197H1171" stroke="#41584b"/>
+        <path d="M674 194v-20a8 8 0 0 1 8-8h139a8 8 0 0 1 8 8v20Z" fill="#37493e"/>
+        <image href="email-firefox.svg" x="683" y="172" width="16" height="16"/>
+        <text x="708" y="184" fill="#ecf3e8" font-size="13">Nouvel onglet</text>
+        <path d="M846 180h11m-5.5-5.5v11m265-4h9m9 0h9m10-4 8 8m0-8-8 8" stroke="#c4d1c7" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="m681 213-6 6 6 6m-6-6h13m8 0h13m-3-4 4 4-4 4" fill="none" stroke="#aebfb4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="723" y="205" width="442" height="29" rx="7" fill="#2d3f33"/>
+        <text x="737" y="224" fill="#c4d1c7" font-size="13">Rechercher ou saisir une adresse</text>
+        <image href="email-firefox.svg" x="889" y="311" width="54" height="54"/>
+        <text x="916" y="404" text-anchor="middle" fill="#eef3e8" font-size="25" font-weight="600">Firefox</text>
+        <rect x="747" y="427" width="338" height="43" rx="10" fill="#304338" stroke="#536d5d"/>
+        <text x="771" y="454" fill="#c4d1c7" font-size="14">Rechercher sur le Web</text>
+        </g>
+      </g>
+      <g id="source" opacity="0">
+        <rect id="cap" x="548" y="16" width="184" height="34" rx="12" fill="url(#enamel)" stroke="#65796c"/>
+        <rect id="shine" x="565" y="17" width="150" height="1" rx=".5" fill="url(#lip)"/>
+      </g>
+    </svg>
+  </div>
+  <p class="foot" id="status" role="status">Maquette animée : aucune application réelle ne s’ouvre.</p>
+  <noscript>Active JavaScript pour voir le mouvement.</noscript>
+</main>
+<script>
+const get = id => document.getElementById(id);
+const scene = get('scene'), launcher = get('launcher'), row = get('row'), launch = get('launch'), reset = get('reset');
+const motion = get('motion'), source = get('source'), cap = get('cap'), shine = get('shine');
+const bodyShape = get('body-shape'), content = get('window-content'), shadow = get('shadow');
+const slow = get('slow'), status = get('status');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const clamp = n => Math.min(1, Math.max(0, n));
+const smooth = n => { const p = clamp(n); return p*p*(3-2*p); };
+const lerp = (a,b,t) => a + (b-a)*t;
+let raf = 0;
+function paint(t) {
+  const fold = smooth(t/.18);
+  const bud = smooth((t-.04)/.43);
+  const flight = smooth((t-.54)/.46);
+  const spread = smooth((t-.59)/.41);
+  const swollen = Math.sin(Math.PI*clamp((t-.05)/.69));
+  const w = lerp(lerp(32,202,bud),536,spread);
+  const h = w*431/536;
+  const x = 640 + 12*bud + 264*flight;
+  const y = 44 + 54*bud + 53*flight;
+  const r = Math.min(h*.46,lerp(47,14,spread));
+  const left = x-w/2, right = x+w/2, bottom = y+h;
+  const sourceW = 184+42*swollen;
+  launcher.style.opacity = 1-fold;
+  source.setAttribute('opacity', fold*(1-smooth((t-.57)/.18)));
+  cap.setAttribute('x',640-sourceW/2); cap.setAttribute('width',sourceW); cap.setAttribute('height',34+8*swollen);
+  shine.setAttribute('x',654-sourceW/2); shine.setAttribute('width',sourceW-28);
+
+  const attached = t < .54;
+  scene.dataset.phase = t < .27 ? 'gonfle' : attached ? 'fil' : t < .72 ? 'goutte' : 'fenetre';
+  const neck = attached && t > .05;
+  let roof = '';
+  if(neck) {
+    const tension = smooth((t-.25)/.29);
+    const root = 640, roofY = 44, waistY = (y+roofY)/2;
+    const base = lerp(27,4,tension), tip = lerp(Math.min(w*.22,43),.8,tension);
+    roof = `H ${x-tip} C ${x-tip*.8} ${y} ${root-base*.48} ${waistY} ${root-base} ${roofY} H ${root+base} C ${root+base*.48} ${waistY} ${x+tip*.8} ${y} ${x+tip} ${y}`;
+  }
+  bodyShape.setAttribute('d', `M ${left+r} ${y} ${roof} H ${right-r} Q ${right} ${y} ${right} ${y+r} V ${bottom-r} Q ${right} ${bottom} ${right-r} ${bottom} H ${left+r} Q ${left} ${bottom} ${left} ${bottom-r} V ${y+r} Q ${left} ${y} ${left+r} ${y} Z`);
+  bodyShape.setAttribute('opacity',smooth((t-.025)/.085));
+  const ratio = w/536;
+  content.setAttribute('transform',`translate(${left-648*ratio} ${y-151*ratio}) scale(${ratio})`);
+  content.setAttribute('opacity',smooth((t-.06)/.15));
+  shadow.setAttribute('x',left-5*spread); shadow.setAttribute('y',y+9*spread);
+  shadow.setAttribute('width',w+10*spread); shadow.setAttribute('height',h+6*spread);
+  shadow.setAttribute('opacity',.20*spread);
+}
+function finish() {
+  raf = 0; paint(1); scene.dataset.phase = 'ouvert';
+  reset.hidden = false; reset.focus();
+  status.textContent = 'Firefox affiché dans la maquette. Aucune application réelle lancée.';
+}
+function start() {
+  if(scene.dataset.phase !== 'lanceur') return;
+  launch.disabled = true; row.hidden = true; motion.removeAttribute('hidden');
+  if(reduced.matches) { finish(); return; }
+  const startTime = performance.now();
+  const duration = slow.checked ? 2600 : 680;
+  function tick(time) {
+    const t = clamp((time-startTime)/duration);
+    if(t === 1) { finish(); return; }
+    paint(t); raf = requestAnimationFrame(tick);
+  }
+  paint(0); raf = requestAnimationFrame(tick);
+}
+launch.addEventListener('click',start);
+row.addEventListener('click',start);
+reset.addEventListener('click',() => {
+  if(raf) cancelAnimationFrame(raf);
+  motion.setAttribute('hidden',''); launcher.style.opacity = '1';
+  scene.dataset.phase = 'lanceur'; launch.disabled = false; row.hidden = false; reset.hidden = true;
+  status.textContent = 'Maquette animée : aucune application réelle ne s’ouvre.';
+  launch.focus();
+});
+document.addEventListener('keydown', event => {
+  if(event.key === 'Enter' && event.target === document.body && scene.dataset.phase === 'lanceur') {
+    event.preventDefault(); start();
+  }
+});
+</script>
+</html>

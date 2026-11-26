@@ -25,6 +25,7 @@
     "TERMINAL_MARGE": "12",
     "TERMINAL_CURSEUR": "beam",
     "FENETRES_CARACTERE": "doux",
+    "FENETRES_GESTE": "maree",
     "FENETRES_OMBRE_DECALAGE": "bas",
     "FENETRES_DISPOSITION": "master",
     "FENETRES_COINS_FORME": "rond",
