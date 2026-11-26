@@ -234,7 +234,7 @@ barre de l'écran actif. Un clic sur Wi-Fi, Bluetooth ou Son dans la barre ouvre
 **Super + Alt + ,** (`nc-reglages fenetre`) ouvre les réglages sur leur page d'accueil : choisir une
 catégorie, puis une page, ou rechercher un réglage dans toutes les catégories. Les actions qui produisent un résultat
 affichent son texte complet dans un dialogue. Les 23 thèmes de l’île Quickshell changent aussi sa composition ouverte :
-navigation en galerie, en pied ou sur un rail, tableau de bord illustré et lecteur adapté à l’identité du thème.
+un vitrail chez Dracula, un magnétophone chez Gruvbox, un salon de thé chez Sakura. Les commandes de lecture et les filtres des notifications s’inscrivent directement dans chaque dessin.
 
 L'île complète est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
 service `nc-ile`), avec les icônes Material Symbols Rounded. Quickshell vient du paquet sur Arch, du dépôt COPR sur

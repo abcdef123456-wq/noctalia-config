@@ -27,6 +27,14 @@ function matrice(w) {
 }
 
 const plans = {
+    "penombre": {
+        dessin: "pliage", tailles: [16, 10, 12], signe: "◇", titre: "droite",
+        repos: (w,h) => `M0,0 H${w} L${w-5},${h-7} L${w-23},${h} H19 L5,${h-5} Z`,
+        page: (w,h) => `M0,0 H${w} V${h-24} L${w-23},${h} H17 L0,${h-16} Z`,
+        carte: w => cartouche(`M0,3 L${w*.28},7 L${w*.38},23 L${w*.49},8 L${w*.58},4 L${w*.4},31 L${w*.21},18 Z`, `M4,4 L${w*.38},23 L${w*.4},31 M${w*.58},25 H${w-13}`),
+        cadre: (t,d,s) => composition(t+s+14+(d ? d+16 : 0), 3,15, t+s+24,17, t+11,10,
+            [bloc(t+7,20,s+6,2,0,"encre")])
+    },
     "noctalia": {
         dessin: "halo", tailles: [16, 11, 13], signe: "◉", titre: "centre",
         repos: (w,h) => `M23,1 H${w-22} C${w-2},1 ${w-1},7 ${w-2},15 Q${w-4},${h-1} ${w-24},${h-1} H20 Q1,${h-1} 1,16 Q1,1 23,1 Z`,

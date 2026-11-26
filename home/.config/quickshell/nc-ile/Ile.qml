@@ -185,8 +185,7 @@ PanelWindow {
     readonly property var disposition: Composition.cadre(plan, modelData.width, multiPages, reglagesPage)
     function adaptee(nom, mini) { return Math.max(mini, Math.min(548, Etat.hauteurs[nom] || mini)) }
     readonly property var hauteurs: ({
-        essentiel: Math.max(152, Etat.hauteurs.essentiel ?? 0),
-        musique: plan.media === "portrait" || plan.media === "scene" ? 234 : 190,
+        essentiel: Math.max(0, Etat.hauteurs.essentiel ?? 0), musique: 66,
         minuteur: Etat.minuteurFin > 0 ? 118 : 302, charge: adaptee("charge", 108),
         jeu: 218, centre: adaptee("centre", 462), son: adaptee("son", 268), reseau: adaptee("reseau", 228),
         bluetooth: adaptee("bluetooth", 188), notifications: adaptee("notifications", 168),
@@ -195,10 +194,14 @@ PanelWindow {
         fenetres: adaptee("fenetres", 128), appel: adaptee("appel", 118), terminal: adaptee("terminal", 118),
         resume: adaptee("resume", 138), concentration: adaptee("concentration", 228)
     })
+    readonly property real margeScene: scene.item ? scene.item.implicitHeight + 8 : 0
+    readonly property real hautContenu: disposition.haut + (disposition.bord === "haut" ? disposition.bande : 0)
+    readonly property real retraitGauche: disposition.bord === "gauche" && disposition.rail > 0 ? disposition.rail + 12 : 0
+    readonly property real retraitDroit: disposition.bord === "droite" && disposition.rail > 0 ? disposition.rail + 12 : (points ? 18 : 0)
     readonly property real hauteurPage: Math.min(hauteurs[Etat.vueActive] ?? hauteurs.essentiel,
-        Math.max(0, Math.min(680, modelData.height - ile.y - 8) - disposition.surHauteur))
+        Math.max(0, Math.min(680, modelData.height - ile.y - 8) - disposition.surHauteur - margeScene))
     readonly property size taille: recherche ? Qt.size(Math.min(modelData.width, 680), spot.hauteurVoulue)
-                                             : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur)
+                                             : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur + margeScene)
     readonly property bool points: Etat.vues.length > 4 && !recherche && !disposition.lateral
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
@@ -347,6 +350,8 @@ PanelWindow {
         opacity: ile.opacity
         sourceComponent: HabillageIle {
             plan: fen.identite
+            pigment: scene.item && !scene.item.breve ? scene.item.planche.accent : Couleurs.accent
+            encre: scene.item && !scene.item.breve ? scene.item.planche.ink : Couleurs.texte
             page: ile.pageIdentite
             dessinerFond: ile.fondDessine
             fond: ile.color
@@ -388,7 +393,8 @@ PanelWindow {
         }
         readonly property real rayonTheme: Couleurs.rayon(fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : (pointFerme ? 100 : 15)), cibleLargeur, cibleHauteur)
         property real radius: fen.ouverte && !fen.recherche ? Math.min(rayonTheme, 16 / (1 - Math.SQRT1_2)) : rayonTheme
-        property color color: pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
+        property color color: scene.item && !scene.item.breve ? scene.item.planche.paper
+            : pointFerme ? Couleurs.accent : Couleurs.forme === "cadre"
             ? Qt.alpha(Couleurs.fond, 0.72) : Qt.alpha(Couleurs.fond, Couleurs.verre)
         opacity: fen.pilCachee ? 0 : 1
         // Pilule au repos, fermée et à sa taille : le lanceur peut partir d'elle (LanceurFondu.qml)
@@ -624,9 +630,10 @@ PanelWindow {
             objectName: "nc-ile-entete"
             lateral: fen.disposition.lateral
             style: fen.plan.onglets
-            x: fen.disposition.bord === "droite" ? ile.width - width - 14 : 16
+            papier: scene.item && !scene.item.breve ? scene.item.planche : null
+            x: (ile.width - fen.disposition.largeur) / 2 + (fen.disposition.bord === "droite" ? fen.disposition.largeur - width - 14 : 16)
             y: fen.disposition.bord === "bas" ? ile.height - height - fen.disposition.bas : fen.disposition.haut
-            width: lateral ? fen.disposition.rail : Math.max(0, ile.width - 32)
+            width: lateral ? fen.disposition.rail : Math.max(0, fen.disposition.largeur - 32)
             height: lateral ? Math.max(0, ile.height - y - fen.disposition.bas) : fen.disposition.bande
             z: 1
             pages: Etat.vues
@@ -639,7 +646,26 @@ PanelWindow {
             onOuvrirControle: fen.ouvrirControle()
         }
 
-        // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
+        // Une seule scène interactive, libérée à la fermeture.
+        Loader {
+            id: scene
+            objectName: "nc-ile-scene"
+            active: fen.ouverte && !fen.recherche
+            visible: active && ile.height > fen.taille.height * .75
+            x: (ile.width - fen.disposition.largeur) / 2 + 16 + fen.retraitGauche
+            y: fen.hautContenu
+            width: Math.max(0, fen.disposition.largeur - 32 - fen.retraitGauche - fen.retraitDroit)
+            sourceComponent: SceneOuverte {
+                page: Etat.vueActive
+                rubrique: barreEntete.meta(page).nom
+                readonly property var contenu: pages.itemAt(Etat.vue)?.contenu ?? null
+                filtre: boite && contenu ? (contenu.filtre ?? "toutes") : "toutes"
+                onChoisirFiltre: valeur => { if (contenu) { contenu.filtre = valeur; contenu.choix = -1 } }
+                onOuvrirControle: fen.ouvrirControle()
+                onOuvrirRecherche: Etat.chercher(fen.modelData.name)
+                onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
+            }
+        }
         Repeater {
             id: pages
             model: Etat.vues
@@ -657,18 +683,21 @@ PanelWindow {
                 onActiveChanged: if (active) dejaVue = true
                 readonly property bool voisine: Math.abs(index - Etat.vue) <= 1
                 Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
-                readonly property real gauche: fen.disposition.bord === "gauche" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : 0
-                readonly property real droite: fen.disposition.bord === "droite" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : (fen.points ? 18 : 0)
-                x: (ile.width - fen.disposition.largeur) / 2 + 16 + gauche
-                width: Math.max(0, fen.disposition.largeur - 32 - gauche - droite)
+                x: scene.x
+                width: scene.width
                 height: Math.max(0, Math.min(fen.hauteurs[modelData] ?? fen.hauteurs.essentiel, fen.hauteurPage))
                 property real decalage: (index - Etat.vue) * (ile.height * 0.6)
-                y: fen.disposition.haut + (fen.disposition.bord === "haut" ? fen.disposition.bande : 0) + decalage
+                y: fen.hautContenu + fen.margeScene + decalage
                 Behavior on decalage { enabled: fen.mouv.actif && !Notifs.enPause; SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
                 opacity: fen.ouverte && !fen.recherche && active && ile.height > fen.taille.height * 0.65 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
+                Rectangle {
+                    anchors.fill: parent
+                    visible: !!scene.item && !scene.item.breve
+                    color: Couleurs.fond; radius: Couleurs.rayonBloc
+                }
                 Loader {
                     id: chargeur
                     anchors.fill: parent
@@ -684,12 +713,8 @@ PanelWindow {
         Component {
             id: pEssentiel
             EssentielIle {
-                plan: fen.plan
                 Component.onCompleted: Etat.annoncerHauteur("essentiel", implicitHeight)
                 onImplicitHeightChanged: Etat.annoncerHauteur("essentiel", implicitHeight)
-                onOuvrirControle: fen.ouvrirControle()
-                onOuvrirRecherche: Etat.chercher(fen.modelData.name)
-                onOuvrirThemes: { Etat.fermer(); fen.ouvrirThemes() }
             }
         }
         Component { id: pAppel; PageAppel {} }
@@ -698,14 +723,14 @@ PanelWindow {
         Component { id: pConcentration; PageConcentration {} }
         Component {
             id: pMusique
-            Musique { disposition: fen.plan.media; motif: fen.plan.icone; dessin: fen.plan.dessin }
+            Musique { motif: fen.plan.icone; dessin: fen.plan.dessin }
         }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }
         Component { id: pJeu; Jeu {} }
         Component { id: pCentre; Centre {} }
         Component { id: pSon; Son {} }
-        Component { id: pNotifs; PageNotifs {} }
+        Component { id: pNotifs; PageNotifs { dansScene: true } }
         Component { id: pReseau; PageListe { mode: "wifi" } }
         Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
         Component { id: pSysteme; Systeme {} }
@@ -720,7 +745,7 @@ PanelWindow {
         // Raccourci visuel pour les listes longues ; un rail latéral contient déjà toutes les pages.
         NavigationIle {
             anchors.right: parent.right; anchors.rightMargin: 8
-            y: fen.disposition.haut + (fen.disposition.bord === "haut" ? fen.disposition.bande : 0) + (fen.hauteurPage - height) / 2
+            y: fen.hautContenu + fen.margeScene + (fen.hauteurPage - height) / 2
             height: Math.max(0, Math.min(fen.hauteurPage - 20, Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue

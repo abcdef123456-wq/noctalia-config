@@ -195,9 +195,9 @@ ShellRoot {
                 onChoisir: nom => Etat.aller(nom)
                 onOuvrirControle: r.controleDemande = true
             }
-            EssentielIle {
+            SceneOuverte {
                 id: ess
-                width: parent.width
+                width: parent.width; page: "essentiel"; rubrique: "Essentiel"
                 onOuvrirControle: r.controleDemande = true
                 onOuvrirRecherche: r.rechercheDemandee = true
                 onOuvrirThemes: r.themesDemandes = true
@@ -213,7 +213,7 @@ ShellRoot {
                 console.error("pages du centre de contrôle encore sur l'île par défaut: " + v); Qt.exit(3)
             }
             if (ess.height > ess.parent.height - entete.height) { console.error("les actions sont rognées"); Qt.exit(4) }
-            ess.ouvrirControle(null)
+            ess.ouvrirControle()
             ess.ouvrirRecherche()
             ess.ouvrirThemes()
             if (!r.controleDemande || !r.rechercheDemandee || !r.themesDemandes) { console.error("signaux manquants"); Qt.exit(5) }

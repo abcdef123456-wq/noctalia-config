@@ -10,6 +10,8 @@ Item {
     required property color fond
     required property real contour
     required property bool lueur
+    property color pigment: Couleurs.accent
+    property color encre: Couleurs.texte
     readonly property string silhouette: dessinerFond ? (page ? plan.page(width, height) : plan.repos(width, height)) : ""
     readonly property var cartouche: page ? plan.carte(width) : null
     readonly property bool pointille: plan.dessin === "afficheur"
@@ -33,13 +35,13 @@ Item {
         }
         ShapePath {
             fillRule: ShapePath.OddEvenFill
-            fillColor: Qt.alpha(Couleurs.accent, Couleurs.sombre ? 0.29 : 0.22)
+            fillColor: Qt.alpha(habillage.pigment, Couleurs.sombre ? 0.29 : 0.22)
             strokeWidth: -1
             PathSvg { path: habillage.cartouche ? habillage.cartouche.aplat : "" }
         }
         ShapePath {
-            fillColor: habillage.pointille ? Qt.alpha(Couleurs.accent, 0.80) : "transparent"
-            strokeColor: Qt.alpha(Couleurs.accent, 0.58)
+            fillColor: habillage.pointille ? Qt.alpha(habillage.pigment, 0.80) : "transparent"
+            strokeColor: Qt.alpha(habillage.pigment, 0.58)
             strokeWidth: habillage.pointille ? -1 : 1.5
             capStyle: ShapePath.RoundCap
             joinStyle: ShapePath.RoundJoin
@@ -53,6 +55,7 @@ Item {
         y: 19 - height / 2
         width: Math.min(implicitWidth, habillage.width * 0.39)
         text: Couleurs.nomThemeAffiche
+        color: habillage.encre
         font.pixelSize: habillage.pointille ? 11 : 10
         font.weight: Font.Bold
         font.letterSpacing: habillage.pointille ? 2.4 : 1.6

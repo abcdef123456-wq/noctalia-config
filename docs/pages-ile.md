@@ -1,13 +1,16 @@
 # Île essentielle et Centre de contrôle
 
 L’île Quickshell se concentre sur **l’essentiel**. Les 23 thèmes fournis ont leur propre dessin, île fermée **et ouverte**.
-Changer de thème suffit, sans redémarrer l’île. Sakura présente les pages en galerie au-dessus d’un jardin et d’un lecteur
-radial ; Papier place un sommaire à gauche du feuillet ; Gruvbox a des touches en pied et une platine ; Nord ouvre
-un rail à droite, un tableau de bord dépouillé et un lecteur-portrait. Les pages gardent leurs commandes et services.
-- Références visuelles : [Impasto](https://github.com/andreumassanet/impasto) pour les vues spécialisées,
-  [Caelestia](https://github.com/caelestia-dots/shell) pour la continuité entre pilule et tableau de bord,
-  [Dynamic Glacier](https://github.com/mavxa/DynamicGlacier) pour la hiérarchie média, et la capture de référence pour
-  la galerie d’onglets et le disque radial. Les dessins vectoriels de l’île sont propres à ce dépôt.
+Changer de thème remplace la scène sans redémarrer. Chez Dracula, les commandes occupent les trois baies d’un vitrail ;
+chez Sakura, elles bordent un ticket de salon de thé illustré ; chez Gruvbox, ce sont les touches d’un magnétophone.
+Les mêmes emplacements servent au **transport du lecteur** sur Musique et aux **filtres de la boîte** sur Notifications.
+Les autres pages conservent leurs outils sous une version courte de l’illustration.
+Le thème personnel **Pénombre de papier** bénéficie aussi d’une scène dédiée : une grue en origami sur papier brun.
+
+Les dessins sont originaux. Références : [lunanoir21](https://github.com/lunanoir21/quickshell-dynamic-island)
+pour l’idée d’un instrument qui change de fonction, [Alan-Betty](https://github.com/Alan-Betty/quickshell-DynamicIsland)
+pour les activités intégrées et [Impasto](https://github.com/andreumassanet/impasto) pour la continuité entre barre et pages.
+
 - **Île fermée** : heure, date optionnelle, météo brève, notifications non lues et réactions en direct
   (musique, volume, luminosité, minuteur, appel, enregistrement vidéo, agents actifs).
 - **Île ouverte** : par défaut **Essentiel**, **Notifications** et **Musique** (lorsqu’un lecteur est actif),

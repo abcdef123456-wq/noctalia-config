@@ -8,6 +8,8 @@ import unittest
 from tests import _ile_hors_ecran as H
 
 THEMES = sorted(f.stem for f in (H.REPO / "home/.local/share/nc/themes").glob("*.json"))
+# Pénombre de papier est également utilisé par des installations personnalisées.
+THEMES = sorted(set(THEMES) | {"penombre"})
 PLANS = H.QML / "IdentitesIle.js"
 
 
@@ -152,26 +154,26 @@ ShellRoot {
             }
             const page = trouver(fen.contentItem, "nc-ile-page-essentiel")
             const nav = trouver(fen.contentItem, "nc-ile-entete")
-            const horloge = page && trouver(page, "nc-essentiel-temps")
-            const actions = page && trouver(page, "nc-essentiel-controle")
+            const scene = trouver(fen.contentItem, "nc-ile-scene")
+            const dessin = scene && trouver(scene, "nc-scene-dessin")
+            const actions = scene && trouver(scene, "nc-essentiel-controle")
             if (test.etape === 1) {
                 if (Couleurs.themeActif !== nom || !actions || !actions.visible || !nav || !nav.visible
                     || Math.abs(Etat.pilules.compositions.height - fen.taille.height) > 0.5) return
-                const zoneNav = nav.mapToItem(page, 0, 0)
-                const separee = zoneNav.x + nav.width <= 0.5 || zoneNav.y + nav.height <= 0.5
-                    || zoneNav.x >= page.width - 0.5 || zoneNav.y >= page.height - 0.5
-                if (!verifier(separee, nom + ": les onglets recouvrent la page " + zoneNav
-                              + " / " + page.width + "×" + page.height)) return
-                const rect = actions.mapToItem(page, actions.width, actions.height)
-                if (!verifier(rect.x <= page.width && rect.y <= page.height + 1, nom + ": action rognée")) return
-                const date = trouver(page, "nc-essentiel-date")
-                const etat = trouver(page, "nc-essentiel-etat")
-                const finDate = date.mapToItem(etat, date.width, date.height)
-                const debutDate = date.mapToItem(etat, 0, 0)
-                if (!verifier(finDate.y <= 0.5 || finDate.x <= 0.5 || debutDate.x >= etat.width - 0.5,
-                              nom + ": les indicateurs recouvrent la date")) return
-                test.dispositions.add([Math.sign(zoneNav.x), Math.sign(zoneNav.y), nav.style,
-                    Math.round(100 * horloge.x / page.width), horloge.y, horloge.alignement].join("/"))
+                if (!dessin || dessin.status !== Image.Ready) return
+                const coin = nav.mapToItem(scene, 0, 0)
+                const separee = coin.x + nav.width <= .5 || coin.y + nav.height <= .5
+                    || coin.x >= scene.width - .5 || coin.y >= scene.height - .5
+                if (!verifier(separee, nom + ": les onglets recouvrent la scène")) return
+                const positions = []
+                for (const suffixe of ["controle", "recherche", "themes"]) {
+                    const bouton = trouver(scene, "nc-essentiel-" + suffixe)
+                    const a = bouton.mapToItem(scene, 0, 0), b = bouton.mapToItem(scene, bouton.width, bouton.height)
+                    if (!verifier(a.x >= 0 && a.y >= 0 && b.x <= scene.width + .5 && b.y <= scene.height + .5,
+                                  nom + ": commande hors du dessin")) return
+                    positions.push(Math.round(1000*a.x/scene.width), Math.round(1000*a.y/scene.height))
+                }
+                test.dispositions.add(positions.join("/"))
                 if (++test.index < test.themes.length) { test.etape = 0; return }
                 fen.modelData = { name: "compositions", width: 440, height: 640 }
                 Reglages.style = { STYLE: "nord" }
@@ -182,6 +184,12 @@ ShellRoot {
                 if (!tab || !tab.visible) return
                 clic.mouseClick(tab, tab.width / 2, tab.height / 2)
                 if (!verifier(Etat.vueActive === "notifications", "l'onglet ne change pas de page")) return
+                test.etape = 3
+            } else if (test.etape === 3) {
+                const urgentes = trouver(scene, "nc-notifs-filtre-urgentes")
+                if (!urgentes || !scene.item.contenu || !urgentes.visible) return
+                clic.mouseClick(urgentes, urgentes.width / 2, urgentes.height / 2)
+                if (!verifier(scene.item.contenu.filtre === "urgentes", "le filtre dessiné ne filtre pas la boîte")) return
                 const ctrl = trouver(nav, "nc-ile-vers-controle")
                 clic.mouseClick(ctrl, ctrl.width / 2, ctrl.height / 2)
                 if (!verifier(Etat.controleOuvert && !Etat.controleAncre && !Etat.controleBord,

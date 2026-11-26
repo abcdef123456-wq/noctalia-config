@@ -1,32 +1,17 @@
-// Tableau de bord : la composition du thème place l'heure, l'illustration et les indicateurs.
+// Activités et actions sous la scène du thème actif.
 import QtQuick
-import Quickshell
 import Quickshell.Widgets
-import Quickshell.Services.UPower
-import "CompositionIle.js" as Composition
 
 Item {
     id: vue
-    property var plan: Composition.pour(Couleurs.themeActif)
-    readonly property var composition: Composition.accueil(plan)
     readonly property bool estBrut: Couleurs.styleBrut
     readonly property bool estTerminal: Couleurs.styleTerminal
     readonly property bool estEditorial: Couleurs.styleEditorial
     readonly property bool estNeon: Couleurs.styleNeon
-    readonly property bool estApple: Couleurs.styleApple
     readonly property bool aResumeNotif: !Partage.silence && !Etat.aMusique && Notifs.nonLues > 0
     readonly property var derniereNotif: aResumeNotif && Notifs.liste.length > 0 ? Notifs.liste[0] : null
-    readonly property string dateFormatee: {
-        var d = Etat.dateLongue || ""
-        if (!d) return ""
-        var cap = d.charAt(0).toUpperCase() + d.slice(1)
-        return (estBrut || estTerminal) ? cap.toUpperCase() : cap
-    }
     readonly property real progresMusique: Etat.lecteur && Etat.lecteur.length > 0
         ? Math.max(0, Math.min(1, Etat.lecteur.position / Etat.lecteur.length)) : 0
-    signal ouvrirControle(Item bouton)
-    signal ouvrirRecherche()
-    signal ouvrirThemes()
 
     implicitHeight: colonne.implicitHeight
 
@@ -36,85 +21,16 @@ Item {
         spacing: 12
 
         Item {
-            id: zoneHero
             width: parent.width
-            height: Math.max(vue.composition.h, blocAmbiant.y + blocAmbiant.implicitHeight + 4,
-                             blocTemps.y + blocTemps.implicitHeight + 4)
-            readonly property var placeHeure: vue.composition.heure
-            readonly property var placeArt: vue.composition.art
-            readonly property var placeEtat: vue.composition.etat
-
-            Rectangle {
-                anchors.fill: parent
-                visible: vue.plan.accueil === "carte" || vue.plan.accueil === "dalle" || vue.plan.accueil === "terminal"
-                color: vue.plan.accueil === "terminal" ? "transparent" : Couleurs.surfaceDouce
-                radius: Couleurs.rayon(vue.plan.accueil === "carte" ? Couleurs.rayonBloc : 0, width, height)
-                border.width: vue.plan.accueil === "carte" ? 0 : 1
-                border.color: Couleurs.bordureSubtile
-            }
-            Rectangle {
-                visible: vue.plan.accueil === "marge" || vue.plan.accueil === "jardin"
-                x: parent.width * (vue.plan.accueil === "marge" ? .29 : .60)
-                y: 8; width: 1; height: parent.height - 16
-                color: Couleurs.separateur
-            }
-            MotifIle {
-                dessin: vue.plan.dessin
-                x: zoneHero.width * zoneHero.placeArt[0]; y: zoneHero.placeArt[1]
-                width: zoneHero.width * zoneHero.placeArt[2]; height: zoneHero.placeArt[3]
-                opacity: vue.plan.accueil === "minimal" ? .32 : .84
-            }
-            Column {
-                id: blocTemps
-                objectName: "nc-essentiel-temps"
-                x: zoneHero.width * zoneHero.placeHeure[0] + (vue.plan.accueil === "terminal" || vue.plan.accueil === "dalle" ? 12 : 0)
-                y: zoneHero.placeHeure[1]
-                width: zoneHero.width * zoneHero.placeHeure[2]
-                spacing: 2
-                readonly property int alignement: zoneHero.placeHeure[3] === "centre" ? Text.AlignHCenter
-                    : zoneHero.placeHeure[3] === "droite" ? Text.AlignRight : Text.AlignLeft
-                Texte {
-                    id: heureTxt
-                    objectName: "nc-essentiel-heure"
-                    width: parent.width
-                    horizontalAlignment: blocTemps.alignement
-                    text: (vue.plan.accueil === "terminal" ? "> " : "") + Etat.heure
-                    font.pixelSize: Math.max(1, Math.min(parent.width / 3.3, vue.estBrut ? 42 : vue.plan.accueil === "minimal" ? 46 : 38))
-                    font.weight: vue.estEditorial ? Font.Normal : (vue.estBrut ? Font.Black : Font.DemiBold)
-                    font.features: ({ "tnum": 1 })
-                    font.letterSpacing: vue.estEditorial ? -0.5 : (vue.estBrut ? 0.8 : -0.4)
-                    color: (vue.estTerminal || vue.estBrut) ? Couleurs.accent : Couleurs.texte
-                }
-
-                Texte {
-                    objectName: "nc-essentiel-date"
-                    width: parent.width
-                    horizontalAlignment: blocTemps.alignement
-                    visible: Reglages.val("ILE_DATE", "oui") !== "non"
-                    text: vue.dateFormatee
-                    secondaire: true
-                    font.pixelSize: (vue.estBrut || vue.estTerminal) ? 10 : 12
-                    font.letterSpacing: (vue.estBrut || vue.estTerminal) ? 0.8 : 0
-                }
-            }
-
-            // Tous les états restent accessibles, que le thème les range comme une légende ou un statut.
+            visible: blocAmbiant.implicitHeight > 0
+            height: blocAmbiant.implicitHeight
             Column {
                 id: blocAmbiant
                 objectName: "nc-essentiel-etat"
-                x: zoneHero.width * zoneHero.placeEtat[0] + (vue.plan.accueil === "dalle" ? 12 : 0)
-                y: Math.max(zoneHero.placeEtat[1], x < blocTemps.x + blocTemps.width && x + width > blocTemps.x
-                            ? blocTemps.y + blocTemps.implicitHeight + 6 : 0)
-                width: zoneHero.width * zoneHero.placeEtat[2] - (vue.plan.accueil === "dalle" ? 24 : 0)
+                width: parent.width
                 spacing: 5
-                readonly property string alignement: zoneHero.placeEtat[3]
-                function debut(ligne) {
-                    return Math.max(0, alignement === "centre" ? (width - ligne) / 2
-                                      : alignement === "droite" ? width - ligne : 0)
-                }
                 // Météo + Batterie sur une ligne fluide
                 Row {
-                    x: blocAmbiant.debut(implicitWidth)
                     spacing: 8
                     visible: Etat.meteoPilule || Etat.batteriePc
 
@@ -166,7 +82,6 @@ Item {
 
                 // Pastilles d'état actives (seulement si VPN ou Concentration actif)
                 Row {
-                    x: blocAmbiant.debut(implicitWidth)
                     spacing: 6
                     visible: Notifs.concentration || VpnEtat.indicateur || Modes.pastille
 
@@ -360,102 +275,5 @@ Item {
             }
         }
 
-        // Séparateur et passerelle vers les surfaces du bureau.
-        Rectangle {
-            width: parent.width; height: 1
-            color: Couleurs.separateur
-            opacity: 0.7
-        }
-
-        Item {
-            id: actions
-            width: parent.width
-            height: 32
-
-            // Bouton principal : ouvrir le Centre de contrôle dédié
-            Rectangle {
-                id: boutonControle
-                objectName: "nc-essentiel-controle"
-                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                width: rowCtrl.implicitWidth + 22; height: 32
-                radius: Couleurs.rayon((vue.estBrut || vue.estTerminal) ? 2 : 16, width, height)
-                color: zc.containsMouse ? Couleurs.surfaceActive : Couleurs.surfaceDouce
-                border.width: (vue.estBrut || vue.estTerminal || vue.estNeon || vue.estEditorial) ? 1 : 0
-                border.color: zc.containsMouse ? Couleurs.accent : Couleurs.bordureSubtile
-                Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
-
-                Row {
-                    id: rowCtrl
-                    anchors.centerIn: parent; spacing: 7
-                    Ico {
-                        anchors.verticalCenter: parent.verticalCenter
-                        nom: "tune"; taille: 15
-                        color: zc.containsMouse ? Couleurs.texteSurSurfaceActive : Couleurs.accent
-                    }
-                    Texte {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (vue.estBrut || vue.estTerminal)
-                              ? Reglages.t("CONTRÔLE", "CONTROL")
-                              : Reglages.t("Centre de contrôle", "Control Center")
-                        font.pixelSize: (vue.estBrut || vue.estTerminal) ? 10 : 12
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: (vue.estBrut || vue.estTerminal) ? 0.8 : 0
-                        color: zc.containsMouse ? Couleurs.texteSurSurfaceActive : Couleurs.texte
-                    }
-                }
-                MouseArea {
-                    id: zc; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: vue.ouvrirControle(boutonControle)
-                }
-                Accessible.role: Accessible.Button
-                Accessible.name: Reglages.t("Centre de contrôle", "Control Center")
-            }
-
-            // Actions secondaires compactes à droite : Recherche + Thèmes
-            Row {
-                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-
-                Rectangle {
-                    objectName: "nc-essentiel-recherche"
-                    width: 32; height: 32
-                    radius: Couleurs.rayon((vue.estBrut || vue.estTerminal) ? 2 : 16, width, height)
-                    color: zr.containsMouse ? Couleurs.surfaceActive : Couleurs.surfaceDouce
-                    border.width: (vue.estBrut || vue.estTerminal || vue.estNeon || vue.estEditorial) ? 1 : 0
-                    border.color: zr.containsMouse ? Couleurs.accent : Couleurs.bordureSubtile
-                    Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
-                    Ico {
-                        anchors.centerIn: parent; nom: "search"; taille: 16
-                        color: zr.containsMouse ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
-                    }
-                    MouseArea {
-                        id: zr; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: vue.ouvrirRecherche()
-                    }
-                    Accessible.role: Accessible.Button
-                    Accessible.name: Reglages.t("Rechercher", "Search")
-                }
-
-                Rectangle {
-                    objectName: "nc-essentiel-themes"
-                    width: 32; height: 32
-                    radius: Couleurs.rayon((vue.estBrut || vue.estTerminal) ? 2 : 16, width, height)
-                    color: zth.containsMouse ? Couleurs.surfaceActive : Couleurs.surfaceDouce
-                    border.width: (vue.estBrut || vue.estTerminal || vue.estNeon || vue.estEditorial) ? 1 : 0
-                    border.color: zth.containsMouse ? Couleurs.accent : Couleurs.bordureSubtile
-                    Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 110 } }
-                    Ico {
-                        anchors.centerIn: parent; nom: "palette"; taille: 16
-                        color: zth.containsMouse ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
-                    }
-                    MouseArea {
-                        id: zth; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: vue.ouvrirThemes()
-                    }
-                    Accessible.role: Accessible.Button
-                    Accessible.name: Reglages.t("Thèmes du bureau", "Desktop themes")
-                }
-            }
-        }
     }
 }

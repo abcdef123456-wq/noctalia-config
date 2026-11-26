@@ -4,6 +4,10 @@ import QtQuick.Controls
 
 Item {
     id: entete
+    property var papier: null
+    readonly property color encre: papier ? papier.ink : Couleurs.texte
+    readonly property color pigment: papier ? papier.accent : Couleurs.accent
+    readonly property color surPigment: papier ? papier.paper : Couleurs.surAccent
     property var pages: []
     property string active: ""
     property int nonLues: 0
@@ -60,7 +64,7 @@ Item {
         anchors.fill: parent
         visible: entete.style === "capsules" || entete.lateral
         radius: Couleurs.rayon(entete.style === "capsules" ? 18 : Couleurs.rayonBloc, width, height)
-        color: entete.plein ? Couleurs.surfaceDouce : Qt.alpha(Couleurs.voile, Couleurs.sombre ? .045 : .06)
+        color: entete.papier ? Qt.alpha(entete.encre, .055) : entete.plein ? Couleurs.surfaceDouce : Qt.alpha(Couleurs.voile, Couleurs.sombre ? .045 : .06)
         border.width: entete.style === "index" || entete.plein ? 1 : 0
         border.color: Couleurs.bordureSubtile
     }
@@ -88,9 +92,8 @@ Item {
             width: entete.lateral ? onglets.width : (entete.icones ? 38 : onglets.largeurOnglet)
             height: entete.lateral ? (entete.icones ? 31 : 34) : onglets.height
             radius: Couleurs.rayon(entete.style === "capsules" ? 16 : entete.plein ? 1 : 6, width, height)
-            color: choisi && entete.plein ? Couleurs.accent
-                 : choisi && !entete.ligne ? Couleurs.surfaceActive
-                 : action.contientPointeur ? Couleurs.carteSurvol : "transparent"
+            color: choisi && entete.plein ? entete.encre : choisi && !entete.ligne ? Qt.alpha(entete.encre, .16)
+                 : action.contientPointeur ? Qt.alpha(entete.encre, .10) : "transparent"
             border.width: entete.plein && !choisi ? 1 : 0
             border.color: Couleurs.bordureSubtile
 
@@ -100,7 +103,7 @@ Item {
                 y: entete.lateral ? 5 : parent.height - height
                 width: entete.lateral ? 2 : parent.width - 10
                 height: entete.lateral ? parent.height - 10 : 2
-                color: Couleurs.accent
+                color: entete.pigment
             }
             Ico {
                 visible: tab.symbole
@@ -108,9 +111,7 @@ Item {
                 y: tab.empile ? 4 : (parent.height - height) / 2
                 nom: tab.info.ico
                 taille: 15
-                color: tab.choisi && entete.plein ? Couleurs.surAccent
-                     : tab.choisi && !entete.ligne ? Couleurs.texteSurSurfaceActive
-                     : tab.choisi ? Couleurs.accent : Couleurs.texteSec
+                color: tab.choisi && entete.plein ? entete.surPigment : entete.encre
             }
             Texte {
                 id: titre
@@ -123,15 +124,13 @@ Item {
                 text: (entete.style === "index" ? String(tab.index + 1).padStart(2, "0") + "  " : "") + tab.info.nom
                 font.pixelSize: entete.lateral || entete.plein ? 10 : 11
                 font.weight: tab.choisi ? Font.DemiBold : Font.Medium
-                color: tab.choisi && entete.plein ? Couleurs.surAccent
-                     : tab.choisi && !entete.ligne ? Couleurs.texteSurSurfaceActive
-                     : tab.choisi ? Couleurs.texte : Couleurs.texteSec
+                color: tab.choisi && entete.plein ? entete.surPigment : entete.encre
             }
             Rectangle {
                 visible: tab.badge
                 x: parent.width - width - 4; y: 5
                 width: 5; height: 5; radius: width / 2
-                color: tab.choisi && entete.plein ? Couleurs.surAccent : Couleurs.accent
+                color: tab.choisi && entete.plein ? entete.surPigment : entete.pigment
             }
             ControleAction {
                 id: action
@@ -153,11 +152,11 @@ Item {
         y: entete.lateral ? parent.height - height - 4 : (parent.height - height) / 2
         width: 28; height: 28
         radius: Couleurs.rayon(entete.plein ? 1 : 14, width, height)
-        color: zc.contientPointeur ? Couleurs.surfaceActive : Couleurs.surfaceDouce
+        color: Qt.alpha(entete.encre, zc.contientPointeur ? .18 : .08)
         Ico {
             anchors.centerIn: parent
             nom: "tune"; taille: 15
-            color: zc.contientPointeur ? Couleurs.texteSurSurfaceActive : Couleurs.texteSec
+            color: entete.encre
         }
         ControleAction {
             id: zc
