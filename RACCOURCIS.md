@@ -47,7 +47,7 @@ section « Mes raccourcis » de la fiche).
 |---|---|
 | `Super` + `Maj` + `Q` | Fermer (et le programme si dernière) |
 | `Super` + `V` | Fenêtre libre ↔ rangée |
-| `Super` + `F` | Plein écran ; une fenêtre flottante (épinglée aussi) retrouve ensuite sa place et sa taille, et reste épinglée |
+| `Super` + `F` | Basculer le plein écran (ou quitter le maximisé) sans déplacer les colonnes du bureau défilant ; une fenêtre flottante retrouve sa place, sa taille et son éventuel épinglage |
 | `Super` + `Maj` + `P` | Garder sa taille (pseudo) |
 | `Super` + `J` | Changer le sens de la division |
 | `Super` + `flèches` | Aller à la fenêtre voisine |

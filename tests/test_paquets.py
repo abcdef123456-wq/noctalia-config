@@ -3,8 +3,10 @@
 Faux pacman, checkupdates, flatpak et sudo ; HOME isolé. La page Système réelle est chargée hors écran avec des
 singletons factices, et le cache passe de 3 à 0 comme après une mise à jour.
 """
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+import select
 import shutil
 import subprocess
 import tempfile
@@ -116,8 +118,20 @@ class Paquets(unittest.TestCase):
     def lancer(self, *args, entree=None, **env_sup):
         env = dict(HOME=str(self.home), PATH=self.chemin, NC_LANGUE="fr", NC_SNAPSHOTS=str(self.snaps))
         env.update(env_sup)
-        return subprocess.run([str(BIN / "nc-paquets"), *args], env=env, capture_output=True, text=True, timeout=30,
-                              **(dict(input=entree) if entree is not None else dict(stdin=subprocess.DEVNULL)))
+        # nc-paquets détache les notifications et ferme stdout/stderr dans l'enfant.
+        # Ce tube reste ouvert jusqu'à la fin des descendants qui utilisent le HOME factice.
+        lecture, ecriture = os.pipe()
+        with os.fdopen(lecture, "rb") as fin:
+            try:
+                resultat = subprocess.run(
+                    [str(BIN / "nc-paquets"), *args], env=env, capture_output=True, text=True, timeout=30,
+                    pass_fds=(ecriture,),
+                    **(dict(input=entree) if entree is not None else dict(stdin=subprocess.DEVNULL)),
+                )
+            finally:
+                os.close(ecriture)
+            self.assertTrue(select.select([fin], [], [], 30)[0], "un descendant de nc-paquets utilise encore le HOME")
+        return resultat
 
     def appels(self):
         p = self.home / "appels"
@@ -608,12 +622,11 @@ sleep 1; rm -f "$L"; printf 'zsh 5-1 -> 5-2\\nlinux 6.1-1 -> 6.2-1\\n'; exit 0
         self.lancer("compter", **env)
         vieux = time.time() - 2 * 3600
         os.utime(self.cache, (vieux, vieux))
-        base = dict(HOME=str(self.home), PATH=self.chemin, NC_LANGUE="fr", **env)
-        minuteur = subprocess.Popen([str(BIN / "nc-paquets"), "compter", "auto"], env=base, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.3)
-        r = self.lancer("verifier", **env)
-        minuteur.wait(timeout=30)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            minuteur = pool.submit(self.lancer, "compter", "auto", **env)
+            time.sleep(0.3)
+            r = self.lancer("verifier", **env)
+            minuteur.result()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads((self.home / ".cache/nc/paquets.json").read_text())["incomplet"], [])
         self.assertFalse((self.home / ".cache/nc/paquets-erreur").exists())
@@ -1048,7 +1061,6 @@ exit 0
     def test_notification_une_seule_fois_si_le_terminal_echoue(self):
         """B1R3-P2 : sous systemd, un clic sur « Mettre à jour » avec un kitty en échec : le scope rendait ce code, et le
         repli « || notifier-attendre » remontrait la notification (et rouvrait le terminal)."""
-        import time
         (self.home / "bin/systemd-run").write_text('''#!/bin/sh
 echo "systemd-run $*" >> "$HOME/appels"
 while [ "${1#-}" != "$1" ]; do shift; done
@@ -1063,7 +1075,6 @@ while [ "${1#-}" != "$1" ]; do shift; done
                 for f in ("appels", "notifs-clic", ".cache/nc/paquets-notif.json"):
                     (self.home / f).unlink(missing_ok=True)
                 self.lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", INVOCATION_ID="x", NC_TEST_KITTY=code)
-                time.sleep(1.5)                       # la notification part en arrière-plan
                 self.assertEqual((self.home / "notifs-clic").read_text().count("notif"), 1, self.appels())
                 self.assertEqual(len([a for a in self.appels() if a.startswith("kitty")]), 1, self.appels())
 

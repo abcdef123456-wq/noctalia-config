@@ -34,7 +34,7 @@ esac
 '''
 
 
-@unittest.skipUnless(LUA and shutil.which("sh") and shutil.which("timeout"), "lua, sh et timeout requis")
+@unittest.skipUnless(LUA and all(shutil.which(cmd) for cmd in ("sh", "timeout", "flock")), "lua, sh, timeout et flock requis")
 class DndEnModeJeu(unittest.TestCase):
     def setUp(self):
         self._t = tempfile.TemporaryDirectory(prefix="nc-jeu-dnd-")
@@ -83,6 +83,20 @@ class DndEnModeJeu(unittest.TestCase):
         self.sortir()
         self.assertEqual(self.etat.read_text().strip(), "non")
         self.assertFalse((self.d / "nc-mode-jeu-dnd").exists())
+
+    def test_sortie_pendant_la_notification_annule_la_pause(self):
+        self.etat.write_text("non\n")
+        # Rejoue la sortie entière avant de rendre la main à l'entrée différée, sans attente réelle.
+        (self.d / "bin" / "sleep").write_text(
+            '#!/bin/sh\ncmd=$("$LUA" "$XDG_RUNTIME_DIR/harnais.lua" "$NC") && sh -c "$cmd"\n'
+        )
+        self.env.update(LUA=LUA, NC=str(NC))
+        self.entrer()
+        self.assertFalse((self.d / "nc-mode-jeu").exists())
+        self.assertEqual(self.etat.read_text().strip(), "non")
+        self.assertFalse((self.d / "nc-mode-jeu-dnd").exists())
+        self.assertNotIn("concentrationRegler true", (self.d / "journal").read_text())
+        self.assertNotIn("notification-dnd-set on", (self.d / "journal").read_text())
 
     def test_entree_deux_fois_ne_crase_pas_letat_davant(self):
         self.etat.write_text("oui\n")

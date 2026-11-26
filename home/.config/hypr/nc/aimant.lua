@@ -250,7 +250,7 @@ function M.appliquer(w, z, r)
         if nc.reglage("AIMANT_PLEIN_MASQUE", false) and adresse_valide(w.address) then
             hl.exec_cmd("~/.local/bin/nc-fenetre plein-masquer " .. w.address)
         end
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set" }))
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set", layout_aware = false }))
     else
         if not w.floating then hl.dispatch(hl.dsp.window.float({ action = "enable", window = w })) end
         hl.dispatch(hl.dsp.window.resize({ window = w, x = r.w, y = r.h }))
@@ -286,7 +286,7 @@ function M.remettre(w, px, py)
     if not e then return false end
     avant[a] = nil
     if (tonumber(w.fullscreen) or 0) ~= 0 then
-        hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "unset" }))
+        hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "unset", layout_aware = false }))
     end
     if not e.libre then
         if w.floating then hl.dispatch(hl.dsp.window.float({ action = "disable", window = w })) end
