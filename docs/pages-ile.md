@@ -54,8 +54,10 @@ immédiatement à Sakura et est conservé quand on passe à un autre thème. En 
 
 La pilule garde l’heure et, quand elle est disponible et activée, la météo. Le titre ouvre le lecteur et la cloche
 ouvre les notifications récentes ; un second clic sur le même bouton ou Échap replie l’île. Le bouton lecture/pause
-de la pilule n’ouvre pas le lecteur. Ces vues n’ont ni onglets ni raccourci de réglages : le Centre de contrôle
-reste accessible par `Super + C` et les Réglages gardent leur propre fenêtre. Les autres thèmes ne changent pas.
+de la pilule n’ouvre pas le lecteur. Dans les notifications, **×** retire une entrée et **Tout effacer** vide la
+liste ; **Marquer comme lues** les conserve. Les vues s’ouvrent directement, sans passer par le Centre de contrôle,
+qui reste accessible par `Super + C`. Les Réglages gardent leur propre fenêtre. Les autres thèmes ne changent pas.
+L’animation suit le profil de mouvement choisi, avec un repli légèrement plus rapide que l’ouverture.
 
 ### Autres pages
 

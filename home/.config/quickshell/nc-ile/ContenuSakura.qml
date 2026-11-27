@@ -76,7 +76,7 @@ Item {
             spacing: 6
             GridLayout {
                 Layout.fillWidth: true
-                columns: width >= 235 ? 2 : 1
+                columns: width >= 280 ? 2 : 1
                 columnSpacing: 8; rowSpacing: 2
                 Libelle {
                     Layout.fillWidth: true
@@ -85,30 +85,20 @@ Item {
                     font.weight: Font.DemiBold
                     Accessible.role: Accessible.Heading
                 }
-                ControleAction {
-                    id: toutLire
-                    objectName: "nc-sakura-notifs-tout-lire"
-                    visible: !Partage.silence && Notifs.liste.length > 0
-                    enabled: Notifs.nonLues > 0
-                    opacity: enabled ? 1 : .58
+                Row {
                     Layout.alignment: Qt.AlignRight
-                    Layout.preferredWidth: Math.min(implicitWidth, racine.width)
-                    implicitWidth: contentItem.implicitWidth + 14
-                    implicitHeight: 27
-                    padding: 0
-                    text: Reglages.t("Marquer comme lues", "Mark as read")
-                    Accessible.name: text
-                    onClicked: if (!Partage.silence) Notifs.toutLire()
-                    background: Rectangle {
-                        color: toutLire.contientPointeur ? racine.rose : "transparent"
-                        radius: height / 2
+                    visible: liste.aDesNotifications
+                    spacing: 2
+                    ActionReception {
+                        objectName: "nc-sakura-notifs-tout-lire"
+                        enabled: Notifs.nonLues > 0
+                        text: Reglages.t("Marquer comme lues", "Mark as read")
+                        onClicked: if (!Partage.silence) Notifs.toutLire()
                     }
-                    contentItem: Libelle {
-                        text: toutLire.text
-                        color: racine.accent
-                        font.pixelSize: 11
-                        font.weight: Font.DemiBold
-                        horizontalAlignment: Text.AlignHCenter
+                    ActionReception {
+                        objectName: "nc-sakura-notifs-tout-effacer"
+                        text: Reglages.t("Tout effacer", "Clear all")
+                        onClicked: if (!Partage.silence) Notifs.toutEffacer()
                     }
                 }
             }
@@ -130,31 +120,30 @@ Item {
                 Accessible.name: Reglages.t("Notifications", "Notifications")
                 Keys.onReturnPressed: event => ouvrirCourante(event)
                 Keys.onEnterPressed: event => ouvrirCourante(event)
+                Keys.onDeletePressed: event => {
+                    if (!event.isAutoRepeat && !Partage.silence && currentItem) Notifs.fermer(currentItem.modelData)
+                }
 
                 function ouvrirCourante(event) {
                     if (!event.isAutoRepeat && !Partage.silence && currentItem) Notifs.ouvrir(currentItem.modelData)
                 }
 
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; width: 6 }
-                delegate: ControleAction {
+                delegate: Item {
                     id: carte
                     required property var modelData
                     required property int index
                     readonly property bool nonLue: !Notifs.lus[modelData.id]
                     readonly property string appli: Notifs.nomAppli(modelData)
                     readonly property string quand: Notifs.quand(modelData, Etat.minute.getTime())
-                    readonly property bool surlignee: contientPointeur || (liste.activeFocus && ListView.isCurrentItem)
+                    readonly property string text: modelData.summary || appli
+                    readonly property bool surlignee: ouvrir.contientPointeur || retirer.contientPointeur
+                        || (liste.activeFocus && ListView.isCurrentItem)
 
-                    objectName: "nc-sakura-notif-" + modelData.id
                     width: Math.max(0, liste.width - (liste.count > 2 ? 8 : 0))
                     height: liste.hauteurLigne
-                    padding: 0
-                    text: modelData.summary || appli
-                    Accessible.name: text
-                    Accessible.description: appli + (quand ? ", " + quand : "")
-                        + (nonLue ? Reglages.t(", non lue", ", unread") : "")
-                    onClicked: if (!Partage.silence) Notifs.ouvrir(modelData)
-                    background: Rectangle {
+                    Rectangle {
+                        anchors.fill: parent
                         radius: racine.ticket ? 0 : 10
                         color: carte.surlignee ? racine.rose : (racine.ticket ? "transparent" : racine.rosePale)
                         Shape {
@@ -173,7 +162,8 @@ Item {
                             }
                         }
                     }
-                    contentItem: RowLayout {
+                    RowLayout {
+                        anchors.fill: parent
                         spacing: 6
                         Vignette {
                             Layout.leftMargin: 6
@@ -201,12 +191,39 @@ Item {
                                 color: racine.encreDouce
                             }
                         }
-                        Item {
-                            Layout.preferredWidth: 7
-                            Layout.preferredHeight: 7
-                            Layout.rightMargin: 8
-                            Rectangle { anchors.fill: parent; radius: width / 2; color: racine.accent; visible: carte.nonLue }
+                        Rectangle {
+                            Layout.preferredWidth: 5
+                            Layout.preferredHeight: 5
+                            radius: width / 2
+                            color: carte.nonLue ? racine.accent : "transparent"
                         }
+                        ControleAction {
+                            id: retirer
+                            objectName: "nc-sakura-notif-retirer-" + carte.modelData.id
+                            Layout.preferredWidth: 30
+                            Layout.fillHeight: true
+                            Layout.rightMargin: 3
+                            text: Reglages.t("Supprimer la notification", "Dismiss notification")
+                            Accessible.name: text + " : " + carte.text
+                            onClicked: if (!Partage.silence) Notifs.fermer(carte.modelData)
+                            background: Rectangle {
+                                anchors.centerIn: parent
+                                width: 26; height: 26; radius: 13
+                                color: retirer.contientPointeur ? racine.rose : "transparent"
+                            }
+                            contentItem: Ico { nom: "close"; taille: 16; color: racine.accent }
+                        }
+                    }
+                    ControleAction {
+                        id: ouvrir
+                        anchors.fill: parent
+                        anchors.rightMargin: retirer.width + 3
+                        objectName: "nc-sakura-notif-" + carte.modelData.id
+                        text: carte.text
+                        Accessible.name: text
+                        Accessible.description: carte.appli + (carte.quand ? ", " + carte.quand : "")
+                            + (carte.nonLue ? Reglages.t(", non lue", ", unread") : "")
+                        onClicked: if (!Partage.silence) Notifs.ouvrir(carte.modelData)
                     }
                 }
             }
@@ -220,6 +237,26 @@ Item {
                 color: racine.encreDouce
                 horizontalAlignment: Text.AlignHCenter
             }
+        }
+    }
+
+    component ActionReception: ControleAction {
+        id: action
+        implicitWidth: contentItem.implicitWidth + 12
+        implicitHeight: 27
+        padding: 0
+        opacity: enabled ? 1 : .58
+        Accessible.name: text
+        background: Rectangle {
+            color: action.contientPointeur ? racine.rose : "transparent"
+            radius: height / 2
+        }
+        contentItem: Libelle {
+            text: action.text
+            color: racine.accent
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+            horizontalAlignment: Text.AlignHCenter
         }
     }
 

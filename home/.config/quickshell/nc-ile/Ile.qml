@@ -26,16 +26,14 @@ PanelWindow {
         const choix = Reglages.val("ILE_SAKURA_VARIANTE", "petale")
         return choix === "ticket" || choix === "bourgeons" ? choix : "petale"
     }
-    readonly property bool sakuraOuverte: themeSakura && ouverte && !recherche
-        && ["essentiel", "notifications", "musique"].includes(Etat.vueActive)
-    readonly property bool sakuraCompacte: themeSakura && !ouverte && !banniere && !enCarte
-        && Couleurs.forme !== "point" && (compact.mode === "repos" || compact.mode === "musique")
-    readonly property bool sakuraActive: sakuraOuverte || sakuraCompacte
+    // Une seule décision pour ne pas détruire le Loader entre la page et la pilule.
+    readonly property bool sakuraActive: themeSakura && (ouverte
+        ? !Etat.recherche && ["essentiel", "notifications", "musique"].includes(Etat.vueActive)
+        : !banniere && !enCarte && Couleurs.forme !== "point" && (compact.mode === "repos" || compact.mode === "musique"))
+    readonly property bool sakuraOuverte: ouverte && sakuraActive
     function basculerSakura(nom) {
-        if (!Etat.vues.includes(nom)) return
         if (ouverte && Etat.vueActive === nom) { Etat.fermer(); return }
-        if (!ouverte) Etat.basculer(modelData.name, false)
-        Etat.aller(nom)
+        Etat.ouvrirContexteSakura(modelData.name, nom)
     }
 
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
@@ -389,6 +387,7 @@ PanelWindow {
     Item {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
+        anchors.alignWhenCentered: !fen.sakuraActive || fen.varianteSakura !== "bourgeons"
         // Encoche : collée au bord haut. Sinon centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 =
         // barre de base : 6 du bord, 36 de haut), ou dans la bande réservée de 42 px quand ILE_BANDE=oui
         y: !fen.sakuraActive && Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9))
@@ -410,8 +409,10 @@ PanelWindow {
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
                                                    : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : 30))))))
-        width: cibleLargeur
-        height: cibleHauteur
+        property real largeurSakura: cibleLargeur
+        property real hauteurSakura: cibleHauteur
+        width: fen.sakuraActive ? largeurSakura : cibleLargeur
+        height: fen.sakuraActive ? hauteurSakura : cibleHauteur
         // La page a 16 px de marge. Dans un quart de cercle, le retrait diagonal
         // minimal vaut r × (1 − 1/√2). Garder ses quatre coins dans le fond.
         // Seulement au-delà du rayon d'origine des pages (42) : en dessous, ⚙ et la navigation gardent leur
@@ -458,14 +459,19 @@ PanelWindow {
             onTriggered: if (!survol.hovered && fen.ouverte && Etat.parSurvol && !Etat.recherche) Etat.fermer()
         }
         Behavior on color { enabled: !Notifs.enPause && fen.mouv.actif; ColorAnimation { duration: fen.mouv.duree } }
-        clip: true
+        // Les deux pastilles et la carte sont déjà bornées par IleSakura, pas par son enveloppe animée.
+        clip: !fen.sakuraActive || fen.varianteSakura !== "bourgeons"
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation.
         // Pendant un partage d'écran (Partage.qml), les transitions restent EXACTEMENT les mêmes : seules les bannières
         // sont coupées (Loader plus bas, retirées sans attendre) et le contenu sensible masqué ; un cadre qui saute à
         // chaque page faisait une île « trop brute » en stream
-        Behavior on width { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiL; epsilon: fen.mouv.epsilonPx } }
-        Behavior on height { enabled: !Notifs.enPause && fen.mouv.actif; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiH; epsilon: fen.mouv.epsilonPx } }
+        readonly property bool animer: !Notifs.enPause && fen.mouv.actif
+        readonly property int dureeSakura: Math.round(fen.mouv.duree * (fen.sakuraOuverte ? .925 : .86))
+        Behavior on largeurSakura { enabled: ile.animer && fen.sakuraActive; NumberAnimation { duration: ile.dureeSakura; easing.type: Easing.OutCubic } }
+        Behavior on hauteurSakura { enabled: ile.animer && fen.sakuraActive; NumberAnimation { duration: ile.dureeSakura; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: ile.animer && !fen.sakuraActive; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiL; epsilon: fen.mouv.epsilonPx } }
+        Behavior on height { enabled: ile.animer && !fen.sakuraActive; SpringAnimation { spring: fen.mouv.raideur; damping: fen.mouv.amortiH; epsilon: fen.mouv.epsilonPx } }
         Behavior on radius { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.duree; easing.type: fen.mouv.courbe } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()

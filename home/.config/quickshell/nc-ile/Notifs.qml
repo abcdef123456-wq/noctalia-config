@@ -243,9 +243,9 @@ Singleton {
         }
         lire(notif)
         var a = notif.actions.find(x => x.identifier === "default") || (notif.actions.length === 1 ? notif.actions[0] : null)
-        if (a) a.invoke()
         if (banniere === notif) banniere = null
         if (notif.synthetique) retirerRevenue(notif)
+        else if (a) a.invoke()                           // Quickshell retire lui-même les notifications non résidentes
         else if (!notif.resident) notif.dismiss()
     }
     // Boutons de la notification (Supprimer, Répondre…) : toutes les actions sauf celle du clic (« default »)
@@ -253,9 +253,8 @@ Singleton {
     function agir(notif, action) {
         if (!notif || !action) return
         lire(notif)
-        action.invoke()
         if (banniere === notif) banniere = null
-        if (!notif.resident) notif.dismiss()
+        action.invoke()
     }
     // Réponse rapide (appli qui le permet : hasInlineReply), sinon l'appli est ouverte
     function repondre(notif, texte) {
@@ -314,7 +313,7 @@ Singleton {
         })
         garder()
     }
-    function retirerRevenue(objet) { revenues = revenues.filter(x => x !== objet) }
+    function retirerRevenue(objet) { revenues = revenues.filter(x => x.id !== objet.id) }
 
     // ── Masquer une appli : 1 h ou toujours ──
     function cleAppli(notif) { return String(notif && (notif.desktopEntry || notif.appName) || "").toLowerCase() }

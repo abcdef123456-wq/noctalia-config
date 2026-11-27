@@ -53,8 +53,9 @@ class SakuraHorsEcran(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-sakura-") as d:
             root = Path(d)
             reglages = root / "reglages.conf"
-            reglages.write_text("STYLE=sakura\nILE_ANIM=sec\nILE_ANIM_ECRANS=sakura:aucun\n")
+            reglages.write_text("STYLE=sakura\nILE_ANIM=doux\nILE_RESUME_REVEIL=non\n")
             qml = outil["preparer"](root, "lecteur", reglages, None)
+            journal_catalogue = instrumenter_catalogue(root)
             f = qml / "test_sakura.qml"
             f.write_text(H.ENTETE + 'import QtTest\nShellRoot {' + H.OUTILS + SCENARIO, encoding="utf-8")
             env = outil["environnement"](root, root / "unused.png")
@@ -66,6 +67,21 @@ class SakuraHorsEcran(unittest.TestCase):
             for erreur in (*ECHECS_QML, "Unable to assign"):
                 self.assertNotIn(erreur, journal)
             self.assertIn("SAKURA_OK", journal)
+            self.assertEqual(journal_catalogue.read_text().splitlines(), ["catalogue --fenetre"])
+
+
+def instrumenter_catalogue(root):
+    cli = root / "home/.local/bin/nc-reglages"
+    cli.unlink()
+    cli.write_text('''#!/bin/sh
+[ "$1" = catalogue ] || exit 0
+[ "$2" != --fenetre ] || printf '%s\\n' "$*" >> "$HOME/lectures"
+cat <<'EOF'
+[{"cle":"ILE_SAKURA_VARIANTE","section":"Île","sectionNom":"Île","nom":"Variante Sakura","genre":"choix","defaut":"petale","valeur":"petale","choix":[["petale","Pétale"]],"aide":"Carte","affiche":"Pétale","modifie":false}]
+EOF
+''', encoding="utf-8")
+    cli.chmod(0o755)
+    return root / "home/lectures"
 
 
 SCENARIO = r'''
@@ -74,8 +90,19 @@ SCENARIO = r'''
     property int indice: 0
     property int etape: 0
     property real centreRepos: 0
+    property real centreCarte: 0
+    property bool carteEnRepli: false
+    Connections {
+        target: Etat
+        function onPageSysChanged() {
+            if (fen.ouverte && Couleurs.themeActif === "sakura")
+                verifier(!Etat.pageSys, "passage par une vue système pendant l’ouverture de Sakura")
+        }
+    }
     TestCase { id: clic; when: false }
     Ile { id: fen; visible: true; modelData: ({ name: "sakura", width: 800, height: 680 }) }
+    Parametres { id: preferences; ileOuverte: fen.ouverte }
+    Component.onCompleted: { preferences.afficher("sakura"); preferences.allerSection("ile") }
     function element(nom) { return trouver(fen.contentItem, nom) }
     function cliquer(nom) {
         const bouton = element(nom)
@@ -90,6 +117,7 @@ SCENARIO = r'''
             const s = test.element("nc-sakura")
             if (test.etape === 0) {
                 if (!s || !Reglages.valeurs.ILE_ANIM || !Etat.aMusique || !Notifs.pret) return
+                if (preferences.enCours || preferences.section !== "ile" || !preferences.reglage("ILE_SAKURA_VARIANTE")) return
                 Notifs.revenues = [
                     { id: "sakura-a", appName: "Agenda", summary: "Réunion dans 10 min", actions: [], synthetique: true },
                     { id: "sakura-b", appName: "Fichiers", summary: "Synchronisation terminée", actions: [], synthetique: true }
@@ -108,11 +136,19 @@ SCENARIO = r'''
                 const liste = test.element("nc-sakura-notifs-liste")
                 if (!liste?.visible || !(s.height > 100)) return
                 if (!verifier(Etat.vueActive === "notifications" && liste.count === 2, "notifications réelles absentes")) return
-                if (!verifier(!Etat.controleOuvert && !test.element("nc-ile-entete").visible, "l’ancien panneau est encore affiché")) return
+                if (!verifier(!Etat.controleOuvert && !test.element("nc-notifs-tout-effacer")?.visible,
+                              "l’ancien panneau est encore affiché")) return
                 if (s.variante === "bourgeons" && !verifier(s.zoneCarte.y > s.zonePrincipale.height
                     && Math.abs(test.centre(s.zonePrincipale) - test.centreRepos) < .5, "le noyau bouge à l’ouverture")) return
-                if (test.indice === 0 && (!test.cliquer("nc-sakura-notifs-tout-lire")
-                    || !verifier(Notifs.nonLues === 0, "marquer comme lues ne fonctionne pas"))) return
+                if (test.indice === 0) {
+                    if (!test.cliquer("nc-sakura-notifs-tout-lire")
+                        || !verifier(Notifs.nonLues === 0 && Notifs.liste.length === 2, "marquer comme lues a retiré les entrées")
+                        || !test.cliquer("nc-sakura-notif-retirer-sakura-a")
+                        || !verifier(Notifs.liste.length === 1 && Notifs.liste[0].id === "sakura-b",
+                                     "retrait individuel : " + Notifs.liste.map(n => n.id).join(", "))
+                        || !test.cliquer("nc-sakura-notifs-tout-effacer")
+                        || !verifier(Notifs.liste.length === 0, "effacer n’a pas vidé les notifications")) return
+                }
                 if (test.cliquer("nc-sakura-ouvrir-musique")) test.etape++
             } else if (test.etape === 3) {
                 const titre = test.element("nc-sakura-musique-titre")
@@ -124,12 +160,29 @@ SCENARIO = r'''
                 const decalage = pause.mapToItem(art, 0, 0).y
                 if (!verifier(s.variante === "petale" ? decalage > art.height : decalage < art.height,
                               "composition du lecteur incorrecte : " + s.variante)) return
+                if (s.variante === "bourgeons") test.centreCarte = test.centre(s.zoneCarte)
                 if (test.cliquer("nc-sakura-ouvrir-musique")) test.etape++
             } else if (test.etape === 4) {
+                if (s.variante === "bourgeons" && !fen.ouverte) {
+                    const carte = test.element("nc-sakura-carte-satellite")
+                    if (!verifier(!s.zoneCarte && Math.abs(test.centre(s.zonePrincipale) - test.centreRepos) < .5,
+                                  "le noyau bouge ou la carte capte encore des clics au repli")) return
+                    if (carte.visible) {
+                        test.carteEnRepli = true
+                        if (!verifier(carte.opacity < 1 && Math.abs(test.centre(carte) - test.centreCarte) < 1,
+                                      "la carte satellite saute pendant le repli")) return
+                    }
+                    if (s.height === 30 && !verifier(test.carteEnRepli && !carte.visible,
+                                                    "pas de transition de sortie pour la carte satellite")) return
+                }
                 if (fen.ouverte || s.height !== 30) return
                 test.indice++
                 if (test.indice < test.variantes.length) {
                     Reglages.valeurs = Object.assign({}, Reglages.valeurs, { ILE_SAKURA_VARIANTE: test.variantes[test.indice] })
+                    Notifs.revenues = [
+                        { id: "sakura-a", appName: "Agenda", summary: "Réunion dans 10 min", actions: [], synthetique: true },
+                        { id: "sakura-b", appName: "Fichiers", summary: "Synchronisation terminée", actions: [], synthetique: true }
+                    ]
                     test.etape = 1
                 } else {
                     Reglages.style = { STYLE: "dracula" }
@@ -138,13 +191,14 @@ SCENARIO = r'''
                     test.etape++
                 }
             } else if (test.etape === 5) {
-                if (!test.element("nc-ile-entete").visible) return
+                if (!test.element("nc-notifs-tout-effacer")?.visible) return
                 if (!verifier(!s && Couleurs.themeActif === "dracula", "une variante Sakura a fui vers Dracula")) return
                 Etat.fermer()
                 Reglages.style = { STYLE: "sakura" }
                 test.etape++
             } else if (test.etape === 6 && s) {
                 if (!verifier(s.variante === "bourgeons", "choix Sakura perdu après Dracula")) return
+                if (!verifier(preferences.visible && preferences.section === "ile", "les Réglages ont perdu la rubrique Île")) return
                 console.warn("SAKURA_OK")
                 Qt.quit()
             }

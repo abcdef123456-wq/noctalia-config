@@ -14,6 +14,10 @@ Item {
     readonly property bool separee: variante === "bourgeons"
     readonly property bool ticket: variante === "ticket"
     readonly property bool deployee: page === "notifications" || page === "musique"
+    property string pageSatellite: ""
+    // Garder le contenu pendant le repli ; la hauteur animée décide quand le décharger.
+    onPageChanged: if (page === "notifications" || page === "musique") pageSatellite = page
+    readonly property bool afficheCarte: separee && (deployee || (pageSatellite !== "" && height > dessusCarte))
     readonly property bool montreMusique: page === "musique" || (Etat.aMusique && Etat.vues.includes("musique"))
     readonly property bool montreNotifs: page === "notifications" || (!Partage.silence && Notifs.liste.length > 0
                                                                     && Etat.vues.includes("notifications"))
@@ -42,7 +46,7 @@ Item {
 
     readonly property Item zonePrincipale: separee ? pastilleHeure : fond
     readonly property Item zoneContexte: separee && aContexte ? pastilleContexte : null
-    readonly property Item zoneCarte: separee && deployee ? surfaceCarte : null
+    readonly property Item zoneCarte: separee && deployee && surfaceCarte.height > 0 ? surfaceCarte : null
 
     Item {
         id: fond
@@ -93,9 +97,13 @@ Item {
     Rectangle {
         id: surfaceCarte
         objectName: "nc-sakura-carte-satellite"
-        visible: sakura.separee && sakura.deployee
-        x: sakura.width / 2 + sakura.gaucheCarte; y: sakura.dessusCarte
+        property real decalage: 0
+        // Garder le bord de la carte pendant le repli, même si un bouton réapparaît dans le satellite.
+        Binding on decalage { value: sakura.gaucheCarte; when: sakura.deployee; restoreMode: Binding.RestoreNone }
+        visible: sakura.afficheCarte && height > 0
+        x: sakura.width / 2 + decalage; y: sakura.dessusCarte
         width: sakura.largeurCarte; height: Math.max(0, sakura.height - y)
+        opacity: Math.min(1, height / Math.max(1, contenu.height + 20))
         radius: 16; color: sakura.papier; border { color: sakura.filet; width: 1 }
     }
 
@@ -189,16 +197,25 @@ Item {
             PathLine { x: sakura.width - 2 * sakura.marge; y: .5 }
         }
     }
-    Loader {
-        id: contenu
-        active: sakura.deployee
+    Item {
         x: (sakura.separee ? surfaceCarte.x : (sakura.width - sakura.largeurCarte) / 2) + sakura.marge
         y: sakura.dessusCarte + (sakura.separee ? 10 : 0)
         width: Math.max(1, sakura.largeurCarte - 2 * sakura.marge)
-        height: item?.implicitHeight ?? 0
-        opacity: sakura.height >= y + height - 1 ? 1 : 0
+        height: sakura.separee ? Math.max(0, surfaceCarte.height - 10) : contenu.height
+        clip: sakura.separee
+        opacity: sakura.separee ? surfaceCarte.opacity : (sakura.height >= y + height - 1 ? 1 : 0)
         visible: opacity > 0
-        sourceComponent: ContenuSakura { variante: sakura.variante; page: sakura.page }
+        Loader {
+            id: contenu
+            active: sakura.deployee || sakura.afficheCarte
+            enabled: sakura.deployee
+            width: parent.width
+            height: item?.implicitHeight ?? 0
+            sourceComponent: ContenuSakura {
+                variante: sakura.variante
+                page: sakura.separee && !sakura.deployee ? sakura.pageSatellite : sakura.page
+            }
+        }
     }
 
     component BoutonSakura: ControleAction {

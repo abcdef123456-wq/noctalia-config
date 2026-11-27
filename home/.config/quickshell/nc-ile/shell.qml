@@ -554,7 +554,11 @@ ShellRoot {
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}
-        function notifications(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true); Etat.aller("notifications") }
+        function notifications(): void {
+            if (Couleurs.themeActif === "sakura") { page("notifications"); return }
+            Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true)
+            Etat.aller("notifications")
+        }
         function effacerNotifications(): void { Notifs.toutEffacer() }
         function concentration(): void { Notifs.basculerConcentration() }
         function concentrationRegler(actif: bool): void { Notifs.concentration = actif }   // mode jeu
@@ -568,6 +572,11 @@ ShellRoot {
             if (Etat.vues.indexOf(cible) >= 0) {
                 if (cible === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
                 if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === cible) { Etat.fermer(); return }
+                if (Couleurs.themeActif === "sakura" && (cible === "notifications" || cible === "musique")) {
+                    const ecran = Etat.ecranOuvert || Hyprland.focusedMonitor?.name || Quickshell.screens[0]?.name || ""
+                    Etat.ouvrirContexteSakura(ecran, cible)
+                    return
+                }
                 if (Etat.ecranOuvert === "") basculer()
                 Etat.aller(cible)
                 return

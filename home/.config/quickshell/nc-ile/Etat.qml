@@ -167,6 +167,15 @@ Singleton {
         lirePage()
     }
 
+    function ouvrirContexteSakura(ecran, nom) {
+        if (!vues.includes(nom)) return
+        // Choisir la vue avant d'ouvrir : pas d'étape intermédiaire dans l'ancien Centre.
+        vueNom = nom
+        recherche = false
+        parSurvol = false
+        ecranOuvert = ecran
+    }
+
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
     // Ouverte en passant le curseur dessus (Ile.qml) : se referme quand il en sort, tant qu'on n'a pas cliqué dedans
     property bool parSurvol: false
