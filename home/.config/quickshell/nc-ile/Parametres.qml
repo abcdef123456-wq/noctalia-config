@@ -15,7 +15,10 @@ FloatingWindow {
     color: "transparent"
 
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
-    property var catalogue: []
+    property var catalogueBrut: []
+    // Garder les choix hors thème en mémoire pour que la bascule soit immédiate.
+    readonly property var catalogue: Couleurs.themeActif === "sakura" ? catalogueBrut
+        : catalogueBrut.filter(r => r.cle !== "ILE_SAKURA_VARIANTE")
     // `section` est un identifiant stable de la fenêtre, jamais un libellé traduit.
     property string domaine: ""
     property string section: ""
@@ -333,7 +336,7 @@ FloatingWindow {
             n.affiche = c ? c[1] : (r.genre === "hz" && /^[0-9]+$/.test(v) ? v + " Hz" : v)
         } else if (r.genre === "entier") n.affiche = v === "0" && r.zero ? r.zero : v + (r.unite ? " " + r.unite : "")
         else return
-        catalogue = catalogue.map(x => x.cle === cle ? n : x)
+        catalogueBrut = catalogueBrut.map(x => x.cle === cle ? n : x)
     }
     function suivant() {
         if (commandeEnCours || !file.length) return
@@ -451,7 +454,7 @@ FloatingWindow {
 
     Process {
         id: lecture
-        command: [fen.bin + "nc-reglages", "catalogue"]
+        command: [fen.bin + "nc-reglages", "catalogue", "--fenetre"]
         onRunningChanged: if (!running && fen.relire) Qt.callLater(() => { fen.relire = false; lecture.running = true })
         stdout: StdioCollector {
             onStreamFinished: {
@@ -460,10 +463,10 @@ FloatingWindow {
                     if (!Array.isArray(d)) throw new Error("catalogue")
                     if (fen.commandeEnCours || fen.file.length > 0) return
                     var avant = {}
-                    fen.catalogue.forEach(r => avant[r.cle] = r)
+                    fen.catalogueBrut.forEach(r => avant[r.cle] = r)
                     d = d.map(r => { var o = avant[r.cle]; return o && JSON.stringify(o) === JSON.stringify(r) ? o : r })
                     fen.organiserSections(d)
-                    fen.catalogue = d
+                    fen.catalogueBrut = d
                     if (fen.resoudreSection()) fen.focaliserScene()
                     else {
                         fen.requeteSection = ""

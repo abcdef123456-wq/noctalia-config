@@ -207,7 +207,7 @@ ShellRoot {
     }
 }
 '''
-        shell = shell.replace("THEMES_JSON", json.dumps(THEMES))
+        shell = shell.replace("THEMES_JSON", json.dumps([t for t in THEMES if t != "sakura"]))
         RefonteHorsEcran.lancer_qml(self, shell, reglages="ILE_ANIM=sec\nILE_ANIM_ECRANS=compositions:aucun\nILE_DATE=non\n")
 
     def test_point_matrice_et_point_choisi_gardent_le_cartouche_ouvert(self):
@@ -247,10 +247,11 @@ ShellRoot {
                 if (!verifier(pilule.pointFerme, "le point choisi est ignoré")) return
                 Etat.ecranOuvert = "identites"
                 test.etape++
-            } else if (test.etape === 4 && pilule.pageIdentite) {
-                const floraison = trouver(fen.contentItem, "nc-ile-habillage-floraison")
-                if (verifier(floraison && floraison.visible && !floraison.dessinerFond,
-                             "le point choisi a fait perdre le cartouche Sakura")) Qt.quit()
+            } else if (test.etape === 4) {
+                const sakura = trouver(fen.contentItem, "nc-sakura")
+                if (!sakura || !trouver(sakura, "nc-sakura-heure").visible || Math.abs(pilule.height - 30) > .5) return
+                if (verifier(sakura.variante === "petale",
+                             "le point choisi n’ouvre pas les repères Sakura")) Qt.quit()
             }
         }
     }

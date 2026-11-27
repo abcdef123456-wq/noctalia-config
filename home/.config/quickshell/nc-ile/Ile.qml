@@ -21,10 +21,27 @@ PanelWindow {
     readonly property var plan: Composition.pour(Couleurs.themeActif)
     function ouvrirControle() { Etat.ouvrirControle(modelData.name, "accueil") }
 
+    readonly property bool themeSakura: Couleurs.themeActif === "sakura"
+    readonly property string varianteSakura: {
+        const choix = Reglages.val("ILE_SAKURA_VARIANTE", "petale")
+        return choix === "ticket" || choix === "bourgeons" ? choix : "petale"
+    }
+    readonly property bool sakuraOuverte: themeSakura && ouverte && !recherche
+        && ["essentiel", "notifications", "musique"].includes(Etat.vueActive)
+    readonly property bool sakuraCompacte: themeSakura && !ouverte && !banniere && !enCarte
+        && Couleurs.forme !== "point" && (compact.mode === "repos" || compact.mode === "musique")
+    readonly property bool sakuraActive: sakuraOuverte || sakuraCompacte
+    function basculerSakura(nom) {
+        if (!Etat.vues.includes(nom)) return
+        if (ouverte && Etat.vueActive === nom) { Etat.fermer(); return }
+        if (!ouverte) Etat.basculer(modelData.name, false)
+        Etat.aller(nom)
+    }
+
     // Encombrement de la pilule fermée, indépendant des animations et des bulles qui apparaissent à côté.
     readonly property rect obstaclePanneauxRepos: {
         const point = Couleurs.forme === "point"
-        const largeur = point ? 10 : compact.largeur
+        const largeur = point ? 10 : (sakura.item?.largeurRepos ?? compact.largeur)
         const x = Math.floor((modelData.width - largeur) / 2 - 5)
         const y = Math.max(0, Math.floor(ile.y - 5))
         return Qt.rect(x, y, modelData.width - 2 * x, Math.ceil(ile.y + (point ? 10 : 30) + 5) - y)
@@ -161,7 +178,14 @@ PanelWindow {
     readonly property bool recherche: ouverte && Etat.recherche
     // Pilule cachée le temps que le lanceur (Code.qml) sort d'elle : ni survol ni clic ne l'activent (le clic est avalé)
     readonly property bool pilCachee: Etat.lanceurFondu === modelData.name
-    mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
+    mask: masqueIle
+    Region {
+        id: masqueIle
+        item: fen.recherche ? fondClic : (sakura.item?.zonePrincipale ?? ile)
+        Region { item: bulle }
+        Region { item: sakura.item?.zoneContexte ?? null }
+        Region { item: sakura.item?.zoneCarte ?? null }
+    }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
@@ -202,7 +226,8 @@ PanelWindow {
     readonly property real hauteurPage: Math.min(hauteurs[Etat.vueActive] ?? hauteurs.essentiel,
         Math.max(0, Math.min(620, modelData.height - ile.y - 8) - disposition.surHauteur - margeScene))
     readonly property size taille: recherche ? Qt.size(Math.min(modelData.width, 680), spot.hauteurVoulue)
-                                             : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur + margeScene)
+        : sakura.item ? Qt.size(sakura.item.implicitWidth, sakura.item.implicitHeight)
+        : Qt.size(disposition.largeur, hauteurPage + disposition.surHauteur + margeScene)
     readonly property bool points: Etat.vues.length > 4 && !recherche && !disposition.lateral
     // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
     // avant tout le reste
@@ -306,7 +331,7 @@ PanelWindow {
             radius: ile.radius + modelData
             color: Qt.alpha(Couleurs.accent, 0.07 + (10 - modelData) * 0.012)
             opacity: fen.ouverte || (Couleurs.contourFermee && !fen.pilCachee) ? 1 : 0
-            visible: !ile.fondDessine && opacity > 0.01
+            visible: !fen.sakuraActive && !ile.fondDessine && opacity > 0.01
             Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         }
     }
@@ -318,7 +343,7 @@ PanelWindow {
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
         opacity: Couleurs.aContour && e > 0 && (fen.ouverte || fen.banniere || fen.enCarte || (Couleurs.contourFermee && !fen.pilCachee)) ? 1 : 0
-        visible: !ile.fondDessine && opacity > 0.01
+        visible: !fen.sakuraActive && !ile.fondDessine && opacity > 0.01
         Behavior on opacity { enabled: !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: fen.mouv.dureeContour } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
@@ -334,20 +359,20 @@ PanelWindow {
         radius: ile.radius
         color: ile.color
         opacity: ile.opacity
-        visible: !ile.fondDessine && (ile.pointFerme || Couleurs.forme !== "encoche")
+        visible: !fen.sakuraActive && !ile.fondDessine && (ile.pointFerme || Couleurs.forme !== "encoche")
         border.width: Couleurs.forme === "cadre" ? 1 : 0
         border.color: Couleurs.accent
     }
     FormeIle {
         anchors.fill: ile
-        visible: !ile.fondDessine && Couleurs.forme === "encoche"
+        visible: !fen.sakuraActive && !ile.fondDessine && Couleurs.forme === "encoche"
         opacity: ile.opacity
         rayon: ile.radius
         couleur: ile.color
     }
     Loader {
         anchors.fill: ile
-        active: ile.fondDessine || ile.pageIdentite
+        active: !fen.sakuraActive && (ile.fondDessine || ile.pageIdentite)
         opacity: ile.opacity
         sourceComponent: HabillageIle {
             plan: fen.identite
@@ -366,7 +391,7 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         // Encoche : collée au bord haut. Sinon centrée dans la barre du haut du thème (ILE_Y, écrit par nc-reglages ; 9 =
         // barre de base : 6 du bord, 36 de haut), ou dans la bande réservée de 42 px quand ILE_BANDE=oui
-        y: Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9))
+        y: !fen.sakuraActive && Couleurs.forme === "encoche" ? 0 : (Reglages.val("ILE_BANDE", "non") === "oui" ? 6 : (parseInt(Reglages.val("ILE_Y", "9")) || 9))
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
         // Forme « point » : fermée, l'île n'est qu'un point plein d'accent de 10 px (ouverte, bannière ou carte : comme d'habitude)
         readonly property bool pointFerme: Couleurs.forme === "point" && !fen.ouverte && !fen.enCarte && !fen.banniere && !fen.confirmGpu
@@ -380,7 +405,8 @@ PanelWindow {
             ? (!pointFerme && !fen.recherche && !fen.banniere && !fen.enCarte
                 && (fen.ouverte || retour.running || (height >= 22 && height <= 40)))
             : (pageIdentite || (!fen.grandeVoulue && !pointFerme && width >= 100 && height >= 24 && height <= 36)))
-        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : (pointFerme ? 10 : compact.largeur)))
+        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440
+            : (pointFerme ? 10 : (sakura.item?.largeurRepos ?? compact.largeur))))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
                                                    : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
                                                    : (fen.banniere ? fen.hauteurBanniere : (pointFerme ? 10 : 30))))))
@@ -410,13 +436,14 @@ PanelWindow {
         // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)
         HoverHandler {
             id: survol
-            enabled: Reglages.val("ILE_SURVOL", "oui") !== "non" && !fen.pilCachee
+            enabled: !fen.sakuraActive && Reglages.val("ILE_SURVOL", "oui") !== "non" && !fen.pilCachee
             onHoveredChanged: if (hovered) { sortieSurvol.stop(); attenteSurvol.restart() } else { attenteSurvol.stop(); sortieSurvol.restart() }
         }
         Timer {
             id: attenteSurvol
             interval: 280                           // juste passer dessus (vers la barre) ne l'ouvre pas
             onTriggered: {
+                if (fen.sakuraActive) return
                 // Sur l'indicateur Cloud : pas d'ouverture ; on regarde à nouveau tant que le curseur reste dans la pilule
                 if (compact.surCloud(survol.point.position.x, survol.point.position.y)) { if (survol.hovered) restart(); return }
                 if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.enCarte && !Etat.enregistre) {
@@ -458,10 +485,23 @@ PanelWindow {
             // se réduit le temps qu'elle grandisse, au lieu d'être rogné des deux côtés (« 6:50 » ; long avec ILE_ANIM=doux)
             // Contenu de 32 px ou moins (forme « point ») ou largeur pas encore connue : échelle 1, jamais NaN ni 0 au repos
             scale: !(compact.largeur > 32) ? 1 : Math.max(0, Math.min(1, (ile.width - 32) / (compact.largeur - 32)))
-            visible: !ile.pointFerme
+            visible: !ile.pointFerme && !fen.sakuraActive
             opacity: fen.recherche ? (fen.spotDepuisPilule ? 1 - ile.etirementRecherche : 0)
                      : (ile.retourSpot ? 1 - ile.etirementRecherche : (fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1))
             Behavior on opacity { enabled: !Notifs.enPause && !fen.recherche && !ile.retourSpot; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
+        }
+
+        Loader {
+            id: sakura
+            anchors.fill: parent
+            active: fen.sakuraActive
+            sourceComponent: IleSakura {
+                variante: fen.varianteSakura
+                page: fen.sakuraOuverte ? Etat.vueActive : ""
+                largeurMax: Math.max(1, Math.min(800, fen.modelData.width))
+                onBasculerPage: nom => fen.basculerSakura(nom)
+                onReplier: Etat.fermer()
+            }
         }
 
         // Spotlight : longue capsule de recherche
@@ -552,7 +592,7 @@ PanelWindow {
 
         MouseArea {
             anchors.fill: parent
-            enabled: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
+            enabled: !fen.sakuraActive && !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
@@ -600,7 +640,7 @@ PanelWindow {
         // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)
         MouseArea {
             anchors.fill: parent
-            enabled: fen.ouverte && fen.multiPages && !fen.recherche
+            enabled: !fen.sakuraActive && fen.ouverte && fen.multiPages && !fen.recherche
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             property real dernier: 0         // heure du dernier événement : un trou de 200 ms = nouveau geste
@@ -642,7 +682,7 @@ PanelWindow {
             pages: Etat.vues
             active: Etat.vueActive
             nonLues: Partage.silence ? 0 : Notifs.nonLues
-            opacity: fen.ouverte && !fen.recherche && fen.multiPages && ile.height > fen.taille.height * 0.65 ? 1 : 0
+            opacity: !fen.sakuraActive && fen.ouverte && !fen.recherche && fen.multiPages && ile.height > fen.taille.height * 0.65 ? 1 : 0
             visible: opacity > 0.01 && fen.multiPages
             Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 180 : 70; easing.type: Easing.OutCubic } }
             onChoisir: nom => Etat.aller(nom)
@@ -653,7 +693,7 @@ PanelWindow {
         Loader {
             id: scene
             objectName: "nc-ile-scene"
-            active: fen.ouverte && !fen.recherche
+            active: !fen.sakuraActive && fen.ouverte && !fen.recherche
             opacity: active && ile.height > fen.taille.height * (fen.nocturne ? 0.65 : 0.75) ? 1 : 0
             Behavior on opacity { enabled: fen.nocturne && scene.active && !Notifs.enPause && fen.mouv.actif; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             visible: active && opacity > 0.01
@@ -695,7 +735,7 @@ PanelWindow {
                 y: fen.hautContenu + fen.margeScene + decalage
                 Behavior on decalage { enabled: fen.mouv.actif && !Notifs.enPause; SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
-                opacity: fen.ouverte && !fen.recherche && active && ile.height > fen.taille.height * 0.65 && chargeur.status === Loader.Ready ? 1 : 0
+                opacity: !fen.sakuraActive && fen.ouverte && !fen.recherche && active && ile.height > fen.taille.height * 0.65 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte && !fen.recherche ? 200 : 80; easing.type: Easing.OutCubic } }
                 Rectangle {
@@ -708,7 +748,7 @@ PanelWindow {
                     id: chargeur
                     anchors.fill: parent
                     asynchronous: true
-                    active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
+                    active: !fen.sakuraActive && (pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine)))
                     sourceComponent: ({ essentiel: pEssentiel, concentration: pConcentration, musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres,
@@ -753,7 +793,7 @@ PanelWindow {
             anchors.right: parent.right; anchors.rightMargin: 8
             y: fen.hautContenu + fen.margeScene + (fen.hauteurPage - height) / 2
             height: Math.max(0, Math.min(fen.hauteurPage - 20, Etat.vues.length * 14))
-            visible: fen.ouverte && fen.points
+            visible: !fen.sakuraActive && fen.ouverte && fen.points
             pages: Etat.vues; courant: Etat.vue
             onChoisir: nom => Etat.aller(nom)
         }
@@ -764,17 +804,17 @@ PanelWindow {
             x: Math.max(0, ile.width - width - Math.max(16, ile.retraitCoin)
                 - (fen.disposition.bord === "droite" && fen.disposition.rail > 0 ? fen.disposition.rail + 12 : 0))
             y: ile.height - fen.disposition.bas - height - (fen.disposition.bord === "bas" ? fen.disposition.bande : 0)
-            visible: fen.ouverte && !fen.recherche && fen.reglagesPage && ile.height > fen.taille.height * 0.8
+            visible: !fen.sakuraActive && fen.ouverte && !fen.recherche && fen.reglagesPage && ile.height > fen.taille.height * 0.8
             vue: Etat.vueActive
             onOuvert: Etat.fermer()
         }
 
         focus: fen.ouverte
         Keys.onEscapePressed: Etat.fermer()
-        Keys.onUpPressed: Etat.changerVue(-1)
-        Keys.onDownPressed: Etat.changerVue(1)
-        Keys.onLeftPressed: Etat.changerVue(-1)
-        Keys.onRightPressed: Etat.changerVue(1)
+        Keys.onUpPressed: e => { if (fen.sakuraActive) e.accepted = false; else Etat.changerVue(-1) }
+        Keys.onDownPressed: e => { if (fen.sakuraActive) e.accepted = false; else Etat.changerVue(1) }
+        Keys.onLeftPressed: e => { if (fen.sakuraActive) e.accepted = false; else Etat.changerVue(-1) }
+        Keys.onRightPressed: e => { if (fen.sakuraActive) e.accepted = false; else Etat.changerVue(1) }
         // Clic dans l'île ouverte au survol : elle reste ouverte comme après un clic. Au-dessus de tout, le clic est
         // seulement noté puis laissé aux boutons en dessous.
         MouseArea {

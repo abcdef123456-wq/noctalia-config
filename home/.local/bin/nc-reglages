@@ -512,6 +512,10 @@ REGLAGES = [
       L("Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
         "Terminal colors: the island follows the wallpaper, like kitty and the window borders."),
       [("terminal", L("Couleurs du terminal", "Terminal colors")), ("noir", L("Noire, façon iPhone", "Black, iPhone-style"))]),
+    R("ILE_SAKURA_VARIANTE", "Île", L("Variante Sakura", "Sakura variant"), "choix", "petale",
+      L("Choisir l’allure de l’île pour le thème Sakura.", "Choose the island’s appearance for the Sakura theme."),
+      [("petale", L("Pétale", "Petal")), ("ticket", L("Ticket de thé", "Tea ticket")),
+       ("bourgeons", L("Deux bourgeons", "Two buds"))]),
     R("ILE_CONTOUR", "Île", L("Contour quand elle est ouverte", "Outline when open"), "choix", "degrade",
       L("La teinte de l'accent, adoucie et légèrement nuancée : sobre même sur un fond d'écran très coloré.",
         "The accent tint, softened and slightly shaded: subtle even on a very colorful wallpaper."),
@@ -1989,7 +1993,7 @@ MATERIEL = {
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie", "BAT_RAPPEL_80": "batterie", "BAT_RAPPEL_SEUIL": "batterie",
     "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
-    "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile",
+    "ILE_RESUME_REVEIL": "ile", "GARMIN_RESUME_MATIN": "ile", "ILE_CONCENTRATION": "ile", "ILE_SAKURA_VARIANTE": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_RAYON", "ILE_FORME", "ILE_CONTOUR_EPAISSEUR", "ILE_VERRE", "ILE_POLICE", "ILE_ANIM", "ILE_ANIM_VITESSE", "ILE_ANIM_ECRANS", "ILE_LUEUR", "ILE_CONTOUR_FERMEE", "ILE_BANDE", "ILE_MAJUSCULES", "ILE_ACCENTS", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_LANCEUR_FONDU", "AIMANT_APERCU", "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "PAUSE_YEUX", "WIDGETS_BUREAU", "WIDGETS_PLAQUE", "WIDGETS_POLICE", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS", "FONDS_JOUR_NUIT", "NOTIFS_IA", "IA_CHALEUR", "IA_MAJ",
@@ -3021,6 +3025,12 @@ def valeur(vals, cle):
         return vals[cle]
     st = style_vals()
     return st[cle] if cle in st and cle != "STYLE" else PAR_CLE[cle].defaut
+
+
+def reglages_visibles(vals, tous_themes=False):
+    if tous_themes or style_vals().get("STYLE", vals.get("STYLE", PAR_CLE["STYLE"].defaut)) == "sakura":
+        return VISIBLES
+    return [r for r in VISIBLES if r.cle != "ILE_SAKURA_VARIANTE"]
 
 
 def valeur_sure(vals, cle):
@@ -4356,7 +4366,7 @@ class Ecran:
                     self.lignes_n = [{"genre": "titre", "nom": T("Historique introuvable (dépôt de la config absent)",
                                                                  "History not found (config repository missing)")}]
             return self.lignes_n
-        lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
+        lignes = [r for r in reglages_visibles(self.vals) if r.section == SECTIONS[self.sec]]
         if SECTIONS[self.sec] == "Énergie":
             lignes = lignes_gpu() + lignes                 # le mode graphique en tête (rien sans objet)
         if SECTIONS[self.sec] == "Fenêtres":
@@ -4427,13 +4437,14 @@ class Ecran:
         place = h - 6
         debut = 0 if len(SECTIONS) <= place else min(max(0, self.sec - place + 2), len(SECTIONS) - place)
         self.debut_sec = debut                     # pour le clic (liste défilée)
+        reglages = reglages_visibles(self.vals)
         for i, s in enumerate(SECTIONS):
             y = 2 + i - debut
             if y < 2:
                 continue
             if y >= h - 4:
                 break
-            n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in VISIBLES if r.section == s and r.cle in self.vals)
+            n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in reglages if r.section == s and r.cle in self.vals)
             if i == self.sec:
                 attr = (curses.A_REVERSE | self.ACC | curses.A_BOLD) if self.focus == "sections" else (curses.A_BOLD | self.ACC)
                 e.addstr(y, 1, couper(f" {nom_section(s)}", lg - 3).ljust(lg - 3), attr)
@@ -5332,10 +5343,10 @@ def activer_plugin(vals, nom):
         raise OSError(T("noctalia a refusé d'activer le plugin", "noctalia refused to enable the plugin"))
 
 
-def catalogue(vals):
+def catalogue(vals, tous_themes=False):
     """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
     res = []
-    for r in VISIBLES:
+    for r in reglages_visibles(vals, tous_themes):
         v = valeur_sure(vals, r.cle)[0]
         res.append(dict(cle=r.cle, section=r.section, sectionNom=nom_section(r.section), nom=r.nom, genre=r.genre,
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
@@ -6238,8 +6249,8 @@ def cli(a):
             print()
         return
     if a[0] in ("catalogue", "catalog"):
-        # Tout ce que la fenêtre graphique des réglages (île, Parametres.qml) a besoin de savoir, en JSON
-        print(json.dumps(catalogue(vals), ensure_ascii=False))
+        # La fenêtre graphique filtre les réglages de thème en direct, sans relire le catalogue.
+        print(json.dumps(catalogue(vals, tous_themes=a[1:] == ["--fenetre"]), ensure_ascii=False))
         return
     if a[0] in ("raccourci", "shortcut") and len(a) == 2:
         # Fenêtre graphique : un changement de raccourci, en JSON (jamais passé à un shell)
@@ -6273,7 +6284,7 @@ def cli(a):
         sys.exit(mode_graphique_cli())
     if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
-        for r in VISIBLES:
+        for r in reglages_visibles(vals):
             if r.section != sec:
                 print(f"\n  {nom_section(r.section)}")
                 sec = r.section

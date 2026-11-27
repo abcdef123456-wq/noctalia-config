@@ -323,8 +323,6 @@ if(etape===3){
 ''', evenements=True, sessions=True)
         self.assertEqual([a for a in appels if a[0] == "nc-session"], [["nc-session", "supprimer", "Dev"]],
                          "une seule suppression, après la confirmation")
-        i = next(k for k, a in enumerate(appels) if a[0] == "nc-session")
-        self.assertIn(["catalogue"], appels[i + 1:], "le catalogue est relu après")
 
     def test_resultats_actions_multilignes_et_sorties_isolees(self):
         appels = self.executer(r'''

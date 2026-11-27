@@ -3,7 +3,7 @@
 L’île Quickshell se concentre sur **l’essentiel**. Les 23 thèmes fournis ont leur propre dessin, île fermée **et ouverte**.
 Changer de thème remplace la scène sans redémarrer. Chez Dracula, la même forme biseautée s’étire de la pastille
 au panneau, avec un filet violet-rose et des commandes natives ; l’éventuel contour fermé reste réglable.
-Chez Sakura, les commandes bordent un ticket de salon de thé illustré ; chez Gruvbox, ce sont les touches d’un magnétophone.
+Chez Gruvbox, les commandes reprennent les touches d’un magnétophone.
 Les mêmes emplacements servent au **transport du lecteur** sur Musique et aux **filtres de la boîte** sur Notifications.
 Les autres pages conservent leurs outils sous une version courte de l’illustration.
 Le thème personnel **Pénombre de papier** bénéficie aussi d’une scène dédiée : une grue en origami sur papier brun.
@@ -44,6 +44,20 @@ contrôle (`Super + C`). Si la page ouverte est désactivée, l’île choisit u
 toutes désactivées, elle se referme et reste en pilule ; le Spotlight reste disponible.
 Les onglets défilent si nécessaire et suivent la page active. Les flèches et la molette changent de page ; les
 thèmes à navigation horizontale ajoutent un raccourci par points si plus de quatre pages sont disponibles.
+
+### Sakura
+
+Dans **Réglages → Île et alertes → Île → Variante Sakura**, choisissez **Pétale** (la capsule florale par défaut),
+**Ticket de thé** (papier découpé) ou **Deux bourgeons** (horloge fixe et carte satellite). Le choix s’applique
+immédiatement à Sakura et est conservé quand on passe à un autre thème. En ligne de commande, par exemple :
+`nc-settings set ILE_SAKURA_VARIANTE ticket`.
+
+La pilule garde l’heure et, quand elle est disponible et activée, la météo. Le titre ouvre le lecteur et la cloche
+ouvre les notifications récentes ; un second clic sur le même bouton ou Échap replie l’île. Le bouton lecture/pause
+de la pilule n’ouvre pas le lecteur. Ces vues n’ont ni onglets ni raccourci de réglages : le Centre de contrôle
+reste accessible par `Super + C` et les Réglages gardent leur propre fenêtre. Les autres thèmes ne changent pas.
+
+### Autres pages
 
 La page Agents affiche seulement les sessions non terminées. Les transitions de fin et leur notification sont
 conservées ; une session qui reprend son travail réapparaît. Aucun fichier d’historique n’est supprimé.
